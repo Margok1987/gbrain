@@ -72,6 +72,11 @@ describe('reflect cap resolution (flag > config > default)', () => {
     expect(await resolveReflectMaxTokens(fakeEngine('-5'), PLAIN)).toEqual({ maxTokens: 4096, source: 'default' });
   });
 
+  test('unreadable config falls back to the default', async () => {
+    const throwing = { getConfig: async (): Promise<string | null> => { throw new Error('db down'); } };
+    expect(await resolveReflectMaxTokens(throwing, THINKING)).toEqual({ maxTokens: 32000, source: 'default' });
+  });
+
   test('remote values are validated and clamped to [256, 32000]', () => {
     expect(clampRemoteReflectMaxTokens(undefined)).toBeUndefined();
     expect(clampRemoteReflectMaxTokens(10_000_000)).toBe(32000);
@@ -84,6 +89,13 @@ describe('reflect cap resolution (flag > config > default)', () => {
 });
 
 describe('remediation', () => {
+  test('Object.prototype keys are not remediation codes', () => {
+    for (const k of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(errorCode(`${k}: boom`)).toBeUndefined();
+      expect(buildRemediation([`${k}: boom`])).toEqual([]);
+    }
+  });
+
   test('every emitted code class maps to a remediation entry with a docs anchor', () => {
     const emitted = [
       'reflect_failure_truncated: 2048 output tokens, max_tokens=2048',
@@ -288,6 +300,36 @@ describe('resume command', () => {
     expect(cmd).toContain('--optimizer-model <other-model>');
     expect(cmd).not.toContain(THINKING);
     expect(buildResumeCommand('demo', 'run-1', SPEC)).toContain('--reflect-max-tokens 32000');
+  });
+
+  test('only output-cap failures double the cap; a context-window failure keeps it', () => {
+    expect(buildResumeCommand('demo', 'run-1', SPEC, 'one_shot_rewrite_truncated')).toContain('--reflect-max-tokens 64000');
+    expect(buildResumeCommand('demo', 'run-1', SPEC, 'one_shot_rewrite_output_cap_too_small')).toContain('--reflect-max-tokens 64000');
+    // The output cap shares the context window, so doubling it would make a
+    // body-too-large refusal certain again.
+    expect(buildResumeCommand('demo', 'run-1', SPEC, 'one_shot_rewrite_body_truncated')).toContain('--reflect-max-tokens 32000');
+    expect(buildResumeCommand('demo', 'run-1', SPEC, 'reflect_context_too_small')).toContain('--reflect-max-tokens 32000');
+  });
+
+  test('carries the run mode, cost cap and runtime cap', () => {
+    const capped = buildResumeCommand('demo', 'run-1', SPEC, undefined, { mode: 'rewrite', maxCostUsd: 20, maxRuntimeMin: 45 });
+    expect(capped).toContain('--rewrite --max-cost-usd 20 --max-runtime-min 45');
+    const uncapped = buildResumeCommand('demo', 'run-1', SPEC, undefined, { mode: 'patch', maxCostUsd: 0, maxRuntimeMin: 30 });
+    expect(uncapped).toContain('--no-max-cost --max-runtime-min 30');
+    expect(uncapped).not.toContain('--rewrite');
+    expect(uncapped).not.toContain('--max-cost-usd');
+  });
+
+  test('optional spec flags and shell quoting of quotes and control characters', () => {
+    const cmd = buildResumeCommand('demo', 'run-1', {
+      ...SPEC,
+      held_out_path: "/tmp/it's\nheld.jsonl",
+      allow_mutate_bundled: true,
+      bootstrap_reviewed: true,
+    });
+    expect(cmd).toContain(`--held-out '/tmp/it'\\''sheld.jsonl'`);
+    expect(cmd).toContain('--allow-mutate-bundled --bootstrap-reviewed');
+    expect(cmd).not.toContain('\n');
   });
 });
 

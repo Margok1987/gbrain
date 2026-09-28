@@ -82,13 +82,35 @@ function shellArg(v: string | number): string {
   return /^[A-Za-z0-9_@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Output-cap failures: resuming with a doubled reflect cap is the fix. */
+const CAP_TOO_SMALL_CODES: ReadonlySet<string> = new Set([
+  'reflect_truncated',
+  'one_shot_rewrite_truncated',
+  'one_shot_rewrite_output_cap_too_small',
+]);
+
+/** Run-level flags that are not part of the resume-compatibility spec. */
+export interface ResumeRunFlags {
+  mode: 'patch' | 'rewrite';
+  /** 0 = uncapped (`--no-max-cost`). */
+  maxCostUsd: number;
+  maxRuntimeMin: number;
+}
+
 /**
- * The exact command that resumes this run, rebuilt from the stored spec. A
- * truncation-class failure doubles the reflect cap; an edits-contract failure
- * replaces the optimizer with an `<other-model>` placeholder to fill in.
+ * The exact command that resumes this run, rebuilt from the stored spec plus
+ * the run's mode and cost/runtime caps. An output-cap failure doubles the
+ * reflect cap; an edits-contract failure replaces the optimizer with an
+ * `<other-model>` placeholder to fill in.
  */
-export function buildResumeCommand(skill: string, runId: string, spec: RunSpec, failureCode?: string): string {
-  const cap = failureCode?.endsWith('_truncated') ? spec.reflect_max_tokens * 2 : spec.reflect_max_tokens;
+export function buildResumeCommand(
+  skill: string,
+  runId: string,
+  spec: RunSpec,
+  failureCode?: string,
+  run?: ResumeRunFlags,
+): string {
+  const cap = failureCode !== undefined && CAP_TOO_SMALL_CODES.has(failureCode) ? spec.reflect_max_tokens * 2 : spec.reflect_max_tokens;
   const contract = failureCode !== undefined && /(_empty_reply|_no_parseable_edits|_invalid_edits)$/.test(failureCode);
   const args: Array<string | number> = [
     'gbrain', 'skillopt', skill, '--resume', runId,
@@ -108,6 +130,12 @@ export function buildResumeCommand(skill: string, runId: string, spec: RunSpec, 
   if (spec.no_mutate) args.push('--no-mutate');
   if (spec.allow_mutate_bundled) args.push('--allow-mutate-bundled');
   if (spec.bootstrap_reviewed) args.push('--bootstrap-reviewed');
+  if (run) {
+    if (run.mode === 'rewrite') args.push('--rewrite');
+    if (run.maxCostUsd > 0) args.push('--max-cost-usd', run.maxCostUsd);
+    else args.push('--no-max-cost');
+    args.push('--max-runtime-min', run.maxRuntimeMin);
+  }
   const rendered = args.map(shellArg);
   if (contract) rendered[rendered.indexOf('--optimizer-model') + 1] = '<other-model>';
   return rendered.join(' ');

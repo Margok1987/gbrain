@@ -55,16 +55,16 @@ export type SkillOptRole = 'optimizer' | 'target' | 'judge';
 
 export type SkillOptModels = Record<SkillOptRole, ModelResolution>;
 
-export type ModelTouchpoint = SkillOptRole | 'expansion' | 'chat' | 'embedding' | 'reranker';
+export type PlanTouchpoint = SkillOptRole | 'expansion' | 'chat' | 'embedding' | 'reranker';
 
 export interface ModelsPlanEntry extends ModelResolution {
-  touchpoint: ModelTouchpoint;
+  touchpoint: PlanTouchpoint;
   active: boolean;
   inactive_reason?: string;
 }
 
 export interface StrictViolation {
-  touchpoint: ModelTouchpoint;
+  touchpoint: PlanTouchpoint;
   model: string;
   source: ModelSource;
   origin: string;
@@ -278,7 +278,7 @@ export function isFallbackChoice(entry: ModelResolution): boolean {
   return FALLBACK_SOURCES.has(entry.source) || entry.substituted_from !== undefined;
 }
 
-const FIX_KEY: Record<Exclude<ModelTouchpoint, 'embedding'>, string> = {
+const FIX_KEY: Record<Exclude<PlanTouchpoint, 'embedding'>, string> = {
   optimizer: 'models.tier.deep',
   target: 'models.tier.subagent',
   judge: 'models.tier.reasoning',

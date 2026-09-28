@@ -35,10 +35,11 @@ symlinkSync(join(outsideDir, 'secret.jsonl'), join(realSkillsRoot, 'evil', 'esca
 mkdirSync(join(realSkillsRoot, 'test-skill'), { recursive: true });
 
 let runSkillOptCalls: unknown[] = [];
+let stubReceipt: Record<string, unknown> | null = null;
 mock.module('../../src/core/skillopt/orchestrator.ts', () => ({
   runSkillOpt: async (opts: unknown) => {
     runSkillOptCalls.push(opts);
-    return { outcome: 'stubbed-run', receipt: null, mutatedSkillFile: null, proposedPath: null };
+    return { outcome: 'stubbed-run', receipt: stubReceipt, mutatedSkillFile: null, proposedPath: null };
   },
 }));
 mock.module('../../src/core/repo-root.ts', () => ({
@@ -123,6 +124,18 @@ describe('run_skillopt remote allowlist (default deny-all)', () => {
     const res = await run_skillopt.handler(ctxOf(), { skill_name: 'test-skill' }) as { outcome?: string };
     expect(res.outcome).toBe('stubbed-run');
     expect(runSkillOptCalls.length).toBe(1);
+  });
+
+  test('the op result carries the receipt diagnostics (remediation, resume command) unchanged', async () => {
+    const remediation = [{ code: 'reflect_truncated', fix: 'raise the cap', docs: 'docs/guides/skillopt.md#reflect_truncated' }];
+    stubReceipt = { outcome: 'errored', remediation, resume_command: 'gbrain skillopt test-skill --resume r1' };
+    try {
+      const res = await run_skillopt.handler(ctxOf({ remote: false }), { skill_name: 'test-skill' }) as { receipt?: Record<string, unknown> };
+      expect(res.receipt?.remediation).toEqual(remediation);
+      expect(res.receipt?.resume_command).toBe('gbrain skillopt test-skill --resume r1');
+    } finally {
+      stubReceipt = null;
+    }
   });
 
   test('local caller (remote === false) bypasses the allowlist entirely', async () => {

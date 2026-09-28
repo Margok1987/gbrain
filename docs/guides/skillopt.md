@@ -110,7 +110,8 @@ the audit event only; the full meta-edit proposal is a tracked follow-up.
 
 An `errored` or `aborted` run keeps its checkpoint. The summary prints the
 run id, the checkpoint path and the exact resume command. A truncation
-failure doubles the cap in that command. An edits-contract failure puts an
+failure doubles the cap in that command, and the command carries the run's
+mode, cost cap and runtime cap. An edits-contract failure puts an
 `<other-model>` placeholder in place of the optimizer model. The JSON receipt
 carries the same `run_id` and `resume_command`. `--resume` refuses when the
 benchmark, held-out set or split changed, or when the run would widen from
@@ -197,7 +198,7 @@ The reflect codes are emitted with a mode, as `reflect_failure_<class>` or
 | <a id="reflect_failed"></a>`reflect_failed` | Reflect provider call failed | Provider/network/auth error | Check `gbrain models doctor`, then resume |
 | <a id="one_shot_rewrite_truncated"></a>`one_shot_rewrite_truncated` | One-shot rewrite hit the output cap; nothing promoted | Cap too small for a full rewrite | Raise `--reflect-max-tokens` / `skillopt.reflect_max_tokens` |
 | <a id="one_shot_rewrite_output_cap_too_small"></a>`one_shot_rewrite_output_cap_too_small` | One-shot refused before calling: the body cannot fit the cap | `ceil(body chars / 3) + 1024` exceeds the cap | Raise the cap, or use the default reflect mode |
-| <a id="one_shot_rewrite_body_truncated"></a>`one_shot_rewrite_body_truncated` | One-shot refused: the body had to be truncated | Skill body larger than the optimizer's context | Raise the cap, use a larger-window `--optimizer-model`, or use reflect mode |
+| <a id="one_shot_rewrite_body_truncated"></a>`one_shot_rewrite_body_truncated` | One-shot refused: the body had to be truncated | Skill body larger than the optimizer's context | Lower the reflect cap (it shares the window), use a larger-window `--optimizer-model`, or use reflect mode |
 | <a id="one_shot_rewrite_empty_reply"></a>`one_shot_rewrite_empty_reply` | One-shot reply was empty | Optimizer is not following the rewrite contract | Try a different `--optimizer-model` |
 | <a id="one_shot_rewrite_failed"></a>`one_shot_rewrite_failed` | One-shot provider call failed | Provider/network/auth error | Check `gbrain models doctor`, then resume |
 | <a id="budget_exhausted"></a>`budget_exhausted` | Run aborted at the cost cap | Spend (including each call's full-cap reservation) reached `--max-cost-usd` | Raise `--max-cost-usd` (cycle: `cycle.skillopt.per_skill_cap_usd`), or lower the reflect cap |
@@ -206,8 +207,9 @@ The reflect codes are emitted with a mode, as `reflect_failure_<class>` or
 
 In the dream cycle, a skill that hits `reservation_exceeds_cap` is recorded as
 `skipped_budget` and makes no calls. It is retried only after
-`skillopt.reflect_max_tokens`, `cycle.skillopt.per_skill_cap_usd` or the
-resolved optimizer changes. An `errored` cycle run does not update
+`skillopt.reflect_max_tokens`, `cycle.skillopt.per_skill_cap_usd`,
+`pricing.overrides`, the skill's benchmark or one of the resolved optimizer,
+target or judge models changes. An `errored` cycle run does not update
 `cycle.skillopt.last_run.<skill>`. It records
 `cycle.skillopt.last_error.<skill>` instead, and the skill is retried no
 sooner than 24h later.
@@ -223,7 +225,7 @@ Example `errored` summary (stderr):
 [skillopt] Fix (reflect_truncated): The optimizer ran out of output tokens. Raise the cap: --reflect-max-tokens <n> or gbrain config set skillopt.reflect_max_tokens <n>. See docs/guides/skillopt.md#reflect_truncated
 [skillopt] Run id: so-20260928-1a2b3c
 [skillopt] Checkpoint: skills/meeting-prep/skillopt/checkpoint-so-20260928-1a2b3c.json
-[skillopt] Resume: gbrain skillopt meeting-prep --resume so-20260928-1a2b3c --skills-dir skills --benchmark skills/meeting-prep/skillopt-benchmark.jsonl --split 4:1:5 --epochs 4 --batch-size 8 --lr 4 --lr-schedule cosine --optimizer-model openai:gpt-5.2 --target-model anthropic:claude-sonnet-5 --judge-model anthropic:claude-sonnet-5 --reflect-max-tokens 8192
+[skillopt] Resume: gbrain skillopt meeting-prep --resume so-20260928-1a2b3c --skills-dir skills --benchmark skills/meeting-prep/skillopt-benchmark.jsonl --split 4:1:5 --epochs 4 --batch-size 8 --lr 4 --lr-schedule cosine --optimizer-model openai:gpt-5.2 --target-model anthropic:claude-sonnet-5 --judge-model anthropic:claude-sonnet-5 --reflect-max-tokens 8192 --max-cost-usd 5 --max-runtime-min 30
 ```
 
 ## Model provenance

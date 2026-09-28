@@ -288,6 +288,31 @@ describe('resume correctness', () => {
     expect(optimizerCalls).toHaveLength(8);
   });
 
+  test('abort after the step\'s optimizer call: the checkpoint keeps the step-start tally, so resume does not count the call twice', async () => {
+    writeFixture(ALL_FAIL);
+    let tripped = false;
+    __setChatTransportForTests(async (opts: ChatOpts) => {
+      if ((opts.system ?? '').startsWith("You are SkillOpt's optimizer")) {
+        optimizerCalls.push({ mode: 'failure', maxTokens: opts.maxTokens });
+        return result(optimizerCalls.length === 3 ? JSON.stringify({ edits: [ADD_CITATIONS] }) : '{"edits": []}');
+      }
+      // Step 3's candidate gate: the first target call after its reflect call aborts.
+      if (optimizerCalls.length === 3 && !tripped) {
+        tripped = true;
+        throw new BudgetExhausted('skillopt:x: projected cost $2 exceeds --max-cost $1.00', { reason: 'cost', spent: 0.5, cap: 1 });
+      }
+      return result('nothing');
+    });
+    const first = await run();
+    expect(first.outcome).toBe('aborted');
+    expect(tripped).toBe(true);
+    expect(optimizerCalls).toHaveLength(3);
+    const cp = loadCheckpoint(skillsDir, SKILL, first.receipt.run_id)!;
+    expect({ epoch: cp.next_epoch, step: cp.next_step }).toEqual({ epoch: 1, step: 3 });
+    expect(cp.tally!.reflect_calls).toBe(2);
+    expect(cp.tally!.usable_replies).toBe(2);
+  });
+
   test('changed benchmark refuses the resume, naming the field', async () => {
     writeFixture(ALL_FAIL);
     const first = await abortAtThirdStep();

@@ -32,7 +32,7 @@ const FIXES: Readonly<Record<string, string>> = {
   reflect_failed: PROVIDER,
   one_shot_rewrite_truncated: RAISE_CAP,
   one_shot_rewrite_output_cap_too_small: 'Raise --reflect-max-tokens / skillopt.reflect_max_tokens, or use the default reflect mode.',
-  one_shot_rewrite_body_truncated: 'The skill body does not fit the optimizer context. Raise the cap, use a larger-context --optimizer-model, or use the default reflect mode.',
+  one_shot_rewrite_body_truncated: 'The skill body does not fit the optimizer context. Lower --reflect-max-tokens / skillopt.reflect_max_tokens (the output cap shares the window), use a larger-context --optimizer-model, or use the default reflect mode.',
   one_shot_rewrite_empty_reply: CONTRACT,
   one_shot_rewrite_failed: PROVIDER,
   budget_exhausted: 'Raise --max-cost-usd (cycle runs: gbrain config set cycle.skillopt.per_skill_cap_usd <usd>). Each optimizer call reserves its full output cap, so lowering --reflect-max-tokens / skillopt.reflect_max_tokens also helps.',
@@ -52,7 +52,7 @@ export function errorCode(message: string): string | undefined {
   const raw = head.split(':', 1)[0]!.trim();
   const reflect = raw.match(/^reflect_(?:failure|success)_(.+)$/);
   const code = reflect ? `reflect_${reflect[1]}` : raw;
-  return code in FIXES ? code : undefined;
+  return Object.hasOwn(FIXES, code) ? code : undefined;
 }
 
 export function buildRemediation(

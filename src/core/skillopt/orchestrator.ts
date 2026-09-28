@@ -118,6 +118,7 @@ import {
   priorSegments,
   resumeCursor,
   saveCheckpoint,
+  type ReflectTally,
   type RunSpec,
 } from './checkpoint.ts';
 import { loadHeldOut, runHeldOutGate } from './held-out.ts';
@@ -516,6 +517,10 @@ async function runOptimizationLoop(
   let totalStepsRun = 0;
   const tally = checkpoint.tally ?? emptyTally();
   checkpoint.tally = tally;
+  // Tally as of the start of the in-flight step. A handled abort re-runs that
+  // step on --resume, so the checkpoint keeps this copy (the receipt keeps the
+  // live tally, which includes the calls this segment actually made).
+  let stepStartTally: ReflectTally | undefined;
   let earlyStopped = false;
   let skillBodyTruncated: SkillBodyTruncation | undefined;
   let caught: ReturnType<typeof classifyAbortError> | undefined;
@@ -560,6 +565,7 @@ async function runOptimizationLoop(
       // Sets last_completed_epoch = epochs so the epoch loop below no-ops, then
       // falls through to the shared final-test + receipt path.
       if (opts.optimizerMode === 'one-shot-rewrite') {
+        stepStartTally = structuredClone(tally);
         const { body: baselineBody, bodyStart } = splitFrontmatter(baselineText);
         const fmBlock = baselineText.slice(0, bodyStart);
         const fwd = await runValidationGate({
@@ -635,6 +641,7 @@ async function runOptimizationLoop(
         advanceCursor(checkpoint!, opts.epochs, 1, 1); // no-op the epoch loop below
         bankAccounting(checkpoint!, prior, tracker.snapshot());
         saveCheckpoint(skillsDir, skillName, checkpoint!);
+        stepStartTally = undefined;
       }
 
       // Epoch loop. The cursor names the first step that has not completed.
@@ -647,6 +654,7 @@ async function runOptimizationLoop(
         for (let step = startStep; step <= stepsPerEpoch; step++) {
           if (Date.now() > deadline) throw new Error(SKILLOPT_RUNTIME_EXCEEDED);
           totalStepsRun += 1;
+          stepStartTally = structuredClone(tally);
           const globalStep = (epoch - 1) * stepsPerEpoch + step;
           const lrBudget = scheduleFn(opts.lr, globalStep, totalSteps);
 
@@ -771,7 +779,8 @@ async function runOptimizationLoop(
             // applied edit, bypassing the D12 median+epsilon check. We still ran
             // the gate above to GET the score (so sel_score tracking is honest),
             // but ignore its accept verdict. We only reach here when at least one
-            // edit applied (the all-rejected case `continue`d earlier).
+            // edit applied (the all-rejected case exits via `break stepBody` earlier,
+            // which still advances the cursor).
             const stepAccepted = opts.disableValidationGate === true ? true : gate.accepted;
             if (stepAccepted) {
               // F11 HELD-OUT GATE — guards CHECKPOINT ACCEPTANCE (not just file
@@ -884,6 +893,7 @@ async function runOptimizationLoop(
           advanceCursor(checkpoint!, epoch, step, stepsPerEpoch);
           bankAccounting(checkpoint!, prior, tracker.snapshot());
           saveCheckpoint(skillsDir, skillName, checkpoint!);
+          stepStartTally = undefined;
           if (shouldEarlyStop(tally)) {
             earlyStopped = true;
             process.stderr.write(
@@ -943,10 +953,13 @@ async function runOptimizationLoop(
       reason: caught.abortReason,
       detail: caught.abortDetail,
     } as never);
-    // Handled abort: bank the spend + reflect tally; the cursor stays on the
-    // interrupted step so --resume re-runs it.
+    // Handled abort: bank the spend; the cursor stays on the interrupted step
+    // so --resume re-runs it, and the saved tally is the step-start copy so
+    // that re-run does not count the step's optimizer calls twice.
     bankAccounting(checkpoint, prior, tracker.snapshot());
+    if (stepStartTally) checkpoint.tally = stepStartTally;
     saveCheckpoint(skillsDir, skillName, checkpoint);
+    checkpoint.tally = tally;
   }
 
   const { outcome, stopReason, abortReason, abortDetail } = resolveRunOutcome({ caught, tally, earlyStopped });
@@ -994,7 +1007,9 @@ async function runOptimizationLoop(
     ...(remediation.length > 0 ? { remediation } : {}),
     reflect_max_tokens: reflectCap.maxTokens,
     reflect_max_tokens_source: reflectCap.source,
-    ...(checkpointRetained ? { resume_command: buildResumeCommand(skillName, runId, runSpec, failureCode) } : {}),
+    ...(checkpointRetained ? { resume_command: buildResumeCommand(skillName, runId, runSpec, failureCode, {
+      mode: opts.mode, maxCostUsd: opts.maxCostUsd, maxRuntimeMin: opts.maxRuntimeMin,
+    }) } : {}),
     baseline_sel_score: baselineSelScore,
     best_sel_score: checkpoint.best_sel_score,
     ...(testScore !== undefined ? { test_score: testScore } : {}),
