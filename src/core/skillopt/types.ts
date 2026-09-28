@@ -154,6 +154,12 @@ export interface SkillOptOpts {
   optimizerModel: string;
   targetModel: string;
   judgeModel: string;
+  /**
+   * Explicit optimizer output cap (`--reflect-max-tokens`, MCP / job
+   * `reflect_max_tokens`). Beats `skillopt.reflect_max_tokens` config, which
+   * beats `defaultMaxOutputTokens(optimizerModel)`; resolved once per run.
+   */
+  reflectMaxTokens?: number;
 
   // Modes.
   mode: 'patch' | 'rewrite';
@@ -230,6 +236,21 @@ export interface RunReceipt {
   // reason + the underlying error message, mirrored from the audit trail.
   abort_reason?: 'budget_exhausted' | 'runtime_exceeded' | 'sigint' | 'error';
   abort_detail?: string;
+  /** #5584: why the loop stopped. */
+  stop_reason?: 'completed' | 'early_stop_unusable_output' | 'aborted';
+  /** #5584: optimizer-reply errors (reflect + one-shot), deduped, max 20 x 300 chars. */
+  reflect_errors?: string[];
+  /** #5584: malformed edits dropped from otherwise-usable optimizer replies. */
+  reflect_invalid_edits_dropped?: number;
+  /** #5584: set when the skill body had to be truncated to fit the optimizer window. */
+  skill_body_truncated?: { sent_chars: number; total_chars: number };
+  /** #5584: one entry per distinct error code in reflect_errors / abort_detail. */
+  remediation?: Array<{ code: string; fix: string; docs: string }>;
+  /** #5584: effective optimizer output cap and where it came from. */
+  reflect_max_tokens?: number;
+  reflect_max_tokens_source?: 'flag' | 'config' | 'default';
+  /** #5584: exact command that resumes this run (present when the checkpoint is retained). */
+  resume_command?: string;
   // Ablation provenance (cat31 replayability) — present when a non-default
   // ablation knob was set.
   reflect_mode?: 'both' | 'failure-only';

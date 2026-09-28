@@ -31,6 +31,8 @@ export interface BatchAllOpts {
   optimizerModel: string;
   targetModel: string;
   judgeModel: string;
+  /** Explicit optimizer output cap (`--reflect-max-tokens`). */
+  reflectMaxTokens?: number;
   epochs: number;
   batchSize: number;
   lr: number;
@@ -99,6 +101,7 @@ export async function runBatchAll(opts: BatchAllOpts): Promise<BatchAllResult> {
       optimizerModel: opts.optimizerModel,
       targetModel: opts.targetModel,
       judgeModel: opts.judgeModel,
+      ...(opts.reflectMaxTokens !== undefined ? { reflectMaxTokens: opts.reflectMaxTokens } : {}),
       mode: 'patch',
       dryRun: opts.dryRun,
       noMutate: opts.noMutate,
@@ -143,6 +146,8 @@ export interface FleetOpts {
   targetModels: string[];
   optimizerModel: string;
   judgeModel: string;
+  /** Explicit optimizer output cap (`--reflect-max-tokens`). */
+  reflectMaxTokens?: number;
   epochs: number;
   batchSize: number;
   lr: number;
@@ -227,6 +232,7 @@ export async function runFleet(opts: FleetOpts): Promise<FleetResult> {
       optimizerModel: opts.optimizerModel,
       targetModel,
       judgeModel: opts.judgeModel,
+      ...(opts.reflectMaxTokens !== undefined ? { reflectMaxTokens: opts.reflectMaxTokens } : {}),
       mode: 'patch',
       dryRun: opts.dryRun,
       noMutate,

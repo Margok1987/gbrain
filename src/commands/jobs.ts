@@ -3167,6 +3167,7 @@ export async function registerBuiltinHandlers(
       optimizerModel: String(data.optimizer_model ?? 'anthropic:claude-opus-4-7'),
       targetModel: String(data.target_model ?? 'anthropic:claude-sonnet-4-6'),
       judgeModel: String(data.judge_model ?? 'anthropic:claude-sonnet-4-6'),
+      reflectMaxTokens: (await import('../core/skillopt/output-cap.ts')).clampRemoteReflectMaxTokens(data.reflect_max_tokens),
       mode: (data.mode as 'patch' | 'rewrite') ?? 'patch',
       dryRun: Boolean(data.dry_run),
       noMutate: Boolean(data.no_mutate),

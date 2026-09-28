@@ -133,6 +133,7 @@ const run_skillopt: Operation = {
     batch_size: { type: 'number', description: 'Default 8' },
     lr: { type: 'number', description: 'Default 4' },
     max_cost_usd: { type: 'number', description: 'Default 5.00' },
+    reflect_max_tokens: { type: 'number', description: 'Optimizer output cap (positive integer, clamped to 256..32000). Default: skillopt.reflect_max_tokens config, else 32000 for thinking optimizers and 4096 otherwise.' },
     no_mutate: { type: 'boolean', description: 'Write proposed.md without replacing SKILL.md' },
     allow_mutate_bundled: { type: 'boolean', description: 'Required to mutate bundled skills' },
     held_out_path: { type: 'string', description: 'Path to a held-out test set (JSONL). REQUIRED (>=5 rows) to mutate a bundled skill in place — otherwise the run hard-refuses. Remote callers: must resolve within the skills directory.' },
@@ -171,6 +172,13 @@ const run_skillopt: Operation = {
       if (!allowed.includes(skillName)) {
         throw new OperationError('permission_denied', `run_skillopt: skill '${skillName}' is not in skillopt.allowed_skills allowlist (default deny-all for remote callers)`);
       }
+    }
+    const { clampRemoteReflectMaxTokens } = await import('../skillopt/output-cap.ts');
+    let reflectMaxTokens: number | undefined;
+    try {
+      reflectMaxTokens = clampRemoteReflectMaxTokens(p.reflect_max_tokens);
+    } catch (err) {
+      throw new OperationError('invalid_params', `run_skillopt: ${err instanceof Error ? err.message : String(err)}`);
     }
     const { runSkillOpt } = await import('../skillopt/orchestrator.ts');
     const { autoDetectSkillsDirReadOnly } = await import('../repo-root.ts');
@@ -243,6 +251,7 @@ const run_skillopt: Operation = {
       optimizerModel,
       targetModel,
       judgeModel,
+      ...(reflectMaxTokens !== undefined ? { reflectMaxTokens } : {}),
       mode: 'patch',
       dryRun: (p.dry_run as boolean) === true,
       noMutate: (p.no_mutate as boolean) === true,

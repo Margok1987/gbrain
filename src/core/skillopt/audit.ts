@@ -23,7 +23,8 @@ export type SkilloptEvent =
   | { kind: 'step'; run_id: string; skill: string; epoch: number; step: number;
       sel_score_median: number; sel_score_runs: number[]; accepted: boolean;
       edits_attempted: number; edits_applied: number; delta: number;
-      reason?: string; cumulative_cost_usd: number; ts: string }
+      reason?: string; cumulative_cost_usd: number; reflect_errors?: string[];
+      invalid_edits_dropped?: number; ts: string }
   | { kind: 'edit_rejected'; run_id: string; skill: string; epoch: number;
       step: number; edit_kind: EditOp['op']; rejection_reason: string;
       ts: string }
@@ -33,7 +34,8 @@ export type SkilloptEvent =
       'no_improvement' | 'aborted' | 'errored'; epochs_completed: number;
       total_steps: number; baseline_sel_score?: number; best_sel_score?: number;
       baseline_test_score?: number; test_score?: number; final_cost_usd: number;
-      ts: string }
+      stop_reason?: 'completed' | 'early_stop_unusable_output' | 'aborted';
+      abort_detail?: string; ts: string }
   // #3516: 'error' is the truthful catch-all for unrecognized failures
   // (provider errors, no_pricing hard-fails, bugs). 'sigint' is reserved for
   // an actual SIGINT interrupt — pre-fix the catch-all logged every error as

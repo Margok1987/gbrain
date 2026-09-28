@@ -34,6 +34,13 @@ Models:
   --optimizer-model MODEL       Reflects + proposes. Default models.tier.deep
   --target-model MODEL          Executes the skill. Default models.tier.subagent
   --judge-model MODEL           Scores rollouts. Default models.tier.reasoning
+  --reflect-max-tokens N        Output cap for every optimizer call (patch and
+                                rewrite reflect). Beats the
+                                skillopt.reflect_max_tokens config; default
+                                32000 for thinking optimizers, 4096 otherwise.
+                                Raise it when the receipt reports
+                                reflect_*_truncated. Judge/bootstrap caps are
+                                separate.
 
 Modes:
   --patch                       Edit ops only (default; safer)
@@ -74,8 +81,11 @@ Batch + fleet + background:
 
 Exit codes:
   0 = improved + accepted (or --no-mutate proposed.md written)
-  1 = no improvement (best skill unchanged)
-  2 = aborted by gate (dirty tree / over budget / bench validation / etc.)
+  1 = no improvement (the optimizer replied usably; best skill unchanged)
+  2 = aborted (dirty tree / over budget / bench validation / etc.) or errored,
+      including a run whose optimizer never produced a usable reply
+      (optimizer_output_unusable). Errored and aborted runs keep their
+      checkpoint and print the exact resume command.
 
 Examples:
   # Generate a starter benchmark from the skill itself (recommended):

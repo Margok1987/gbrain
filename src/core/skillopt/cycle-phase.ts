@@ -9,7 +9,11 @@
  *
  * Per-skill last-run state lives in `config` table keyed
  * `cycle.skillopt.last_run.<skill>` so the cycle is cheap to re-enter
- * (don't re-run the same skill every cycle).
+ * (don't re-run the same skill every cycle). An `errored` run (or a thrown
+ * error) does NOT bank last_run: it records `cycle.skillopt.last_error.<skill>`
+ * instead, and the skill is retried no sooner than 24h after that error.
+ * Each result row forwards the run's abort_reason / abort_detail / run_id /
+ * remediation so the cycle report says why a skill failed.
  *
  * Each per-skill invocation runs with epochs=1 (incremental nightly
  * improvement, not full optimization). Users who want a full multi-epoch
@@ -51,12 +55,25 @@ interface SkillCandidate {
   lastRunAt: number | null;
 }
 
+interface SkillResult {
+  skill: string;
+  outcome: string;
+  cost_usd: number;
+  reason?: string;
+  abort_reason?: string;
+  abort_detail?: string;
+  run_id?: string;
+  remediation?: Array<{ code: string; fix: string; docs: string }>;
+}
+
 /** Default per-skill cost cap for the phase. */
 const DEFAULT_PER_SKILL_CAP_USD = 0.50;
 /** Default brain-wide cost cap for one cycle. */
 const DEFAULT_BRAIN_WIDE_CAP_USD = 2.00;
 /** Default stale threshold (skip skills that ran within this window). */
 const DEFAULT_STALE_DAYS = 7;
+/** An errored skill is retried no sooner than this after its last error. */
+const ERROR_RETRY_MS = 24 * 3600 * 1000;
 
 export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<SkilloptPhaseResult> {
   const { engine } = opts;
@@ -121,7 +138,7 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
 
   // Run per-skill. Each invocation gets its own per-skill cap; we track
   // cumulative cost across the cycle and bail when brain-wide cap hit.
-  const results: Array<{ skill: string; outcome: string; cost_usd: number; reason?: string }> = [];
+  const results: SkillResult[] = [];
   let cumulativeCostUsd = 0;
   let skipped_brain_wide_cap = 0;
 
@@ -165,18 +182,26 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
         force: false,
       };
       const result = await runSkillOpt(skillOptOpts);
-      const spent = result.receipt.final_cost_usd ?? 0;
+      const receipt = result.receipt;
+      const spent = receipt.final_cost_usd ?? 0;
       cumulativeCostUsd += spent;
       results.push({
         skill: c.name,
         outcome: result.outcome,
         cost_usd: spent,
+        ...(receipt.abort_reason ? { abort_reason: receipt.abort_reason } : {}),
+        ...(receipt.abort_detail ? { abort_detail: receipt.abort_detail } : {}),
+        ...(receipt.run_id ? { run_id: receipt.run_id } : {}),
+        ...(receipt.remediation?.length ? { remediation: receipt.remediation } : {}),
       });
-      // Persist last_run_at so we don't re-enter every cycle.
-      await engine.setConfig(`cycle.skillopt.last_run.${c.name}`, String(Date.now()));
+      // Persist last_run_at so we don't re-enter every cycle; an errored run
+      // records last_error instead so it is retried (after the 24h gate).
+      const stateKey = result.outcome === 'errored' ? 'last_error' : 'last_run';
+      await engine.setConfig(`cycle.skillopt.${stateKey}.${c.name}`, String(Date.now()));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       results.push({ skill: c.name, outcome: 'errored', cost_usd: 0, reason: msg });
+      await engine.setConfig(`cycle.skillopt.last_error.${c.name}`, String(Date.now())).catch(() => {});
     }
   }
 
@@ -205,7 +230,8 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
 
 /**
  * Walk skillsDir and return skills that have a benchmark file AND a stale
- * last_run_at (older than staleDays, or never run).
+ * last_run_at (older than staleDays, or never run) AND no error within the
+ * last 24h.
  */
 async function collectCandidates(
   engine: BrainEngine,
@@ -228,6 +254,14 @@ async function collectCandidates(
     } catch { /* fall through */ }
     if (lastRunAt !== null && lastRunAt >= cutoffMs) {
       continue; // ran recently; skip
+    }
+    let lastErrorAt: number | null = null;
+    try {
+      const v = await engine.getConfig(`cycle.skillopt.last_error.${entry}`);
+      if (v) lastErrorAt = Number(v);
+    } catch { /* fall through */ }
+    if (lastErrorAt !== null && Date.now() - lastErrorAt < ERROR_RETRY_MS) {
+      continue; // errored recently; retry after the 24h gate
     }
     out.push({ name: entry, benchmarkPath: benchPath, lastRunAt });
   }

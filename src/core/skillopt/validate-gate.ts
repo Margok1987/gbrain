@@ -21,6 +21,7 @@
  */
 
 import { runWithLimit, isMustAbortError } from '../worker-pool.ts';
+import { SKILLOPT_RUNTIME_EXCEEDED } from './must-abort.ts';
 import { runRollout, type RolloutOpts } from './rollout.ts';
 import { scoreTrajectory } from './score.ts';
 import type { BenchmarkTask, GateInput, GateResult, ScoredRollout } from './types.ts';
@@ -58,8 +59,7 @@ export interface ValidateGateOpts extends Omit<GateInput, 'selSet'> {
   scoreFn?: typeof scoreTrajectory;
 }
 
-/** #4119 — the runtime-deadline breach error, shared with the orchestrator. */
-export const SKILLOPT_RUNTIME_EXCEEDED = 'skillopt_runtime_exceeded';
+export { SKILLOPT_RUNTIME_EXCEEDED };
 function isRuntimeExceeded(e: unknown): boolean {
   return e instanceof Error && e.message === SKILLOPT_RUNTIME_EXCEEDED;
 }

@@ -20,6 +20,7 @@
  * ┌─ Run state machine ────────────────────────────────────────────────────┐
  * │                                                                       │
  * │   start ──► lock_acquire ──► preflight ──► resume_or_init             │
+ * │                    (resume: cursor next_epoch/next_step, spec check)   │
  * │                                                  │                     │
  * │                                                  ▼                     │
  * │                                  ┌──── epoch_start ◄────┐              │
@@ -30,7 +31,9 @@
  * │                                  │           │            │            │
  * │                                  │           ▼            │            │
  * │                                  │   backward_pass        │            │
- * │                                  │   (reflect ×2 D7)      │            │
+ * │                                  │   (reflect ×2 D7; each │            │
+ * │                                  │    call: edits | empty │            │
+ * │                                  │    | exactly 1 error)  │            │
  * │                                  │           │            │            │
  * │                                  │           ▼            │            │
  * │                                  │   rank_and_clip        │            │
@@ -49,12 +52,27 @@
  * │                                  │     └─►◄──┘                          │
  * │                                  │           │                          │
  * │                                  │           ▼                          │
- * │                                  │   epoch_end ──► slow_update (D6)    │
- * │                                  │           │                          │
- * │                                  └───────────┘                          │
- * │                                              │ all epochs done          │
- * │                                              ▼                          │
- * │                                       final_test ──► run_end           │
+ * │                                  │   step_end: advance cursor,         │
+ * │                                  │   save cost + tally ──► 2 fully     │
+ * │                                  │           │    unusable steps in a  │
+ * │                                  │           │    row ──► EARLY STOP ─┐ │
+ * │                                  │           ▼                        │ │
+ * │                                  │   epoch_end ──► slow_update (D6)  │ │
+ * │                                  │           │                        │ │
+ * │                                  └───────────┘                        │ │
+ * │                                              │ all epochs done        │ │
+ * │                                              ▼                        │ │
+ * │                                       final_test ──► run_end ◄───────┘ │
+ * │                                                                       │
+ * │  run_end outcome (stop_reason completed | early_stop_unusable_output  │
+ * │  | aborted):                                                          │
+ * │    caught abort/error ──────────────► aborted | errored  (checkpoint  │
+ * │                                        kept, resume_command)          │
+ * │    any step accepted ───────────────► accepted                        │
+ * │    optimizer called, 0 usable replies ► errored                       │
+ * │                                        (optimizer_output_unusable,    │
+ * │                                        checkpoint kept, remediation)  │
+ * │    otherwise ───────────────────────► no_improvement                  │
  * └────────────────────────────────────────────────────────────────────────┘
  *
  * ┌─ Validation gate decision tree (D12) ──────────────────────────────────┐
@@ -87,13 +105,33 @@ import { applyEditBatch, getWorkingTreeStatusForFile, splitFrontmatter } from '.
 import { logEvent, sha8 } from './audit.ts';
 import { loadBenchmark, splitBench, parseSplit } from './benchmark.ts';
 import { getBundledSkillContext, shouldMutateSkillFile, assertBundledMutationHeldOut } from './bundled-skill-gate.ts';
-import { loadCheckpoint, saveCheckpoint, deleteCheckpoint, type RunCheckpoint } from './checkpoint.ts';
+import {
+  advanceCursor,
+  assertResumeCompatible,
+  deleteCheckpoint,
+  emptyTally,
+  loadCheckpoint,
+  resumeCursor,
+  saveCheckpoint,
+  type RunSpec,
+} from './checkpoint.ts';
 import { loadHeldOut, runHeldOutGate } from './held-out.ts';
 import { withSkilloptLock } from './lock.ts';
 import { resolveLrSchedule } from './lr-schedule.ts';
+import { SKILLOPT_RUNTIME_EXCEEDED } from './must-abort.ts';
+import { resolveReflectMaxTokens } from './output-cap.ts';
 import { preflight, formatPreflightReport } from './preflight.ts';
 import { isRejected, loadRejectedBuffer, makeRejectedEntry, saveRejectedBuffer } from './rejected-buffer.ts';
-import { runReflect, runOneShotRewrite, describeJudges } from './reflect.ts';
+import { runReflect, runOneShotRewrite, describeJudges, type SkillBodyTruncation } from './reflect.ts';
+import { buildRemediation, errorCode } from './remediation.ts';
+import {
+  buildResumeCommand,
+  recordOptimizerStep,
+  resolveRunOutcome,
+  shouldEarlyStop,
+  unusableClasses,
+  EARLY_STOP_UNUSABLE_STEPS,
+} from './run-outcome.ts';
 import {
   acceptCandidate,
   proposedPath as proposedFilePath,
@@ -284,7 +322,7 @@ export function classifyAbortError(
       abortReason: err.reason === 'runtime' ? 'runtime_exceeded' : 'budget_exhausted',
       abortDetail: msg,
     };
-  } else if (msg.includes('skillopt_runtime_exceeded')) {
+  } else if (msg.includes(SKILLOPT_RUNTIME_EXCEEDED)) {
     return {
       outcome: 'aborted',
       abortReason: 'runtime_exceeded',
@@ -299,6 +337,9 @@ export function classifyAbortError(
     return { outcome: 'errored', abortReason: 'error', abortDetail: msg };
   }
 }
+
+/** Appended to a cost-cap abort: optimizer calls reserve their whole output cap up front. */
+const BUDGET_ADMISSION_HINT = ' (raise --max-cost-usd; each optimizer call reserves its full output cap, so lowering --reflect-max-tokens / skillopt.reflect_max_tokens also helps)';
 
 async function runOptimizationLoop(
   opts: SkillOptOpts,
@@ -327,10 +368,35 @@ async function runOptimizationLoop(
   const baselineText = fs.readFileSync(skillFile, 'utf8');
   const baselineSha8 = sha8(baselineText);
 
-  // Resume or init checkpoint.
+  const reflectCap = await resolveReflectMaxTokens(opts.engine, opts.optimizerModel, opts.reflectMaxTokens);
+  const runSpec: RunSpec = {
+    skills_dir: skillsDir,
+    benchmark_path: opts.benchmarkPath,
+    benchmark_sha8: bench.benchmark_sha8,
+    held_out_path: opts.heldOutPath ?? null,
+    held_out_sha8: opts.heldOutPath ? sha8(fs.readFileSync(opts.heldOutPath, 'utf8')) : null,
+    split: opts.split,
+    mutate: mutateDecision.mutate,
+    no_mutate: opts.noMutate,
+    allow_mutate_bundled: opts.allowMutateBundled,
+    bootstrap_reviewed: opts.bootstrapReviewed,
+    optimizer_model: opts.optimizerModel,
+    target_model: opts.targetModel,
+    judge_model: opts.judgeModel,
+    epochs: opts.epochs,
+    batch_size: opts.batchSize,
+    lr: opts.lr,
+    lr_schedule: opts.lrSchedule,
+    reflect_max_tokens: reflectCap.maxTokens,
+  };
+
+  // Resume or init checkpoint. A resume must match what the checkpoint measured.
   const runId = opts.resumeRunId ?? randomUUID();
   let checkpoint = opts.resumeRunId ? loadCheckpoint(skillsDir, skillName, opts.resumeRunId) : null;
-  if (!checkpoint) {
+  if (checkpoint) {
+    assertResumeCompatible(checkpoint, runSpec);
+    checkpoint.run_spec = runSpec;
+  } else {
     checkpoint = {
       schema: 1,
       run_id: runId,
@@ -348,6 +414,10 @@ async function runOptimizationLoop(
       best_skill_text: baselineText,
       last_completed_epoch: 0,
       last_completed_step: 0,
+      next_epoch: 1,
+      next_step: 1,
+      run_spec: runSpec,
+      tally: emptyTally(),
       cumulative_cost_usd: 0,
       started_at: new Date().toISOString(),
       last_updated_at: new Date().toISOString(),
@@ -392,13 +462,13 @@ async function runOptimizationLoop(
   const totalSteps = opts.epochs * Math.max(1, Math.floor(split.train.length / opts.batchSize));
 
   // Run the loop inside withBudgetTracker so every nested gateway call composes.
-  let outcome: 'accepted' | 'no_improvement' | 'aborted' | 'errored' = 'no_improvement';
-  // #3516: why a run aborted/errored — surfaced on the receipt + CLI, not
-  // just the audit JSONL, so a failed run is never a silent "Outcome: errored".
-  let abortReason: 'budget_exhausted' | 'runtime_exceeded' | 'sigint' | 'error' | undefined;
-  let abortDetail: string | undefined;
   let finalText = checkpoint.best_skill_text;
   let totalStepsRun = 0;
+  const tally = checkpoint.tally ?? emptyTally();
+  checkpoint.tally = tally;
+  let earlyStopped = false;
+  let skillBodyTruncated: SkillBodyTruncation | undefined;
+  let caught: ReturnType<typeof classifyAbortError> | undefined;
   // Hoisted for the receipt (computed inside the budget-tracker closure).
   let baselineSelScore = 0;
   let testScore: number | undefined;
@@ -460,7 +530,15 @@ async function runOptimizationLoop(
           rejected: [],
           criteria: benchmarkCriteria,
           optimizerModel: opts.optimizerModel,
+          maxTokens: reflectCap.maxTokens,
         });
+        recordOptimizerStep(tally, {
+          calls: 1,
+          usableReplies: rewrite.error ? 0 : 1,
+          errors: rewrite.error ? [rewrite.error] : [],
+          invalidEditsDropped: 0,
+        });
+        if (rewrite.error) process.stderr.write(`[skillopt] one-shot rewrite produced no candidate (${rewrite.error})\n`);
         if (rewrite.newBody) {
           const candidate = fmBlock + rewrite.newBody;
           // Held-out gate still applies (independent signal); skipped when unset.
@@ -500,22 +578,23 @@ async function runOptimizationLoop(
             } else {
               writeProposed(skillsDir, skillName, candidate);
             }
-            outcome = 'accepted';
+            tally.accepted_steps += 1;
             finalText = candidate;
           }
         }
-        checkpoint!.last_completed_epoch = opts.epochs; // no-op the epoch loop below
+        advanceCursor(checkpoint!, opts.epochs, 1, 1); // no-op the epoch loop below
         saveCheckpoint(skillsDir, skillName, checkpoint!);
       }
 
-      // Epoch loop.
-      for (let epoch = checkpoint!.last_completed_epoch + 1; epoch <= opts.epochs; epoch++) {
-        const stepsPerEpoch = Math.max(1, Math.floor(split.train.length / opts.batchSize));
-        const startStep = epoch === checkpoint!.last_completed_epoch + 1 ? checkpoint!.last_completed_step + 1 : 1;
+      // Epoch loop. The cursor names the first step that has not completed.
+      const stepsPerEpoch = Math.max(1, Math.floor(split.train.length / opts.batchSize));
+      const cursor = resumeCursor(checkpoint!, stepsPerEpoch);
+      epochs: for (let epoch = cursor.epoch; epoch <= opts.epochs; epoch++) {
+        const startStep = epoch === cursor.epoch ? cursor.step : 1;
         const epochStartBest = checkpoint!.best_sel_score;
 
         for (let step = startStep; step <= stepsPerEpoch; step++) {
-          if (Date.now() > deadline) throw new Error('skillopt_runtime_exceeded');
+          if (Date.now() > deadline) throw new Error(SKILLOPT_RUNTIME_EXCEEDED);
           totalStepsRun += 1;
           const globalStep = (epoch - 1) * stepsPerEpoch + step;
           const lrBudget = scheduleFn(opts.lr, globalStep, totalSteps);
@@ -545,202 +624,221 @@ async function runOptimizationLoop(
           const successes = forwardGate.scoredRollouts.filter((r) => r.score >= ROLLOUT_SUCCESS_THRESHOLD);
           const failures = forwardGate.scoredRollouts.filter((r) => r.score < ROLLOUT_SUCCESS_THRESHOLD);
 
-          // BACKWARD PASS: D7 two reflect calls (failures + successes).
-          const rejected = loadRejectedBuffer(skillsDir, skillName);
-          const reflectResult = await runReflect({
-            skillBodyText: checkpoint!.best_skill_text,
-            successes,
-            failures,
-            rejected,
-            criteria: benchmarkCriteria,
-            optimizerModel: opts.optimizerModel,
-            ...(opts.reflectMode ? { reflectMode: opts.reflectMode } : {}),
-            abortSignal: undefined,
-          });
+          stepBody: {
+            // BACKWARD PASS: D7 two reflect calls (failures + successes).
+            const rejected = loadRejectedBuffer(skillsDir, skillName);
+            const reflectResult = await runReflect({
+              skillBodyText: checkpoint!.best_skill_text,
+              successes,
+              failures,
+              rejected,
+              criteria: benchmarkCriteria,
+              optimizerModel: opts.optimizerModel,
+              maxTokens: reflectCap.maxTokens,
+              ...(opts.reflectMode ? { reflectMode: opts.reflectMode } : {}),
+              abortSignal: undefined,
+            });
+            recordOptimizerStep(tally, reflectResult);
+            if (reflectResult.skillBodyTruncated) skillBodyTruncated = reflectResult.skillBodyTruncated;
 
-          // Merge + rank + LR-clip.
-          const allEdits: EditOp[] = [...reflectResult.failureEdits, ...reflectResult.successEdits];
-          // Drop edits already in rejected buffer.
-          const fresh = allEdits.filter((e) => !isRejected(rejected, checkpoint!.best_skill_text, [e]));
-          // Apply under LR budget.
-          const applied = applyEditBatch(checkpoint!.best_skill_text, fresh, lrBudget);
+            // Merge + rank + LR-clip.
+            const allEdits: EditOp[] = [...reflectResult.failureEdits, ...reflectResult.successEdits];
+            // Drop edits already in rejected buffer.
+            const fresh = allEdits.filter((e) => !isRejected(rejected, checkpoint!.best_skill_text, [e]));
+            // Apply under LR budget.
+            const applied = applyEditBatch(checkpoint!.best_skill_text, fresh, lrBudget);
 
-          if (fresh.length === 0) {
-            // #4741: the optimizer proposed NOTHING (reflect returned/parsed no
-            // edits, or every edit was already in the rejected buffer). This
-            // used to fall into the all-rejected branch below ([].every() is
-            // true) and log the same 'no_edits_applied' as "gated N candidates
-            // and rejected all" — so a whole run of zero candidates read as a
-            // real `no_improvement`. Say so per step; nothing to reject-buffer.
-            const why = reflectResult.errors[0]
-              ? `no_edits_proposed: ${reflectResult.errors[0]}`
-              : 'no_edits_proposed';
-            process.stderr.write(`[skillopt] epoch ${epoch} step ${step}: optimizer proposed no edits (${why})\n`);
-            logEvent({
-              kind: 'step',
-              run_id: runId,
-              skill: skillName,
-              epoch,
-              step,
-              sel_score_median: checkpoint!.best_sel_score,
-              sel_score_runs: [],
-              accepted: false,
-              edits_attempted: 0,
-              edits_applied: 0,
-              delta: 0,
-              reason: why,
-              cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
-            } as never);
-            continue;
-          }
-
-          if (applied.results.every((r) => r.outcome === 'rejected')) {
-            // Nothing applied; record rejected entries + skip gate.
-            const newRejections = fresh.map((e) =>
-              makeRejectedEntry(checkpoint!.best_skill_text, [e], 'apply_failed'),
-            );
-            saveRejectedBuffer(skillsDir, skillName, newRejections);
-            logEvent({
-              kind: 'step',
-              run_id: runId,
-              skill: skillName,
-              epoch,
-              step,
-              sel_score_median: checkpoint!.best_sel_score,
-              sel_score_runs: [],
-              accepted: false,
-              edits_attempted: fresh.length,
-              edits_applied: 0,
-              delta: 0,
-              reason: 'no_edits_applied',
-              cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
-            } as never);
-            continue;
-          }
-
-          // VALIDATION GATE (D12 median-of-3 + epsilon=0.05, D4 parallel).
-          const gate = await runValidationGate({
-            engine: opts.engine,
-            operationContext: opts.operationContext,
-            candidateSkillText: applied.newText,
-            selSet: split.sel,
-            bestScore: checkpoint!.best_sel_score,
-            targetModel: opts.targetModel,
-            judgeModel: opts.judgeModel,
-            deadlineMs: deadline,
-          });
-
-          // Ablation (cat31 config D): disableValidationGate greedy-accepts any
-          // applied edit, bypassing the D12 median+epsilon check. We still ran
-          // the gate above to GET the score (so sel_score tracking is honest),
-          // but ignore its accept verdict. We only reach here when at least one
-          // edit applied (the all-rejected case `continue`d earlier).
-          const stepAccepted = opts.disableValidationGate === true ? true : gate.accepted;
-          if (stepAccepted) {
-            // F11 HELD-OUT GATE — guards CHECKPOINT ACCEPTANCE (not just file
-            // mutation), so the no-mutate / proposed.md paths can't promote a
-            // held-out-failing candidate either. Independent signal: a candidate
-            // that improved D_sel but regresses on the held-out set is refused
-            // (benchmark-gaming defense). Skipped when no held-out is configured.
-            if (heldOutTasks.length > 0) {
-              const ho = await runHeldOutGate({
-                engine: opts.engine,
-                operationContext: opts.operationContext,
-                candidateSkillText: applied.newText,
-                baselineSkillText: baselineText,
-                heldOutTasks,
-                deadlineMs: deadline,
-                targetModel: opts.targetModel,
-                judgeModel: opts.judgeModel,
-              });
-              if (!ho.passed) {
-                const newRejections = fresh.map((e) =>
-                  makeRejectedEntry(checkpoint!.best_skill_text, [e], 'held_out_regression'),
-                );
-                saveRejectedBuffer(skillsDir, skillName, newRejections);
-                logEvent({
-                  kind: 'step',
-                  run_id: runId,
-                  skill: skillName,
-                  epoch,
-                  step,
-                  sel_score_median: gate.selScore,
-                  sel_score_runs: gate.perTaskMedians.map((t) => t.median),
-                  accepted: false,
-                  edits_attempted: fresh.length,
-                  edits_applied: applied.results.filter((r) => r.outcome === 'applied').length,
-                  delta: gate.selScore - checkpoint!.best_sel_score,
-                  reason: 'held_out_regression',
-                  held_out_baseline: ho.baselineScore,
-                  held_out_candidate: ho.candidateScore,
-                  cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
-                } as never);
-                continue; // do NOT promote
-              }
-            }
-
-            const delta = gate.selScore - checkpoint!.best_sel_score;
-            // ACCEPT: D8 commit via version-store (mutate) OR write proposed.md
-            // for the --no-mutate / bundled-without-allow paths.
-            if (mutateDecision.mutate) {
-              acceptCandidate({
-                skillsDir,
-                skillName,
-                runId,
+            if (fresh.length === 0) {
+              // #4741: the optimizer proposed NOTHING (reflect returned/parsed no
+              // edits, or every edit was already in the rejected buffer). This
+              // used to fall into the all-rejected branch below ([].every() is
+              // true) and log the same 'no_edits_applied' as "gated N candidates
+              // and rejected all" — so a whole run of zero candidates read as a
+              // real `no_improvement`. Say so per step; nothing to reject-buffer.
+              const why = reflectResult.errors[0]
+                ? `no_edits_proposed: ${reflectResult.errors[0]}`
+                : 'no_edits_proposed';
+              process.stderr.write(`[skillopt] epoch ${epoch} step ${step}: optimizer proposed no edits (${why})\n`);
+              logEvent({
+                kind: 'step',
+                run_id: runId,
+                skill: skillName,
                 epoch,
                 step,
-                edits: fresh,
-                candidateText: applied.newText,
-                selScore: gate.selScore,
-                delta,
-              });
-            } else {
-              writeProposed(skillsDir, skillName, applied.newText);
+                sel_score_median: checkpoint!.best_sel_score,
+                sel_score_runs: [],
+                accepted: false,
+                edits_attempted: 0,
+                edits_applied: 0,
+                delta: 0,
+                reason: why,
+                cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
+                ...(reflectResult.errors.length > 0 ? { reflect_errors: reflectResult.errors } : {}),
+                ...(reflectResult.invalidEditsDropped > 0 ? { invalid_edits_dropped: reflectResult.invalidEditsDropped } : {}),
+              } as never);
+              break stepBody;
             }
-            checkpoint!.best_sel_score = gate.selScore;
-            checkpoint!.best_skill_text = applied.newText;
-            checkpoint!.last_completed_epoch = epoch;
-            checkpoint!.last_completed_step = step;
-            checkpoint!.cumulative_cost_usd = tracker.snapshot().cumulativeCostUsd;
-            saveCheckpoint(skillsDir, skillName, checkpoint!);
 
-            logEvent({
-              kind: 'step',
-              run_id: runId,
-              skill: skillName,
-              epoch,
-              step,
-              sel_score_median: gate.selScore,
-              sel_score_runs: gate.perTaskMedians.map((t) => t.median),
-              accepted: true,
-              edits_attempted: fresh.length,
-              edits_applied: applied.results.filter((r) => r.outcome === 'applied').length,
-              delta,
-              cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
-            } as never);
-            outcome = 'accepted';
-            finalText = applied.newText;
-          } else {
-            // REJECT: push to rejected-buffer.
-            const newRejections = fresh.map((e) =>
-              makeRejectedEntry(checkpoint!.best_skill_text, [e], `validation_gate_${gate.reason ?? 'rejected'}`),
+            if (applied.results.every((r) => r.outcome === 'rejected')) {
+              // Nothing applied; record rejected entries + skip gate.
+              const newRejections = fresh.map((e) =>
+                makeRejectedEntry(checkpoint!.best_skill_text, [e], 'apply_failed'),
+              );
+              saveRejectedBuffer(skillsDir, skillName, newRejections);
+              logEvent({
+                kind: 'step',
+                run_id: runId,
+                skill: skillName,
+                epoch,
+                step,
+                sel_score_median: checkpoint!.best_sel_score,
+                sel_score_runs: [],
+                accepted: false,
+                edits_attempted: fresh.length,
+                edits_applied: 0,
+                delta: 0,
+                reason: 'no_edits_applied',
+                cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
+                ...(reflectResult.invalidEditsDropped > 0 ? { invalid_edits_dropped: reflectResult.invalidEditsDropped } : {}),
+              } as never);
+              break stepBody;
+            }
+
+            // VALIDATION GATE (D12 median-of-3 + epsilon=0.05, D4 parallel).
+            const gate = await runValidationGate({
+              engine: opts.engine,
+              operationContext: opts.operationContext,
+              candidateSkillText: applied.newText,
+              selSet: split.sel,
+              bestScore: checkpoint!.best_sel_score,
+              targetModel: opts.targetModel,
+              judgeModel: opts.judgeModel,
+              deadlineMs: deadline,
+            });
+
+            // Ablation (cat31 config D): disableValidationGate greedy-accepts any
+            // applied edit, bypassing the D12 median+epsilon check. We still ran
+            // the gate above to GET the score (so sel_score tracking is honest),
+            // but ignore its accept verdict. We only reach here when at least one
+            // edit applied (the all-rejected case `continue`d earlier).
+            const stepAccepted = opts.disableValidationGate === true ? true : gate.accepted;
+            if (stepAccepted) {
+              // F11 HELD-OUT GATE — guards CHECKPOINT ACCEPTANCE (not just file
+              // mutation), so the no-mutate / proposed.md paths can't promote a
+              // held-out-failing candidate either. Independent signal: a candidate
+              // that improved D_sel but regresses on the held-out set is refused
+              // (benchmark-gaming defense). Skipped when no held-out is configured.
+              if (heldOutTasks.length > 0) {
+                const ho = await runHeldOutGate({
+                  engine: opts.engine,
+                  operationContext: opts.operationContext,
+                  candidateSkillText: applied.newText,
+                  baselineSkillText: baselineText,
+                  heldOutTasks,
+                  deadlineMs: deadline,
+                  targetModel: opts.targetModel,
+                  judgeModel: opts.judgeModel,
+                });
+                if (!ho.passed) {
+                  const newRejections = fresh.map((e) =>
+                    makeRejectedEntry(checkpoint!.best_skill_text, [e], 'held_out_regression'),
+                  );
+                  saveRejectedBuffer(skillsDir, skillName, newRejections);
+                  logEvent({
+                    kind: 'step',
+                    run_id: runId,
+                    skill: skillName,
+                    epoch,
+                    step,
+                    sel_score_median: gate.selScore,
+                    sel_score_runs: gate.perTaskMedians.map((t) => t.median),
+                    accepted: false,
+                    edits_attempted: fresh.length,
+                    edits_applied: applied.results.filter((r) => r.outcome === 'applied').length,
+                    delta: gate.selScore - checkpoint!.best_sel_score,
+                    reason: 'held_out_regression',
+                    held_out_baseline: ho.baselineScore,
+                    held_out_candidate: ho.candidateScore,
+                    cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
+                  } as never);
+                  break stepBody; // do NOT promote
+                }
+              }
+
+              const delta = gate.selScore - checkpoint!.best_sel_score;
+              // ACCEPT: D8 commit via version-store (mutate) OR write proposed.md
+              // for the --no-mutate / bundled-without-allow paths.
+              if (mutateDecision.mutate) {
+                acceptCandidate({
+                  skillsDir,
+                  skillName,
+                  runId,
+                  epoch,
+                  step,
+                  edits: fresh,
+                  candidateText: applied.newText,
+                  selScore: gate.selScore,
+                  delta,
+                });
+              } else {
+                writeProposed(skillsDir, skillName, applied.newText);
+              }
+              checkpoint!.best_sel_score = gate.selScore;
+              checkpoint!.best_skill_text = applied.newText;
+              tally.accepted_steps += 1;
+
+              logEvent({
+                kind: 'step',
+                run_id: runId,
+                skill: skillName,
+                epoch,
+                step,
+                sel_score_median: gate.selScore,
+                sel_score_runs: gate.perTaskMedians.map((t) => t.median),
+                accepted: true,
+                edits_attempted: fresh.length,
+                edits_applied: applied.results.filter((r) => r.outcome === 'applied').length,
+                delta,
+                cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
+                ...(reflectResult.invalidEditsDropped > 0 ? { invalid_edits_dropped: reflectResult.invalidEditsDropped } : {}),
+              } as never);
+              finalText = applied.newText;
+            } else {
+              // REJECT: push to rejected-buffer.
+              const newRejections = fresh.map((e) =>
+                makeRejectedEntry(checkpoint!.best_skill_text, [e], `validation_gate_${gate.reason ?? 'rejected'}`),
+              );
+              saveRejectedBuffer(skillsDir, skillName, newRejections);
+              logEvent({
+                kind: 'step',
+                run_id: runId,
+                skill: skillName,
+                epoch,
+                step,
+                sel_score_median: gate.selScore,
+                sel_score_runs: gate.perTaskMedians.map((t) => t.median),
+                accepted: false,
+                edits_attempted: fresh.length,
+                edits_applied: applied.results.filter((r) => r.outcome === 'applied').length,
+                delta: gate.selScore - checkpoint!.best_sel_score,
+                reason: gate.reason ?? 'rejected',
+                cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
+                ...(reflectResult.invalidEditsDropped > 0 ? { invalid_edits_dropped: reflectResult.invalidEditsDropped } : {}),
+              } as never);
+            }
+          }
+
+          // Step completed (accepted, rejected or no candidate): advance the
+          // cursor and persist accounting so --resume continues after it.
+          advanceCursor(checkpoint!, epoch, step, stepsPerEpoch);
+          checkpoint!.cumulative_cost_usd = tracker.snapshot().cumulativeCostUsd;
+          saveCheckpoint(skillsDir, skillName, checkpoint!);
+          if (shouldEarlyStop(tally)) {
+            earlyStopped = true;
+            process.stderr.write(
+              `[skillopt] stopped after ${EARLY_STOP_UNUSABLE_STEPS} steps of ${unusableClasses(tally)}; remaining budget not spent\n`,
             );
-            saveRejectedBuffer(skillsDir, skillName, newRejections);
-            logEvent({
-              kind: 'step',
-              run_id: runId,
-              skill: skillName,
-              epoch,
-              step,
-              sel_score_median: gate.selScore,
-              sel_score_runs: gate.perTaskMedians.map((t) => t.median),
-              accepted: false,
-              edits_attempted: fresh.length,
-              edits_applied: applied.results.filter((r) => r.outcome === 'applied').length,
-              delta: gate.selScore - checkpoint!.best_sel_score,
-              reason: gate.reason ?? 'rejected',
-              cumulative_cost_usd: tracker.snapshot().cumulativeCostUsd,
-            } as never);
+            break epochs;
           }
         }
 
@@ -756,16 +854,14 @@ async function runOptimizationLoop(
           } as never);
         }
 
-        checkpoint!.last_completed_epoch = epoch;
-        checkpoint!.last_completed_step = 0;
-        saveCheckpoint(skillsDir, skillName, checkpoint!);
       }
 
       // FINAL TEST: score the best skill AND the baseline on D_test so the
       // receipt carries an honest held-out generalization signal (the eval
       // harnesses also compute this themselves, but a truthful receipt removes
-      // the prior hardcoded-0 lie). Skipped when D_test is empty.
-      if (split.test.length > 0) {
+      // the prior hardcoded-0 lie). Skipped when D_test is empty, and after an
+      // early stop with nothing accepted (best === baseline; budget not spent).
+      if (split.test.length > 0 && !(earlyStopped && tally.accepted_steps === 0)) {
         testScore = await scoreSkillOnTasks({
           engine: opts.engine,
           operationContext: opts.operationContext,
@@ -787,32 +883,35 @@ async function runOptimizationLoop(
       }
     });
   } catch (err) {
-    const classified = classifyAbortError(err, opts);
-    outcome = classified.outcome;
-    abortReason = classified.abortReason;
-    abortDetail = classified.abortDetail;
+    caught = classifyAbortError(err, opts);
+    if (err instanceof BudgetExhausted && err.reason === 'cost') caught.abortDetail += BUDGET_ADMISSION_HINT;
     logEvent({
       kind: 'abort',
       run_id: runId,
       skill: skillName,
-      reason: abortReason,
-      detail: abortDetail,
+      reason: caught.abortReason,
+      detail: caught.abortDetail,
     } as never);
+    // Handled abort: bank the spend + reflect tally; the cursor stays on the
+    // interrupted step so --resume re-runs it.
+    checkpoint.cumulative_cost_usd = tracker.snapshot().cumulativeCostUsd;
+    saveCheckpoint(skillsDir, skillName, checkpoint);
   }
 
-  // If --no-mutate or bundled+!allowMutateBundled: write proposed.md instead.
-  let mutatedSkillFile = false;
-  let proposedPath: string | undefined;
-  // Widen back to the full union — TS narrowed `outcome` inside the try/catch
-  // to the catch's assignment values only (it can't prove the async callback ran).
-  const finalOutcome = outcome as 'accepted' | 'no_improvement' | 'aborted' | 'errored';
-  if (!mutateDecision.mutate && finalOutcome === 'accepted') {
-    // writeProposed() emitted both the best pointer and the stable review
-    // artifact in the accept branch. SKILL.md remains untouched.
-    proposedPath = proposedFilePath(skillsDir, skillName);
-  } else if (mutateDecision.mutate) {
-    mutatedSkillFile = finalOutcome === 'accepted';
+  const { outcome, stopReason, abortReason, abortDetail } = resolveRunOutcome({ caught, tally, earlyStopped });
+  if (outcome === 'errored' && !caught) {
+    logEvent({ kind: 'abort', run_id: runId, skill: skillName, reason: 'error', detail: abortDetail } as never);
   }
+
+  // Acceptance history (not the final loop state) decides what was written:
+  // an abort or early stop after an accepted step still mutated SKILL.md /
+  // wrote proposed.md.
+  const acceptedAny = tally.accepted_steps > 0;
+  const mutatedSkillFile = mutateDecision.mutate && acceptedAny;
+  const proposedPath = !mutateDecision.mutate && acceptedAny ? proposedFilePath(skillsDir, skillName) : undefined;
+  const checkpointRetained = outcome === 'aborted' || outcome === 'errored';
+  const remediation = buildRemediation([...tally.reflect_errors, ...(abortDetail ? [abortDetail] : [])], abortReason);
+  const failureCode = abortDetail ? errorCode(abortDetail) : undefined;
 
   // Final receipt.
   const receipt: RunReceipt = {
@@ -835,6 +934,14 @@ async function runOptimizationLoop(
     // CLI's stderr summary both see WHY, not just that the run died.
     ...(abortReason !== undefined ? { abort_reason: abortReason } : {}),
     ...(abortDetail !== undefined ? { abort_detail: abortDetail } : {}),
+    stop_reason: stopReason,
+    ...(tally.reflect_errors.length > 0 ? { reflect_errors: [...tally.reflect_errors] } : {}),
+    ...(tally.invalid_edits_dropped > 0 ? { reflect_invalid_edits_dropped: tally.invalid_edits_dropped } : {}),
+    ...(skillBodyTruncated ? { skill_body_truncated: skillBodyTruncated } : {}),
+    ...(remediation.length > 0 ? { remediation } : {}),
+    reflect_max_tokens: reflectCap.maxTokens,
+    reflect_max_tokens_source: reflectCap.source,
+    ...(checkpointRetained ? { resume_command: buildResumeCommand(skillName, runId, runSpec, failureCode) } : {}),
     baseline_sel_score: baselineSelScore,
     best_sel_score: checkpoint.best_sel_score,
     ...(testScore !== undefined ? { test_score: testScore } : {}),
@@ -857,10 +964,12 @@ async function runOptimizationLoop(
     total_steps: totalStepsRun,
     best_sel_score: checkpoint.best_sel_score,
     final_cost_usd: tracker.snapshot().cumulativeCostUsd,
+    stop_reason: stopReason,
+    ...(abortDetail !== undefined ? { abort_detail: abortDetail } : {}),
   } as never);
 
   // Clean checkpoint on success (resume not needed).
-  if (finalOutcome === 'accepted' || finalOutcome === 'no_improvement') {
+  if (!checkpointRetained) {
     deleteCheckpoint(skillsDir, skillName, runId);
   }
 

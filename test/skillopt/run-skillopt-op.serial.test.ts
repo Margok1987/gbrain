@@ -174,3 +174,24 @@ describe('run_skillopt remote path confinement', () => {
     expect(runSkillOptCalls.length).toBe(1);
   });
 });
+
+describe('run_skillopt reflect_max_tokens (#5584)', () => {
+  beforeEach(async () => {
+    await engine.setConfig('skillopt.allowed_skills', JSON.stringify(['test-skill']));
+  });
+
+  test('remote caller: huge value clamped to 32000, tiny value raised to 256', async () => {
+    await run_skillopt.handler(ctxOf({ remote: true }), { skill_name: 'test-skill', reflect_max_tokens: 10_000_000 });
+    await run_skillopt.handler(ctxOf({ remote: true }), { skill_name: 'test-skill', reflect_max_tokens: 3 });
+    expect(runSkillOptCalls.map((c) => (c as { reflectMaxTokens?: number }).reflectMaxTokens)).toEqual([32000, 256]);
+  });
+
+  test('absent -> not passed (orchestrator resolves config/default); invalid -> invalid_params, no run', async () => {
+    await run_skillopt.handler(ctxOf({ remote: true }), { skill_name: 'test-skill' });
+    expect((runSkillOptCalls[0] as { reflectMaxTokens?: number }).reflectMaxTokens).toBeUndefined();
+    for (const bad of [-5, 1.5, 'lots']) {
+      await expectCode(run_skillopt.handler(ctxOf({ remote: true }), { skill_name: 'test-skill', reflect_max_tokens: bad }), 'invalid_params');
+    }
+    expect(runSkillOptCalls.length).toBe(1);
+  });
+});
