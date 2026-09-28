@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.59.9.0] - 2026-09-28
+## [0.59.11.0] - 2026-09-28
 
 **Dream stops paying for the same transcripts every cycle, and claude.ai and ChatGPT connectors can finish connecting.**
 
@@ -38,7 +38,7 @@ a corpus folder that covers your brain checkout no longer re-synthesizes them.
 | Any other unexpected resource | Token minted, then refused | Clear `invalid_target` error naming the right URL |
 | `gbrain mcp expose --funnel` on current Tailscale | Refused as "Funnel not enabled" | Publishes |
 
-### To take advantage of v0.59.9.0
+### To take advantage of v0.59.11.0
 
 Run `gbrain upgrade`. No migration or repair step is needed: synthesis, patterns
 and the sweep pick up the new rules on their next run.
@@ -69,6 +69,103 @@ and the sweep pick up the new rules on their next run.
 - The `/mcp` sign-in challenge suggests `read write`. Clients that request exactly the suggested scope now get write when their registration allows it; the grant is still capped to the registered scope. Contributed by @howardpark (#5277).
 - `/authorize`, code exchange and token refresh share one resource check derived from `--public-url`. The server's origin is accepted as an alias of its `/mcp` resource; any other resource is refused with `invalid_target` and a description naming the accepted URL, before a sign-in request is created or a code is spent (#5222).
 - `gbrain mcp expose --funnel` recognizes the Funnel capability in the forms current Tailscale reports (`funnel` and `https://tailscale.com/cap/funnel-ports?ports=…`) as well as the older URL form (#5599).
+
+## [0.59.10.0] - 2026-09-28
+
+**Memory maintenance preserves what it cannot safely rebuild and tells you what remains unfinished.**
+
+Changing how your brain searches should not erase information it cannot recreate.
+GBrain now checks that saved material can be rebuilt before replacing its search
+data. Archived material stays untouched. If something blocks the work, the command
+explains what needs attention instead of reporting success with unfinished work.
+Retries also remember the spending already authorized, including requests whose
+outcome is uncertain after an interruption.
+
+Forgetting one fact no longer sends every page in its source through a rewrite.
+Only the affected pages are updated, with unrelated content, search data and local
+changes preserved. Interrupted work keeps its recorded intent and resumes within
+the same boundaries.
+
+Exports now describe one consistent point in time. They include all selected pages
+within the documented resource limits, refuse conflicting names and occupied
+output paths, and leave an explicit incomplete marker if publication fails.
+Use a fresh destination for another export. Exported Markdown is still not a full
+database backup.
+
+Gmail imports distinguish attachments present, inspected with none found, not
+inspected, and incompletely inspected. Unavailable messages and threads are
+reported separately. An optional historical repair inspects metadata without
+downloading attachments or replacing your edited message text. It does not mean
+the attachments have been read or indexed.
+
+| Operation | What changes |
+|---|---|
+| Embedding migration | Saved facts participate in repair and completion checks; blocked archived work is reported before spending. |
+| Forgetting | Publication and retry work stay limited to the affected pages. |
+| Export | Conflicts fail before output, and interruption cannot look like a complete export. |
+| Gmail repair | Source-scoped, bounded metadata inspection preserves edits and withdrawals. |
+| MCP search | Provider timeouts remain distinguishable from genuine misses; source-binding warnings do not widen access. |
+
+Older fact vectors with unknown model identity are not treated as compatible
+merely because their dimensions match. Repair is explicit, not an automatic paid
+side effect of upgrading. The reported Windows/Hermes clean-miss issue remains
+unresolved; these diagnostics are not a claimed fix for that environment.
+
+## To take advantage of v0.59.10.0
+
+Stop old writers and verify an engine-appropriate full backup before upgrading.
+Do not run mixed old and new workers during migration. Follow
+[the upgrade guide](skills/migrations/v0.59.10.0.md); Markdown export is not a backup
+substitute.
+
+If the automatic upgrade did not finish its schema work, run
+`gbrain apply-migrations --yes --no-autopilot-install` only after those precautions.
+Inspect `gbrain migrate embeddings --status` and preview a chosen target with
+`--dry-run` before approving any paid repair. New migrations require an explicit
+finite `--max-cost-usd` total. Retained-vector refusals require
+the supported recovery described in [embedding migration](docs/guides/embedding-migration.md),
+not an override or an automatic archive restore.
+
+`forget` can now refuse with `withdrawal_capacity` before changing memory when
+discovery exceeds its safety limits: 12,000 source pages, 40,000 chunks, 40,000
+facts, 64 MiB of combined text or 256 affected pages. Additional manifest,
+per-batch and scan-time limits apply. Follow
+[withdrawal recovery](docs/guides/concurrent-writes.md#withdrawal-recovery)
+for investigation; there is no unsafe override or unchanged-retry workaround.
+
+### Itemized changes
+
+- **Embedding safety:** prepare eligible projections before invalidation, retain
+  protected archived/deleted data, preserve source and lease fences, and verify
+  fresh page/fact convergence before completion. Schema v166 records fact-vector
+  model and exact-text identity; incompatible or unknown generations are withheld
+  from semantic comparison. Paid migration attempts require durable bounded
+  authorization, including retries and verification calls.
+- **Migration replay:** retain existing fact and query-cache vector types and
+  widths when rebuilding supported indexes, instead of assuming the current
+  extension's preferred type. Malformed existing columns refuse without
+  rewriting stored data.
+- **Withdrawal safety:** discover exact affected pages before mutation and
+  persist bounded targets atomically with withdrawal intent. Legacy effect
+  recovery preserves unrelated pages and genuine conflicts.
+- **Export safety:** use a coherent snapshot, bounded staging, global path
+  preflight and native no-replace publication. Existing files and unrelated
+  destination content are never silently overwritten.
+- **Attachment visibility:** retain bounded MIME inspection receipts and expose
+  `gbrain google attachments backfill --source <id>` for preview. Explicit
+  `--yes` authorizes a bounded metadata-only batch on an existing managed source.
+  Traversal completion is distinct from complete inspection.
+- **Search diagnostics:** preserve timeout classification through wrapped
+  provider errors and warn about unresolved stdio source binding without
+  changing grants or revealing private matches.
+
+### For contributors
+
+Recovery coverage runs in separate PGLite and PostgreSQL lanes without increasing
+timeouts. Fixture provenance is explicit, temporary Git repositories do not
+depend on the host identity, and the MCP transport matrix participates in
+diff-aware test selection. Release instructions now default to patch numbering
+and resolve collisions without an approval prompt.
 
 ## [0.59.8.0] - 2026-09-28
 
