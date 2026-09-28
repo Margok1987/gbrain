@@ -53,6 +53,9 @@ and `--lanes` tune the fleet; failure logs and a run summary land in
   process ID that can belong to a live process, the E2E runner interrupt test
   checked for a killed child before it had been reaped, and the hook-under-serve
   E2E read the serve's own background heartbeat as the hook's.
+- Raise the `fast-uri` (3.1.7) and `ip-address` (10.5.1+) dependency overrides
+  past newly published advisories GHSA-58mr-gqgx-xq4g, GHSA-qw65-cvwx-89v3,
+  GHSA-2vr4-cq9g-pvrc and GHSA-rpw4-54j3-4h4q.
 
 ## [0.59.3.0] - 2026-09-28
 
