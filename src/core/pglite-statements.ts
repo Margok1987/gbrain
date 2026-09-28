@@ -79,6 +79,11 @@ export class PgliteStatementCache {
     const exec = handle.exec.bind(handle);
     return new Proxy(handle, {
       get: (target, key) => {
+        // An instance override (test seams, wrappers) owns the call; the
+        // cache still serves whatever it delegates to through this proxy.
+        if (!inTransaction && (key === 'query' || key === 'exec') && Object.hasOwn(target, key)) {
+          return (Reflect.get(target, key, target) as (...args: unknown[]) => unknown).bind(target);
+        }
         if (key === 'query') return (sql: string, params?: unknown[], options?: unknown) =>
           options !== undefined || (inTransaction && (target as Transaction).closed)
             ? this.observe(sql, () => query(sql, params as never[], options as never))
