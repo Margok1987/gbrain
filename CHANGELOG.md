@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.59.6.0] - 2026-09-28
+## [0.59.9.0] - 2026-09-28
 
 **Dream stops paying for the same transcripts every cycle, and claude.ai and ChatGPT connectors can finish connecting.**
 
@@ -38,7 +38,7 @@ a corpus folder that covers your brain checkout no longer re-synthesizes them.
 | Any other unexpected resource | Token minted, then refused | Clear `invalid_target` error naming the right URL |
 | `gbrain mcp expose --funnel` on current Tailscale | Refused as "Funnel not enabled" | Publishes |
 
-### To take advantage of v0.59.6.0
+### To take advantage of v0.59.9.0
 
 Run `gbrain upgrade`. No migration or repair step is needed: synthesis, patterns
 and the sweep pick up the new rules on their next run.
@@ -69,6 +69,21 @@ and the sweep pick up the new rules on their next run.
 - The `/mcp` sign-in challenge suggests `read write`. Clients that request exactly the suggested scope now get write when their registration allows it; the grant is still capped to the registered scope. Contributed by @howardpark (#5277).
 - `/authorize`, code exchange and token refresh share one resource check derived from `--public-url`. The server's origin is accepted as an alias of its `/mcp` resource; any other resource is refused with `invalid_target` and a description naming the accepted URL, before a sign-in request is created or a code is spent (#5222).
 - `gbrain mcp expose --funnel` recognizes the Funnel capability in the forms current Tailscale reports (`funnel` and `https://tailscale.com/cap/funnel-ports?ports=…`) as well as the older URL form (#5599).
+
+## [0.59.8.0] - 2026-09-28
+
+**Pull request CI now finishes in about 10-12 minutes instead of 20-34.**
+
+Nearly all of the extra time came from one check: 10,000 writes pushed through a
+single PGLite brain, at about 11 writes per second. Pull requests now run the
+same crash-recovery and schedule checks with a 2,500-write soak. Pushes to
+master and manual runs still run the full 10,000-write gate before release.
+
+### Itemized changes
+
+- The persistence invariant jobs pass `--operations=2500` on pull requests and
+  keep the full 10,000-write soak on master pushes and manual dispatches; a
+  workflow test pins the split.
 
 ## [0.59.5.0] - 2026-09-28
 
