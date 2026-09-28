@@ -192,12 +192,28 @@ export async function preparePageProjection(prepared: ProjectionSnapshot) {
   return { chunks: await prepareMarkdownChunks(page, prepared.maxChunkTokens), code: undefined };
 }
 
+// The job queue is usually empty or small while pages grows without bound, so
+// these reads walk jobs and probe sources/pages per job. The OFFSET 0 fences
+// keep the planner from turning the probes back into a scan of pages; PGLite
+// has no autovacuum to give it accurate queue statistics.
+const PROJECTION_JOB_PROBES = `CROSS JOIN LATERAL (SELECT s.id FROM sources s
+      WHERE s.incarnation=j.source_incarnation AND NOT s.archived OFFSET 0) s
+    CROSS JOIN LATERAL (SELECT p.page_kind FROM pages p WHERE p.source_id=s.id AND p.slug=j.slug
+      AND p.deleted_at IS NULL AND p.page_kind IN ('markdown','code') OFFSET 0) p`;
+
+/**
+ * Rebuilds between statistics refreshes, per engine. Like autovacuum's analyze
+ * threshold, a refresh is due once 50 rows plus 10% of the table changed; a
+ * process's first drained rebuild always refreshes.
+ */
+const statisticsDebt = new WeakMap<BrainEngine, { rebuilt: number; rows: number }>();
+
 /** Bounded and keyless. Unsupported media remains queued for its source importer. */
 export async function rebuildPendingPageProjections(engine: BrainEngine, limit = 20): Promise<{ rebuilt: number; superseded: number }> {
   const jobs = await engine.executeRaw<{ source_id: string; source_incarnation: string; slug: string; revision: string; page_kind: string }>(`SELECT s.id AS source_id,j.source_incarnation,j.slug,j.revision,p.page_kind
-    FROM page_projection_jobs j JOIN sources s ON s.incarnation=j.source_incarnation
-    JOIN pages p ON p.source_id=s.id AND p.slug=j.slug
-    WHERE p.deleted_at IS NULL AND NOT s.archived AND p.page_kind IN ('markdown','code')
+    FROM (SELECT source_incarnation,slug,revision,updated_at FROM page_projection_jobs
+      ORDER BY updated_at,source_incarnation,slug OFFSET 0) j
+    ${PROJECTION_JOB_PROBES}
     ORDER BY j.updated_at,j.source_incarnation,j.slug LIMIT $1`, [Math.max(1, Math.min(limit, 100))]);
   let rebuilt = 0;
   let superseded = 0;
@@ -225,11 +241,18 @@ export async function rebuildPendingPageProjections(engine: BrainEngine, limit =
     }
   }
   if (rebuilt > 0) {
+    const debt = statisticsDebt.get(engine);
+    const owed = { rebuilt: (debt?.rebuilt ?? 0) + rebuilt, rows: debt?.rows ?? 0 };
+    statisticsDebt.set(engine, owed);
+    if (debt && owed.rebuilt < 50 + owed.rows * 0.1) return { rebuilt, superseded };
     const remaining = await engine.executeRaw(`SELECT 1 FROM page_projection_jobs j
-      JOIN sources s ON s.incarnation=j.source_incarnation JOIN pages p ON p.source_id=s.id AND p.slug=j.slug
-      WHERE p.deleted_at IS NULL AND NOT s.archived AND p.page_kind IN ('markdown','code')
-        AND j.reason<>'rebuild_failed' LIMIT 1`);
-    if (!remaining.length) await refreshProjectionStatistics(engine);
+      ${PROJECTION_JOB_PROBES}
+      WHERE j.reason<>'rebuild_failed' LIMIT 1`);
+    if (!remaining.length) {
+      await refreshProjectionStatistics(engine);
+      const [pages] = await engine.executeRaw<{ rows: number }>("SELECT GREATEST(reltuples,0)::float8 AS rows FROM pg_class WHERE oid='pages'::regclass");
+      statisticsDebt.set(engine, { rebuilt: 0, rows: Number(pages?.rows ?? 0) });
+    }
   }
   return { rebuilt, superseded };
 }

@@ -65,7 +65,7 @@ export class PersistenceConsumer {
       .then(({ recoverSourceTopologies }) => recoverSourceTopologies(this.engine, { hostId: this.hostId, limit: 2 }))
       .catch(error => this.report(error)).finally(() => { this.topologyWorker = undefined; });
     if (!this.effectsWorker) this.effectsWorker = runPersistenceEffects(this.engine, this.config,
-      { hostId: this.hostId, limit: 2, signal: this.abort.signal }).catch(error => this.report(error))
+      { hostId: this.hostId, limit: 8, signal: this.abort.signal }).catch(error => this.report(error))
       .finally(() => { this.effectsWorker = undefined; });
     if (!this.maintenanceWorker && Date.now() >= this.nextMaintenance) {
       this.nextMaintenance = Date.now() + 60_000;

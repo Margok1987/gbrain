@@ -211,6 +211,19 @@ function pgliteCloseWatchdogMs(): { deadlineMs: number; graceMs: number } {
 
 type PGLiteDB = PGlite;
 
+/**
+ * PGlite copies `db.parsers` into a fresh object for every query result. Its
+ * array-type init registers one parser per composite (table row) array type,
+ * most of the map in a gbrain schema, and gbrain never selects those arrays;
+ * the per-query copy then dominated short statements. Their values would only
+ * have been split into unparsed strings, so drop them after connect.
+ */
+async function dropRowTypeArrayParsers(db: PGLiteDB): Promise<void> {
+  const { rows } = await db.query<{ oid: number }>(`SELECT a.oid::int AS oid FROM pg_type a
+    JOIN pg_type e ON e.oid=a.typelem WHERE a.typcategory='A' AND e.typtype='c'`);
+  for (const { oid } of rows) delete db.parsers[oid];
+}
+
 // Tier 3 snapshot fast-restore. Reads a tar dump produced by
 // `bun run scripts/build-pglite-snapshot.ts`. Snapshot is matched against
 // the current MIGRATIONS hash via a sidecar `.version` file; on mismatch we
@@ -758,7 +771,10 @@ export class PGLiteEngine implements BrainEngine {
     }
     this.vectorIterativeScan = undefined;
     const opening = this._connectInternal(config).then(async () => {
-      try { if (registerRoots) await registerManagedFilesystemEngine(this, config.database_path); }
+      try {
+        await dropRowTypeArrayParsers(this.db);
+        if (registerRoots) await registerManagedFilesystemEngine(this, config.database_path);
+      }
       catch (error) {
         try { await this._closeInternal(); }
         catch (closeError) {

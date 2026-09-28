@@ -25,6 +25,7 @@ import { prepareFileTarget } from './page-prepare.ts';
 import { advanceEffectCursor, claimPersistenceEffect, completeEffect, failEffect, renewPersistenceEffectClaim, retryEffect } from './effect-journal.ts';
 import { guardEffectSource, recoverEffectPublication, reserveEffectRecovery } from './effect-recovery.ts';
 import { publishGitEffect } from './effect-git.ts';
+import { isDurabilityHardenedAsync } from '../brain-repo-durability.ts';
 import { dispatchFactsBackstopEffect } from './effect-facts.ts';
 import type { EffectRecovery, PersistenceEffect } from './effect-model.ts';
 import { recoveryStagingFile } from './staging.ts';
@@ -90,7 +91,8 @@ async function mirrorPage(engine: BrainEngine, effect: PersistenceEffect, bindin
   await recoverEffectPublication(engine, effect, opts.hostId, opts);
 }
 
-async function gitPage(engine: BrainEngine, effect: PersistenceEffect, binding: WorktreeBinding | null, opts: EffectWorkerOptions): Promise<void> {
+async function gitPage(engine: BrainEngine, effect: PersistenceEffect, binding: WorktreeBinding | null, opts: EffectWorkerOptions,
+  hardened: boolean | undefined): Promise<void> {
   if (!binding?.local_path) { await completeEffect(engine, effect, { git: 'skipped', reason: 'no_repo_configured' }); return; }
   const snapshot = await selectedEffectPage(engine, effect);
   let path: string;
@@ -110,7 +112,7 @@ async function gitPage(engine: BrainEngine, effect: PersistenceEffect, binding: 
     if (persistenceFileHash(path) !== effect.data.expected_hash) { await completeEffect(engine, effect, { git: 'superseded' }); return; }
   }
   if (!isWriteTargetContained(path, join(binding.local_path, binding.relative_path))) throw new OperationError('source_changed', 'The Git target escaped its registered source.');
-  const result = await publishGitEffect(binding.local_path, relative(binding.local_path, path).split(sep).join('/'), opts.signal);
+  const result = await publishGitEffect(binding.local_path, relative(binding.local_path, path).split(sep).join('/'), opts.signal, hardened);
   if (result.reason === 'durability_not_enabled') await completeEffect(engine, effect, result);
   else await finishPage(engine, effect, snapshot, result);
 }
@@ -277,6 +279,9 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
     try {
       const binding = effect.worktree_id ? await getWorktreeBinding(engine, effect.source_id, opts.hostId) : null;
+      // Probe durability before locking: the git child processes must not
+      // hold the worktree's publications behind them.
+      const hardened = effect.kind === 'git' && binding?.local_path ? await isDurabilityHardenedAsync(binding.local_path) : undefined;
       if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) {
         if (!binding) throw new OperationError('owner_unavailable', 'The canonical effect owner is unavailable.');
         lock = await acquireWorktree(binding);
@@ -290,7 +295,7 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
         }
       });
       if (effect.kind === 'withdrawal-mirror') await mirrorPage(engine, effect, binding, opts);
-      else if (effect.kind === 'git') await gitPage(engine, effect, binding, opts);
+      else if (effect.kind === 'git') await gitPage(engine, effect, binding, opts, hardened);
       else if (effect.kind === 'facts-backstop') await dispatchFactsBackstopEffect(engine, effect, opts.hostId);
       else await embedPage(engine, config, effect, opts);
     } catch (error) { await recordFailure(engine, effect, error, opts.signal); }
