@@ -11,7 +11,8 @@
  *    next_epoch, next_step,          // authoritative resume cursor
  *    run_spec,                       // what --resume must match
  *    tally,                          // reflect usability + early-stop counter
- *    cumulative_cost_usd,
+ *    cumulative_cost_usd,              // every segment of the run
+ *    models_used, models_used_scope,   // #5585 ledger rows, every segment
  *    started_at, last_updated_at
  *  }
  *
@@ -24,6 +25,11 @@
  * mutate policy would widen (no-mutate -> mutate); the optimizer model, reflect
  * cap and cost cap may change.
  *
+ * Accounting (#5585): `bankAccounting` folds this segment's tracker snapshot
+ * onto what earlier segments banked, so a resumed run's receipt reports the
+ * whole run. A legacy checkpoint without ledger rows marks the resumed run's
+ * `models_used` as `since_resume`.
+ *
  * 7-day GC: stale checkpoints older than 7 days are removed by the dream
  * cycle's purge phase (T6 wiring).
  */
@@ -33,6 +39,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { errorFor } from '../errors.ts';
 import { atomicWrite } from './apply-edits.ts';
+import type { BudgetSnapshot } from '../budget/budget-tracker.ts';
+import { buildModelsUsed, type ModelUsageRow } from '../budget/models-used.ts';
 
 const CHECKPOINT_SCHEMA = 1;
 
@@ -103,8 +111,36 @@ export interface RunCheckpoint {
   run_spec?: RunSpec;
   tally?: ReflectTally;
   cumulative_cost_usd: number;
+  /** Ledger rows banked across segments. Absent on legacy checkpoints. */
+  models_used?: ModelUsageRow[];
+  models_used_scope?: ModelsUsedScope;
   started_at: string;
   last_updated_at: string;
+}
+
+export type ModelsUsedScope = 'full_run' | 'since_resume';
+
+/** What earlier segments of this run banked before the current tracker started. */
+export interface PriorSegments {
+  costUsd: number;
+  rows: ModelUsageRow[];
+  scope: ModelsUsedScope;
+}
+
+export function priorSegments(cp: RunCheckpoint | null): PriorSegments {
+  if (!cp) return { costUsd: 0, rows: [], scope: 'full_run' };
+  return {
+    costUsd: cp.cumulative_cost_usd,
+    rows: cp.models_used ?? [],
+    scope: cp.models_used ? (cp.models_used_scope ?? 'full_run') : 'since_resume',
+  };
+}
+
+/** Bank spend + ledger rows (prior segments + this one) on completed steps and handled aborts. */
+export function bankAccounting(cp: RunCheckpoint, prior: PriorSegments, snapshot: BudgetSnapshot): void {
+  cp.cumulative_cost_usd = prior.costUsd + snapshot.cumulativeCostUsd;
+  cp.models_used = buildModelsUsed(snapshot, prior.rows);
+  cp.models_used_scope = prior.scope;
 }
 
 /**

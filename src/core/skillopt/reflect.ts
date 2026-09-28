@@ -29,7 +29,7 @@
 import { chat as gatewayChat, defaultMaxOutputTokens, type ChatResult } from '../ai/gateway.ts';
 import { resolveChatContextTokens } from '../ai/model-resolver.ts';
 import { isSkilloptMustAbort } from './must-abort.ts';
-import type { EditOp, ScoredRollout, Judge, RuleCheck } from './types.ts';
+import { SKILLOPT_PURPOSE, type EditOp, type ScoredRollout, type Judge, type RuleCheck } from './types.ts';
 import type { RejectedEntry } from './rejected-buffer.ts';
 
 /**
@@ -241,6 +241,7 @@ export async function runOneShotRewrite(opts: ReflectOpts): Promise<OneShotRewri
       maxTokens,
       cacheSystem: true,
       abortSignal: opts.abortSignal,
+      purpose: SKILLOPT_PURPOSE.optimizer,
     });
   } catch (err) {
     if (isSkilloptMustAbort(err)) throw err;
@@ -285,6 +286,7 @@ async function callReflect(
       maxTokens,
       cacheSystem: true, // D11
       abortSignal: opts.abortSignal,
+      purpose: SKILLOPT_PURPOSE.optimizer,
     });
   } catch (err) {
     if (isSkilloptMustAbort(err)) throw err;

@@ -22,7 +22,7 @@ import { chat as gatewayChat } from '../ai/gateway.ts';
 import { ndcgAtK } from '../search/eval.ts';
 import { isSkilloptMustAbort } from './must-abort.ts';
 import { skilloptOutputCap } from './output-cap.ts';
-import type { Judge, RuleCheck, ScoredRollout, Trajectory } from './types.ts';
+import { SKILLOPT_PURPOSE, type Judge, type RuleCheck, type ScoredRollout, type Trajectory } from './types.ts';
 
 /** Score a trajectory against a judge. Returns a ScoredRollout. */
 export async function scoreTrajectory(
@@ -176,6 +176,7 @@ async function scoreLlm(
       messages: [{ role: 'user', content: userMsg }],
       maxTokens: skilloptOutputCap(judgeModel, JUDGE_SITE_MAX_TOKENS),
       cacheSystem: true, // D11: judge system prompt is stable across calls.
+      purpose: SKILLOPT_PURPOSE.judge,
     });
     const parsed = parseJudgeJson(result.text);
     if (!parsed) {

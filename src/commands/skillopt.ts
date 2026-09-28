@@ -12,6 +12,7 @@ import { runBootstrap, runBootstrapFromSkill } from '../core/skillopt/bootstrap-
 import { SKILLOPT_HELP_TEXT } from '../core/skillopt/help.ts';
 import { runSkillOpt, parseSplit } from '../core/skillopt/orchestrator.ts';
 import { checkpointPath } from '../core/skillopt/checkpoint.ts';
+import { formatModelsUsedTable } from '../core/budget/models-used.ts';
 import { parsePositiveInt } from '../core/skillopt/output-cap.ts';
 import { serializeError, StructuredAgentError } from '../core/errors.ts';
 import type { BrainEngine } from '../core/engine.ts';
@@ -365,6 +366,12 @@ export function formatRunSummary(outcome: RunSkillOptOutcome, receipt: RunReceip
   }
   if (receipt.skill_body_truncated) {
     lines.push(`[skillopt] Warning: skill body truncated for the optimizer (sent ${receipt.skill_body_truncated.sent_chars} of ${receipt.skill_body_truncated.total_chars} chars).`);
+  }
+  const modelsUsed = receipt.models_used ?? [];
+  if (modelsUsed.length > 0) {
+    const scope = receipt.models_used_scope === 'since_resume' ? 'since resume; earlier segments predate the ledger' : 'full run';
+    lines.push(`[skillopt] Models called (${scope}; a call is one gateway operation, internal retries count once; ~ = estimated cost):`);
+    for (const row of formatModelsUsedTable(modelsUsed)) lines.push(`[skillopt]   ${row}`);
   }
   for (const r of receipt.remediation ?? []) {
     lines.push(`[skillopt] Fix (${r.code}): ${r.fix} See ${r.docs}`);

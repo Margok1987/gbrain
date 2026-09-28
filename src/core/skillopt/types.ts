@@ -15,6 +15,7 @@
 import type { BrainEngine } from '../engine.ts';
 import type { OperationContext } from '../ops/contract.ts';
 import type { ToolLoopStopReason } from '../ai/gateway.ts';
+import type { ModelUsageRow } from '../budget/models-used.ts';
 
 // ─── Benchmarks + judges ──────────────────────────────────────────────────
 
@@ -251,6 +252,12 @@ export interface RunReceipt {
   reflect_max_tokens_source?: 'flag' | 'config' | 'default';
   /** #5584: exact command that resumes this run (present when the checkpoint is retained). */
   resume_command?: string;
+  /** #5585: every model the run called, one row per (requested, served, touchpoint, purpose). */
+  models_used?: ModelUsageRow[];
+  /** #5585: `since_resume` when an earlier segment's checkpoint predates ledger persistence. */
+  models_used_scope?: 'full_run' | 'since_resume';
+  /** #5585: spend banked by earlier segments of a resumed run; `final_cost_usd` is this segment. */
+  prior_segments_cost_usd?: number;
   // Ablation provenance (cat31 replayability) — present when a non-default
   // ablation knob was set.
   reflect_mode?: 'both' | 'failure-only';
@@ -281,6 +288,13 @@ export const VALIDATION_RUNS_PER_TASK = 3;
  * source of truth for the D7 partition — used by every forward-pass site.
  */
 export const ROLLOUT_SUCCESS_THRESHOLD = 0.5;
+
+/** #5585: `purpose` stamped on skillopt's gateway calls, one BudgetTracker ledger row per role. */
+export const SKILLOPT_PURPOSE = {
+  optimizer: 'skillopt.optimizer',
+  target: 'skillopt.target',
+  judge: 'skillopt.judge',
+} as const;
 
 export interface GateInput {
   candidateSkillText: string;

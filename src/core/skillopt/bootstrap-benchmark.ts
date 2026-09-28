@@ -32,7 +32,7 @@ import { errorFor } from '../errors.ts';
 import { atomicWrite } from './apply-edits.ts';
 import { isSkilloptMustAbort } from './must-abort.ts';
 import { skilloptOutputCap } from './output-cap.ts';
-import { BOOTSTRAP_PENDING_REVIEW, type RuleCheck } from './types.ts';
+import { BOOTSTRAP_PENDING_REVIEW, SKILLOPT_PURPOSE, type RuleCheck } from './types.ts';
 
 const BOOTSTRAP_SYSTEM = `You are SkillOpt's bootstrap-benchmark generator. Given a user intent that triggers a SKILL, generate 2-4 deterministic rule checks that would verify a successful execution.
 
@@ -131,6 +131,7 @@ export async function runBootstrap(opts: BootstrapOpts): Promise<BootstrapResult
         messages: [{ role: 'user', content: userMsg }],
         maxTokens: skilloptOutputCap(optimizerModel, 500),
         cacheSystem: true,
+        purpose: SKILLOPT_PURPOSE.optimizer,
       });
       if (result.stopReason === 'length') {
         skipped += 1;
@@ -250,6 +251,7 @@ export async function runBootstrapFromSkill(opts: BootstrapFromSkillOpts): Promi
     messages: [{ role: 'user', content: userMsg }],
     maxTokens: skilloptOutputCap(optimizerModel, Math.min(8000, Math.max(4000, taskCount * 220))),
     cacheSystem: true,
+    purpose: SKILLOPT_PURPOSE.optimizer,
   });
 
   const { generated, skipped } = parseSkillBenchmarkJsonl(result.text, skillName, result.stopReason === 'length');

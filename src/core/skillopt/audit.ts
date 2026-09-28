@@ -12,6 +12,7 @@
 
 import { createHash } from 'node:crypto';
 import { createAuditWriter, type AuditWriter } from '../audit/audit-writer.ts';
+import type { ModelUsageRow } from '../budget/models-used.ts';
 import type { EditOp } from './types.ts';
 
 /** Discriminated union of every event kind emitted to the audit trail. */
@@ -35,7 +36,8 @@ export type SkilloptEvent =
       total_steps: number; baseline_sel_score?: number; best_sel_score?: number;
       baseline_test_score?: number; test_score?: number; final_cost_usd: number;
       stop_reason?: 'completed' | 'early_stop_unusable_output' | 'aborted';
-      abort_detail?: string; ts: string }
+      abort_detail?: string; models_used?: ModelUsageRow[];
+      models_used_scope?: 'full_run' | 'since_resume'; ts: string }
   // #3516: 'error' is the truthful catch-all for unrecognized failures
   // (provider errors, no_pricing hard-fails, bugs). 'sigint' is reserved for
   // an actual SIGINT interrupt — pre-fix the catch-all logged every error as

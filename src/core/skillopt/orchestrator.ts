@@ -99,6 +99,7 @@ import { assertLegacySkillWriter } from '../skillpack/writer-guard.ts';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import { BudgetExhausted, BudgetTracker } from '../budget/budget-tracker.ts';
+import { buildModelsUsed } from '../budget/models-used.ts';
 import { withBudgetTracker } from '../ai/gateway.ts';
 import { errorFor } from '../errors.ts';
 import { applyEditBatch, getWorkingTreeStatusForFile, splitFrontmatter } from './apply-edits.ts';
@@ -108,9 +109,11 @@ import { getBundledSkillContext, shouldMutateSkillFile, assertBundledMutationHel
 import {
   advanceCursor,
   assertResumeCompatible,
+  bankAccounting,
   deleteCheckpoint,
   emptyTally,
   loadCheckpoint,
+  priorSegments,
   resumeCursor,
   saveCheckpoint,
   type RunSpec,
@@ -393,6 +396,7 @@ async function runOptimizationLoop(
   // Resume or init checkpoint. A resume must match what the checkpoint measured.
   const runId = opts.resumeRunId ?? randomUUID();
   let checkpoint = opts.resumeRunId ? loadCheckpoint(skillsDir, skillName, opts.resumeRunId) : null;
+  const prior = priorSegments(checkpoint);
   if (checkpoint) {
     assertResumeCompatible(checkpoint, runSpec);
     checkpoint.run_spec = runSpec;
@@ -419,6 +423,8 @@ async function runOptimizationLoop(
       run_spec: runSpec,
       tally: emptyTally(),
       cumulative_cost_usd: 0,
+      models_used: [],
+      models_used_scope: 'full_run',
       started_at: new Date().toISOString(),
       last_updated_at: new Date().toISOString(),
     };
@@ -583,6 +589,7 @@ async function runOptimizationLoop(
           }
         }
         advanceCursor(checkpoint!, opts.epochs, 1, 1); // no-op the epoch loop below
+        bankAccounting(checkpoint!, prior, tracker.snapshot());
         saveCheckpoint(skillsDir, skillName, checkpoint!);
       }
 
@@ -831,7 +838,7 @@ async function runOptimizationLoop(
           // Step completed (accepted, rejected or no candidate): advance the
           // cursor and persist accounting so --resume continues after it.
           advanceCursor(checkpoint!, epoch, step, stepsPerEpoch);
-          checkpoint!.cumulative_cost_usd = tracker.snapshot().cumulativeCostUsd;
+          bankAccounting(checkpoint!, prior, tracker.snapshot());
           saveCheckpoint(skillsDir, skillName, checkpoint!);
           if (shouldEarlyStop(tally)) {
             earlyStopped = true;
@@ -894,7 +901,7 @@ async function runOptimizationLoop(
     } as never);
     // Handled abort: bank the spend + reflect tally; the cursor stays on the
     // interrupted step so --resume re-runs it.
-    checkpoint.cumulative_cost_usd = tracker.snapshot().cumulativeCostUsd;
+    bankAccounting(checkpoint, prior, tracker.snapshot());
     saveCheckpoint(skillsDir, skillName, checkpoint);
   }
 
@@ -912,6 +919,8 @@ async function runOptimizationLoop(
   const checkpointRetained = outcome === 'aborted' || outcome === 'errored';
   const remediation = buildRemediation([...tally.reflect_errors, ...(abortDetail ? [abortDetail] : [])], abortReason);
   const failureCode = abortDetail ? errorCode(abortDetail) : undefined;
+  const budget = tracker.snapshot();
+  const modelsUsed = buildModelsUsed(budget, prior.rows);
 
   // Final receipt.
   const receipt: RunReceipt = {
@@ -946,7 +955,10 @@ async function runOptimizationLoop(
     best_sel_score: checkpoint.best_sel_score,
     ...(testScore !== undefined ? { test_score: testScore } : {}),
     ...(baselineTestScore !== undefined ? { baseline_test_score: baselineTestScore } : {}),
-    final_cost_usd: tracker.snapshot().cumulativeCostUsd,
+    final_cost_usd: budget.cumulativeCostUsd,
+    prior_segments_cost_usd: prior.costUsd,
+    models_used: modelsUsed,
+    models_used_scope: prior.scope,
     total_steps: totalStepsRun,
     epochs_completed: checkpoint.last_completed_epoch,
     // Ablation provenance (cat31 replayability) — only when a non-default knob set.
@@ -963,7 +975,9 @@ async function runOptimizationLoop(
     epochs_completed: checkpoint.last_completed_epoch,
     total_steps: totalStepsRun,
     best_sel_score: checkpoint.best_sel_score,
-    final_cost_usd: tracker.snapshot().cumulativeCostUsd,
+    final_cost_usd: budget.cumulativeCostUsd,
+    models_used: modelsUsed,
+    models_used_scope: prior.scope,
     stop_reason: stopReason,
     ...(abortDetail !== undefined ? { abort_detail: abortDetail } : {}),
   } as never);
