@@ -10,6 +10,25 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.59.8.0] - 2026-09-28
+
+**Pull request CI now finishes in about 10-12 minutes instead of 20-34.**
+
+Nearly all of the extra time came from one check: 10,000 writes pushed through a
+single PGLite brain, at about 11 writes per second. Pull requests now run the
+same crash-recovery and schedule checks with a 2,500-write soak. Pushes to
+master and manual runs still run the full 10,000-write gate before release.
+
+### Itemized changes
+
+- The persistence invariant jobs pass `--operations=2500` on pull requests and
+  keep the full 10,000-write soak on master pushes and manual dispatches; a
+  workflow test pins the split.
+- Raise the `fast-uri` (3.1.7) and `ip-address` (10.5.1+) dependency overrides
+  past newly published advisories GHSA-58mr-gqgx-xq4g, GHSA-qw65-cvwx-89v3,
+  GHSA-2vr4-cq9g-pvrc and GHSA-rpw4-54j3-4h4q, which fail the dependency scan on
+  any pull request that touches `package.json`.
+
 ## [0.59.3.0] - 2026-09-28
 
 **A broken worker installation now asks for repair instead of repeatedly interrupting your jobs.**
