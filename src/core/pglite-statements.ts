@@ -1,12 +1,15 @@
-import { parse, protocol, type PGlite, type Results, type Transaction } from '@electric-sql/pglite';
+import { protocol, types, type PGlite, type Results, type Transaction } from '@electric-sql/pglite';
 
-type BackendMessage = { name: string; dataTypeIDs?: number[]; code?: string };
+type Field = { name: string; dataTypeID: number };
+type BackendMessage = { name: string; dataTypeIDs?: number[]; fields?: (Field | string | null)[]; text?: string };
+type Parser = (value: string, typeId: number) => unknown;
 type ExclusiveDatabase = PGlite & {
   _checkReady(): Promise<void>;
   _runExclusiveQuery<T>(fn: () => Promise<T>): Promise<T>;
   _runExclusiveTransaction<T>(fn: () => Promise<T>): Promise<T>;
 };
-interface Statement { name: string; paramTypes: number[]; description: BackendMessage | null }
+interface Column { name: string; dataTypeID: number; parse: Parser | undefined }
+interface Statement { name: string; paramTypes: number[]; columns: Column[] }
 
 const { serialize } = protocol as unknown as {
   serialize: {
@@ -18,15 +21,34 @@ const { serialize } = protocol as unknown as {
     sync(): Uint8Array;
   };
 };
-const { parseResults } = parse as unknown as {
-  parseResults(messages: BackendMessage[], parsers: PGlite['parsers']): Results[];
-};
+const defaultParsers = types.parsers as unknown as Record<number, Parser>;
 
 /** Statements that can change a cached statement's result shape or drop session statements. */
 const SHAPE_CHANGING = /^\s*(?:ALTER|CREATE|DROP|DO|DISCARD|DEALLOCATE)\b/i;
 const TRANSACTION_CONTROL = /^\s*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b/i;
 /** Plan-cache errors that a fresh Parse resolves: changed result type, missing statement. */
 const STALE_STATEMENT = new Set(['0A000', '26000']);
+
+/** PGlite's parseResults for one statement, with parsers resolved once per prepared statement. */
+function results(columns: Column[], messages: BackendMessage[]): Results {
+  const rows: Record<string, unknown>[] = [];
+  let affectedRows = 0;
+  let completed = false;
+  for (const message of messages) {
+    if (message.name === 'dataRow') rows.push(Object.fromEntries(message.fields!.map((value, index) => {
+      const column = columns[index];
+      return [column.name, value === null || !column.parse ? value : column.parse(value as string, column.dataTypeID)];
+    })));
+    else if (message.name === 'commandComplete') {
+      const [command, first, second] = message.text!.split(' ');
+      affectedRows += command === 'INSERT' ? parseInt(second, 10)
+        : ['UPDATE', 'DELETE', 'COPY', 'MERGE'].includes(command) ? parseInt(first, 10) : 0;
+      completed = true;
+    }
+  }
+  const fields = columns.map(({ name, dataTypeID }) => ({ name, dataTypeID }));
+  return (completed ? { rows, fields, affectedRows } : { affectedRows: 0, rows: [], fields: [] }) as Results;
+}
 
 function concat(parts: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((size, part) => size + part.length, 0));
@@ -126,9 +148,12 @@ export class PgliteStatementCache {
     const parts = this.retired.splice(0).map(retired => serialize.close({ type: 'S', name: retired }));
     parts.push(serialize.parse({ name, text: sql }), serialize.describe({ type: 'S', name }), serialize.sync());
     const { messages } = await this.protocol(concat(parts), sql, []);
+    const parsers = this.db.parsers as unknown as Record<number, Parser>;
+    const fields = (messages.find(message => message.name === 'rowDescription')?.fields ?? []) as Field[];
     const statement = { name,
       paramTypes: messages.find(message => message.name === 'parameterDescription')?.dataTypeIDs ?? [],
-      description: messages.find(message => message.name === 'rowDescription') ?? null };
+      columns: fields.map(({ name: column, dataTypeID }) => ({ name: column, dataTypeID,
+        parse: parsers[dataTypeID] ?? defaultParsers[dataTypeID] })) };
     this.statements.set(sql, statement);
     return statement;
   }
@@ -143,7 +168,7 @@ export class PgliteStatementCache {
     });
     const { messages } = await this.protocol(concat([serialize.bind({ statement: statement.name, values }),
       serialize.execute({}), serialize.sync()]), sql, params);
-    return parseResults(statement.description ? [statement.description, ...messages] : messages, this.db.parsers)[0];
+    return results(statement.columns, messages);
   }
 
   private async protocol(message: Uint8Array, sql: string, params: unknown[]): Promise<{ messages: BackendMessage[] }> {
