@@ -7760,8 +7760,8 @@ files, credentials or database URLs into a public report.
 Upgrading while an older owner (0.59.0.0 or earlier) is still running keeps
 working: that owner respawns the upgraded worker, which processes jobs without
 publishing readiness status. Restart the owner when convenient to get readiness
-reporting and configuration blocking. Rolling a worker back below 0.59.1.0
-under a 0.59.1.0 or later owner is different: the older worker never reports
+reporting and configuration blocking. Rolling a worker back below 0.59.3.0
+under a 0.59.3.0 or later owner is different: the older worker never reports
 readiness, so the owner's 120-second startup deadline stops and restarts it
 repeatedly. Stop the owner first, roll back, then start the owner from the
 rolled-back installation.
