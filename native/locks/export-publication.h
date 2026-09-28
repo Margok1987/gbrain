@@ -293,14 +293,14 @@ static unsigned long export_remove_temp(export_dir *parent, const char *name, os
 static unsigned long export_publish(export_dir *parent, const char *temporary, const char *leaf, os_handle handle) {
 #ifdef _WIN32
   (void)temporary;
-  wchar_t *wide = export_wide(leaf);
+  wchar_t *wide = export_child_path(parent, leaf);
   if (!wide) return export_invalid();
   size_t bytes = wcslen(wide) * sizeof(wchar_t);
   size_t size = sizeof(FILE_RENAME_INFO) + bytes;
   FILE_RENAME_INFO *rename = calloc(1, size);
   if (!rename) { free(wide); return export_invalid(); }
   rename->ReplaceIfExists = FALSE;
-  rename->RootDirectory = parent->handle;
+  rename->RootDirectory = NULL;
   rename->FileNameLength = (DWORD)bytes;
   memcpy(rename->FileName, wide, bytes);
   unsigned long error = SetFileInformationByHandle(handle, FileRenameInfo, rename, (DWORD)size) ? 0 : export_error();

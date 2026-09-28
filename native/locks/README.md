@@ -84,9 +84,10 @@ Begin exclusively creates `.gbrain-export-status` and writes and flushes
 Each file is fully written and flushed to a same-directory exclusive temporary
 file before publication. POSIX uses `linkat(..., 0)` followed by temporary-name
 removal and directory `fsync`; Windows uses `SetFileInformationByHandle` with
-`FileRenameInfo`, `ReplaceIfExists=FALSE`, the retained parent `RootDirectory`,
-and one leaf name. Existing files, hard-link aliases, directories and symlinks
-cannot be replaced. Windows files use `FILE_FLAG_WRITE_THROUGH` and
+`FileRenameInfo`, `ReplaceIfExists=FALSE`, a null `RootDirectory`, and the absolute
+destination path. Retained ancestor handles deny delete sharing throughout the
+rename, so destination components cannot be replaced. Existing files, hard-link
+aliases, directories and symlinks cannot be replaced. Windows files use `FILE_FLAG_WRITE_THROUGH` and
 `FlushFileBuffers`; this is not a claim of POSIX directory-fsync or whole-volume
 power-loss durability. Microsoft's contracts are documented in
 [FILE_RENAME_INFO](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_rename_info)
