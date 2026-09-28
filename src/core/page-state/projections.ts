@@ -54,14 +54,13 @@ async function indexingContext(engine: BrainEngine, snapshot: PageSnapshot, maxC
     searchEmbeddingColumn: config.find(row => row.key === 'search_embedding_column')?.value ?? null,
     embeddingColumnsJson: config.find(row => row.key === 'embedding_columns')?.value ?? null,
   });
-  const [projection] = await engine.executeRaw<{ chunker_version: number | null; corpus_generation: string | null }>(
-    'SELECT chunker_version,corpus_generation FROM pages WHERE id=$1', [snapshot.page.id]);
-  const [kind] = await engine.executeRaw<{ page_kind: PageKind }>('SELECT page_kind FROM pages WHERE id=$1', [snapshot.page.id]);
-  if (!kind) throw new PageRevisionConflictError(snapshot.revision, null);
+  const [projection] = await engine.executeRaw<{ chunker_version: number | null; corpus_generation: string | null; page_kind: PageKind }>(
+    'SELECT chunker_version,corpus_generation,page_kind FROM pages WHERE id=$1', [snapshot.page.id]);
+  if (!projection) throw new PageRevisionConflictError(snapshot.revision, null);
   return { key: digest({ config, mode: snapshot.page.contextual_retrieval_mode, model, column,
-    maxChunkTokens, storedChunkerVersion: projection?.chunker_version ?? null, corpusGeneration: projection?.corpus_generation ?? null,
-    chunkerVersion: MARKDOWN_CHUNKER_VERSION, codeChunkerVersion: CHUNKER_VERSION, pageKind: kind.page_kind,
-    ftsLanguage: getFtsLanguage() }), model, maxChunkTokens, column, pageKind: kind.page_kind };
+    maxChunkTokens, storedChunkerVersion: projection.chunker_version ?? null, corpusGeneration: projection.corpus_generation ?? null,
+    chunkerVersion: MARKDOWN_CHUNKER_VERSION, codeChunkerVersion: CHUNKER_VERSION, pageKind: projection.page_kind,
+    ftsLanguage: getFtsLanguage() }), model, maxChunkTokens, column, pageKind: projection.page_kind };
 }
 
 /** A short guarded read binds the exact chunk set and title/body revision. */
@@ -69,12 +68,18 @@ export async function readProjectionSnapshot(engine: BrainEngine, slug: string, 
   opts: { allowUnsealed?: boolean; maxChunkTokens?: number } = {}): Promise<ProjectionSnapshot | null> {
   return engine.transaction(async tx => {
     await tx.lockPageKeys([{ sourceId, slug }]);
-    const snapshot = await tx.readPageSnapshot(slug, { sourceId });
-    if (!snapshot || (!opts.allowUnsealed && snapshot.page.text_projection_revision !== snapshot.revision)) return null;
-    const context = await indexingContext(tx, snapshot, opts.maxChunkTokens);
-    return { snapshot, chunks: await tx.getChunks(slug, { sourceId, includeUnsealed: true }), indexingContext: context.key,
-      embeddingModel: context.model, embeddingColumn: context.column, maxChunkTokens: context.maxChunkTokens, maxChunkTokensOverride: opts.maxChunkTokens, pageKind: context.pageKind };
+    return readGuardedProjectionSnapshot(tx, slug, sourceId, opts);
   });
+}
+
+/** readProjectionSnapshot for a caller whose transaction already holds the page guard. */
+async function readGuardedProjectionSnapshot(tx: BrainEngine, slug: string, sourceId: string,
+  opts: { allowUnsealed?: boolean; maxChunkTokens?: number }): Promise<ProjectionSnapshot | null> {
+  const snapshot = await tx.readPageSnapshot(slug, { sourceId });
+  if (!snapshot || (!opts.allowUnsealed && snapshot.page.text_projection_revision !== snapshot.revision)) return null;
+  const context = await indexingContext(tx, snapshot, opts.maxChunkTokens);
+  return { snapshot, chunks: await tx.getChunks(slug, { sourceId, includeUnsealed: true }), indexingContext: context.key,
+    embeddingModel: context.model, embeddingColumn: context.column, maxChunkTokens: context.maxChunkTokens, maxChunkTokensOverride: opts.maxChunkTokens, pageKind: context.pageKind };
 }
 
 /** No provider work under the guard. Delayed derived results lose to newer content. */
@@ -223,7 +228,7 @@ export async function rebuildPendingPageProjections(engine: BrainEngine, limit =
       const pending = await tx.executeRaw(`SELECT 1 FROM page_projection_jobs
         WHERE source_incarnation=$1::uuid AND slug=$2 AND revision=$3::uuid`, [job.source_incarnation, job.slug, job.revision]);
       if (!pending.length) return null;
-      return readProjectionSnapshot(tx, job.slug, job.source_id, { allowUnsealed: true });
+      return readGuardedProjectionSnapshot(tx, job.slug, job.source_id, { allowUnsealed: true });
     });
     if (!prepared || prepared.snapshot.sourceIncarnation !== job.source_incarnation || prepared.snapshot.revision !== job.revision) { superseded++; continue; }
     try {

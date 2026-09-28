@@ -212,6 +212,13 @@ function pgliteCloseWatchdogMs(): { deadlineMs: number; graceMs: number } {
 
 type PGLiteDB = PGlite;
 
+interface HeldPageKeys { keys: Set<string>; parent: HeldPageKeys | null }
+/** Identity acquirePageKeys guards; null when the key is invalid and must reach its checks. */
+function heldPageKey(key: PageKey): string | null {
+  if (!key.sourceId) return null;
+  try { return JSON.stringify([key.sourceId, validateSlug(key.slug)]); } catch { return null; }
+}
+
 /**
  * PGlite copies `db.parsers` into a fresh object for every query result. Its
  * array-type init registers one parser per composite (table row) array type,
@@ -1706,14 +1713,20 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async transaction<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
-    return this.db.transaction(async handle => {
+    const parent = this._pageTransaction ? this._heldPageKeys : null;
+    const held: HeldPageKeys = { keys: new Set(), parent };
+    const result = await this.db.transaction(async handle => {
       const tx = composablePgliteTransaction(this._statements?.attach(handle, true) ?? handle);
       const txEngine = Object.create(this) as PGLiteEngine;
       Object.defineProperty(txEngine, '_chunkWritesInTransaction', { value: true });
       Object.defineProperty(txEngine, '_pageTransaction', { value: true });
+      Object.defineProperty(txEngine, '_heldPageKeys', { value: held });
       Object.defineProperty(txEngine, 'db', { get: () => tx });
       return fn(txEngine);
     });
+    // A released savepoint's guards stay held by its parent; a rolled-back one's do not.
+    for (const key of held.keys) parent?.keys.add(key);
+    return result;
   }
 
   async transactionDirect<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
@@ -1729,9 +1742,23 @@ export class PGLiteEngine implements BrainEngine {
     return readCanonicalPageSnapshot(this.executeRaw.bind(this), slug, opts);
   }
 
+  /**
+   * The single PGLite session already owns guards taken earlier in this
+   * transaction (or an enclosing, still-open savepoint), so they are not
+   * re-acquired; each new key runs the full guard sequence once.
+   */
   async lockPageKeys(keys: readonly PageKey[]): Promise<void> {
     if (!this._pageTransaction) throw new Error('lockPageKeys requires engine.transaction()');
-    await acquirePageKeys(this, keys);
+    const pending = keys.filter(key => { const id = heldPageKey(key); return id === null || !this._holdsPageKey(id); });
+    if (!pending.length) return;
+    await acquirePageKeys(this, pending);
+    for (const key of pending) this._heldPageKeys!.keys.add(heldPageKey(key)!);
+  }
+
+  private _heldPageKeys: HeldPageKeys | null = null;
+  private _holdsPageKey(id: string): boolean {
+    for (let held = this._heldPageKeys; held; held = held.parent) if (held.keys.has(id)) return true;
+    return false;
   }
 
   /**

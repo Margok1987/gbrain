@@ -94,7 +94,8 @@ async function mirrorPage(engine: BrainEngine, effect: PersistenceEffect, bindin
 async function gitPage(engine: BrainEngine, effect: PersistenceEffect, binding: WorktreeBinding | null, opts: EffectWorkerOptions,
   hardened: boolean | undefined): Promise<void> {
   if (!binding?.local_path) { await completeEffect(engine, effect, { git: 'skipped', reason: 'no_repo_configured' }); return; }
-  const snapshot = await selectedEffectPage(engine, effect);
+  // Only a source scan walks pages; a single-file effect completes by its recorded hash.
+  const snapshot = effect.data.source_scan ? await selectedEffectPage(engine, effect) : null;
   let path: string;
   if (effect.data.source_scan) {
     if (!snapshot) { await completeEffect(engine, effect); return; }
