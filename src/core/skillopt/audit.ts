@@ -13,6 +13,7 @@
 import { createHash } from 'node:crypto';
 import { createAuditWriter, type AuditWriter } from '../audit/audit-writer.ts';
 import type { ModelUsageRow } from '../budget/models-used.ts';
+import type { ModelsPlanEntry } from './models-plan.ts';
 import type { EditOp } from './types.ts';
 
 /** Discriminated union of every event kind emitted to the audit trail. */
@@ -20,7 +21,8 @@ export type SkilloptEvent =
   | { kind: 'run_start'; run_id: string; skill: string; skill_sha8: string;
       benchmark_sha8: string; target_model: string; optimizer_model: string;
       judge_model: string; epochs: number; batch_size: number; lr: number;
-      lr_schedule: string; max_cost_usd: number; ts: string }
+      lr_schedule: string; max_cost_usd: number; models_plan?: ModelsPlanEntry[];
+      ts: string }
   | { kind: 'step'; run_id: string; skill: string; epoch: number; step: number;
       sel_score_median: number; sel_score_runs: number[]; accepted: boolean;
       edits_attempted: number; edits_applied: number; delta: number;

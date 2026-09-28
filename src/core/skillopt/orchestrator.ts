@@ -19,7 +19,8 @@
  *
  * ┌─ Run state machine ────────────────────────────────────────────────────┐
  * │                                                                       │
- * │   start ──► lock_acquire ──► preflight ──► resume_or_init             │
+ * │   start ──► models_plan ──► preflight ──► lock_acquire ──► resume     │
+ * │     (banner; strict abort; reservation check: all before any spend)   │
  * │                    (resume: cursor next_epoch/next_step, spec check)   │
  * │                                                  │                     │
  * │                                                  ▼                     │
@@ -98,7 +99,8 @@
 import { assertLegacySkillWriter } from '../skillpack/writer-guard.ts';
 import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
-import { BudgetExhausted, BudgetTracker } from '../budget/budget-tracker.ts';
+import { BudgetExhausted, BudgetTracker, loadPricingOverrides } from '../budget/budget-tracker.ts';
+import type { PricingOverrides } from '../budget/reservation-cost.ts';
 import { buildModelsUsed } from '../budget/models-used.ts';
 import { withBudgetTracker } from '../ai/gateway.ts';
 import { errorFor } from '../errors.ts';
@@ -122,7 +124,17 @@ import { loadHeldOut, runHeldOutGate } from './held-out.ts';
 import { withSkilloptLock } from './lock.ts';
 import { resolveLrSchedule } from './lr-schedule.ts';
 import { SKILLOPT_RUNTIME_EXCEEDED } from './must-abort.ts';
-import { resolveReflectMaxTokens } from './output-cap.ts';
+import {
+  buildModelsPlan,
+  formatModelsBanner,
+  modelsStrictError,
+  resolveModelsStrict,
+  strictVerdict,
+  unknownProvenanceModels,
+  type ModelsPlanEntry,
+  type StrictVerdict,
+} from './models-plan.ts';
+import { resolveReflectMaxTokens, type ReflectCap } from './output-cap.ts';
 import { preflight, formatPreflightReport } from './preflight.ts';
 import { isRejected, loadRejectedBuffer, makeRejectedEntry, saveRejectedBuffer } from './rejected-buffer.ts';
 import { runReflect, runOneShotRewrite, describeJudges, type SkillBodyTruncation } from './reflect.ts';
@@ -233,6 +245,19 @@ export async function runSkillOpt(opts: SkillOptOpts): Promise<RunSkillOptResult
     }
   }
 
+  // ── Models plan + strict mode (#5585) — banner and verdict before any spend
+  const reflectCap = await resolveReflectMaxTokens(engine, opts.optimizerModel, opts.reflectMaxTokens);
+  const modelsPlan = await buildModelsPlan(
+    engine,
+    opts.models ?? unknownProvenanceModels(opts, 'caller-supplied'),
+    [...bench.tasks, ...heldOutTasks],
+  );
+  const banner = formatModelsBanner(modelsPlan, { skill: skillName, baseline: opts.modelsBannerBaseline, reflectCap });
+  if (banner) process.stderr.write(banner);
+  const strict = strictVerdict(modelsPlan, await resolveModelsStrict(engine, opts.modelsStrict));
+  if (strict.enabled && !strict.ok && !opts.dryRun) throw modelsStrictError(strict);
+  const pricingOverrides = await loadPricingOverrides(engine);
+
   // ── Cost preflight (D3) ─────────────────────────────────────────────────
   const preflightResult = preflight({
     epochs: opts.epochs,
@@ -246,6 +271,9 @@ export async function runSkillOpt(opts: SkillOptOpts): Promise<RunSkillOptResult
     maxCostUsd: opts.maxCostUsd,
     heldOutSize: heldOutTasks.length,
     interactive: process.stderr.isTTY === true,
+    reflectMaxTokens: reflectCap.maxTokens,
+    judgeModels: modelsPlan.filter((e) => e.touchpoint === 'judge' && e.active).map((e) => e.model),
+    ...(pricingOverrides ? { pricingOverrides } : {}),
   });
   if (opts.json !== true) {
     process.stderr.write(formatPreflightReport(preflightResult.estimate, {
@@ -260,7 +288,9 @@ export async function runSkillOpt(opts: SkillOptOpts): Promise<RunSkillOptResult
       class: 'CostCapExceeded',
       code: 'cost_cap_exceeded',
       message: preflightResult.abort_reason ?? 'preflight refused to proceed',
-      hint: `Raise --max-cost-usd or reduce knobs.`,
+      hint: preflightResult.abort_code === 'reservation_exceeds_cap'
+        ? `No model call was made.`
+        : `Raise --max-cost-usd or reduce knobs.`,
     });
   }
 
@@ -281,13 +311,19 @@ export async function runSkillOpt(opts: SkillOptOpts): Promise<RunSkillOptResult
       max_cost_usd: opts.maxCostUsd,
       started_at: new Date().toISOString(),
       outcome: 'aborted',
+      reflect_max_tokens: reflectCap.maxTokens,
+      reflect_max_tokens_source: reflectCap.source,
+      models_plan: modelsPlan,
+      models_strict: strict,
     };
     return { outcome: 'aborted', receipt, finalText: fs.readFileSync(skillFile, 'utf8'), mutatedSkillFile: false };
   }
 
   // ── Acquire per-skill lock (D14) ────────────────────────────────────────
   return await withSkilloptLock(engine, skillName, async () => {
-    return runOptimizationLoop(opts, bench, split, bundledCtx, mutateDecision, heldOutTasks);
+    return runOptimizationLoop(opts, bench, split, bundledCtx, mutateDecision, heldOutTasks, {
+      reflectCap, modelsPlan, strict, pricingOverrides,
+    });
   });
 }
 
@@ -351,8 +387,15 @@ async function runOptimizationLoop(
   bundledCtx: ReturnType<typeof getBundledSkillContext>,
   mutateDecision: ReturnType<typeof shouldMutateSkillFile>,
   heldOutTasks: BenchmarkTask[],
+  resolved: {
+    reflectCap: ReflectCap;
+    modelsPlan: ModelsPlanEntry[];
+    strict: StrictVerdict;
+    pricingOverrides: PricingOverrides | undefined;
+  },
 ): Promise<RunSkillOptResult> {
   const { skillName, skillsDir } = opts;
+  const { reflectCap, modelsPlan } = resolved;
   const skillFile = skillPath(skillsDir, skillName);
 
   // Plain-English success criteria from the benchmark judges, fed to the
@@ -371,7 +414,6 @@ async function runOptimizationLoop(
   const baselineText = fs.readFileSync(skillFile, 'utf8');
   const baselineSha8 = sha8(baselineText);
 
-  const reflectCap = await resolveReflectMaxTokens(opts.engine, opts.optimizerModel, opts.reflectMaxTokens);
   const runSpec: RunSpec = {
     skills_dir: skillsDir,
     benchmark_path: opts.benchmarkPath,
@@ -450,6 +492,7 @@ async function runOptimizationLoop(
     validation_gate_disabled: opts.disableValidationGate === true,
     optimizer_mode: opts.optimizerMode ?? 'reflect',
     held_out_size: heldOutTasks.length,
+    models_plan: modelsPlan,
   } as never);
 
   // Budget tracker for the whole run. BudgetExhausted propagates as
@@ -461,6 +504,7 @@ async function runOptimizationLoop(
   // unpriced model ids (openrouter:*, litellm:*) can run at the user's own risk.
   const tracker = new BudgetTracker({
     ...(opts.maxCostUsd > 0 ? { maxCostUsd: opts.maxCostUsd } : {}),
+    ...(resolved.pricingOverrides ? { pricingOverrides: resolved.pricingOverrides } : {}),
     label: `skillopt:${skillName}`,
   });
 
@@ -959,6 +1003,8 @@ async function runOptimizationLoop(
     prior_segments_cost_usd: prior.costUsd,
     models_used: modelsUsed,
     models_used_scope: prior.scope,
+    models_plan: modelsPlan,
+    models_strict: resolved.strict,
     total_steps: totalStepsRun,
     epochs_completed: checkpoint.last_completed_epoch,
     // Ablation provenance (cat31 replayability) — only when a non-default knob set.

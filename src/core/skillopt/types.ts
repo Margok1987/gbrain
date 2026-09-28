@@ -16,6 +16,7 @@ import type { BrainEngine } from '../engine.ts';
 import type { OperationContext } from '../ops/contract.ts';
 import type { ToolLoopStopReason } from '../ai/gateway.ts';
 import type { ModelUsageRow } from '../budget/models-used.ts';
+import type { ModelsPlanEntry, SkillOptModels, StrictVerdict } from './models-plan.ts';
 
 // ─── Benchmarks + judges ──────────────────────────────────────────────────
 
@@ -161,6 +162,18 @@ export interface SkillOptOpts {
    * beats `defaultMaxOutputTokens(optimizerModel)`; resolved once per run.
    */
   reflectMaxTokens?: number;
+  /**
+   * #5585: provenance of the three role models (from resolveSkillOptModels).
+   * Absent -> every role reports source `unknown` (fail-closed under strict).
+   */
+  models?: SkillOptModels;
+  /** #5585: `--models-strict`; OR'ed with the `skillopt.models_strict` config. */
+  modelsStrict?: boolean;
+  /**
+   * #5585: invocation banner already printed by a batch / cycle caller; the
+   * run prints only the plan rows that differ from it.
+   */
+  modelsBannerBaseline?: ModelsPlanEntry[];
 
   // Modes.
   mode: 'patch' | 'rewrite';
@@ -258,6 +271,10 @@ export interface RunReceipt {
   models_used_scope?: 'full_run' | 'since_resume';
   /** #5585: spend banked by earlier segments of a resumed run; `final_cost_usd` is this segment. */
   prior_segments_cost_usd?: number;
+  /** #5585: every touchpoint the run can call, with the source that chose its model. */
+  models_plan?: ModelsPlanEntry[];
+  /** #5585: strict-mode verdict over `models_plan` (computed even when strict mode is off). */
+  models_strict?: StrictVerdict;
   // Ablation provenance (cat31 replayability) — present when a non-default
   // ablation knob was set.
   reflect_mode?: 'both' | 'failure-only';

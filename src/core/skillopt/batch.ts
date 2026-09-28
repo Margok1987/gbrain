@@ -17,6 +17,7 @@ import { assertLegacySkillFilesystemWrite, assertLegacySkillWriter } from '../sk
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { BrainEngine } from '../engine.ts';
+import { sanitizeEcho, type ModelsPlanEntry, type SkillOptModels } from './models-plan.ts';
 import { runSkillOpt } from './orchestrator.ts';
 import type { RunReceipt, SkillOptOpts } from './types.ts';
 
@@ -31,6 +32,12 @@ export interface BatchAllOpts {
   optimizerModel: string;
   targetModel: string;
   judgeModel: string;
+  /** Role provenance (resolveSkillOptModels); absent -> `unknown`. */
+  models?: SkillOptModels;
+  /** `--models-strict`, applied to every skill's run. */
+  modelsStrict?: boolean;
+  /** Invocation banner the caller printed; each skill prints only differing rows. */
+  modelsBannerBaseline?: ModelsPlanEntry[];
   /** Explicit optimizer output cap (`--reflect-max-tokens`). */
   reflectMaxTokens?: number;
   epochs: number;
@@ -101,6 +108,9 @@ export async function runBatchAll(opts: BatchAllOpts): Promise<BatchAllResult> {
       optimizerModel: opts.optimizerModel,
       targetModel: opts.targetModel,
       judgeModel: opts.judgeModel,
+      ...(opts.models ? { models: opts.models } : {}),
+      ...(opts.modelsStrict ? { modelsStrict: true } : {}),
+      ...(opts.modelsBannerBaseline ? { modelsBannerBaseline: opts.modelsBannerBaseline } : {}),
       ...(opts.reflectMaxTokens !== undefined ? { reflectMaxTokens: opts.reflectMaxTokens } : {}),
       mode: 'patch',
       dryRun: opts.dryRun,
@@ -146,6 +156,10 @@ export interface FleetOpts {
   targetModels: string[];
   optimizerModel: string;
   judgeModel: string;
+  /** Optimizer + judge provenance; each fleet run's target is `--target-models`. */
+  models?: Pick<SkillOptModels, 'optimizer' | 'judge'>;
+  /** `--models-strict`, applied to every fleet run. */
+  modelsStrict?: boolean;
   /** Explicit optimizer output cap (`--reflect-max-tokens`). */
   reflectMaxTokens?: number;
   epochs: number;
@@ -232,6 +246,10 @@ export async function runFleet(opts: FleetOpts): Promise<FleetResult> {
       optimizerModel: opts.optimizerModel,
       targetModel,
       judgeModel: opts.judgeModel,
+      ...(opts.models ? {
+        models: { ...opts.models, target: { model: sanitizeEcho(targetModel), source: 'cli_flag' as const, origin: '--target-models' } },
+      } : {}),
+      ...(opts.modelsStrict ? { modelsStrict: true } : {}),
       ...(opts.reflectMaxTokens !== undefined ? { reflectMaxTokens: opts.reflectMaxTokens } : {}),
       mode: 'patch',
       dryRun: opts.dryRun,

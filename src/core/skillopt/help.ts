@@ -41,11 +41,18 @@ Models:
                                 Raise it when the receipt reports
                                 reflect_*_truncated. Judge/bootstrap caps are
                                 separate.
+  --models-strict               Abort before any spend unless every active
+                                model (optimizer, target, judge, expansion,
+                                chat, embedding, reranker when enabled) was
+                                chosen by touchpoint-specific configuration,
+                                not models.default or a built-in default.
+                                Same as skillopt.models_strict=true.
 
 Modes:
   --patch                       Edit ops only (default; safer)
   --rewrite                     Allow full rewrites of sections
-  --dry-run                     Plan + cost estimate, no LLM calls
+  --dry-run                     Models plan, strict verdict + cost estimate,
+                                no LLM calls (exit 1 only on a strict failure)
   --no-mutate                   Write proposed.md without replacing SKILL.md
   --allow-mutate-bundled        Required to mutate a bundled skill in place.
                                 ALSO requires --held-out (>=5 rows); without it

@@ -15,6 +15,15 @@
  * Each result row forwards the run's abort_reason / abort_detail / run_id /
  * remediation so the cycle report says why a skill failed.
  *
+ * Admission (#5585): when one call of the run can never fit the per-skill cap
+ * (preflight's `reservation_exceeds_cap: ...` abort, raised before any model call) the
+ * skill is recorded `skipped_budget` with remediation, and
+ * `cycle.skillopt.last_skip.<skill>` stores a fingerprint of the resolved
+ * optimizer, `cycle.skillopt.per_skill_cap_usd` and
+ * `skillopt.reflect_max_tokens`; the skill is not retried until one of them
+ * changes. Models resolve once per cycle through `resolveSkillOptModels`; the
+ * models banner prints once and each run prints only rows that differ.
+ *
  * Each per-skill invocation runs with epochs=1 (incremental nightly
  * improvement, not full optimization). Users who want a full multi-epoch
  * run invoke `gbrain skillopt <name> --epochs N` directly.
@@ -24,9 +33,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import { autoDetectSkillsDirReadOnly } from '../repo-root.ts';
-import { resolveModel } from '../model-config.ts';
+import { StructuredAgentError } from '../errors.ts';
+import { buildModelsPlan, formatModelsBanner, resolveSkillOptModels, skillOptModelOpts } from './models-plan.ts';
 import { runSkillOpt } from './orchestrator.ts';
+import { REFLECT_MAX_TOKENS_CONFIG_KEY } from './output-cap.ts';
 import { parseSplit } from './benchmark.ts';
+import { buildRemediation, errorCode } from './remediation.ts';
 import type { SkillOptOpts } from './types.ts';
 
 export interface SkilloptPhaseOpts {
@@ -119,8 +131,16 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
     };
   }
 
+  // Resolve models once. Tiers default to deep/subagent/reasoning.
+  const models = await resolveSkillOptModels(engine);
+  const fingerprint = JSON.stringify({
+    optimizer: models.optimizer.model,
+    per_skill_cap_usd: perSkillCap,
+    reflect_max_tokens: await engine.getConfig(REFLECT_MAX_TOKENS_CONFIG_KEY).catch(() => null) ?? null,
+  });
+
   // Walk skills dir; pick candidates with skillopt-benchmark.jsonl + stale last_run_at.
-  const candidates = await collectCandidates(engine, skillsDir, staleDays);
+  const candidates = await collectCandidates(engine, skillsDir, staleDays, fingerprint);
   if (candidates.length === 0) {
     return {
       phase: 'skillopt',
@@ -131,16 +151,15 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
     };
   }
 
-  // Resolve models once. Tiers default to deep/subagent/reasoning.
-  const optimizerModel = await resolveModel(engine, { tier: 'deep', fallback: 'anthropic:claude-opus-4-7' });
-  const targetModel = await resolveModel(engine, { tier: 'subagent', fallback: 'anthropic:claude-sonnet-4-6' });
-  const judgeModel = await resolveModel(engine, { tier: 'reasoning', fallback: 'anthropic:claude-sonnet-4-6' });
+  const basePlan = await buildModelsPlan(engine, models);
+  process.stderr.write(formatModelsBanner(basePlan));
 
   // Run per-skill. Each invocation gets its own per-skill cap; we track
   // cumulative cost across the cycle and bail when brain-wide cap hit.
   const results: SkillResult[] = [];
   let cumulativeCostUsd = 0;
   let skipped_brain_wide_cap = 0;
+  let skipped_budget = 0;
 
   for (const c of candidates) {
     if (opts.signal?.aborted) break;
@@ -165,9 +184,8 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
         lr: 4,
         lrSchedule: 'cosine',
         split,
-        optimizerModel,
-        targetModel,
-        judgeModel,
+        ...skillOptModelOpts(models),
+        modelsBannerBaseline: basePlan,
         mode: 'patch',
         dryRun: opts.dryRun ?? false,
         // Bundled-skill safety: dream-cycle NEVER auto-mutates bundled skills.
@@ -200,6 +218,18 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
       await engine.setConfig(`cycle.skillopt.${stateKey}.${c.name}`, String(Date.now()));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
+      if (err instanceof StructuredAgentError && errorCode(err.envelope.message) === 'reservation_exceeds_cap') {
+        if (effectiveCap < perSkillCap) {
+          skipped_brain_wide_cap += 1;
+          results.push({ skill: c.name, outcome: 'skipped', cost_usd: 0, reason: 'brain_wide_cap_reached' });
+        } else {
+          skipped_budget += 1;
+          results.push({ skill: c.name, outcome: 'skipped_budget', cost_usd: 0, reason: err.envelope.message,
+            remediation: buildRemediation(['reservation_exceeds_cap']) });
+          await engine.setConfig(`cycle.skillopt.last_skip.${c.name}`, fingerprint).catch(() => {});
+        }
+        continue;
+      }
       results.push({ skill: c.name, outcome: 'errored', cost_usd: 0, reason: msg });
       await engine.setConfig(`cycle.skillopt.last_error.${c.name}`, String(Date.now())).catch(() => {});
     }
@@ -213,13 +243,14 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
     phase: 'skillopt',
     status: errored > 0 ? 'warn' : 'ok',
     duration_ms: Date.now() - start,
-    summary: `optimized ${accepted}/${candidates.length} skills (${noImprovement} no-improvement, ${errored} errored, ${skipped_brain_wide_cap} skipped over brain-wide cap)`,
+    summary: `optimized ${accepted}/${candidates.length} skills (${noImprovement} no-improvement, ${errored} errored, ${skipped_brain_wide_cap} skipped over brain-wide cap${skipped_budget > 0 ? `, ${skipped_budget} skipped: one call exceeds the per-skill cap` : ''})`,
     details: {
       skills_scanned: candidates.length,
       accepted,
       no_improvement: noImprovement,
       errored,
       skipped_brain_wide_cap,
+      skipped_budget,
       cumulative_cost_usd: cumulativeCostUsd,
       brain_wide_cap_usd: brainWideCap,
       per_skill_cap_usd: perSkillCap,
@@ -231,12 +262,13 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
 /**
  * Walk skillsDir and return skills that have a benchmark file AND a stale
  * last_run_at (older than staleDays, or never run) AND no error within the
- * last 24h.
+ * last 24h AND no budget skip under the current admission fingerprint.
  */
 async function collectCandidates(
   engine: BrainEngine,
   skillsDir: string,
   staleDays: number,
+  fingerprint: string,
 ): Promise<SkillCandidate[]> {
   const out: SkillCandidate[] = [];
   if (!fs.existsSync(skillsDir)) return out;
@@ -263,6 +295,8 @@ async function collectCandidates(
     if (lastErrorAt !== null && Date.now() - lastErrorAt < ERROR_RETRY_MS) {
       continue; // errored recently; retry after the 24h gate
     }
+    const lastSkip = await engine.getConfig(`cycle.skillopt.last_skip.${entry}`).catch(() => null);
+    if (lastSkip === fingerprint) continue; // budget-skipped; wait for a config change
     out.push({ name: entry, benchmarkPath: benchPath, lastRunAt });
   }
   return out;

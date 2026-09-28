@@ -159,7 +159,7 @@ function tryJsonParse(s: string): unknown | null {
   try { return JSON.parse(s); } catch { return null; }
 }
 
-const JUDGE_SITE_MAX_TOKENS = 200;
+export const JUDGE_SITE_MAX_TOKENS = 200;
 
 async function scoreLlm(
   trajectory: Trajectory,

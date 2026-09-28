@@ -51,6 +51,7 @@ import {
 } from './recipes/openrouter.ts';
 import { resolveModelDetailed, resolveEffectiveChatModel, resolveEffectiveExpansionModel } from '../model-config.ts';
 import { snapshotConfigReader } from '../config-snapshot.ts';
+import { clearGatewayModelSources, gatewayModelSource, setGatewayModelSource } from './gateway-model-sources.ts';
 import { parseLlmJson } from '../llm-json.ts';
 import type { BrainEngine } from '../engine.ts';
 import { dimsProviderOptions } from './dims.ts';
@@ -564,12 +565,11 @@ export async function reconfigureGatewayWithEngine(engine: BrainEngine): Promise
       fileCfg = null;
     }
   }
-  const newChat = needsFileCfg(chatDetailed.source)
-    ? resolveEffectiveChatModel(fileCfg, cfg.env ?? process.env).model
-    : chatDetailed.model;
-  const newExpansion = needsFileCfg(expansionDetailed.source)
-    ? resolveEffectiveExpansionModel(fileCfg, cfg.env ?? process.env).model
-    : expansionDetailed.model;
+  const env = cfg.env ?? process.env;
+  const chatEffective = needsFileCfg(chatDetailed.source) ? resolveEffectiveChatModel(fileCfg, env) : null;
+  const expansionEffective = needsFileCfg(expansionDetailed.source) ? resolveEffectiveExpansionModel(fileCfg, env) : null;
+  const newChat = chatEffective?.model ?? chatDetailed.model;
+  const newExpansion = expansionEffective?.model ?? expansionDetailed.model;
 
   // Resolved values are bare model ids (e.g. `claude-sonnet-4-6`) — prepend
   // the existing provider prefix from cfg so the gateway keeps routing to
@@ -579,6 +579,8 @@ export async function reconfigureGatewayWithEngine(engine: BrainEngine): Promise
   const chatFull = newChat.includes(':') ? newChat : prefixWithProviderFrom(cfg.chat_model ?? DEFAULT_CHAT_MODEL, newChat);
 
   _config = { ...cfg, expansion_model: expansionFull, chat_model: chatFull };
+  setGatewayModelSource('expansion', expansionFull, gatewayModelSource('expansion', expansionDetailed, expansionEffective));
+  setGatewayModelSource('chat', chatFull, gatewayModelSource('chat', chatDetailed, chatEffective));
   _modelCache.clear();
   _shrinkState.clear();
   return _config;
@@ -659,6 +661,7 @@ export function __setGatewayResetBaselineForTests(
 /** Clear every piece of module state. Shared by both reset flavors. */
 function clearGatewayState(): void {
   _config = null;
+  clearGatewayModelSources();
   stashGatewayAnthropicKeyFromEnv(undefined); // gateway-owned snapshot dies with the config
   _modelCache.clear();
   _shrinkState.clear();

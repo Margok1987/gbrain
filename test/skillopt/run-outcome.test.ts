@@ -98,6 +98,7 @@ describe('remediation', () => {
       'one_shot_rewrite_body_truncated: sent 0 of 1 chars',
       'one_shot_rewrite_empty_reply: stop=end',
       'one_shot_rewrite_failed: boom',
+      'reservation_exceeds_cap',
     ];
     const entries = buildRemediation(emitted, 'budget_exhausted');
     const codes = entries.map((e) => e.code);

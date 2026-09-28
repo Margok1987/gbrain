@@ -37,6 +37,7 @@ const FIXES: Readonly<Record<string, string>> = {
   one_shot_rewrite_failed: PROVIDER,
   budget_exhausted: 'Raise --max-cost-usd (cycle runs: gbrain config set cycle.skillopt.per_skill_cap_usd <usd>). Each optimizer call reserves its full output cap, so lowering --reflect-max-tokens / skillopt.reflect_max_tokens also helps.',
   runtime_exceeded: 'Raise --max-runtime-min, then resume the run.',
+  reservation_exceeds_cap: 'One call alone reserves more than the cost cap, so no model call was made. Lower --reflect-max-tokens / skillopt.reflect_max_tokens, pick a cheaper model, or raise --max-cost-usd (cycle runs: gbrain config set cycle.skillopt.per_skill_cap_usd <usd>).',
 };
 
 /** Every code that can appear in `remediation[].code` (docs table pins this). */

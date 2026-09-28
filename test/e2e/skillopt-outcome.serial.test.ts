@@ -243,9 +243,10 @@ describe('must-abort classification', () => {
   test('raised reflect cap trips reserve() -> aborted budget_exhausted naming both knobs, zero optimizer calls', async () => {
     writeFixture(ALL_FAIL);
     installOptimizer(() => result('{"edits": []}'));
-    // Preflight (~$8 heuristic) admits the run; one 200k-token fable
-    // reservation (~$10) cannot fit the $9 cap.
-    const res = await run({ optimizerModel: THINKING, reflectMaxTokens: 200_000, maxCostUsd: 9 });
+    // Preflight admits the run (heuristic ~$8; one 178k-token fable reservation
+    // alone is ~$8.90 < $9), but the baseline spend plus that reservation
+    // cannot fit the $9 cap at the first reflect call.
+    const res = await run({ optimizerModel: THINKING, reflectMaxTokens: 178_000, maxCostUsd: 9 });
 
     expect(optimizerCalls).toHaveLength(0);
     expect(res.outcome).toBe('aborted');
