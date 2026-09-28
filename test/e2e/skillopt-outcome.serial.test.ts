@@ -349,6 +349,25 @@ describe('resume correctness', () => {
     expect(cp.tally!.usable_replies).toBe(2);
   });
 
+  test('the early-stop remedy comes from the step that stopped the run, not the deduped error list', async () => {
+    writeFixture(ALL_FAIL);
+    // truncated, usable, empty reply, truncated again (a duplicate message the
+    // receipt list drops): the stop was caused by truncation.
+    const replies = [
+      () => result(TRUNCATED_JSON, 'length', 4096),
+      () => result('{"edits": []}'),
+      () => result(''),
+      () => result(TRUNCATED_JSON, 'length', 4096),
+    ];
+    installOptimizer((_c, n) => replies[Math.min(n, replies.length) - 1]!());
+    const res = await run();
+    expect(res.receipt.stop_reason).toBe('early_stop_unusable_output');
+    expect(optimizerCalls).toHaveLength(4);
+    expect(res.receipt.reflect_errors!.at(-1)).toStartWith('reflect_failure_empty_reply');
+    expect(res.receipt.resume_command).toContain('--reflect-max-tokens 8192');
+    expect(res.receipt.resume_command).not.toContain('<other-model>');
+  });
+
   test('a resume that aborts before its first rewound step keeps the rewound cursor', async () => {
     writeFixture(ALL_FAIL);
     installOptimizer(() => result(TRUNCATED_JSON, 'length', 4096));

@@ -552,6 +552,9 @@ async function runOptimizationLoop(
   // step on --resume, so the checkpoint keeps this copy (the receipt keeps the
   // live tally, which includes the calls this segment actually made).
   let stepStartTally: ReflectTally | undefined;
+  // First error of the most recent fully unusable step (the receipt's error
+  // list is deduped and capped, so it cannot say what caused an early stop).
+  let lastUnusableError: string | undefined;
   let earlyStopped = false;
   let skillBodyTruncated: SkillBodyTruncation | undefined;
   let caught: ReturnType<typeof classifyAbortError> | undefined;
@@ -728,6 +731,7 @@ async function runOptimizationLoop(
               abortSignal: undefined,
             });
             recordOptimizerStep(tally, reflectResult);
+            if (reflectResult.calls > 0 && reflectResult.usableReplies === 0) lastUnusableError = reflectResult.errors[0];
             if (reflectResult.skillBodyTruncated) skillBodyTruncated = reflectResult.skillBodyTruncated;
 
             // Merge + rank + LR-clip.
@@ -1015,7 +1019,7 @@ async function runOptimizationLoop(
   // resume remedy from the trailing unusable errors.
   const failureCode = abortDetail
     ? errorCode(abortDetail)
-    : earlyStopped && tally.reflect_errors.length > 0 ? errorCode(tally.reflect_errors[tally.reflect_errors.length - 1]!) : undefined;
+    : earlyStopped && lastUnusableError ? errorCode(lastUnusableError) : undefined;
   const budget = tracker.snapshot();
   const modelsUsed = buildModelsUsed(budget, prior.rows);
 
