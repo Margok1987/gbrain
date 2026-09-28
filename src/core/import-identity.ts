@@ -4,7 +4,7 @@
  */
 
 import { existsSync, realpathSync } from 'fs';
-import { join } from 'path';
+import { resolve, sep } from 'path';
 import type { BrainEngine } from './engine.ts';
 import type { Page } from './types.ts';
 import { slugifyPath } from './sync.ts';
@@ -63,8 +63,8 @@ export async function decideImportIdentity(engine: BrainEngine, input: ImportIde
   const sameExternalId = input.frontmatterId !== null && dupFmId === input.frontmatterId;
   if (!sameExternalId) return { kind: 'shared_hash', dupSlug: dup.slug };
   const dupSourcePath = dupPage?.source_path ?? null;
-  if (input.sourceRoot !== undefined && input.sourcePath !== undefined && dupSourcePath !== null
-    && dupSourcePath !== input.sourcePath && !existsSync(join(input.sourceRoot, dupSourcePath))) {
+  const dupFile = input.sourceRoot !== undefined && dupSourcePath !== null ? pathUnderRoot(input.sourceRoot, dupSourcePath) : null;
+  if (dupFile !== null && input.sourcePath !== undefined && dupSourcePath !== input.sourcePath && !existsSync(dupFile)) {
     return { kind: 'move', dupSlug: dup.slug, dupSourcePath };
   }
   const sameContent = dupPage?.content_hash === input.hash || (!!dupPage && dupPage.title === input.body.title
@@ -86,9 +86,22 @@ export function collidingSlugOwner(existing: Pick<Page, 'source_path' | 'deleted
   const owner = existing?.source_path;
   if (!owner || existing?.deleted_at || sourceRoot === undefined || sourcePath === undefined) return null;
   if (owner === sourcePath || sourcePath === `${slug}.md` || slugifyPath(owner) !== slug) return null;
+  const ownerFile = pathUnderRoot(sourceRoot, owner);
+  const candidateFile = pathUnderRoot(sourceRoot, sourcePath);
+  if (ownerFile === null || candidateFile === null) return null;
   try {
-    return realpathSync.native(join(sourceRoot, owner)) !== realpathSync.native(join(sourceRoot, sourcePath)) ? owner : null;
+    return realpathSync.native(ownerFile) !== realpathSync.native(candidateFile) ? owner : null;
   } catch {
     return null;
   }
+}
+
+/**
+ * A repo-relative path joined to its (absolute, normalized) import root, or
+ * null when it would escape the root.
+ */
+function pathUnderRoot(root: string, relativePath: string): string | null {
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- the joined path is checked to stay inside `root` on the next line before any filesystem probe, and it is only ever used for existsSync/realpath, never read or written
+  const full = resolve(root, relativePath);
+  return full.startsWith(root.endsWith(sep) ? root : root + sep) ? full : null;
 }

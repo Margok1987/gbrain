@@ -1338,6 +1338,7 @@ export async function importFromFile(
     ...opts,
     filename: fileBasename,
     sourcePath: relativePath,
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- walks up from the caller's own file path by the depth of its own relative path to recover the import root; import-identity confines every probe under that root
     sourceRoot: resolve(filePath, ...relativePath.split(/[\\/]/).map(() => '..')),
     fileTimes: { birthtime: stat.birthtime, mtime: stat.mtime },
     // The disk file IS the source of truth: a file the user emptied is a
