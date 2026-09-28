@@ -1017,9 +1017,10 @@ async function runOptimizationLoop(
   const remediation = buildRemediation([...tally.reflect_errors, ...(abortDetail ? [abortDetail] : [])], abortReason);
   // An early stop that still resolved accepted/no_improvement takes its
   // resume remedy from the trailing unusable errors.
-  const failureCode = abortDetail
-    ? errorCode(abortDetail)
-    : earlyStopped && lastUnusableError ? errorCode(lastUnusableError) : undefined;
+  const failureCode = caught
+    ? errorCode(caught.abortDetail)
+    : earlyStopped && lastUnusableError ? errorCode(lastUnusableError)
+      : abortDetail ? errorCode(abortDetail) : undefined;
   const budget = tracker.snapshot();
   const modelsUsed = buildModelsUsed(budget, prior.rows);
 

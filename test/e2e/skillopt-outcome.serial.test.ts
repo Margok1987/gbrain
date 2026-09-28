@@ -368,6 +368,16 @@ describe('resume correctness', () => {
     expect(res.receipt.resume_command).not.toContain('<other-model>');
   });
 
+  test('an all-unusable early stop takes its remedy from the last step: truncation then empty replies -> <other-model>', async () => {
+    writeFixture(ALL_FAIL);
+    installOptimizer((_c, n) => (n === 1 ? result(TRUNCATED_JSON, 'length', 4096) : result('')));
+    const res = await run();
+    expect(res.outcome).toBe('errored');
+    expect(res.receipt.abort_detail).toStartWith('optimizer_output_unusable: reflect_failure_truncated');
+    expect(res.receipt.resume_command).toContain(`--optimizer-model '<other-model>'`);
+    expect(res.receipt.resume_command).toContain('--reflect-max-tokens 4096');
+  });
+
   test('a resume that aborts before its first rewound step keeps the rewound cursor', async () => {
     writeFixture(ALL_FAIL);
     installOptimizer(() => result(TRUNCATED_JSON, 'length', 4096));
