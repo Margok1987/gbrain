@@ -165,6 +165,10 @@ and `--lanes` tune the fleet; failure logs and a run summary land in
   past newly published advisories GHSA-58mr-gqgx-xq4g, GHSA-qw65-cvwx-89v3,
   GHSA-2vr4-cq9g-pvrc and GHSA-rpw4-54j3-4h4q.
 
+#### Dependencies
+
+- Bump the transitive `fast-uri` override to 3.1.7 and `ip-address` to ^10.5.1 to clear new OSV advisories (two high, two medium) against the versions pinned on master.
+
 ## [0.59.3.0] - 2026-09-28
 
 **A broken worker installation now asks for repair instead of repeatedly interrupting your jobs.**
