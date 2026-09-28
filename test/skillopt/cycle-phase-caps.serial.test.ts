@@ -272,6 +272,22 @@ describe('runPhaseSkillopt reservation refusals (#5585)', () => {
     expect(await engine.getConfig(`cycle.skillopt.last_skip.${d.results![1]!.skill}`)).toBeNull();
   });
 
+  test('an unreadable benchmark never throws the phase: the skill is re-admitted', async () => {
+    await enableFlag();
+    const root = mkdtempSync(join(tmpdir(), 'cycle-phase-caps-unreadable-'));
+    try {
+      // The benchmark path exists but is a directory, so reading it fails.
+      mkdirSync(join(root, 'skill-x', 'skillopt-benchmark.jsonl'), { recursive: true });
+      currentSkillsDir = root;
+      await engine.setConfig('cycle.skillopt.last_skip.skill-x', '{"stale":"fingerprint"}');
+      const res = await runPhaseSkillopt({ engine });
+      expect(runnerCalls.length).toBe(1);
+      expect((res.details as PhaseDetails).results![0]!.skill).toBe('skill-x');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('refusal at the full per-skill cap is skipped_budget and records last_skip', async () => {
     await enableFlag();
     currentSkillsDir = skills1Dir;

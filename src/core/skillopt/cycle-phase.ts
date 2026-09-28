@@ -21,8 +21,9 @@
  * `cycle.skillopt.last_skip.<skill>` stores a fingerprint of everything the
  * reservation check prices: the resolved optimizer, target and judge models,
  * `cycle.skillopt.per_skill_cap_usd`, `skillopt.reflect_max_tokens`,
- * `pricing.overrides` and the skill's benchmark (per-task judge models); the
- * skill is not retried until one of them changes. Models resolve once per cycle through `resolveSkillOptModels`; the
+ * `pricing.overrides`, the gbrain version (built-in prices and default caps)
+ * and the skill's benchmark (per-task judge models); the skill is not retried
+ * until one of them changes. Models resolve once per cycle through `resolveSkillOptModels`; the
  * models banner prints once and each run prints only rows that differ.
  *
  * Each per-skill invocation runs with epochs=1 (incremental nightly
@@ -40,6 +41,7 @@ import { runSkillOpt } from './orchestrator.ts';
 import { REFLECT_MAX_TOKENS_CONFIG_KEY } from './output-cap.ts';
 import { parseSplit } from './benchmark.ts';
 import { sha8 } from './audit.ts';
+import { VERSION } from '../../version.ts';
 import { buildRemediation, errorCode } from './remediation.ts';
 import type { SkillOptOpts } from './types.ts';
 
@@ -142,9 +144,16 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
     per_skill_cap_usd: perSkillCap,
     reflect_max_tokens: await engine.getConfig(REFLECT_MAX_TOKENS_CONFIG_KEY).catch(() => null) ?? null,
     pricing_overrides: await engine.getConfig('pricing.overrides').catch(() => null) ?? null,
+    // Built-in prices and default caps move with releases.
+    gbrain_version: VERSION,
   };
-  const fingerprint = (benchmarkPath: string): string =>
-    JSON.stringify({ ...admission, benchmark_sha8: sha8(fs.readFileSync(benchmarkPath, 'utf8')) });
+  // An unreadable benchmark hashes as null (never matches a stored skip), so the
+  // skill is re-admitted and fails on its own instead of throwing the phase.
+  const fingerprint = (benchmarkPath: string): string => {
+    let benchmarkSha8: string | null = null;
+    try { benchmarkSha8 = sha8(fs.readFileSync(benchmarkPath, 'utf8')); } catch { /* re-admit */ }
+    return JSON.stringify({ ...admission, benchmark_sha8: benchmarkSha8 });
+  };
 
   // Walk skills dir; pick candidates with skillopt-benchmark.jsonl + stale last_run_at.
   const candidates = await collectCandidates(engine, skillsDir, staleDays, fingerprint);
@@ -303,7 +312,7 @@ async function collectCandidates(
       continue; // errored recently; retry after the 24h gate
     }
     const lastSkip = await engine.getConfig(`cycle.skillopt.last_skip.${entry}`).catch(() => null);
-    if (lastSkip && lastSkip === fingerprint(benchPath)) continue; // budget-skipped; wait for a config change
+    if (lastSkip && !lastSkip.includes('"benchmark_sha8":null') && lastSkip === fingerprint(benchPath)) continue; // budget-skipped; wait for a config change
     out.push({ name: entry, benchmarkPath: benchPath, lastRunAt });
   }
   return out;
