@@ -62,7 +62,8 @@ import { parseLlmJson } from '../llm-json.ts';
 import type { BrainEngine, DreamVerdict, TriageSegment } from '../engine.ts';
 import type { PhaseResult, PhaseError } from '../cycle.ts';
 import { DEFAULT_PRIVATE_QUEUE_LEASE_MS, MinionQueue } from '../minions/queue.ts';
-import { clampSubagentBudgets, CYCLE_DEADLINE_RESERVE_MS, MIN_PATTERNS_SUBAGENT_BUDGET_MS } from './patterns.ts';
+import { clampSubagentBudgets, CYCLE_DEADLINE_RESERVE_MS, MIN_PATTERNS_SUBAGENT_BUDGET_MS, loadPatternsOutputSlugPrefix } from './patterns.ts';
+import { claudeCliSelfSessionIds } from '../ai/providers/claude-cli-scratch.ts';
 import { isQueueQuotaExceededError } from '../minions/admission.ts';
 import { waitForCompletionRenewing, TimeoutError } from '../minions/wait-for-completion.ts';
 import type { MinionJobInput, SubagentHandlerData } from '../minions/types.ts';
@@ -474,6 +475,18 @@ async function runPhaseSynthesizeInner(
           from: opts.from,
           to: opts.to,
           bypassGuard: opts.bypassDreamGuard,
+          // #5471: outputs a failed postprocess left unmarked must not come
+          // back as transcripts; the explicit bypass re-enables them.
+          excludeDirs: opts.bypassDreamGuard
+            ? []
+            : [
+                config.reflectionsPrefix,
+                config.originalsPrefix,
+                await loadPatternsOutputSlugPrefix(engine, config.outputRoot),
+                dirname(buildDreamSummarySlug(config.outputRoot, 'x')),
+              ].map(prefix => join(opts.brainDir, prefix)),
+          // #5413: corpus files captured from gbrain's own claude-cli calls.
+          selfCaptureSessionIds: claudeCliSelfSessionIds(),
         });
 
     if (transcripts.length === 0) {
