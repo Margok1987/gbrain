@@ -110,9 +110,9 @@ describe('outcome file round-trip', () => {
 
 describe('handler-error encode → reconstruct (instanceof parity with inline mode)', () => {
   test('versioned typed configuration outcome roundtrips without disclosing error text', () => {
-    const encoded = encodeHandlerError(new LocalConfigurationError('postgres_cancellation_unavailable', 'postgres://private:password@example.invalid/db'));
+    const encoded = encodeHandlerError(new LocalConfigurationError('postgres_cancellation_unavailable', 'postgres://private:GSTACK_EXAMPLE_NONCE@example.invalid/db'));
     const raw = JSON.stringify(encoded);
-    expect(raw).not.toContain('password');
+    expect(raw).not.toContain('GSTACK_EXAMPLE_NONCE');
     const decoded = parseChildOutcome(raw, raw.length);
     expect(decoded.outcome).toBe('error');
     if (decoded.outcome !== 'error') throw new Error('expected error');

@@ -23,9 +23,9 @@ describe('doctor Postgres cancellation driver check', () => {
   });
 
   test('connection errors warn without disclosing the driver error', async () => {
-    const result = await checkPostgresCancellationDriver(engine(async () => { throw new Error('postgres://fixture:secret@localhost/db'); }));
+    const result = await checkPostgresCancellationDriver(engine(async () => { throw new Error('postgres://fixture:GSTACK_EXAMPLE_NONCE@localhost/db'); }));
     expect(result?.status).toBe('warn');
-    expect(JSON.stringify(result)).not.toContain('secret');
+    expect(JSON.stringify(result)).not.toContain('GSTACK_EXAMPLE_NONCE');
   });
 
   test('reservation timeout is transient and a late connection is released', async () => {

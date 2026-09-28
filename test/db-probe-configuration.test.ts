@@ -92,10 +92,11 @@ describe('typed database configuration faults', () => {
   test('transient diagnostics redact connection credentials on both lanes', async () => {
     const result = await runDbReadinessProbe({
       ...budgets,
-      probeRead: fail(new Error('postgresql://fixture:private-value@localhost/test')),
+      probeRead: fail(new Error('postgresql://fixture:GSTACK_EXAMPLE_NONCE@localhost/test')),
       probeDirect: fail(new Error('password=other-private-value')),
     });
     expect(JSON.stringify(result)).not.toContain('private-value');
+    expect(JSON.stringify(result)).not.toContain('GSTACK_EXAMPLE_NONCE');
     expect(result.ok === false && result.verdict).toBe('server_unreachable');
   });
 });

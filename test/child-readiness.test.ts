@@ -34,17 +34,18 @@ describe('selected child readiness protocol', () => {
   });
 
   test('completed malformed, missing-feature and wrong-major replies are permanent and redacted', () => {
-    for (const raw of ['', 'null', 'postgres://private:password@example.invalid/db', '{}',
+    for (const raw of ['', 'null', 'postgres://private:GSTACK_EXAMPLE_NONCE@example.invalid/db', '{}',
       JSON.stringify({ ...reply, protocolVersion: 999 }),
       JSON.stringify({ ...reply, features: ['unknown-feature'] }),
       JSON.stringify({ ...reply, status: 'configuration_error', reasonCode: 'unknown', message: 'password' }),
-      JSON.stringify({ ...reply, version: 'postgres://private:password@example.invalid/db' }),
+      JSON.stringify({ ...reply, version: 'postgres://private:GSTACK_EXAMPLE_NONCE@example.invalid/db' }),
       JSON.stringify({ ...reply, version: '1.2.3-private-password' }),
     ]) {
       try { parseChildReadiness(raw); throw new Error('unexpected success'); }
       catch (error) {
         expect(error).toBeInstanceOf(LocalConfigurationError);
         expect((error as Error).message).not.toContain('password');
+        expect((error as Error).message).not.toContain('GSTACK_EXAMPLE_NONCE');
       }
     }
   });
@@ -117,11 +118,12 @@ describe('selected child readiness protocol', () => {
   });
 
   test('completed malformed child blocks without leaking either stream', async () => {
-    await fixture(`console.error('postgres://private:password@example.invalid/db'); console.log('invalid password');`, async (invocation) => {
+    await fixture(`console.error('postgres://private:GSTACK_EXAMPLE_NONCE@example.invalid/db'); console.log('invalid password');`, async (invocation) => {
       try { await checkChildReadiness({ invocation, tiniPath: '' }); throw new Error('unexpected success'); }
       catch (error) {
         expect(error).toBeInstanceOf(LocalConfigurationError);
         expect((error as Error).message).not.toContain('password');
+        expect((error as Error).message).not.toContain('GSTACK_EXAMPLE_NONCE');
       }
     });
   });
@@ -134,6 +136,7 @@ describe('selected child readiness protocol', () => {
         expect(isLocalConfigurationError(error)).toBe(false);
         expect((error as Error).message).toContain('combined output limit');
         expect((error as Error).message).not.toContain('password');
+        expect((error as Error).message).not.toContain('GSTACK_EXAMPLE_NONCE');
       }
       expect(Date.now() - start).toBeLessThan(2000);
     });
@@ -187,6 +190,7 @@ describe('selected child readiness protocol', () => {
           catch (error) {
             expect((error as LocalConfigurationError).reasonCode).toBe('child_executable_invalid');
             expect((error as Error).message).not.toContain('password');
+        expect((error as Error).message).not.toContain('GSTACK_EXAMPLE_NONCE');
           }
           let stopped = 0;
           const error = await runJobInChild({
@@ -196,6 +200,7 @@ describe('selected child readiness protocol', () => {
           }).then(() => null, (error: unknown) => error);
           expect((error as LocalConfigurationError).reasonCode).toBe('child_executable_invalid');
           expect((error as Error).message).not.toContain('password');
+        expect((error as Error).message).not.toContain('GSTACK_EXAMPLE_NONCE');
           expect(stopped).toBe(1);
         }
       }
