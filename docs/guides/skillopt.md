@@ -114,8 +114,13 @@ exact resume command. An output-cap failure (a truncated reply, or a one-shot
 cap too small for the body) doubles the reflect cap in that command. A
 body-too-large or context-window refusal keeps the cap, because the cap
 shares the context window. The command also carries the run's mode, cost
-cap, runtime cap, `--models-strict`, and `--force` when the run used it or
-already rewrote SKILL.md. An edits-contract failure puts a quoted
+cap, runtime cap, `--models-strict`, and `--force` only when the run used
+it. A resume accepts a SKILL.md with uncommitted changes when the file is
+exactly the text the run itself accepted, so it never needs `--force` for its
+own edit; any other change to the file still stops the resume. An early stop
+takes its cap remedy from the trailing errors, so a run that stopped on
+truncated replies doubles the cap even when it still reports
+`no_improvement` or `accepted`. An edits-contract failure puts a quoted
 `'<other-model>'` placeholder in place of the optimizer model. The JSON
 receipt carries the same `run_id` and `resume_command`. `--resume` refuses
 when the benchmark, held-out set or split changed, or when the run would

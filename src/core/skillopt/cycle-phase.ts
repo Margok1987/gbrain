@@ -40,6 +40,7 @@ import { buildModelsPlan, formatModelsBanner, resolveSkillOptModels, skillOptMod
 import { runSkillOpt } from './orchestrator.ts';
 import { REFLECT_MAX_TOKENS_CONFIG_KEY } from './output-cap.ts';
 import { parseSplit } from './benchmark.ts';
+import { gcStaleCheckpoints } from './checkpoint.ts';
 import { sha8 } from './audit.ts';
 import { VERSION } from '../../version.ts';
 import { buildRemediation, errorCode } from './remediation.ts';
@@ -133,6 +134,12 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
       summary: 'no skills directory found',
       details: { reason: 'no_skills_dir' },
     };
+  }
+
+  // Cycle runs never resume, so kept checkpoints (errored / early-stopped)
+  // are reclaimed here once they age past the 7-day window.
+  if (!opts.dryRun) {
+    try { gcStaleCheckpoints(skillsDir); } catch { /* best effort; never blocks the phase */ }
   }
 
   // Resolve models once. Tiers default to deep/subagent/reasoning.

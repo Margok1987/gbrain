@@ -11,6 +11,7 @@ import { describe, expect, test, beforeAll, afterAll, beforeEach, afterEach } fr
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { resetPgliteState } from '../helpers/reset-pglite.ts';
 import { withEnv } from '../helpers/with-env.ts';
@@ -193,11 +194,13 @@ describe('unusable optimizer output', () => {
     expect(res.receipt.stop_reason).toBe('early_stop_unusable_output');
     expect(res.receipt.abort_detail).toBeUndefined();
     expect(fs.readFileSync(skillPath(skillsDir, SKILL), 'utf8')).toContain('## Citations');
-    // The early stop left steps undone: the checkpoint is kept, and since the
-    // accepted candidate left SKILL.md dirty the resume command carries --force
-    // even when the run itself did not pass it.
+    // The early stop left steps undone: the checkpoint is kept. The resume
+    // command never adds --force; the resume admits SKILL.md only when it is
+    // exactly the run's own accepted text.
     expect(fs.existsSync(checkpointPath(skillsDir, SKILL, res.receipt.run_id))).toBe(true);
-    expect(res.receipt.resume_command).toContain('--force');
+    expect(res.receipt.resume_command).not.toContain('--force');
+    // The trailing truncation still drives the cap remedy.
+    expect(res.receipt.resume_command).toContain('--reflect-max-tokens 8192');
     // The kept checkpoint's accounting matches the receipt (a resume merges it).
     expect(res.receipt.test_score).toBeDefined();
     expect(loadCheckpoint(skillsDir, SKILL, res.receipt.run_id)!.cumulative_cost_usd).toBeCloseTo(res.receipt.final_cost_usd!, 10);
@@ -213,6 +216,7 @@ describe('unusable optimizer output', () => {
     const runId = first.receipt.run_id;
     expect(fs.existsSync(checkpointPath(skillsDir, SKILL, runId))).toBe(true);
     expect(first.receipt.resume_command).toContain(`--resume ${runId}`);
+    expect(first.receipt.resume_command).toContain('--reflect-max-tokens 8192');
     const saved = loadCheckpoint(skillsDir, SKILL, runId)!;
     expect(saved.tally!.unusable_streak).toBe(2);
     expect({ epoch: saved.next_epoch, step: saved.next_step }).toEqual({ epoch: 1, step: 4 });
@@ -343,6 +347,55 @@ describe('resume correctness', () => {
     expect({ epoch: cp.next_epoch, step: cp.next_step }).toEqual({ epoch: 1, step: 3 });
     expect(cp.tally!.reflect_calls).toBe(2);
     expect(cp.tally!.usable_replies).toBe(2);
+  });
+
+  test('a resume that aborts before its first rewound step keeps the rewound cursor', async () => {
+    writeFixture(ALL_FAIL);
+    installOptimizer(() => result(TRUNCATED_JSON, 'length', 4096));
+    const first = await run();
+    expect(first.outcome).toBe('errored');
+    const runId = first.receipt.run_id;
+    expect(loadCheckpoint(skillsDir, SKILL, runId)!.next_step).toBe(3);
+
+    optimizerCalls = [];
+    installOptimizer(() => { throw new BudgetExhausted('skillopt:x: projected cost $2 exceeds --max-cost $1.00', { reason: 'cost', spent: 0.5, cap: 1 }); });
+    const second = await run({ resumeRunId: runId, reflectMaxTokens: 8192 });
+    expect(second.outcome).toBe('aborted');
+    const cp = loadCheckpoint(skillsDir, SKILL, runId)!;
+    // Rewound to step 1 and persisted, so the next resume still retries both steps.
+    expect({ epoch: cp.next_epoch, step: cp.next_step }).toEqual({ epoch: 1, step: 1 });
+    expect(cp.tally!.unusable_streak).toBe(0);
+  });
+
+  test('in a git repo, a resume admits SKILL.md dirtied by its own accepted edit but refuses a hand edit', async () => {
+    writeFixture(MIXED);
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: skillsDir, stdio: 'pipe' });
+    git('init', '-q');
+    git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'add', '-A');
+    git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-qm', 'fixture');
+    let proposed = false;
+    installOptimizer((call) => {
+      if (call.mode === 'failure' && !proposed) { proposed = true; return result(JSON.stringify({ edits: [ADD_CITATIONS] })); }
+      return result(TRUNCATED_JSON, 'length', 4096);
+    });
+    const first = await run({ force: false });
+    expect(first.outcome).toBe('accepted');
+    expect(first.receipt.resume_command).not.toContain('--force');
+    const runId = first.receipt.run_id;
+    const ownText = fs.readFileSync(skillPath(skillsDir, SKILL), 'utf8');
+    expect(ownText).toContain('## Citations');
+
+    // A hand edit on top of the run's own text is refused (never overwritten).
+    fs.appendFileSync(skillPath(skillsDir, SKILL), '\nA hand edit.\n');
+    await expect(run({ force: false, resumeRunId: runId })).rejects.toThrow(/uncommitted changes/);
+    // An unknown run id admits nothing either.
+    await expect(run({ force: false, resumeRunId: 'no-such-run' })).rejects.toThrow(/uncommitted changes/);
+
+    // Exactly the run's own accepted text: the resume goes ahead without --force.
+    fs.writeFileSync(skillPath(skillsDir, SKILL), ownText);
+    installOptimizer(() => result('{"edits": []}'));
+    const resumed = await run({ force: false, resumeRunId: runId });
+    expect(resumed.outcome).toBe('accepted');
   });
 
   test('changed benchmark refuses the resume, naming the field', async () => {

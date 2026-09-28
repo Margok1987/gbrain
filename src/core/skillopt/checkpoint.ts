@@ -30,8 +30,8 @@
  * whole run. A legacy checkpoint without ledger rows marks the resumed run's
  * `models_used` as `since_resume`.
  *
- * 7-day GC: stale checkpoints older than 7 days are removed by the dream
- * cycle's purge phase (T6 wiring).
+ * 7-day GC: stale checkpoints older than 7 days are removed at the start of
+ * the dream cycle's skillopt phase.
  */
 
 import { assertLegacySkillFilesystemWrite } from '../skillpack/writer-guard.ts';
@@ -165,6 +165,14 @@ export function advanceCursor(cp: RunCheckpoint, epoch: number, step: number, st
   cp.last_completed_step = epochDone ? 0 : step;
 }
 
+/** Point the checkpoint's cursor at (epoch, step) as the next step to run. */
+export function setCursor(cp: RunCheckpoint, cursor: { epoch: number; step: number }): void {
+  cp.next_epoch = cursor.epoch;
+  cp.next_step = cursor.step;
+  cp.last_completed_epoch = cursor.epoch - 1;
+  cp.last_completed_step = cursor.step === 1 ? 0 : cursor.step - 1;
+}
+
 /** Move a cursor back `steps` steps, never before epoch 1 step 1. */
 export function rewindCursor(
   cursor: { epoch: number; step: number },
@@ -233,8 +241,8 @@ export function deleteCheckpoint(skillsDir: string, skillName: string, runId: st
 }
 
 /**
- * GC stale checkpoints older than `maxAgeDays` (default 7). Called by the
- * dream cycle's purge phase. Returns the count of removed files.
+ * GC stale checkpoints older than `maxAgeDays` (default 7). Called at the
+ * start of the dream cycle's skillopt phase. Returns the count of removed files.
  */
 export function gcStaleCheckpoints(skillsDir: string, maxAgeDays: number = 7): number {
   if (!fs.existsSync(skillsDir)) return 0;

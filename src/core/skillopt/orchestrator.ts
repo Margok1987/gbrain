@@ -119,6 +119,7 @@ import {
   resumeCursor,
   rewindCursor,
   saveCheckpoint,
+  setCursor,
   type ReflectTally,
   type RunSpec,
 } from './checkpoint.ts';
@@ -194,7 +195,7 @@ export async function runSkillOpt(opts: SkillOptOpts): Promise<RunSkillOptResult
   // Working-tree gate.
   if (!opts.force) {
     const status = getWorkingTreeStatusForFile(skillFile);
-    if (status === 'dirty') {
+    if (status === 'dirty' && !isOwnResumeEdit(skillsDir, skillName, skillFile, opts.resumeRunId)) {
       throw errorFor({
         class: 'DirtyTree',
         code: 'dirty_tree',
@@ -348,6 +349,22 @@ export async function runSkillOpt(opts: SkillOptOpts): Promise<RunSkillOptResult
  * through to the generic catch-all instead, misreporting outcome='errored'
  * / abortReason='error' on the receipt and audit trail.
  */
+/**
+ * A resume may start on a SKILL.md this run itself rewrote: the file is dirty,
+ * but it is exactly the checkpoint's best text. Any other edit still trips the
+ * dirty-tree gate, so a hand edit between segments is never overwritten.
+ */
+function isOwnResumeEdit(skillsDir: string, skillName: string, skillFile: string, resumeRunId: string | undefined): boolean {
+  if (!resumeRunId) return false;
+  const cp = loadCheckpoint(skillsDir, skillName, resumeRunId);
+  if (!cp) return false;
+  try {
+    return sha8(fs.readFileSync(skillFile, 'utf8')) === sha8(cp.best_skill_text);
+  } catch {
+    return false;
+  }
+}
+
 export function classifyAbortError(
   err: unknown,
   opts: { maxRuntimeMin: number },
@@ -523,7 +540,12 @@ async function runOptimizationLoop(
   // A resume is a fresh attempt (usually after a fix): the trailing fully
   // unusable steps are re-run instead of skipped, and the early-stop streak
   // restarts instead of stopping the resumed run after one step.
-  const rewindSteps = opts.resumeRunId && opts.optimizerMode !== 'one-shot-rewrite' ? tally.unusable_streak : 0;
+  // The rewound cursor is written to the checkpoint together with the reset
+  // streak, so a resume that aborts before its first step still retries them.
+  const stepsPerEpoch = Math.max(1, Math.floor(split.train.length / opts.batchSize));
+  if (opts.resumeRunId && opts.optimizerMode !== 'one-shot-rewrite' && tally.unusable_streak > 0) {
+    setCursor(checkpoint, rewindCursor(resumeCursor(checkpoint, stepsPerEpoch), tally.unusable_streak, stepsPerEpoch));
+  }
   tally.unusable_streak = 0;
   checkpoint.tally = tally;
   // Tally as of the start of the in-flight step. A handled abort re-runs that
@@ -654,8 +676,7 @@ async function runOptimizationLoop(
       }
 
       // Epoch loop. The cursor names the first step that has not completed.
-      const stepsPerEpoch = Math.max(1, Math.floor(split.train.length / opts.batchSize));
-      const cursor = rewindCursor(resumeCursor(checkpoint!, stepsPerEpoch), rewindSteps, stepsPerEpoch);
+      const cursor = resumeCursor(checkpoint!, stepsPerEpoch);
       epochs: for (let epoch = cursor.epoch; epoch <= opts.epochs; epoch++) {
         const startStep = epoch === cursor.epoch ? cursor.step : 1;
         const epochStartBest = checkpoint!.best_sel_score;
@@ -990,7 +1011,11 @@ async function runOptimizationLoop(
     saveCheckpoint(skillsDir, skillName, checkpoint);
   }
   const remediation = buildRemediation([...tally.reflect_errors, ...(abortDetail ? [abortDetail] : [])], abortReason);
-  const failureCode = abortDetail ? errorCode(abortDetail) : undefined;
+  // An early stop that still resolved accepted/no_improvement takes its
+  // resume remedy from the trailing unusable errors.
+  const failureCode = abortDetail
+    ? errorCode(abortDetail)
+    : earlyStopped && tally.reflect_errors.length > 0 ? errorCode(tally.reflect_errors[tally.reflect_errors.length - 1]!) : undefined;
   const budget = tracker.snapshot();
   const modelsUsed = buildModelsUsed(budget, prior.rows);
 
@@ -1024,7 +1049,7 @@ async function runOptimizationLoop(
     reflect_max_tokens_source: reflectCap.source,
     ...(checkpointRetained ? { resume_command: buildResumeCommand(skillName, runId, runSpec, failureCode, {
       mode: opts.mode, maxCostUsd: opts.maxCostUsd, maxRuntimeMin: opts.maxRuntimeMin,
-      force: opts.force || (mutateDecision.mutate && acceptedAny),
+      force: opts.force,
       modelsStrict: opts.modelsStrict === true,
     }) } : {}),
     baseline_sel_score: baselineSelScore,
