@@ -72,7 +72,7 @@ import {
   EmbeddingColumnNotRegisteredError,
 } from './search/embedding-column.ts';
 import { getFtsLanguage, applyFtsLanguagePolicy } from './fts-language.ts';
-import { splitEmbeddingSignature, currentSpaceChunkPredicate } from './embedding-invalidation.ts';
+import { splitEmbeddingSignature, currentSpaceChunkPredicate, lockEmbeddingSources } from './embedding-invalidation.ts';
 import { SAFE_FENCE_CHUNKER_VERSION, bodyWriteChunkVersion, chunkWriteInvalidation, currentTextProjectionFilter, requiresSafeChunks, safeChunksFilter } from './search/safe-chunks.ts';
 import type {
   Page, PageInput, PageFilters, PageType,
@@ -2031,6 +2031,12 @@ export class PostgresEngine implements BrainEngine {
       params.push(opts.sourceId);
       sourceClause = `AND p.source_id = $${params.length}`;
     }
+    let generationClause = '';
+    if (resolvedCol.name === 'embedding') {
+      params.push(resolvedCol.embeddingModel || null);
+      generationClause = `AND ((cc.model=$${params.length} AND (cc.embedded_text_hash=md5(cc.chunk_text) OR cc.embedded_text_hash IS NULL))
+        OR ($${params.length}::text IS NULL AND NOT EXISTS(SELECT 1 FROM config WHERE key='embedding_migration.state')))`;
+    }
     params.push(innerLimit);
     const innerLimitIdx = params.length - 1; // mutated by the escalation loop
     const innerLimitParam = `$${params.length}`;
@@ -2072,6 +2078,7 @@ export class PostgresEngine implements BrainEngine {
           ${afterDateClause}
           ${beforeDateClause}
           ${sourceClause}
+          ${generationClause}
           ${hardExcludeClause}
           ${visibilityClause}`;
     const rawQuery = (exact: boolean) => `
@@ -2551,7 +2558,7 @@ export class PostgresEngine implements BrainEngine {
    */
   private buildStaleChunkWhere(staleColRef: string, opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean }): { where: string; params: unknown[] } {
     const params: unknown[] = [];
-    const conds: string[] = [];
+    const conds: string[] = ['p.deleted_at IS NULL'];
     if (opts?.signature !== undefined) {
       params.push(opts.signature);
       conds.push(
@@ -2635,18 +2642,23 @@ export class PostgresEngine implements BrainEngine {
       ? `(p.embedding_signature IS NULL OR p.embedding_signature <> $1)`
       : `p.embedding_signature IS NOT NULL
           AND p.embedding_signature <> $1`;
-    const rows = await this.sql.unsafe(
-      `UPDATE content_chunks cc
-          SET ${colId} = NULL, embedded_at = NULL
-         FROM pages p
-        WHERE cc.page_id = p.id
-          AND cc.${colId} IS NOT NULL
-          AND NOT ${currentSpaceChunkPredicate(colId, 2, 3)}
-          AND ${sigClause}${srcClause}
-        RETURNING cc.page_id`,
-      params as Parameters<typeof this.sql.unsafe>[1],
-    );
-    return (rows as unknown[]).length;
+    return this.transaction(async tx => {
+      params.push(await lockEmbeddingSources(tx, opts.sourceId));
+      const rows = await tx.executeRaw(
+        `UPDATE content_chunks cc
+            SET ${colId} = NULL, embedded_at = NULL
+           FROM pages p
+          WHERE cc.page_id = p.id
+            AND p.source_id=ANY($${params.length}::text[])
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id=p.source_id AND NOT s.archived)
+            AND cc.${colId} IS NOT NULL
+            AND NOT ${currentSpaceChunkPredicate(colId, 2, 3)}
+            AND ${sigClause}${srcClause}
+          RETURNING cc.page_id`,
+        params,
+      );
+      return (rows as unknown[]).length;
+    });
   }
 
   async invalidateContentDriftEmbeddings(opts?: { sourceId?: string }): Promise<number> {
@@ -2666,20 +2678,25 @@ export class PostgresEngine implements BrainEngine {
       params.push(opts.sourceId);
       srcClause = ` AND p.source_id = $${params.length}`;
     }
-    const sql = this.sql;
-    const rows = await sql.unsafe(
-      `UPDATE content_chunks cc
-          SET ${colId} = NULL, embedded_at = NULL, embedded_text_hash = NULL
-         FROM pages p
-        WHERE cc.page_id = p.id
-          AND cc.${colId} IS NOT NULL
-          AND cc.embedded_text_hash IS NOT NULL
-          AND cc.embedded_text_hash <> md5(cc.chunk_text)
-          AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')${srcClause}
-        RETURNING cc.page_id`,
-      params as Parameters<typeof sql.unsafe>[1],
-    );
-    return (rows as unknown[]).length;
+    return this.transaction(async tx => {
+      params.push(await lockEmbeddingSources(tx, opts?.sourceId));
+      const rows = await tx.executeRaw(
+        `UPDATE content_chunks cc
+            SET ${colId} = NULL, embedded_at = NULL, embedded_text_hash = NULL
+           FROM pages p
+          WHERE cc.page_id = p.id
+            AND p.source_id=ANY($${params.length}::text[])
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id=p.source_id AND NOT s.archived)
+            AND p.deleted_at IS NULL
+            AND cc.${colId} IS NOT NULL
+            AND cc.embedded_text_hash IS NOT NULL
+            AND cc.embedded_text_hash <> md5(cc.chunk_text)
+            AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')${srcClause}
+          RETURNING cc.page_id`,
+        params,
+      );
+      return (rows as unknown[]).length;
+    });
   }
 
   async listStaleChunks(opts?: {
@@ -2715,7 +2732,7 @@ export class PostgresEngine implements BrainEngine {
                    p.updated_at
             FROM content_chunks cc
             JOIN pages p ON p.id = cc.page_id
-            WHERE cc.${tx.unsafe(staleColId)} IS NULL
+            WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
             ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
             LIMIT ${limit}
@@ -2725,7 +2742,7 @@ export class PostgresEngine implements BrainEngine {
                    p.updated_at
             FROM content_chunks cc
             JOIN pages p ON p.id = cc.page_id
-            WHERE cc.${tx.unsafe(staleColId)} IS NULL
+            WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
               AND (
                 p.updated_at < ${afterUpdated}::timestamptz
@@ -2743,7 +2760,7 @@ export class PostgresEngine implements BrainEngine {
                  p.updated_at
           FROM content_chunks cc
           JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${tx.unsafe(staleColId)} IS NULL
+          WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
             AND p.source_id = ${opts.sourceId}
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
           ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
@@ -2754,7 +2771,7 @@ export class PostgresEngine implements BrainEngine {
                  p.updated_at
           FROM content_chunks cc
           JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${tx.unsafe(staleColId)} IS NULL
+          WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
             AND p.source_id = ${opts.sourceId}
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
             AND (
@@ -2774,7 +2791,7 @@ export class PostgresEngine implements BrainEngine {
                  cc.model, cc.token_count, p.source_id, cc.page_id
           FROM content_chunks cc
           JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${tx.unsafe(staleColId)} IS NULL
+          WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
             AND (cc.page_id, cc.chunk_index) > (${afterPid}, ${afterIdx})
           ORDER BY cc.page_id, cc.chunk_index
@@ -2787,7 +2804,7 @@ export class PostgresEngine implements BrainEngine {
                cc.model, cc.token_count, p.source_id, cc.page_id
         FROM content_chunks cc
         JOIN pages p ON p.id = cc.page_id
-        WHERE cc.${tx.unsafe(staleColId)} IS NULL
+        WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
           AND p.source_id = ${opts.sourceId}
           AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
           AND (cc.page_id, cc.chunk_index) > (${afterPid}, ${afterIdx})
@@ -4444,7 +4461,7 @@ export class PostgresEngine implements BrainEngine {
     source_id: string,
     entitySlug: string,
     factText: string,
-    opts?: { k?: number; embedding?: Float32Array },
+    opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null },
   ): Promise<FactRow[]> {
     return factsImpl.findCandidateDuplicates(this.factsDeps, source_id, entitySlug, factText, opts);
   }
@@ -4818,7 +4835,7 @@ export class PostgresEngine implements BrainEngine {
         -- cannot move it and 'doctor --remediate' re-plans it every pass.
         (SELECT count(*) FROM content_chunks cc
            JOIN scoped_pages p ON p.id = cc.page_id
-          WHERE cc.${sql.unsafe(colId)} IS NULL
+          WHERE cc.${sql.unsafe(colId)} IS NULL AND p.deleted_at IS NULL
             AND NOT jsonb_exists(COALESCE(p.frontmatter, '{}'::jsonb), 'embed_skip')
         ) as missing_embeddings,
         (SELECT count(*) FROM links l
