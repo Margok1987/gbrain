@@ -13,9 +13,13 @@ import { getFtsLanguage } from '../fts-language.ts';
 import { getEmbeddingModel } from '../ai/gateway.ts';
 import { refreshProjectionStatistics } from '../search/projection-statistics.ts';
 
-/** Complete the searchable snapshot only after its sanitized chunks are installed. */
-export async function sealPageTextProjection(engine: BrainEngine, slug: string, sourceId: string): Promise<void> {
-  const current = await engine.readPageSnapshot(slug, { sourceId });
+/**
+ * Complete the searchable snapshot only after its sanitized chunks are installed.
+ * `guarded` is this transaction's own read of the page under its guard, when
+ * the caller has one and has not changed the page's revision or timeline since.
+ */
+export async function sealPageTextProjection(engine: BrainEngine, slug: string, sourceId: string, guarded?: PageSnapshot): Promise<void> {
+  const current = guarded ?? await engine.readPageSnapshot(slug, { sourceId });
   if (!current) return;
   await engine.executeRaw(`UPDATE pages SET text_projection_revision=knowledge_revision,
     search_vector=setweight(to_tsvector('${getFtsLanguage()}',COALESCE(title,'')),'A') ||
@@ -128,7 +132,7 @@ export async function installPageProjection(engine: BrainEngine, prepared: Proje
     if (opts.seal) {
       await tx.executeRaw(`UPDATE pages SET chunker_version=$3
         WHERE source_id=$1 AND slug=$2`, [sourceId, slug, MARKDOWN_CHUNKER_VERSION]);
-      await sealPageTextProjection(tx, slug, sourceId);
+      await sealPageTextProjection(tx, slug, sourceId, current!);
       await tx.executeRaw('DELETE FROM page_projection_jobs WHERE source_incarnation=$1::uuid AND slug=$2 AND revision=$3::uuid', [snapshot.sourceIncarnation, slug, snapshot.revision]);
     }
     if (opts.signature) await tx.setPageEmbeddingSignature(slug, { sourceId, signature: opts.signature });
