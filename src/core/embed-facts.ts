@@ -44,7 +44,8 @@ interface PendingFact {
 const eligible = `f.source_id = $1 AND f.embedding IS NULL AND f.expired_at IS NULL
   AND f.superseded_by IS NULL AND NOT (f.source = ANY($2::text[]))
   AND NOT EXISTS (SELECT 1 FROM fact_withdrawals w WHERE w.source_id=f.source_id
-    AND w.visibility=f.visibility AND w.fact_hash=gbrain_fact_fingerprint(f.fact))
+    AND w.visibility=f.visibility AND (w.subject = '*' OR w.subject = f.entity_slug)
+    AND w.fact_hash=gbrain_fact_fingerprint(f.fact))
   AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.source_id=f.source_id
     AND p.slug=f.source_markdown_slug AND p.deleted_at IS NOT NULL)`;
 
