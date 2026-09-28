@@ -64,7 +64,7 @@ export async function decideImportIdentity(engine: BrainEngine, input: ImportIde
   if (!sameExternalId) return { kind: 'shared_hash', dupSlug: dup.slug };
   const dupSourcePath = dupPage?.source_path ?? null;
   const dupFile = input.sourceRoot !== undefined && dupSourcePath !== null ? pathUnderRoot(input.sourceRoot, dupSourcePath) : null;
-  if (dupFile !== null && input.sourcePath !== undefined && dupSourcePath !== input.sourcePath && !existsSync(dupFile)) {
+  if (dupFile !== null && dupSourcePath !== null && input.sourcePath !== undefined && dupSourcePath !== input.sourcePath && !existsSync(dupFile)) {
     return { kind: 'move', dupSlug: dup.slug, dupSourcePath };
   }
   const sameContent = dupPage?.content_hash === input.hash || (!!dupPage && dupPage.title === input.body.title
