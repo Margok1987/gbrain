@@ -186,7 +186,7 @@ jobs:
           SOAK_OPERATIONS: ${{ github.event_name == 'pull_request' && '2500' || '10000' }}
         run: >-
           bun --no-env-file scripts/persistence/validate.ts --engine=${{ matrix.engine }}
-          --operations=$SOAK_OPERATIONS
+          --operations="$SOAK_OPERATIONS"
           --manifest=.context/persistence-manifest.json
       - name: Require all reconciliation crash boundaries before and after activation
         timeout-minutes: 12
