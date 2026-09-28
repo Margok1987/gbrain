@@ -1294,9 +1294,9 @@ export interface SearchOpts extends PageReadPolicy {
   /**
    * #4352 — page-level `visibility: private` enforcement for untrusted
    * callers. When true, both engines' search paths (keyword, titles,
-   * keyword-chunks, vector) add
-   * `COALESCE(p.frontmatter->>'visibility','world') <> 'private'` to the
-   * visibility clause. Callers resolve trust + the config gate via
+   * keyword-chunks, vector) add `privatePagesFilterFragment` to the
+   * visibility clause (absent visibility is world, except on derived atoms
+   * and synthesized concepts, where it is private). Callers resolve trust + the config gate via
    * `resolveExcludePrivatePages` (search/private-visibility.ts):
    * ctx.remote !== false → true unless the operator opted out. Omitted /
    * false = pre-fix behavior (trusted local reads see everything).

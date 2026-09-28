@@ -10,6 +10,77 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.59.12.0] - 2026-09-28
+
+**Saving a page no longer deletes timeline history that only lived in the database, and remote agents can no longer read extracted atoms or synthesized concepts that carry no visibility.**
+
+Some timeline entries exist only in the database, with no matching bullet in the
+page's Markdown: entries added before pages were written back to files, and
+entries produced by timeline extraction from the database. Until now, any
+coordinated write that republished such a page (a `put_page`, an edit picked up
+by managed sync, an import, a reconcile or a connector sync) silently deleted
+those entries. Takes stored in the database but missing from the page's takes
+table were removed the same way. Now a write removes only the entries and takes
+it can see in the page before or after the edit. Everything else stays.
+
+Extracted atoms and synthesized concept pages can come from private pages or
+private transcripts, and some were written without a `visibility` field. Remote
+readers treated a missing field as public. They now treat it as private on
+those two kinds of derived pages. Local CLI reads are unchanged.
+
+**Back up first, and upgrade every writer.** Any gbrain process that still runs
+an older version keeps deleting database-only timeline history each time it
+republishes a page. That includes `gbrain serve`, autopilot and job workers,
+session hooks and every global CLI install. This release cannot restore entries
+that were already deleted; recovering them needs a database backup taken before
+the loss.
+
+| Situation | Before | After |
+| --- | --- | --- |
+| Timeline entry with no bullet, page edited and saved | Deleted | Kept |
+| You delete a bullet and save with the current revision | Its entry is deleted | Its entry is deleted |
+| New takes row reuses the number of a database-only take | Take overwritten | Write refused with `take_row_collision` |
+| Remote read of an atom or concept with no `visibility` | Returned | Hidden |
+
+### To take advantage of v0.59.12.0
+
+1. Back up the database itself before upgrading: `pg_dump` for Postgres, or a
+   copy of the PGLite data directory while gbrain is stopped. A Markdown export
+   does not include database-only timeline entries.
+2. Run `gbrain upgrade` on every machine that writes to the brain, then restart
+   `gbrain serve`, autopilot, job supervisors and session hooks so no older
+   writer keeps running.
+3. Your agent reads `skills/migrations/v0.59.12.0.md` and walks through the same
+   checks. There is no schema migration.
+4. Verify: `gbrain --version` on each writer reports 0.59.12.0, and
+   `gbrain timeline <slug>` still lists a page's older entries after an edit.
+
+If you already lost entries, restore them from a backup taken before the loss.
+Remote agents stop seeing atoms and concepts without a `visibility` field until
+a later release stamps explicit visibility on them. Do not set
+`search.remote_private_pages` to work around it; that exposes every private page.
+
+### Itemized changes
+
+- Coordinated page writes pass the prior page snapshot and the writer's class
+  into canonical projection. Timeline rows and take rows the writer did not edit
+  are kept; deletes and detail refreshes act only on row ids, tuples and detail
+  pinned at preparation, so rows changed by another process after preparation
+  are untouched (#5567).
+- A new takes fence row that collides with a take missing from the prior fence
+  refuses with the new `take_row_collision` write error instead of overwriting it.
+- Remote page reads, search, graph, history and publication rechecks treat an
+  absent `visibility` on `type: atom` pages and on synthesized `type: concept`
+  pages as private; ordinary pages keep absent-means-world (#5525).
+
+### For contributors
+
+- `prepareCanonicalProjections` is async and takes `(engine, page, slug,
+  sourceId, prior, writer)`; `compileCanonicalProjections` is the
+  validation-only entry. `isPrivatePage` takes `{ type, frontmatter }`.
+- New dual-engine suites: `test/canonical-projection-history.test.ts` and
+  `test/derived-page-visibility.test.ts`, with Postgres wrappers in `test/e2e/`.
+
 ## [0.59.10.0] - 2026-09-28
 
 **Memory maintenance preserves what it cannot safely rebuild and tells you what remains unfinished.**

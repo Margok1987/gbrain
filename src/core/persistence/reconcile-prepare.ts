@@ -50,7 +50,7 @@ export async function prepareReconcileResult(engine: BrainEngine, state: Reconci
   if (!ready || ready.slug !== state.pins.slug) throw new OperationError('invalid_params', imported.error ?? 'Reconciliation cannot change page identity or deduplicate to another page.');
   if (ready.observedRevision !== state.snapshot.revision) staleReconcile('revision changed during policy assessment');
   const resolved = reconcileCanonical(ready.parsedPage, [...new Set([...state.snapshot.tags, ...ready.parsedPage.tags])]);
-  const project = prepareCanonicalProjections(resolved, state.pins.slug, state.pins.source_id);
+  const project = await prepareCanonicalProjections(engine, resolved, state.pins.slug, state.pins.source_id, state.snapshot, 'preserving');
   return { ...merged, result: resolved, ready, project };
 }
 

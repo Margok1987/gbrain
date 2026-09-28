@@ -25,14 +25,25 @@ import type { BrainEngine } from '../engine.ts';
 export const REMOTE_PRIVATE_PAGES_KEY = 'search.remote_private_pages';
 
 /**
+ * #5525 — extracted atoms and synthesized concept pages are derived from
+ * other pages or from private transcripts, so a missing `visibility` field on
+ * them means "origin unknown", not "world". They fail closed; every other page
+ * keeps the documented default (absent visibility is world).
+ */
+function derivedPageSql(pageAlias: string): string {
+  return `(${pageAlias}.type = 'atom' OR (${pageAlias}.type = 'concept' AND ${pageAlias}.frontmatter->>'synthesized_by' IS NOT NULL))`;
+}
+
+/**
  * Raw SQL predicate hiding `visibility: private` pages (absent visibility
- * defaults to 'world'). Single source of truth for the fragment — consumed by
+ * defaults to 'world', except on derived atoms and concepts where it defaults
+ * to 'private'). Single source of truth for the fragment — consumed by
  * buildVisibilityClause (search paths), both engines' listPages, the
  * relational-arm hydrate, and get_page's fuzzy-candidate filter. `pageAlias`
  * is a code-provided literal, never user input.
  */
 export function privatePagesFilterFragment(pageAlias: string): string {
-  return `COALESCE(${pageAlias}.frontmatter->>'visibility', 'world') <> 'private'`;
+  return `COALESCE(${pageAlias}.frontmatter->>'visibility', CASE WHEN ${derivedPageSql(pageAlias)} THEN 'private' ELSE 'world' END) <> 'private'`;
 }
 
 /** Check the actual origin, independently of joins that redact its source. */
@@ -70,15 +81,14 @@ export function privateProvenanceFilterFragment(factAlias: string): string {
 /**
  * Row-side twin of privatePagesFilterFragment for pages already fetched
  * (get_page / fetch read one row by slug; re-querying just to filter would
- * be a second round-trip). Same semantics: only the exact string 'private'
- * hides a page; absent/other values default to world-visible.
+ * be a second round-trip). Same semantics: an explicit 'private' hides a
+ * page, and an absent value hides only derived atoms and concepts.
  */
-export function isPrivatePage(frontmatter: unknown): boolean {
-  return (
-    typeof frontmatter === 'object' &&
-    frontmatter !== null &&
-    (frontmatter as Record<string, unknown>).visibility === 'private'
-  );
+export function isPrivatePage(page: { type?: string | null; frontmatter?: unknown }): boolean {
+  const frontmatter = typeof page.frontmatter === 'object' && page.frontmatter !== null
+    ? page.frontmatter as Record<string, unknown> : {};
+  const derived = page.type === 'atom' || (page.type === 'concept' && frontmatter.synthesized_by != null);
+  return (frontmatter.visibility ?? (derived ? 'private' : 'world')) === 'private';
 }
 
 /**
