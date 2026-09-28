@@ -371,6 +371,20 @@ describe('cycle admission', () => {
       const third = await runPhaseSkillopt({ engine });
       expect((third.details as { results: Array<{ outcome: string }> }).results.map((r) => r.outcome)).toEqual(['skipped_budget']);
       expect(chatCalls).toBe(0);
+
+      // Every priced role is in the fingerprint: a judge-tier change re-admits
+      // the skill (a judge-role refusal would otherwise never be retried).
+      expect((await runPhaseSkillopt({ engine }).then((r) => r.details as { candidates?: number })).candidates).toBe(0);
+      await engine.setConfig('models.tier.reasoning', HAIKU);
+      const judgeChanged = await runPhaseSkillopt({ engine });
+      expect((judgeChanged.details as { results: Array<{ outcome: string }> }).results.map((r) => r.outcome)).toEqual(['skipped_budget']);
+
+      // So is the skill's benchmark (per-task judge.model overrides live there).
+      expect((await runPhaseSkillopt({ engine }).then((r) => r.details as { candidates?: number })).candidates).toBe(0);
+      fs.appendFileSync(benchmarkPath, JSON.stringify({ ...BENCH[0], task_id: 'st-extra' }) + '\n');
+      const benchChanged = await runPhaseSkillopt({ engine });
+      expect((benchChanged.details as { results: Array<{ outcome: string }> }).results.map((r) => r.outcome)).toEqual(['skipped_budget']);
+      expect(chatCalls).toBe(0);
     });
   });
 });

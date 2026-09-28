@@ -18,10 +18,11 @@
  * Admission (#5585): when one call of the run can never fit the per-skill cap
  * (preflight's `reservation_exceeds_cap: ...` abort, raised before any model call) the
  * skill is recorded `skipped_budget` with remediation, and
- * `cycle.skillopt.last_skip.<skill>` stores a fingerprint of the resolved
- * optimizer, `cycle.skillopt.per_skill_cap_usd` and
- * `skillopt.reflect_max_tokens`; the skill is not retried until one of them
- * changes. Models resolve once per cycle through `resolveSkillOptModels`; the
+ * `cycle.skillopt.last_skip.<skill>` stores a fingerprint of everything the
+ * reservation check prices: the resolved optimizer, target and judge models,
+ * `cycle.skillopt.per_skill_cap_usd`, `skillopt.reflect_max_tokens`,
+ * `pricing.overrides` and the skill's benchmark (per-task judge models); the
+ * skill is not retried until one of them changes. Models resolve once per cycle through `resolveSkillOptModels`; the
  * models banner prints once and each run prints only rows that differ.
  *
  * Each per-skill invocation runs with epochs=1 (incremental nightly
@@ -38,6 +39,7 @@ import { buildModelsPlan, formatModelsBanner, resolveSkillOptModels, skillOptMod
 import { runSkillOpt } from './orchestrator.ts';
 import { REFLECT_MAX_TOKENS_CONFIG_KEY } from './output-cap.ts';
 import { parseSplit } from './benchmark.ts';
+import { sha8 } from './audit.ts';
 import { buildRemediation, errorCode } from './remediation.ts';
 import type { SkillOptOpts } from './types.ts';
 
@@ -133,11 +135,16 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
 
   // Resolve models once. Tiers default to deep/subagent/reasoning.
   const models = await resolveSkillOptModels(engine);
-  const fingerprint = JSON.stringify({
+  const admission = {
     optimizer: models.optimizer.model,
+    target: models.target.model,
+    judge: models.judge.model,
     per_skill_cap_usd: perSkillCap,
     reflect_max_tokens: await engine.getConfig(REFLECT_MAX_TOKENS_CONFIG_KEY).catch(() => null) ?? null,
-  });
+    pricing_overrides: await engine.getConfig('pricing.overrides').catch(() => null) ?? null,
+  };
+  const fingerprint = (benchmarkPath: string): string =>
+    JSON.stringify({ ...admission, benchmark_sha8: sha8(fs.readFileSync(benchmarkPath, 'utf8')) });
 
   // Walk skills dir; pick candidates with skillopt-benchmark.jsonl + stale last_run_at.
   const candidates = await collectCandidates(engine, skillsDir, staleDays, fingerprint);
@@ -226,7 +233,7 @@ export async function runPhaseSkillopt(opts: SkilloptPhaseOpts): Promise<Skillop
           skipped_budget += 1;
           results.push({ skill: c.name, outcome: 'skipped_budget', cost_usd: 0, reason: err.envelope.message,
             remediation: buildRemediation(['reservation_exceeds_cap']) });
-          await engine.setConfig(`cycle.skillopt.last_skip.${c.name}`, fingerprint).catch(() => {});
+          await engine.setConfig(`cycle.skillopt.last_skip.${c.name}`, fingerprint(c.benchmarkPath)).catch(() => {});
         }
         continue;
       }
@@ -268,7 +275,7 @@ async function collectCandidates(
   engine: BrainEngine,
   skillsDir: string,
   staleDays: number,
-  fingerprint: string,
+  fingerprint: (benchmarkPath: string) => string,
 ): Promise<SkillCandidate[]> {
   const out: SkillCandidate[] = [];
   if (!fs.existsSync(skillsDir)) return out;
@@ -296,7 +303,7 @@ async function collectCandidates(
       continue; // errored recently; retry after the 24h gate
     }
     const lastSkip = await engine.getConfig(`cycle.skillopt.last_skip.${entry}`).catch(() => null);
-    if (lastSkip === fingerprint) continue; // budget-skipped; wait for a config change
+    if (lastSkip && lastSkip === fingerprint(benchPath)) continue; // budget-skipped; wait for a config change
     out.push({ name: entry, benchmarkPath: benchPath, lastRunAt });
   }
   return out;

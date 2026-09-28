@@ -31,6 +31,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
+import { errorFor } from '../../src/core/errors.ts';
 import { resetPgliteState } from '../helpers/reset-pglite.ts';
 
 // ─── Fixture skills trees (benchmark file existence is all the phase reads;
@@ -245,6 +246,41 @@ describe('runPhaseSkillopt cost caps', () => {
     expect(runnerCalls[0]!.maxCostUsd).toBe(1.5);
     // Call 2: remaining $1.00 < per-skill $1.50 → min is the remaining budget.
     expect(runnerCalls[1]!.maxCostUsd).toBe(1.0);
+  });
+});
+
+describe('runPhaseSkillopt reservation refusals (#5585)', () => {
+  const refuse = () => {
+    throw errorFor({ class: 'CostCapExceeded', code: 'cost_cap_exceeded', message: 'reservation_exceeds_cap: a single optimizer call reserves $0.80' });
+  };
+
+  test('refusal under a brain-wide-reduced cap is brain_wide_cap_reached and writes no last_skip', async () => {
+    await enableFlag();
+    currentSkillsDir = skills2Dir;
+    await engine.setConfig('cycle.skillopt.per_skill_cap_usd', '0.8');
+    await engine.setConfig('cycle.skillopt.brain_wide_cap_usd', '1');
+    stubCosts = [0.5];
+    // Call 1 spends $0.50; call 2 gets min(0.8, 0.5) = $0.50 and is refused.
+    onRunnerCall = (_opts, idx) => { if (idx === 1) refuse(); };
+    const res = await runPhaseSkillopt({ engine });
+    expect(runnerCalls.length).toBe(2);
+    expect(runnerCalls[1]!.maxCostUsd).toBe(0.5);
+    const d = res.details as PhaseDetails;
+    expect(d.results![1]).toEqual({ skill: d.results![1]!.skill, outcome: 'skipped', cost_usd: 0, reason: 'brain_wide_cap_reached' });
+    expect(d.skipped_brain_wide_cap).toBe(1);
+    // Not a per-skill budget skip: tomorrow's full per-skill cap may fit it.
+    expect(await engine.getConfig(`cycle.skillopt.last_skip.${d.results![1]!.skill}`)).toBeNull();
+  });
+
+  test('refusal at the full per-skill cap is skipped_budget and records last_skip', async () => {
+    await enableFlag();
+    currentSkillsDir = skills1Dir;
+    onRunnerCall = refuse;
+    const res = await runPhaseSkillopt({ engine });
+    const row = (res.details as PhaseDetails).results![0]!;
+    expect(row.outcome).toBe('skipped_budget');
+    expect(await engine.getConfig('cycle.skillopt.last_skip.skill-a')).toContain('"benchmark_sha8"');
+    expect(await engine.getConfig('cycle.skillopt.last_error.skill-a')).toBeNull();
   });
 });
 
