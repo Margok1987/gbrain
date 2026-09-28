@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.59.9.0] - 2026-09-28
+## [0.59.11.0] - 2026-09-28
 
 **Your brain stops losing notes, stops linking people to the wrong person, and forgets links and dates you deleted.**
 
@@ -29,7 +29,7 @@ All of that is fixed. Sync now treats the note's text as the truth for its links
 
 BrainBench (all harnesses, all suites) and the retrieval canary are byte-identical before and after. LONGMEMEVAL_ROW
 
-### To take advantage of v0.59.9.0
+### To take advantage of v0.59.11.0
 
 Run `gbrain upgrade`. There is no migration. New behavior applies as pages are written; to repair an existing graph, run `gbrain sync --full` (moved and colliding files reconcile, image pages pick up missing visual vectors) and `gbrain extract --stale` for pages edited since their last extraction. Watch the sync output for `slug collision` warnings: rename one of the two files to index both. `gbrain embed --stale` embeds any page saved during a provider outage.
 
