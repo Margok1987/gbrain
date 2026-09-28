@@ -70,6 +70,10 @@ and the sweep pick up the new rules on their next run.
 - `/authorize`, code exchange and token refresh share one resource check derived from `--public-url`. The server's origin is accepted as an alias of its `/mcp` resource; any other resource is refused with `invalid_target` and a description naming the accepted URL, before a sign-in request is created or a code is spent (#5222).
 - `gbrain mcp expose --funnel` recognizes the Funnel capability in the forms current Tailscale reports (`funnel` and `https://tailscale.com/cap/funnel-ports?ports=…`) as well as the older URL form (#5599).
 
+#### Dependencies
+
+- Bump the transitive `fast-uri` override to 3.1.7 and `ip-address` to ^10.5.1 to clear new OSV advisories (two high, two medium) against the versions pinned on master.
+
 ## [0.59.3.0] - 2026-09-28
 
 **A broken worker installation now asks for repair instead of repeatedly interrupting your jobs.**
