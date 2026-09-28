@@ -64,8 +64,7 @@ export class PersistenceConsumer {
     if (!this.topologyWorker) this.topologyWorker = import('./topology-recovery.ts')
       .then(({ recoverSourceTopologies }) => recoverSourceTopologies(this.engine, { hostId: this.hostId, limit: 2 }))
       .catch(error => this.report(error)).finally(() => { this.topologyWorker = undefined; });
-    if (!this.effectsWorker) this.effectsWorker = runPersistenceEffects(this.engine, this.config,
-      { hostId: this.hostId, limit: 8, signal: this.abort.signal }).catch(error => this.report(error))
+    if (!this.effectsWorker) this.effectsWorker = this.drainEffects().catch(error => this.report(error))
       .finally(() => { this.effectsWorker = undefined; });
     if (!this.maintenanceWorker && Date.now() >= this.nextMaintenance) {
       this.nextMaintenance = Date.now() + 60_000;
@@ -129,6 +128,12 @@ export class PersistenceConsumer {
       });
       this.active.add(task);
     }
+  }
+  /** Effects keep pace with publication: full batches continue without waiting for the next tick. */
+  private async drainEffects(): Promise<void> {
+    const limit = 8;
+    while (!this.stopping && await runPersistenceEffects(this.engine, this.config,
+      { hostId: this.hostId, limit, signal: this.abort.signal }) >= limit);
   }
   foregroundCompletions(worktreeId: string): number { return this.foregroundCounts.get(worktreeId) ?? 0; }
   status() {

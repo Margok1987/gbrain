@@ -394,9 +394,11 @@ function gitOutput(repoPath: string, args: string[]): Promise<string> {
 }
 
 async function resolveHooksDirAsync(repoPath: string): Promise<string> {
-  const hooksPath = await gitOutput(repoPath, ['config', '--get', 'core.hooksPath']);
+  // Both probes run at once; the git-path answer is used only when hooksPath is unset.
+  const [hooksPath, gitHooks] = await Promise.all([gitOutput(repoPath, ['config', '--get', 'core.hooksPath']),
+    gitOutput(repoPath, ['rev-parse', '--git-path', 'hooks'])]);
   if (hooksPath) return hooksDirFromConfig(repoPath, hooksPath).dir;
-  return gitPathOrClassic(repoPath, 'hooks', await gitOutput(repoPath, ['rev-parse', '--git-path', 'hooks']));
+  return gitPathOrClassic(repoPath, 'hooks', gitHooks);
 }
 
 /** Ensure a repo-relative path is in the git exclude file so our hook stays untracked. */

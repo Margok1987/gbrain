@@ -252,13 +252,22 @@ async function recordFailure(engine: BrainEngine, effect: PersistenceEffect, err
   await retryEffect(engine, effect, code, ['projection_pending', 'revision_conflict', 'writer_busy', 'writer_pool_capacity'].includes(code) ? 250 : 30_000);
 }
 
-/** Bounded, idempotent work. Recovery obtains kernel exclusion before a DB claim. */
-export async function runPersistenceEffects(engine: BrainEngine, config: GBrainConfig, opts: EffectWorkerOptions): Promise<void> {
+/**
+ * Bounded, idempotent work. Recovery obtains kernel exclusion before a DB claim.
+ * Resolves with the number of effects attempted, so a caller can keep draining.
+ */
+export async function runPersistenceEffects(engine: BrainEngine, config: GBrainConfig, opts: EffectWorkerOptions): Promise<number> {
   const limit = Math.max(1, Math.min(opts.limit ?? 2, 20));
+  // One durability probe per worktree root per bounded run.
+  const durability = new Map<string, Promise<boolean>>();
+  const hardenedRoot = (root: string) => {
+    if (!durability.has(root)) durability.set(root, isDurabilityHardenedAsync(root));
+    return durability.get(root)!;
+  };
   const recoveries = await selectEffectRecoveries(engine, opts.hostId, limit);
   let attempted = 0;
   for (const recovery of recoveries) {
-    if (opts.signal?.aborted) return;
+    if (opts.signal?.aborted) return attempted;
     const binding = await getWorktreeBinding(engine, recovery.source_id, opts.hostId);
     if (!binding) continue;
     const lock = await acquireWorktree(binding);
@@ -273,15 +282,16 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     } catch (error) { if (claimed) await recordFailure(engine, claimed, error); }
     finally { await lock.release(); }
   }
-  while (attempted++ < limit && !opts.signal?.aborted) {
+  while (attempted < limit && !opts.signal?.aborted) {
     const effect = await claimPersistenceEffect(engine, opts.hostId);
-    if (!effect) return;
+    if (!effect) return attempted;
+    attempted++;
     let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
     try {
       const binding = effect.worktree_id ? await getWorktreeBinding(engine, effect.source_id, opts.hostId) : null;
       // Probe durability before locking: the git child processes must not
       // hold the worktree's publications behind them.
-      const hardened = effect.kind === 'git' && binding?.local_path ? await isDurabilityHardenedAsync(binding.local_path) : undefined;
+      const hardened = effect.kind === 'git' && binding?.local_path ? await hardenedRoot(binding.local_path) : undefined;
       if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) {
         if (!binding) throw new OperationError('owner_unavailable', 'The canonical effect owner is unavailable.');
         lock = await acquireWorktree(binding);
@@ -301,4 +311,5 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     } catch (error) { await recordFailure(engine, effect, error, opts.signal); }
     finally { await lock?.release(); }
   }
+  return attempted;
 }
