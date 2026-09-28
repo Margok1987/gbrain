@@ -10,6 +10,50 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.59.5.0] - 2026-09-28
+
+**The full test gate now runs in about five minutes on Ubicloud instead of about 25 on one Docker host.**
+
+`bun run ci:ubicloud` runs everything `bun run ci:local` runs: gitleaks, guards and
+typecheck, the serial, slow and unit lanes, and every E2E file with PgBouncer
+required. It spreads the work across ten fresh Ubicloud VMs and destroys them
+when it finishes, including after Ctrl-C. It tests your working tree as it is,
+uncommitted edits included, and needs no local Docker or gitleaks.
+
+Work is balanced while the run is going. Every test file waits in one queue,
+heaviest first, and any idle slot on any VM takes the next one. A slow machine
+or a surprisingly long file holds up one slot instead of a whole shard. Each
+run records how long every file took, and the next run orders its queue from
+those timings. In practice, all files except the longest few are done about
+two minutes after the VMs come up. The run then ends when the longest single
+test file finishes.
+
+### To take advantage of v0.59.5.0
+
+Export a Ubicloud project token as `UBICLOUD_API_KEY` (or `UBICLOUD_API_TOKEN`)
+and run `bun run ci:ubicloud`. Use `bun run ci:ubicloud:diff` to narrow E2E to
+the files your diff touches, like `ci:local:diff`. `--vms`, `--size`, `--slots`
+and `--lanes` tune the fleet; failure logs and a run summary land in
+`.context/ci-ubicloud/`.
+
+### Itemized changes
+
+- Add `ci:ubicloud` and `ci:ubicloud:diff`: parallel VM provisioning, one
+  pgvector server and transaction-mode PgBouncer per slot with a bootstrapped
+  schema, a dynamic heaviest-first work queue that spreads the longest files one
+  per VM, per-item logs, one retry for items lost to a dropped connection, and
+  guaranteed teardown.
+- `run-unit-shard.sh`, `run-serial-tests.sh` and `run-slow-tests.sh` accept
+  explicit test files; `run-serial-tests.sh --dry-run-list-exclusive` lists its
+  machine-exclusive files.
+- E2E `setupDB()` disables managed persistence left on by an earlier file
+  before it resets sources, and `sync-lock-overlap-postgres` cleans up through
+  the writer guard, so both pass whichever file reaches a fresh database first.
+- Fix three tests that failed on busy hosts: a PGLite repair fixture used a
+  process ID that can belong to a live process, the E2E runner interrupt test
+  checked for a killed child before it had been reaped, and the hook-under-serve
+  E2E read the serve's own background heartbeat as the hook's.
+
 ## [0.59.3.0] - 2026-09-28
 
 **A broken worker installation now asks for repair instead of repeatedly interrupting your jobs.**
