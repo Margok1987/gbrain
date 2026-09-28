@@ -26,6 +26,8 @@ export class PersistenceConsumer {
   private topologyWorker: Promise<unknown> | undefined;
   private maintenanceWorker: Promise<unknown> | undefined;
   private nextMaintenance = 0;
+  private lastScan = 0;
+  private progressWake = false;
   private lastError: { code: string; at: string; phase?: string } | undefined;
   private abort = new AbortController();
   private phaseObservation: { name: string; started_at: string; deadline_exceeded: boolean; attempt: number } | undefined;
@@ -45,23 +47,38 @@ export class PersistenceConsumer {
     if (ms === 0 && this.tickPromise) { this.wakeRequested = true; return; }
     if (this.timer && ms !== 0) return;
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { this.timer = undefined; void this.tick().finally(() => this.schedule(this.opts.pollMs ?? 250)); }, ms);
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      const afterProgress = this.progressWake;
+      this.progressWake = false;
+      void this.tick(afterProgress).finally(() => this.schedule(this.opts.pollMs ?? 250));
+    }, ms);
     this.timer.unref?.();
   }
-  async tick(): Promise<void> {
+  /**
+   * `afterProgress` marks the wake-up that follows a completed publication.
+   * Under sustained load those ticks claim the next write at once and leave
+   * root refresh and recovery/expiry/topology scans to at most one pass per
+   * poll interval, the same bound an idle owner has.
+   */
+  async tick(afterProgress = false): Promise<void> {
     if (this.tickPromise) return this.tickPromise;
-    this.tickPromise = this.doTick().catch(error => { this.report(error); }).finally(() => {
+    this.tickPromise = this.doTick(afterProgress).catch(error => { this.report(error); }).finally(() => {
       this.tickPromise = undefined;
       if (this.wakeRequested) { this.wakeRequested = false; this.schedule(0); }
     });
     return this.tickPromise;
   }
-  private async doTick(): Promise<void> {
+  private async doTick(afterProgress: boolean): Promise<void> {
     if (this.stopping) return;
-    await this.phase('refresh_roots', signal => refreshManagedFilesystemRoots(this.engine,
-      this.engine.kind === 'pglite' ? this.config.database_path : undefined, signal));
+    const scan = !afterProgress || Date.now() - this.lastScan >= (this.opts.pollMs ?? 250);
+    if (scan) {
+      this.lastScan = Date.now();
+      await this.phase('refresh_roots', signal => refreshManagedFilesystemRoots(this.engine,
+        this.engine.kind === 'pglite' ? this.config.database_path : undefined, signal));
+    }
     if (this.stopping) return;
-    if (!this.topologyWorker) this.topologyWorker = import('./topology-recovery.ts')
+    if (scan && !this.topologyWorker) this.topologyWorker = import('./topology-recovery.ts')
       .then(({ recoverSourceTopologies }) => recoverSourceTopologies(this.engine, { hostId: this.hostId, limit: 2 }))
       .catch(error => this.report(error)).finally(() => { this.topologyWorker = undefined; });
     if (!this.effectsWorker) this.effectsWorker = this.drainEffects().catch(error => this.report(error))
@@ -77,35 +94,37 @@ export class PersistenceConsumer {
     // proves that a previous process can no longer be publishing this root.
     const now = Date.now();
     for (const [root, retryAt] of this.rootRetryAfter) if (retryAt <= now) this.rootRetryAfter.delete(root);
-    const excluded = [...this.activeRoots, ...this.rootRetryAfter.keys()];
-    const recovery = await this.phase('recovery_scan', signal => this.engine.executeRaw<WriteRequest>(`SELECT r.* FROM persistence_requests r
-      JOIN persistence_worktrees w ON w.id=r.worktree_id
-      WHERE w.owner_host_id=$1::uuid AND r.recovery IS NOT NULL AND NOT(r.worktree_id::text=ANY($2::text[]))
-      AND NOT EXISTS (SELECT 1 FROM persistence_requests earlier WHERE earlier.worktree_id=r.worktree_id
-        AND earlier.recovery IS NOT NULL AND earlier.sequence<r.sequence)
-      ORDER BY r.updated_at,r.sequence LIMIT 16`, [this.hostId, excluded], { signal }));
-    for (const row of recovery) {
-      const root = row.worktree_id!;
-      // Always skip at least the next scheduled poll for an unresolved root.
-      // This preserves its FIFO head while allowing the next root into LIMIT 16.
-      const delay = Math.max(1000, (this.opts.pollMs ?? 250) * 2);
-      this.rootRetryAfter.set(root, Date.now() + delay);
-      try {
-        const recovered = await this.phase('recovery', () => recoverPublication(this.engine, row.id, this.hostId));
-        if (!recovered.recovery) this.rootRetryAfter.delete(root);
-        else if (recovered.blocked_reason === 'unexpected_file_bytes') this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
-      } catch (error) {
-        this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
-        this.report(error);
+    if (scan) {
+      const excluded = [...this.activeRoots, ...this.rootRetryAfter.keys()];
+      const recovery = await this.phase('recovery_scan', signal => this.engine.executeRaw<WriteRequest>(`SELECT r.* FROM persistence_requests r
+        JOIN persistence_worktrees w ON w.id=r.worktree_id
+        WHERE w.owner_host_id=$1::uuid AND r.recovery IS NOT NULL AND NOT(r.worktree_id::text=ANY($2::text[]))
+        AND NOT EXISTS (SELECT 1 FROM persistence_requests earlier WHERE earlier.worktree_id=r.worktree_id
+          AND earlier.recovery IS NOT NULL AND earlier.sequence<r.sequence)
+        ORDER BY r.updated_at,r.sequence LIMIT 16`, [this.hostId, excluded], { signal }));
+      for (const row of recovery) {
+        const root = row.worktree_id!;
+        // Always skip at least the next scheduled poll for an unresolved root.
+        // This preserves its FIFO head while allowing the next root into LIMIT 16.
+        const delay = Math.max(1000, (this.opts.pollMs ?? 250) * 2);
+        this.rootRetryAfter.set(root, Date.now() + delay);
+        try {
+          const recovered = await this.phase('recovery', () => recoverPublication(this.engine, row.id, this.hostId));
+          if (!recovered.recovery) this.rootRetryAfter.delete(root);
+          else if (recovered.blocked_reason === 'unexpected_file_bytes') this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
+        } catch (error) {
+          this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
+          this.report(error);
+        }
       }
+      await this.phase('expired_claims', signal => this.engine.executeRaw(`WITH expired AS (
+        SELECT r.id FROM persistence_requests r WHERE r.state='running' AND r.recovery IS NULL
+        AND r.publication_started=false AND r.claim_expires_at<now() AND ${PERSISTENCE_PROTOCOL_PREDICATE}
+        AND (r.worktree_id IS NULL OR EXISTS (SELECT 1 FROM persistence_worktrees w WHERE w.id=r.worktree_id AND w.owner_host_id=$1::uuid))
+        ORDER BY r.sequence LIMIT 100 FOR UPDATE OF r SKIP LOCKED)
+        UPDATE persistence_requests r SET state='queued',execution_token=NULL,claim_expires_at=NULL
+        FROM expired WHERE r.id=expired.id`, [this.hostId], { signal }));
     }
-    await this.phase('expired_claims', signal => this.engine.executeRaw(`WITH expired AS (
-      SELECT r.id FROM persistence_requests r WHERE r.state='running' AND r.recovery IS NULL
-      AND r.publication_started=false AND r.claim_expires_at<now() AND ${PERSISTENCE_PROTOCOL_PREDICATE}
-      AND (r.worktree_id IS NULL OR EXISTS (SELECT 1 FROM persistence_worktrees w WHERE w.id=r.worktree_id AND w.owner_host_id=$1::uuid))
-      ORDER BY r.sequence LIMIT 100 FOR UPDATE OF r SKIP LOCKED)
-      UPDATE persistence_requests r SET state='queued',execution_token=NULL,claim_expires_at=NULL
-      FROM expired WHERE r.id=expired.id`, [this.hostId], { signal }));
     if (publicationConcurrency(this.engine) === 0) {
       await this.phase('capacity', signal => this.engine.executeRaw(`UPDATE persistence_requests SET blocked_reason='writer_pool_capacity'
         WHERE state='queued' AND blocked_reason IS DISTINCT FROM 'writer_pool_capacity' AND ${PERSISTENCE_PROTOCOL_PREDICATE}`, undefined, { signal }));
@@ -124,6 +143,7 @@ export class PersistenceConsumer {
       let progressed = false;
       const task = this.execute(row).then(result => { progressed = result; }).catch(error => this.report(error)).finally(() => {
         if (!progressed) this.rootRetryAfter.set(key, Date.now() + (this.opts.pollMs ?? 250));
+        else this.progressWake = true;
         this.active.delete(task); this.activeRoots.delete(key); this.schedule(progressed ? 0 : this.opts.pollMs ?? 250);
       });
       this.active.add(task);
