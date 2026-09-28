@@ -86,6 +86,8 @@
     "test:serial": "bash scripts/run-serial-tests.sh",
     "ci:local": "bash scripts/ci-local.sh",
     "ci:local:diff": "bash scripts/ci-local.sh --diff",
+    "ci:ubicloud": "bun run scripts/ci-ubicloud.ts",
+    "ci:ubicloud:diff": "bun run scripts/ci-ubicloud.ts --diff",
     "ci:select-e2e": "bun run scripts/select-e2e.ts",
     "typecheck": "tsc --noEmit --incremental --tsBuildInfoFile node_modules/.cache/gbrain-typecheck.tsbuildinfo",
     "check:jsonb": "bash scripts/check-jsonb-pattern.sh",
