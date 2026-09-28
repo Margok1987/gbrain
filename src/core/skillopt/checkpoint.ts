@@ -165,6 +165,17 @@ export function advanceCursor(cp: RunCheckpoint, epoch: number, step: number, st
   cp.last_completed_step = epochDone ? 0 : step;
 }
 
+/** Move a cursor back `steps` steps, never before epoch 1 step 1. */
+export function rewindCursor(
+  cursor: { epoch: number; step: number },
+  steps: number,
+  stepsPerEpoch: number,
+): { epoch: number; step: number } {
+  if (steps <= 0) return cursor;
+  const index = Math.max(0, (cursor.epoch - 1) * stepsPerEpoch + (cursor.step - 1) - steps);
+  return { epoch: Math.floor(index / stepsPerEpoch) + 1, step: (index % stepsPerEpoch) + 1 };
+}
+
 const RESUME_LOCKED_FIELDS = ['benchmark_sha8', 'held_out_sha8', 'split', 'target_model', 'judge_model', 'batch_size'] as const;
 
 /** Refuse a resume that would change what the checkpoint measured, naming the field. */

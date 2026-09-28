@@ -117,6 +117,7 @@ import {
   loadCheckpoint,
   priorSegments,
   resumeCursor,
+  rewindCursor,
   saveCheckpoint,
   type ReflectTally,
   type RunSpec,
@@ -515,7 +516,15 @@ async function runOptimizationLoop(
   // Run the loop inside withBudgetTracker so every nested gateway call composes.
   let finalText = checkpoint.best_skill_text;
   let totalStepsRun = 0;
-  const tally = checkpoint.tally ?? emptyTally();
+  // A legacy checkpoint (no tally) that already moved past the baseline text
+  // accepted a candidate in an earlier segment.
+  const tally = checkpoint.tally
+    ?? { ...emptyTally(), accepted_steps: sha8(checkpoint.best_skill_text) !== checkpoint.skill_sha8 ? 1 : 0 };
+  // A resume is a fresh attempt (usually after a fix): the trailing fully
+  // unusable steps are re-run instead of skipped, and the early-stop streak
+  // restarts instead of stopping the resumed run after one step.
+  const rewindSteps = opts.resumeRunId && opts.optimizerMode !== 'one-shot-rewrite' ? tally.unusable_streak : 0;
+  tally.unusable_streak = 0;
   checkpoint.tally = tally;
   // Tally as of the start of the in-flight step. A handled abort re-runs that
   // step on --resume, so the checkpoint keeps this copy (the receipt keeps the
@@ -646,7 +655,7 @@ async function runOptimizationLoop(
 
       // Epoch loop. The cursor names the first step that has not completed.
       const stepsPerEpoch = Math.max(1, Math.floor(split.train.length / opts.batchSize));
-      const cursor = resumeCursor(checkpoint!, stepsPerEpoch);
+      const cursor = rewindCursor(resumeCursor(checkpoint!, stepsPerEpoch), rewindSteps, stepsPerEpoch);
       epochs: for (let epoch = cursor.epoch; epoch <= opts.epochs; epoch++) {
         const startStep = epoch === cursor.epoch ? cursor.step : 1;
         const epochStartBest = checkpoint!.best_sel_score;
@@ -973,7 +982,13 @@ async function runOptimizationLoop(
   const acceptedAny = tally.accepted_steps > 0;
   const mutatedSkillFile = mutateDecision.mutate && acceptedAny;
   const proposedPath = !mutateDecision.mutate && acceptedAny ? proposedFilePath(skillsDir, skillName) : undefined;
-  const checkpointRetained = outcome === 'aborted' || outcome === 'errored';
+  // An early stop left work undone even when it resolves to no_improvement.
+  const checkpointRetained = outcome === 'aborted' || outcome === 'errored' || earlyStopped;
+  if (checkpointRetained && !caught) {
+    // The final evaluation ran after the last step save; bank its spend too.
+    bankAccounting(checkpoint, prior, tracker.snapshot());
+    saveCheckpoint(skillsDir, skillName, checkpoint);
+  }
   const remediation = buildRemediation([...tally.reflect_errors, ...(abortDetail ? [abortDetail] : [])], abortReason);
   const failureCode = abortDetail ? errorCode(abortDetail) : undefined;
   const budget = tracker.snapshot();
@@ -1009,6 +1024,8 @@ async function runOptimizationLoop(
     reflect_max_tokens_source: reflectCap.source,
     ...(checkpointRetained ? { resume_command: buildResumeCommand(skillName, runId, runSpec, failureCode, {
       mode: opts.mode, maxCostUsd: opts.maxCostUsd, maxRuntimeMin: opts.maxRuntimeMin,
+      force: opts.force || (mutateDecision.mutate && acceptedAny),
+      modelsStrict: opts.modelsStrict === true,
     }) } : {}),
     baseline_sel_score: baselineSelScore,
     best_sel_score: checkpoint.best_sel_score,

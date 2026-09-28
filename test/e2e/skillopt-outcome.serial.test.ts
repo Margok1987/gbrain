@@ -186,14 +186,46 @@ describe('unusable optimizer output', () => {
       if (call.mode === 'failure' && !proposed) { proposed = true; return result(JSON.stringify({ edits: [ADD_CITATIONS] })); }
       return result(TRUNCATED_JSON, 'length', 4096);
     });
-    const res = await run();
+    const res = await run({ force: false });
 
     expect(res.outcome).toBe('accepted');
     expect(res.mutatedSkillFile).toBe(true);
     expect(res.receipt.stop_reason).toBe('early_stop_unusable_output');
     expect(res.receipt.abort_detail).toBeUndefined();
     expect(fs.readFileSync(skillPath(skillsDir, SKILL), 'utf8')).toContain('## Citations');
-    expect(fs.existsSync(checkpointPath(skillsDir, SKILL, res.receipt.run_id))).toBe(false);
+    // The early stop left steps undone: the checkpoint is kept, and since the
+    // accepted candidate left SKILL.md dirty the resume command carries --force
+    // even when the run itself did not pass it.
+    expect(fs.existsSync(checkpointPath(skillsDir, SKILL, res.receipt.run_id))).toBe(true);
+    expect(res.receipt.resume_command).toContain('--force');
+    // The kept checkpoint's accounting matches the receipt (a resume merges it).
+    expect(res.receipt.test_score).toBeDefined();
+    expect(loadCheckpoint(skillsDir, SKILL, res.receipt.run_id)!.cumulative_cost_usd).toBeCloseTo(res.receipt.final_cost_usd!, 10);
+  });
+
+  test('usable reply, then unusable steps -> no_improvement, but the early stop keeps the checkpoint and resume finishes the run', async () => {
+    writeFixture(ALL_FAIL);
+    installOptimizer((_c, n) => (n === 1 ? result('{"edits": []}') : result(TRUNCATED_JSON, 'length', 4096)));
+    const first = await run();
+    expect(first.outcome).toBe('no_improvement');
+    expect(first.receipt.stop_reason).toBe('early_stop_unusable_output');
+    expect(optimizerCalls).toHaveLength(3);
+    const runId = first.receipt.run_id;
+    expect(fs.existsSync(checkpointPath(skillsDir, SKILL, runId))).toBe(true);
+    expect(first.receipt.resume_command).toContain(`--resume ${runId}`);
+    const saved = loadCheckpoint(skillsDir, SKILL, runId)!;
+    expect(saved.tally!.unusable_streak).toBe(2);
+    expect({ epoch: saved.next_epoch, step: saved.next_step }).toEqual({ epoch: 1, step: 4 });
+    expect(saved.cumulative_cost_usd).toBeCloseTo(first.receipt.final_cost_usd!, 10);
+
+    optimizerCalls = [];
+    installOptimizer(() => result('{"edits": []}'));
+    const second = await run({ resumeRunId: runId });
+    expect(second.outcome).toBe('no_improvement');
+    expect(second.receipt.stop_reason).toBe('completed');
+    // The two unusable steps (2 and 3) are re-run, then steps 4..10.
+    expect(optimizerCalls).toHaveLength(9);
+    expect(fs.existsSync(checkpointPath(skillsDir, SKILL, runId))).toBe(false);
   });
 
   test('one-shot rewrite cut off at max_tokens -> not promoted, errored, error in reflect_errors', async () => {

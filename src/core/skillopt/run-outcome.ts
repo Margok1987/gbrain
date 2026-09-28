@@ -95,6 +95,9 @@ export interface ResumeRunFlags {
   /** 0 = uncapped (`--no-max-cost`). */
   maxCostUsd: number;
   maxRuntimeMin: number;
+  /** The run used --force, or it accepted a candidate that left SKILL.md dirty. */
+  force?: boolean;
+  modelsStrict?: boolean;
 }
 
 /**
@@ -135,8 +138,11 @@ export function buildResumeCommand(
     if (run.maxCostUsd > 0) args.push('--max-cost-usd', run.maxCostUsd);
     else args.push('--no-max-cost');
     args.push('--max-runtime-min', run.maxRuntimeMin);
+    if (run.force) args.push('--force');
+    if (run.modelsStrict) args.push('--models-strict');
   }
   const rendered = args.map(shellArg);
-  if (contract) rendered[rendered.indexOf('--optimizer-model') + 1] = '<other-model>';
+  // Quoted: a bare `<other-model>` would be read by the shell as a redirection.
+  if (contract) rendered[rendered.indexOf('--optimizer-model') + 1] = `'<other-model>'`;
   return rendered.join(' ');
 }

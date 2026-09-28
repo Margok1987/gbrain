@@ -200,6 +200,14 @@ describe('buildModelsPlan', () => {
     });
     await resetPgliteState(engine);
     await inEnv(async () => {
+      // An explicit override of the default column is configuration, not a fallback.
+      await engine.setConfig('embedding_columns', JSON.stringify({ embedding: { provider: 'voyage:voyage-3-large', dimensions: 1024, type: 'vector' } }));
+      const def = (await buildModelsPlan(engine, await resolveSkillOptModels(engine))).find((e) => e.touchpoint === 'embedding')!;
+      expect(def).toMatchObject({ model: 'voyage:voyage-3-large', source: 'config_key', origin: 'embedding_columns.embedding' });
+      expect(strictVerdict([def], { on: true }).ok).toBe(true);
+    });
+    await resetPgliteState(engine);
+    await inEnv(async () => {
       const envEmb = (await buildModelsPlan(engine, await resolveSkillOptModels(engine))).find((e) => e.touchpoint === 'embedding')!;
       expect(envEmb).toMatchObject({ model: 'openai:text-embedding-3-large', source: 'env', origin: 'GBRAIN_EMBEDDING_MODEL' });
     }, { GBRAIN_EMBEDDING_MODEL: 'openai:text-embedding-3-large' });
@@ -292,6 +300,12 @@ describe('strict mode', () => {
     expect(await resolveModelsStrict(engine, true)).toEqual({ on: true });
     const text = describeStrictVerdict(strictVerdict([{ touchpoint: 'optimizer', model: OPUS, source: 'tier_default', origin: 'built-in default', active: true }], strict));
     expect(text).toContain("(skillopt.models_strict='sometimes' treated as on)");
+  });
+
+  test('an unreadable strict setting fails closed (on), never silently off', async () => {
+    const throwing = { getConfig: async (): Promise<string | null> => { throw new Error('db down'); } };
+    expect(await resolveModelsStrict(throwing as never)).toEqual({ on: true });
+    expect(stderr).toContain('could not read skillopt.models_strict; treating strict mode as on');
   });
 
   test('skillopt.models_strict is a registered config key', () => {

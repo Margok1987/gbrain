@@ -108,15 +108,26 @@ the audit event only; the full meta-edit proposal is a tracked follow-up.
 
 `--dry-run` exits 0, or 1 when strict mode is on and fails.
 
-An `errored` or `aborted` run keeps its checkpoint. The summary prints the
-run id, the checkpoint path and the exact resume command. A truncation
-failure doubles the cap in that command, and the command carries the run's
-mode, cost cap and runtime cap. An edits-contract failure puts an
-`<other-model>` placeholder in place of the optimizer model. The JSON receipt
-carries the same `run_id` and `resume_command`. `--resume` refuses when the
-benchmark, held-out set or split changed, or when the run would widen from
-no-mutate to mutate. You can override the optimizer model, the reflect cap
-and the cost cap on resume.
+An `errored` or `aborted` run keeps its checkpoint, and so does a run that
+stopped early. The summary prints the run id, the checkpoint path and the
+exact resume command. An output-cap failure (a truncated reply, or a one-shot
+cap too small for the body) doubles the reflect cap in that command. A
+body-too-large or context-window refusal keeps the cap, because the cap
+shares the context window. The command also carries the run's mode, cost
+cap, runtime cap, `--models-strict`, and `--force` when the run used it or
+already rewrote SKILL.md. An edits-contract failure puts a quoted
+`'<other-model>'` placeholder in place of the optimizer model. The JSON
+receipt carries the same `run_id` and `resume_command`. `--resume` refuses
+when the benchmark, held-out set or split changed, or when the run would
+widen from no-mutate to mutate. You can override the optimizer model, the
+reflect cap and the cost cap on resume. The cost cap applies to each run
+segment: a resumed run gets a fresh `--max-cost-usd` on top of what earlier
+segments spent (the receipt reports that as `prior_segments_cost_usd`), so
+after a `budget_exhausted` abort, pass the extra budget you want to allow.
+A resume re-runs the trailing steps whose optimizer output was all unusable,
+so raising the cap and resuming retries them. Run the resume command in the
+same brain context (`--brain`, `GBRAIN_BRAIN_ID` or the mount directory) as
+the original run; the command does not carry the brain.
 
 A run that accepted a candidate still reports `accepted` when it later stops
 early. `stop_reason` records why the loop ended: `completed`,
@@ -208,8 +219,8 @@ The reflect codes are emitted with a mode, as `reflect_failure_<class>` or
 In the dream cycle, a skill that hits `reservation_exceeds_cap` is recorded as
 `skipped_budget` and makes no calls. It is retried only after
 `skillopt.reflect_max_tokens`, `cycle.skillopt.per_skill_cap_usd`,
-`pricing.overrides`, the skill's benchmark or one of the resolved optimizer,
-target or judge models changes. An `errored` cycle run does not update
+`pricing.overrides`, the skill's benchmark, the gbrain version or one of the
+resolved optimizer, target or judge models changes. An `errored` cycle run does not update
 `cycle.skillopt.last_run.<skill>`. It records
 `cycle.skillopt.last_error.<skill>` instead, and the skill is retried no
 sooner than 24h later.
@@ -367,7 +378,11 @@ For an embedding violation, the fix points to `embedding_model` in
 `~/.gbrain/config.json` or `GBRAIN_EMBEDDING_MODEL`, since changing it needs
 an embedding migration. `skillopt.models_strict` accepts
 `true|1|yes|on` and `false|0|no|off|empty`. Any other value warns once and
-counts as **on**.
+counts as **on**, and so does a setting that cannot be read.
+
+What strict mode does not cover: the check runs on the plan before spend. A
+rollout that asks a search tool for a specific, non-default embedding column
+is not re-checked at call time.
 
 ### Newer models (`gbrain models`)
 

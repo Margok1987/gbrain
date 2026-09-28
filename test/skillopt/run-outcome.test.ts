@@ -25,6 +25,7 @@ import {
 import {
   advanceCursor,
   assertResumeCompatible,
+  rewindCursor,
   emptyTally,
   resumeCursor,
   type RunCheckpoint,
@@ -33,6 +34,8 @@ import {
 import { formatRunSummary, parseFlags } from '../../src/commands/skillopt.ts';
 import type { RunReceipt } from '../../src/core/skillopt/types.ts';
 import { KNOWN_CONFIG_KEYS } from '../../src/core/config.ts';
+import { isSkilloptMustAbort } from '../../src/core/skillopt/must-abort.ts';
+import { invokeAI, withAIInvocationGuard } from '../../src/core/ai/invocation-guard.ts';
 
 const THINKING = 'anthropic:claude-opus-5';
 const PLAIN = 'anthropic:claude-sonnet-4-6';
@@ -283,6 +286,16 @@ describe('resume spec refusal', () => {
   });
 });
 
+describe('rewindCursor', () => {
+  test('steps back across epoch boundaries and never before the first step', () => {
+    expect(rewindCursor({ epoch: 1, step: 4 }, 2, 10)).toEqual({ epoch: 1, step: 2 });
+    expect(rewindCursor({ epoch: 2, step: 1 }, 2, 10)).toEqual({ epoch: 1, step: 9 });
+    expect(rewindCursor({ epoch: 2, step: 1 }, 1, 1)).toEqual({ epoch: 1, step: 1 });
+    expect(rewindCursor({ epoch: 1, step: 2 }, 5, 10)).toEqual({ epoch: 1, step: 1 });
+    expect(rewindCursor({ epoch: 3, step: 2 }, 0, 10)).toEqual({ epoch: 3, step: 2 });
+  });
+});
+
 describe('resume command', () => {
   test('rebuilt from the stored spec; truncation doubles the cap; paths quoted', () => {
     const cmd = buildResumeCommand('demo', 'run-1', SPEC, 'reflect_truncated');
@@ -297,7 +310,8 @@ describe('resume command', () => {
 
   test('contract class swaps in an --optimizer-model placeholder; other failures keep the cap', () => {
     const cmd = buildResumeCommand('demo', 'run-1', SPEC, 'reflect_invalid_edits');
-    expect(cmd).toContain('--optimizer-model <other-model>');
+    // Quoted, so pasting the command never turns the placeholder into a shell redirection.
+    expect(cmd).toContain(`--optimizer-model '<other-model>'`);
     expect(cmd).not.toContain(THINKING);
     expect(buildResumeCommand('demo', 'run-1', SPEC)).toContain('--reflect-max-tokens 32000');
   });
@@ -318,6 +332,10 @@ describe('resume command', () => {
     expect(uncapped).toContain('--no-max-cost --max-runtime-min 30');
     expect(uncapped).not.toContain('--rewrite');
     expect(uncapped).not.toContain('--max-cost-usd');
+    expect(uncapped).not.toContain('--force');
+    expect(uncapped).not.toContain('--models-strict');
+    const forced = buildResumeCommand('demo', 'run-1', SPEC, undefined, { mode: 'patch', maxCostUsd: 5, maxRuntimeMin: 30, force: true, modelsStrict: true });
+    expect(forced).toEndWith('--max-runtime-min 30 --force --models-strict');
   });
 
   test('optional spec flags and shell quoting of quotes and control characters', () => {
@@ -367,5 +385,15 @@ describe('CLI', () => {
   test('a clean no_improvement summary prints no warnings', () => {
     const out = formatRunSummary('no_improvement', { run_id: 'r', skill: 'demo' } as RunReceipt, '/tmp/skills');
     expect(out).toBe('[skillopt] Outcome: no_improvement\n');
+  });
+});
+
+describe('must-abort', () => {
+  test('an AI spend-policy refusal is a must-abort, never a per-call reflect/judge error', async () => {
+    const denied = new Error('spend policy refused');
+    await withAIInvocationGuard(async () => { throw denied; }, () =>
+      invokeAI({ operation: 'test', kind: 'chat', model: 'test:model' }, async () => 'unreached', () => null)).catch(() => {});
+    expect(isSkilloptMustAbort(denied)).toBe(true);
+    expect(isSkilloptMustAbort(new Error('provider 500'))).toBe(false);
   });
 });

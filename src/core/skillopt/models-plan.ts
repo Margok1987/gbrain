@@ -192,9 +192,12 @@ async function embeddingEntry(engine: BrainEngine): Promise<ModelsPlanEntry> {
   const unknown = (origin: string): ModelsPlanEntry =>
     ({ touchpoint: 'embedding', model: '(unresolved)', source: 'unknown', origin, active: true });
   let column;
+  let explicitDefaultColumn = false;
   try {
     const cfg = (await loadConfigWithEngine(engine).catch(() => null)) ?? loadConfig() ?? { engine: engine.kind };
     column = resolveEmbeddingColumn(undefined, cfg);
+    const userColumns: unknown = cfg.embedding_columns;
+    explicitDefaultColumn = typeof userColumns === 'object' && userColumns !== null && Object.hasOwn(userColumns, DEFAULT_COLUMN_NAME);
   } catch (err) {
     return unknown(sanitizeEcho(`embedding column unresolved: ${err instanceof Error ? err.message : String(err)}`));
   }
@@ -202,6 +205,9 @@ async function embeddingEntry(engine: BrainEngine): Promise<ModelsPlanEntry> {
   const model = sanitizeEcho(column.embeddingModel);
   if (column.name !== DEFAULT_COLUMN_NAME) {
     return { touchpoint: 'embedding', model, source: 'config_key', origin: sanitizeEcho(`search_embedding_column=${column.name} (embedding_columns)`), active: true };
+  }
+  if (explicitDefaultColumn) {
+    return { touchpoint: 'embedding', model, source: 'config_key', origin: `embedding_columns.${DEFAULT_COLUMN_NAME}`, active: true };
   }
   if (process.env.GBRAIN_EMBEDDING_MODEL?.trim()) {
     return { touchpoint: 'embedding', model, source: 'env', origin: 'GBRAIN_EMBEDDING_MODEL', active: true };
@@ -334,7 +340,13 @@ export async function resolveModelsStrict(
 ): Promise<{ on: boolean; unrecognized?: string }> {
   if (flag === true) return { on: true };
   let raw: string | null | undefined = null;
-  try { raw = await engine.getConfig(MODELS_STRICT_CONFIG_KEY); } catch { /* unreadable config -> off */ }
+  try {
+    raw = await engine.getConfig(MODELS_STRICT_CONFIG_KEY);
+  } catch {
+    // Fail closed: an unreadable policy must not silently disable enforcement.
+    process.stderr.write(`[skillopt] could not read ${MODELS_STRICT_CONFIG_KEY}; treating strict mode as on\n`);
+    return { on: true };
+  }
   return parseModelsStrict(raw);
 }
 
