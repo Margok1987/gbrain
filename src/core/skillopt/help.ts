@@ -94,6 +94,12 @@ Exit codes:
       (optimizer_output_unusable). Errored and aborted runs keep their
       checkpoint and print the exact resume command.
 
+Diagnostics:
+  Every run prints a models banner (each touchpoint, its model and the flag or
+  key that chose it) before any spend, and a "Models called" table (including
+  engine-internal query expansion and embeddings) at the end. Each error code
+  in the summary links to its fix in docs/guides/skillopt.md#<code>.
+
 Examples:
   # Generate a starter benchmark from the skill itself (recommended):
   gbrain skillopt meeting-prep --bootstrap-from-skill
