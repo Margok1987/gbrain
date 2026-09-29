@@ -128,6 +128,7 @@ describe('inline import contextual synopsis containment', () => {
       new URL('../src/core/import-file.ts', import.meta.url),
       'utf8',
     );
+    // test-reads-source-ok[structural]: the #5621 peel moved the inline mode resolution here; pins the paid-synopsis containment.
     const resolverSource = readFileSync(
       new URL('../src/core/import-contextual-mode.ts', import.meta.url),
       'utf8',

@@ -117,6 +117,20 @@ for (const kind of testBackends()) describe(`#5621 gbrain repair contextual-mode
     expect(inputs).toHaveLength(0);
   });
 
+  test('an embed_skip page keeps its retained vectors and is counted, not stamped', async () => {
+    await legacyPage('plain', 'notes/skip-embedding', 'Skip Embedding Example');
+    await engine.executeRaw(`UPDATE pages SET frontmatter = COALESCE(frontmatter, '{}'::jsonb) || '{"embed_skip": {"reason": "example"}}'::jsonb
+      WHERE source_id='plain' AND slug='notes/skip-embedding'`);
+    const before = await vectors('plain', 'notes/skip-embedding');
+    inputs = [];
+    const result = await run(true);
+    expect(result.residuals).toMatchObject({ embed_skip: 1 });
+    expect(inputs).toHaveLength(0);
+    expect((await page('plain', 'notes/skip-embedding')).mode).toBeNull();
+    expect(await vectors('plain', 'notes/skip-embedding')).toEqual(before);
+    await engine.executeRaw("DELETE FROM pages WHERE source_id='plain' AND slug='notes/skip-embedding'");
+  });
+
   test('--no-embed stamps and clears only the changed vectors without a provider call', async () => {
     await legacyPage('plain', 'notes/no-embed-repair', 'No Embed Repair');
     inputs = [];
