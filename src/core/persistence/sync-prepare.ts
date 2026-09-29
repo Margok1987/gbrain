@@ -228,6 +228,8 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   // A rename projects against the moved page (same id), so its pinned timeline rows carry over.
   const project = await prepareCanonicalProjections(engine, ready.parsedPage, row.slug, row.source_id, base, p.companyApproval ? 'immutable' : 'file');
   return { observedRevision: snapshot?.revision ?? null,
+    // No file is published without an overlay, so this only tells the #5470 screen the content is unchanged.
+    noop: ready.noop && !moved && !overlay,
     ...(renamed ? { additionalPageKeys: [{ sourceId: row.source_id, slug: renamed.slug }] } : {}),
     validate: async tx => { await validate(tx); await ready.validate(tx); },
     deferEmbedding: p.processingOptions?.noEmbed,
