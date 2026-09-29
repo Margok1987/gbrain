@@ -20,9 +20,9 @@ A local brain's resident writer spent most of each write on overhead. It parsed 
 | --- | --- | --- |
 | PGLite, 1,000-write soak (median of 3) | 8.92 writes/s | 31.68 writes/s |
 | PGLite, time for a caller's write to commit (p50) | 1.73 s | 0.44 s |
-| PGLite, 10,000-write validation soak | 1,417 s | 277–308 s |
+| PGLite, 10,000-write validation soak | 1,417 s | 277–351 s |
 | Postgres, 1,000-write soak (median of 3) | 11.18 writes/s | 13.48 writes/s |
-| Postgres, 10,000-write validation soak | 886 s | 581–727 s |
+| Postgres, 10,000-write validation soak | 886 s | 581–838 s |
 
 All eight SIGKILL crash boundaries and the full default validation gate pass on both engines.
 
