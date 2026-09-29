@@ -105,7 +105,12 @@ is bound to the revision it read, so an edited page or unresolved attendance
 stays stale. `performManagedSync` calls it once the checkpoint commits
 (unless `noExtract` is set), in the process that owns the brain. That process
 is the serve process for delegated PGLite syncs, so both engines take the
-same path, and forward references inside one run resolve. The result carries
+same path, and forward references inside one run resolve. The pages the run
+imported are re-derived whatever their watermark says. A serve's idle sweep
+can stamp a page in the middle of a sync, before that page's link targets
+exist, and then the page would no longer look stale. The harness caught this
+once: a Postgres MCP cell had `notes/b` at 5/8, and a regression test now
+covers it. The result carries
 `links`. An extraction failure leaves pages stale and does not fail the
 already-committed sync. Timeline rows are not written here, because the
 coordinator already projects them with each page (`canonical-projections.ts`).
@@ -149,9 +154,8 @@ working near-name presence control.
 
 Setup: `bun eval/runner/lifecycle-experiment.ts --gbrain-repo <checkout>
 --builds <label>=<sha> --concurrency 4`, with Postgres from `pgvector/pgvector:pg16`
-using trust auth. Build `base` is `045a613` (origin/master). Build `fix` is the
-branch head; the table below comes from the final head run (see the report
-message for the SHA).
+using trust auth. Build `base` is `045a613` (origin/master). Build `fix` is the branch
+head's code (`7e83676`); the table below comes from that run.
 
 | Contract | base (master) | fix |
 |---|---|---|
