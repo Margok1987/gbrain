@@ -720,7 +720,7 @@ snapshot. The slow runner and direct BrainBench test invocation prepare the
 default profile automatically. `GBRAIN_NO_SNAPSHOT=1` clears both paths and
 survives test preloads.
 
-### PGLite checkpoint harness (outside CI)
+### PGLite checkpoint harness (outside PR CI)
 
 `scripts/pglite-checkpoint-harness/supervisor.ts` reproduces the large-store
 PGLite freeze. It spawns `worker.ts`, which imports 40 KB pages through
@@ -739,6 +739,29 @@ bun scripts/pglite-checkpoint-harness/supervisor.ts --dir /tmp/h --fresh --pages
 bun scripts/pglite-checkpoint-harness/supervisor.ts --dir /tmp/h --fresh --pages 1500 \
   --shared-buffers 16MB --max-wal-size 160MB --stall-sec 120 --expect-wedge   # baseline check
 ```
+
+`--min-store-gb <n>` also fails a completed run whose data directory is
+smaller than `n` GiB; the result reports the store size with and without WAL.
+On macOS the supervisor samples worker CPU with `ps` instead of `/proc`.
+
+### macOS 26 validation (`macos-validation`)
+
+`.github/workflows/macos-validation.yml` runs on a GitHub-hosted `macos-26`
+runner nightly, on manual dispatch, and on pull requests that carry the
+`macos-validation` label. It uses no secrets and has a 90-minute cap. It checks
+the device-identity re-stamp (#5604) on real APFS (the step first asserts an
+APFS volume with a non-zero birth time and inode; the device-number change
+itself stays simulated because a runner never reboots), runs the checkpoint
+harness above on a store of at least 2 GiB with the WAL-bound assertion
+(#5449), and verifies the latest published signed `darwin-arm64` release
+binary with `codesign --verify --strict` and `--version` against its release
+tag (#5286). Maintainers with triage or write access apply the label; an
+outside contributor whose change touches macOS-specific persistence, locking
+or release code asks for it in the pull request. Scheduled and dispatched runs
+use the default branch's workflow file, so the label is the way to get this
+evidence for a change before it merges. `test.yml`'s security matrix,
+`release.yml`'s darwin build and `native-locks.yml`'s darwin cells pin
+`macos-26` / `macos-26-intel` rather than `macos-latest`.
 
 ### Keeping CI partitions balanced
 
