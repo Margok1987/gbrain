@@ -10,7 +10,7 @@
  */
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
@@ -126,6 +126,28 @@ test('#5484: a concept whose provenance cannot land stays private (promotion is 
     expect(requests).toHaveLength(1);
     expect(String(requests[0].intent?.content)).toContain('visibility: private');
     expect((await engine.getPage('concepts/moats', { sourceId }))?.frontmatter?.visibility).toBe('private');
+  });
+});
+
+test('#5484: a concept edited while its narrative is being synthesized is not overwritten (Codex review)', async () => {
+  await managedFixture(async (engine, sourceId) => {
+    for (const n of [1, 2, 3, 4, 5]) {
+      await putPage(engine, sourceId, `atoms/flywheel-${n}`,
+        `---\ntitle: Flywheel ${n}\ntype: atom\nvisibility: world\nconcepts: [flywheels]\n---\nAtom ${n} about flywheels.`);
+    }
+    await putPage(engine, sourceId, 'concepts/flywheels',
+      '---\ntitle: flywheels\ntype: concept\nsynthesized_by: synthesize_concepts-v0.41\nsynthesis_mode: llm\nmember_hash: stale\n---\nOld narrative.');
+  }, async (engine, sourceId, root) => {
+    const result = await runPhaseSynthesizeConcepts(engine, { sourceId, brainDir: root, _chat: (async () => {
+      const current = await engine.readPageSnapshot('concepts/flywheels', { sourceId });
+      await submitPageMutation(ctxFor(engine, sourceId), { operation: 'put_page', params: { slug: 'concepts/flywheels',
+        expected_revision: current!.revision, request_id: randomUUID(), content: '---\ntitle: flywheels\ntype: concept\n---\nA human rewrote this.' } });
+      return { text: 'Fresh narrative.', usage: { input_tokens: 1, output_tokens: 1 }, model: 'anthropic:claude-sonnet-4-6' };
+    }) as never });
+    expect((result.details.publication_deferred as unknown[]).length).toBe(1);
+    const page = await engine.getPage('concepts/flywheels', { sourceId });
+    expect(page?.compiled_truth).toContain('A human rewrote this.');
+    expect(page?.frontmatter?.synthesized_by).toBeUndefined();
   });
 });
 
@@ -261,6 +283,52 @@ test('enrich carries the page facts and takes fences over the model output (Code
     expect(page?.compiled_truth).toContain('Alice founded WidgetCo.');
     expect(page?.compiled_truth).toContain('Founded WidgetCo');
     expect({ facts: (await activeFacts()).length, takes: (await activeTakes()).length }).toEqual(before);
+  });
+});
+
+test('#5280: grade_takes resolves the judged take by page identity when its page is renamed during judging (Codex review)', async () => {
+  const { runPhaseGradeTakes } = await import('../src/core/cycle/grade-takes.ts');
+  const takes = (claim: string) => ['<!--- gbrain:takes:begin -->', '| # | claim | kind | who | weight | since | source |',
+    '|---|-------|------|-----|--------|-------|--------|', `| 1 | ${claim} | take | brain | 0.6 | 2025-01 | notes |`, '<!--- gbrain:takes:end -->'].join('\n');
+  await managedFixture(async (engine, sourceId) => {
+    await putPage(engine, sourceId, 'notes/graded', `---\ntitle: Graded\ntype: note\n---\nDraft.\n\n${takes('Acme will ship widgets')}\n`);
+  }, async (engine, sourceId, root) => {
+    let renamed = false;
+    const judge = async ({ take }: { take: { claim: string } }) => {
+      // Other sources' takes on this shared test brain are not part of this case.
+      if (take.claim !== 'Acme will ship widgets' || renamed) return { verdict: 'unresolvable' as const, confidence: 0.1, reasoning: 'n/a' };
+      renamed = true;
+      // Simulate a rename that already committed, then a new page taking over the old slug.
+      await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+      await engine.executeRaw("UPDATE pages SET slug='notes/graded-renamed', source_path=replace(source_path,'notes/graded.md','notes/graded-renamed.md') WHERE source_id=$1 AND slug='notes/graded'", [sourceId]);
+      await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+      renameSync(join(root, 'notes/graded.md'), join(root, 'notes/graded-renamed.md'));
+      await putPage(engine, sourceId, 'notes/graded', `---\ntitle: Graded\ntype: note\n---\nNew page.\n\n${takes('An unrelated claim')}\n`);
+      return { verdict: 'correct' as const, confidence: 0.99, reasoning: 'Acme shipped widgets.' };
+    };
+    const result = await runPhaseGradeTakes({ engine, sourceId, remote: false, config: {} as never, dryRun: false, logger } as never,
+      { autoResolve: true, minAgeMonths: 0, judge: judge as never, evidenceRetriever: (async () => 'evidence') as never, promptVersion: 'w3-rename' });
+    expect(result.details.auto_applied).toBe(1);
+    const rows = await engine.executeRaw<{ slug: string; resolved_quality: string | null }>(
+      `SELECT p.slug, t.resolved_quality FROM takes t JOIN pages p ON p.id=t.page_id WHERE p.source_id=$1 ORDER BY p.slug`, [sourceId]);
+    expect(rows).toEqual([{ slug: 'notes/graded', resolved_quality: null }, { slug: 'notes/graded-renamed', resolved_quality: 'correct' }]);
+  });
+});
+
+test('#5280: incremental extract on a managed brain handles only the requested slugs, leaving the backlog to the bounded drain (Codex review)', async () => {
+  const { runExtractCore } = await import('../src/commands/extract.ts');
+  const { LINK_EXTRACTOR_VERSION_TS } = await import('../src/core/link-extraction.ts');
+  await managedFixture(async (engine, sourceId) => {
+    await engine.setConfig('auto_link', 'false');
+    await putPage(engine, sourceId, 'notes/changed', '---\ntitle: Changed\ntype: note\n---\nSee [[notes/backlog]].');
+    await putPage(engine, sourceId, 'notes/backlog', '---\ntitle: Backlog\ntype: note\n---\nOld page.');
+  }, async (engine, sourceId, root) => {
+    try {
+      expect(await engine.countStalePagesForExtraction({ sourceId, versionTs: LINK_EXTRACTOR_VERSION_TS })).toBe(2);
+      const result = await runExtractCore(engine, { mode: 'all', dir: root, sourceId, slugs: ['notes/changed'], quiet: true });
+      expect(result.pages_processed).toBe(1);
+      expect(await engine.countStalePagesForExtraction({ sourceId, versionTs: LINK_EXTRACTOR_VERSION_TS })).toBe(1);
+    } finally { await engine.setConfig('auto_link', 'true'); }
   });
 });
 

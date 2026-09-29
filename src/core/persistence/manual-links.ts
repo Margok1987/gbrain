@@ -27,7 +27,7 @@ export async function coordinatedManualLinkWrite<T>(ctx: OperationContext, opera
   const authority = await submissionAuthority(ctx, operation, sourceId, source.incarnation, from);
   const value = await ctx.engine.transaction(tx => withCoordinatedWrite(tx, [sourceId], async () => {
     const [current] = await tx.executeRaw<{ incarnation: string; archived: boolean }>(
-      'SELECT incarnation,archived FROM sources WHERE id=$1', [sourceId]);
+      'SELECT incarnation,archived FROM sources WHERE id=$1 FOR SHARE', [sourceId]);
     if (!current || current.archived || current.incarnation !== source.incarnation) {
       throw new OperationError('source_changed', 'The link source changed before the write.');
     }

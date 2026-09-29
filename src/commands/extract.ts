@@ -740,7 +740,7 @@ export async function runExtractCore(engine: BrainEngine, opts: ExtractOpts): Pr
   if (!dryRun && opts.mode === 'all' && opts.slugs?.length !== 0 && await managedPersistenceEnabled(engine)) {
     const { extractManagedStaleLinks } = await import('../core/persistence/links-maintenance.ts');
     const progress = createProgress(cliOptsToProgressOptions(getCliOptions())); progress.start('extract.links_fs', opts.slugs?.length);
-    const r = await extractManagedStaleLinks(engine, { sourceId: opts.sourceId, slugs: opts.slugs, signal: opts.signal });
+    const r = await extractManagedStaleLinks(engine, { sourceId: opts.sourceId, slugs: opts.slugs, signal: opts.signal, maxPages: opts.slugs?.length });
     progress.finish(); return { links_created: r.created, timeline_entries_created: r.timeline, pages_processed: r.pages };
   }
 

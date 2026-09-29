@@ -305,7 +305,8 @@ export async function runPhaseSynthesizeConcepts(
     const conceptSlug = `concepts/${group.conceptSlug}`;
     // A concept page this phase did not write belongs to a human (or another
     // writer). Check before any spend; never replace its body.
-    const existing = await engine.getPage(conceptSlug, { sourceId: opts.sourceId ?? 'default' });
+    const existingSnapshot = await engine.readPageSnapshot(conceptSlug, { sourceId: opts.sourceId ?? 'default' });
+    const existing = existingSnapshot?.page ?? null;
     if (existing && !String(existing.frontmatter?.synthesized_by ?? '').startsWith('synthesize_concepts')) {
       skippedHumanOwned.push(conceptSlug);
       continue;
@@ -424,9 +425,13 @@ export async function runPhaseSynthesizeConcepts(
         synthesized_by: 'synthesize_concepts-v0.41',
         visibility: pageVisibility,
       });
+      // Each managed publication is bound to the revision the narrative was
+      // synthesized from, then to the previous publication's result.
+      let conceptRevision = existingSnapshot?.revision ?? null;
       const publish = async (pageVisibility: Visibility): Promise<void> => {
         if (maintenance) {
-          await publishManagedConcept(engine, maintenance, conceptSlug, synthesized(pageVisibility), narrative, opts.brainDir);
+          conceptRevision = await publishManagedConcept(engine, maintenance, conceptSlug, synthesized(pageVisibility), narrative,
+            conceptRevision, opts.brainDir);
           return;
         }
         await importFromContent(engine, conceptSlug, serializeMarkdown(synthesized(pageVisibility), narrative, '',

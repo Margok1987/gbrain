@@ -33,8 +33,13 @@ function conceptHoldError(message: string): Error { return Object.assign(new Err
  * `db_only` storage tier always wins.
  */
 export async function publishManagedConcept(engine: BrainEngine, authority: MaintenanceAuthority,
-  slug: string, synthesized: Record<string, unknown>, narrative: string, brainDir?: string): Promise<void> {
+  slug: string, synthesized: Record<string, unknown>, narrative: string, expectedRevision: string | null, brainDir?: string): Promise<string | null> {
   const snapshot = await engine.readPageSnapshot(slug, { sourceId: authority.writer.sourceId, includeDeleted: true });
+  // The narrative was synthesized from the revision read before the model call
+  // (or the previous publication's result); an intervening edit wins.
+  if ((snapshot?.revision ?? null) !== expectedRevision) {
+    throw Object.assign(new Error('The concept page changed during synthesis.'), { code: 'revision_conflict' });
+  }
   let dbOnly = !snapshot?.page.source_path;
   if (!dbOnly) {
     try {
@@ -48,8 +53,9 @@ export async function publishManagedConcept(engine: BrainEngine, authority: Main
   const markdown = snapshot && !snapshot.page.deleted_at
     ? composeConceptRepublication(snapshot.page, snapshot.tags, synthesized, narrative)
     : serializeMarkdown(synthesized, narrative, '', { type: 'concept', title, tags: [] });
-  await publishMaintenancePage(engine, authority, slug, markdown,
+  const receipt = await publishMaintenancePage(engine, authority, slug, markdown,
     { expectedRevision: snapshot?.revision ?? null, file: !dbOnly });
+  return typeof receipt.revision === 'string' ? receipt.revision : null;
 }
 
 /** Provenance edges inside a coordinated transaction scoped to the concept's source. */
