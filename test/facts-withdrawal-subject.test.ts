@@ -13,6 +13,7 @@ import { runExtractFacts } from '../src/core/cycle/extract-facts.ts';
 import { forgetFactInFence } from '../src/core/facts/forget.ts';
 import { importFromContent } from '../src/core/import-file.ts';
 import { isFactWithdrawn } from '../src/core/facts/withdrawal.ts';
+import { readExportPage, readExportWithdrawals } from '../src/core/export-snapshot.ts';
 
 let engine: PGLiteEngine;
 let brainDir: string;
@@ -104,6 +105,17 @@ describe('subject-scoped withdrawal', () => {
     expect(bob?.compiled_truth).not.toContain('forgotten:');
     expect((await activeFacts()).find(r => r.entity_slug === 'people/bob-example')?.expired).toBe(false);
     expect((await activeFacts()).find(r => r.entity_slug === 'people/alice-example')?.expired).toBe(true);
+  });
+
+  test('Markdown export strikes the claim only on the forgotten entity\'s page', async () => {
+    await forgetAlice();
+    const withdrawals = await readExportWithdrawals(engine, 'default');
+    const exported = async (slug: string) => {
+      const [row] = await engine.executeRaw<{ id: string }>(`SELECT id::text AS id FROM pages WHERE slug=$1`, [slug]);
+      return (await readExportPage(engine, { id: row.id, source_id: 'default', slug }, withdrawals)).page.compiled_truth;
+    };
+    expect(await exported('people/alice-example')).toContain('~~Prefers email~~');
+    expect(await exported('people/bob-example')).not.toContain('~~Prefers email~~');
   });
 
   test('the withdrawal follows a rename of the forgotten entity\'s page', async () => {
