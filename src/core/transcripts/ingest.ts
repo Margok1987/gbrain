@@ -35,9 +35,13 @@ import { detectAdapter } from './detect.ts';
 import {
   loadImportRedactionPatterns,
   redactSession,
+  renderPartContent,
   renderSessionParts,
+  type RenderedPart,
   type RenderSessionResult,
 } from './render.ts';
+import { RECONCILE_SAFETY_KEYS } from '../persistence/reconcile-safety.ts';
+import { ATOMS_SCAN_HASH_KEY } from '../utils.ts';
 
 export interface IngestActivePack {
   page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string> }>;
@@ -289,6 +293,7 @@ export async function runTranscriptsIngest(
             let resolvedBaseSlug = rendered.baseSlug;
             for (const part of rendered.parts) {
               try {
+                await preserveForeignFrontmatter(engine, opts.sourceId ?? 'default', part);
                 const r = await importFromContent(engine, part.slug, part.content, {
                   noEmbed: !opts.embed,
                   sourceId: opts.sourceId,
@@ -465,6 +470,22 @@ export async function runTranscriptsIngest(
  * slug, the importer's cross-slug identity dedup skipped it as a duplicate
  * and every message added since the last import was silently dropped.
  */
+/**
+ * Re-ingest replaces only what the collector renders (#5431): keys another
+ * tool or the operator added to an imported conversation page (a review flag,
+ * say) are carried onto the re-rendered part. Gate- and phase-owned markers
+ * are re-derived from the new content, so they are never carried.
+ */
+async function preserveForeignFrontmatter(engine: BrainEngine, sourceId: string, part: RenderedPart): Promise<void> {
+  const existing = await engine.getPage(part.slug, { sourceId });
+  const foreign = Object.entries(existing?.frontmatter ?? {})
+    .filter(([key]) => !Object.hasOwn(part.frontmatter, key) && !RE_DERIVED_KEYS.has(key));
+  if (foreign.length === 0) return;
+  part.content = renderPartContent({ ...part.frontmatter, ...Object.fromEntries(foreign) }, part.body);
+}
+
+const RE_DERIVED_KEYS = new Set([...RECONCILE_SAFETY_KEYS, ATOMS_SCAN_HASH_KEY]);
+
 async function adoptExistingBaseSlug(engine: BrainEngine, sourceId: string, rendered: RenderSessionResult): Promise<void> {
   const [existing] = await engine.executeRaw<{ slug: string }>(
     `SELECT slug FROM pages WHERE source_id = $1 AND deleted_at IS NULL AND frontmatter->>'id' = $2 ORDER BY id LIMIT 1`,
