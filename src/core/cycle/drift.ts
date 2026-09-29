@@ -23,7 +23,8 @@
  */
 
 import type { BrainEngine } from '../engine.ts';
-import { BudgetMeter } from './budget-meter.ts';
+import { BudgetMeter, loadAllowUnpriced, parseBudgetUsd } from './budget-meter.ts';
+import { resolveSynthMaxOutputTokens } from './synthesize-concepts.ts';
 import { resolveModel } from '../model-config.ts';
 import type { DreamPhaseResult } from './auto-think.ts';
 
@@ -42,6 +43,7 @@ export interface DriftConfig {
   enabled: boolean;
   lookbackDays: number;
   budgetUsd: number;
+  allowUnpriced: boolean;
   autoUpdate: boolean;
   maxPerCycle: number;
 }
@@ -55,7 +57,8 @@ async function loadDriftConfig(engine: BrainEngine): Promise<DriftConfig> {
   return {
     enabled: enabledStr === 'true',
     lookbackDays: lookbackStr ? Math.max(1, parseInt(lookbackStr, 10) || 30) : 30,
-    budgetUsd: budgetStr ? Math.max(0, parseFloat(budgetStr) || 1.0) : 1.0,
+    budgetUsd: parseBudgetUsd(budgetStr, 1.0),
+    allowUnpriced: await loadAllowUnpriced(engine),
     autoUpdate: autoStr === 'true',
     maxPerCycle: maxPerStr ? Math.max(1, parseInt(maxPerStr, 10) || 20) : 20,
   };
@@ -86,6 +89,7 @@ export type DriftJudgeFn = (input: {
   candidate: DriftCandidate;
   evidence: string;
   modelHint?: string;
+  maxOutputTokens?: number;
 }) => Promise<DriftVerdict>;
 
 export const DRIFT_JUDGE_PROMPT = `You are auditing a knowledge-base "take" (a weighted claim) for drift:
@@ -111,6 +115,15 @@ TAKE:
 RECENT EVIDENCE (timeline entries on the same page):
 {EVIDENCE_BLOCK}
 `;
+
+/** The judge prompt for one candidate; also the basis of its budget estimate. */
+export function buildDriftPrompt(candidate: Pick<DriftCandidate, 'claim' | 'weight' | 'pageSlug'>, evidence: string): string {
+  return DRIFT_JUDGE_PROMPT
+    .replace('{CLAIM}', candidate.claim)
+    .replace('{WEIGHT}', String(candidate.weight))
+    .replace('{PAGE}', candidate.pageSlug)
+    .replace('{EVIDENCE_BLOCK}', evidence);
+}
 
 /**
  * Parse the judge model's JSON output. Tolerant of fence wrapping and
@@ -149,17 +162,13 @@ export async function defaultDriftJudge(input: {
   candidate: DriftCandidate;
   evidence: string;
   modelHint?: string;
+  maxOutputTokens?: number;
 }): Promise<DriftVerdict> {
   const { chat } = await import('../ai/gateway.ts');
-  const prompt = DRIFT_JUDGE_PROMPT
-    .replace('{CLAIM}', input.candidate.claim)
-    .replace('{WEIGHT}', String(input.candidate.weight))
-    .replace('{PAGE}', input.candidate.pageSlug)
-    .replace('{EVIDENCE_BLOCK}', input.evidence);
   const result = await chat({
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: buildDriftPrompt(input.candidate, input.evidence) }],
     ...(input.modelHint ? { model: input.modelHint } : {}),
-    maxTokens: 400,
+    maxTokens: input.maxOutputTokens ?? resolveSynthMaxOutputTokens(input.modelHint ?? ''),
   });
   const parsed = parseDriftOutput(result.text);
   if (!parsed) {
@@ -308,9 +317,11 @@ export async function runPhaseDrift(
   });
   const meter = new BudgetMeter({
     budgetUsd: config.budgetUsd,
+    allowUnpriced: config.allowUnpriced,
     phase: 'drift',
     auditPath: opts.auditPath,
   });
+  const maxOutputTokens = resolveSynthMaxOutputTokens(modelId);
   const judge = opts.judge ?? defaultDriftJudge;
   const cutoffIso = lookbackCutoffIso(config.lookbackDays);
 
@@ -318,19 +329,20 @@ export async function runPhaseDrift(
   let budgetExhausted = false;
   let failed = 0;
   for (const candidate of candidates.slice(0, config.maxPerCycle)) {
+    const evidence = await loadEvidence(engine, candidate.pageId, cutoffIso);
     const check = meter.check({
       modelId,
-      estimatedInputTokens: 1500,
-      maxOutputTokens: 400,
+      // ~4 chars per token over the prompt the judge actually sends.
+      estimatedInputTokens: Math.ceil(buildDriftPrompt(candidate, evidence).length / 4),
+      maxOutputTokens,
       label: `drift:${candidate.pageSlug}#${candidate.rowNum}`,
     });
     if (!check.allowed) {
       budgetExhausted = true;
       break;
     }
-    const evidence = await loadEvidence(engine, candidate.pageId, cutoffIso);
     try {
-      const verdict = await judge({ candidate, evidence, modelHint: modelId });
+      const verdict = await judge({ candidate, evidence, modelHint: modelId, maxOutputTokens });
       judged.push({ candidate, verdict });
     } catch (e) {
       failed += 1;
