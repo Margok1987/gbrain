@@ -250,6 +250,16 @@ export async function markRecovering(engine: SqlEngine, row: WriteRequest, reaso
     error_code=COALESCE(error_code,$4),error_message=COALESCE(error_message,$5)
     WHERE id=$1::uuid AND execution_token=$2::uuid AND state IN ('running','recovering') AND ${PERSISTENCE_PROTOCOL_PREDICATE}`, [row.id, row.execution_token, reason, failure?.code ?? null, failure?.message ?? null]);
 }
+/**
+ * PGLite has no autovacuum. The resident owner reclaims queue churn and keeps
+ * planner statistics current, so receipt lookups keep using the request-id
+ * index and claims do not walk dead queue entries.
+ */
+export async function vacuumPersistenceQueues(engine: BrainEngine): Promise<void> {
+  if (engine.kind !== 'pglite') return;
+  await engine.executeRaw('VACUUM (ANALYZE) persistence_requests, persistence_effects, persistence_counters, page_projection_jobs, page_write_guards');
+}
+
 export async function compactWriteReceipts(engine: BrainEngine, retentionDays = 30): Promise<number> {
   if (!Number.isFinite(retentionDays) || retentionDays < 0) throw new TypeError('Invalid receipt retention.');
   const rows = await engine.executeRaw<WriteRequest>(`SELECT * FROM persistence_requests

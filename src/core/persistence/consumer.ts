@@ -1,6 +1,6 @@
 import type { BrainEngine } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
-import { claimNextWrite, compactWriteReceipts, getWriteRequestById, releaseUnpublishedClaim, renewWriteClaim } from './journal.ts';
+import { claimNextWrite, compactWriteReceipts, getWriteRequestById, releaseUnpublishedClaim, renewWriteClaim, vacuumPersistenceQueues } from './journal.ts';
 import { finishUnpublishedFailure, publishMutation, recoverPublication, type PreparedMutation } from './coordinator.ts';
 import { localHostId } from './identity.ts';
 import { isTerminal, type WriteRequest } from './model.ts';
@@ -26,6 +26,7 @@ export class PersistenceConsumer {
   private topologyWorker: Promise<unknown> | undefined;
   private maintenanceWorker: Promise<unknown> | undefined;
   private nextMaintenance = 0;
+  private publishedSinceMaintenance = 0;
   private lastScan = 0;
   private progressWake = false;
   private lastError: { code: string; at: string; phase?: string } | undefined;
@@ -83,9 +84,12 @@ export class PersistenceConsumer {
       .catch(error => this.report(error)).finally(() => { this.topologyWorker = undefined; });
     if (!this.effectsWorker) this.effectsWorker = this.drainEffects().catch(error => this.report(error))
       .finally(() => { this.effectsWorker = undefined; });
-    if (!this.maintenanceWorker && Date.now() >= this.nextMaintenance) {
+    // Queue upkeep also follows publication volume, so a busy owner never
+    // plans against statistics from a much smaller queue.
+    if (!this.maintenanceWorker && (Date.now() >= this.nextMaintenance || this.publishedSinceMaintenance >= 1000)) {
       this.nextMaintenance = Date.now() + 60_000;
-      this.maintenanceWorker = compactWriteReceipts(this.engine).catch(error => this.report(error))
+      this.publishedSinceMaintenance = 0;
+      this.maintenanceWorker = compactWriteReceipts(this.engine).then(() => vacuumPersistenceQueues(this.engine)).catch(error => this.report(error))
         .finally(() => { this.maintenanceWorker = undefined; });
     }
     if (!this.projectionWorker) this.projectionWorker = rebuildPendingPageProjections(this.engine, 2)
@@ -143,7 +147,7 @@ export class PersistenceConsumer {
       let progressed = false;
       const task = this.execute(row).then(result => { progressed = result; }).catch(error => this.report(error)).finally(() => {
         if (!progressed) this.rootRetryAfter.set(key, Date.now() + (this.opts.pollMs ?? 250));
-        else this.progressWake = true;
+        else { this.progressWake = true; this.publishedSinceMaintenance++; }
         this.active.delete(task); this.activeRoots.delete(key); this.schedule(progressed ? 0 : this.opts.pollMs ?? 250);
       });
       this.active.add(task);
