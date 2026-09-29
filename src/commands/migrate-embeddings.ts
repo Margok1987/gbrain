@@ -178,6 +178,10 @@ function renderPlan(ctx: MigrationPlanContext): string {
   lines.push(worst.usd === null
     ? `  Worst-case authorization: unknown (${worst.requests} request(s); no price for ${plan.to_model}); paid dispatch refuses until priced.`
     : `  Worst-case authorization: $${ceilCents(worst.usd).toFixed(2)} (${worst.requests} request(s) at maximum input size; retries and batch splits settle from the same headroom).`);
+  const unpricedReranker = worst.unpriced_models.filter(m => m !== plan.to_model);
+  if (worst.usd !== null && unpricedReranker.length) {
+    lines.push(`  WARNING: reranker ${unpricedReranker.join(', ')} has no price; its probe refuses without dispatch and the switch is reported as failed. The worst case above covers embeddings only.`);
+  }
   if (worst.usd !== null && worst.prior_debited_usd > 0) {
     lines.push(`  Prior debits: $${worst.prior_debited_usd.toFixed(4)} retained; --max-cost-usd must be at least $${ceilCents(worst.usd + worst.prior_debited_usd).toFixed(2)}.`);
   }

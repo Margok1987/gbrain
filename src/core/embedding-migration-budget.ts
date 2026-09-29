@@ -10,8 +10,8 @@ export const EMBEDDING_BUDGET_BELOW_WORST_CASE = 'embedding_budget_below_worst_c
 export const EMBEDDING_BUDGET_REFUSAL_DOCS = 'https://github.com/garrytan/gbrain/blob/master/docs/guides/write-refusals.md#embedding_budget_below_worst_case';
 const USD_EPSILON = 1e-9;
 
-/** Σ maximum input over the planned requests, from the same batcher the run dispatches through. */
-export interface MigrationWorstCase { requests: number; input_tokens: number; usd: number | null }
+/** Σ maximum input over the planned requests, from the same batcher the run dispatches through. `usd` is null only when the embedding model is unpriced. */
+export interface MigrationWorstCase { requests: number; input_tokens: number; usd: number | null; unpriced_models: string[] }
 
 export interface MigrationBudgetRefusalDetails {
   error: typeof EMBEDDING_BUDGET_BELOW_WORST_CASE;

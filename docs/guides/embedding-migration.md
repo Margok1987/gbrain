@@ -76,7 +76,8 @@ even if a custom base URL still serves its old model.
    this gate guards both destructive work and bounded provider attempts.
    `--yes` confirms the operation; it does not waive the cap. The plan prints a
    **worst-case authorization** beside the estimate: every planned provider
-   request (probes, chunks per page, fact batches, smoke-check queries) at its
+   request (probes, chunks per page, chunks that projection recovery will
+   rebuild, fact batches, smoke-check queries) at its
    maximum input size, where a request's maximum is one token per UTF-8 byte
    of its texts. A cap below the worst case (plus any debits a resumed run
    already holds) refuses with `embedding_budget_below_worst_case` before any
@@ -86,7 +87,9 @@ even if a custom base URL still serves its old model.
    headroom returns and retries and batch splits draw from it. A response
    without usage, or a crash before settlement, keeps the maximum debit.
    Usage above the reservation is debited, recorded as overshoot, and stops
-   further dispatch until you re-run with `--max-cost-usd`. Raising the total
+   further dispatch until you re-run with `--max-cost-usd`. A reranker without
+   a price is left out of the worst case with a warning; its probe refuses
+   without dispatch and the switch is reported as failed. Raising the total
    cap explicitly authorizes more work. Unknown pricing refuses before dispatch.
 3. **Live probe.** After checking environment and embedding-enabled policy,
    one tiny embed against the TARGET provider before any

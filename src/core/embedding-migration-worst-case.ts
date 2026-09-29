@@ -2,22 +2,32 @@
  * #5680: the worst-case authorization of an embedding migration — the sum of
  * each planned provider request's maximum input, computed with the gateway's
  * own request plan (embed-batch-plan.ts) over the texts the run will send:
- * the provider probes, every stale chunk grouped per page and wrapped as the
- * drain wraps it, every stale fact in the fact backfill's batches, the
+ * the provider probes, every stale chunk grouped per page, split as the
+ * drain's oversize heal splits it and wrapped as the drain wraps it, the
+ * chunks projection recovery and the chunkless heal will create (replayed
+ * through the same projection preparation at the tighter of the current and
+ * target chunk sizes), every stale fact in the fact backfill's batches, the
  * completion smoke-check queries, and the reranker probe when the run
  * switches rerankers. The per-request ceiling is additive over texts, so a
  * batch split or retry of the same texts settles from the same headroom.
+ * An unpriced reranker is left out of `usd` and listed in `unpriced_models`:
+ * its probe refuses without dispatch and the switch is reported as failed,
+ * while the known embedding bound is still enforced.
  */
 import type { BrainEngine } from './engine.ts';
 import { embedRequestCeilings, rerankRequestMaxInputTokens } from './ai/embed-batch-plan.ts';
 import { wrapChunkTextsForStoredMode } from './embedding-context.ts';
-import type { CRMode } from './types.ts';
+import type { ChunkInput, CRMode } from './types.ts';
 import { readContentChunksEmbeddingDim } from './embedding-dim-check.ts';
 import { falseStampPageWhere } from './embedding-invalidation.ts';
 import { resolveActiveEmbeddingColumnFromEngine, quoteIdentifier } from './search/embedding-column.ts';
 import { eligibleFactEmbedding, staleFactEmbedding } from './facts/embedding-identity.ts';
 import { AUDIT_ROW_SOURCES } from './facts/audit-sources.ts';
 import { EMBED_PROBE_TEXT } from './embed-stale.ts';
+import { healOversizedChunks } from './embed-oversize-heal.ts';
+import { resolveMaxChunkTokens } from './embedding-input-limit.ts';
+import { preparePageProjection, readProjectionSnapshot } from './page-state/projections.ts';
+import { QUARANTINE_FILTER_FRAGMENT } from './quarantine.ts';
 import { loadPricingOverrides } from './budget/budget-tracker.ts';
 import { usageCostUsd } from './budget/reservation-cost.ts';
 import type { EmbeddingMigrationPlan } from './embedding-migration.ts';
@@ -39,8 +49,40 @@ const SCAN_PAGE = 2000;
 
 interface ChunkRow { page_id: number; chunk_index: number; chunk_text: string; chunk_source: string | null; title: string | null; contextual_retrieval_mode: CRMode | null }
 interface FactRow { id: string; source_id: string; fact: string }
+interface ChunkSizes { run: number; target: number }
 
-async function eachStalePage(engine: BrainEngine, plan: EmbeddingMigrationPlan, visit: (texts: string[]) => void): Promise<void> {
+/** Pages whose chunks are (re)built before embedding: unsealed projections, and contentful pages with no chunks. */
+const REPROJECTED_PAGE = `(p.text_projection_revision IS DISTINCT FROM p.knowledge_revision
+  OR ((p.compiled_truth <> '' OR p.timeline <> '') AND ${QUARANTINE_FILTER_FRAGMENT}
+    AND NOT EXISTS (SELECT 1 FROM content_chunks c WHERE c.page_id=p.id)))`;
+
+/** The drain's oversize split reads only text, source and token count; the planner's rows carry no other metadata. */
+const embeddedTexts = (page: { title?: string | null; contextual_retrieval_mode?: CRMode | null },
+  chunks: ReadonlyArray<Pick<ChunkInput, 'chunk_index' | 'chunk_text'> & { chunk_source?: string | null }>, sizes: ChunkSizes) =>
+  wrapChunkTextsForStoredMode(page, healOversizedChunks(chunks as unknown as Parameters<typeof healOversizedChunks>[0], sizes.target).chunks);
+
+async function eachReprojectedPage(engine: BrainEngine, sizes: ChunkSizes, visit: (texts: string[]) => void): Promise<void> {
+  let after = 0;
+  for (;;) {
+    const rows = await engine.executeRaw<{ id: number; slug: string; source_id: string }>(`SELECT p.id, p.slug, p.source_id
+      FROM pages p JOIN sources s ON s.id=p.source_id
+      WHERE NOT s.archived AND p.deleted_at IS NULL AND NOT (COALESCE(p.frontmatter,'{}'::jsonb) ? 'embed_skip')
+        AND ${REPROJECTED_PAGE} AND p.id > $1
+      ORDER BY p.id LIMIT ${SCAN_PAGE}`, [after]);
+    for (const row of rows) {
+      const prepared = await readProjectionSnapshot(engine, row.slug, row.source_id, { allowUnsealed: true, maxChunkTokens: sizes.run });
+      if (!prepared) continue;
+      let chunks: ChunkInput[];
+      try { chunks = (await preparePageProjection(prepared)).chunks; }
+      catch { continue; }
+      visit(embeddedTexts(prepared.snapshot.page, chunks, sizes));
+    }
+    if (rows.length < SCAN_PAGE) break;
+    after = rows[rows.length - 1].id;
+  }
+}
+
+async function eachStalePage(engine: BrainEngine, plan: EmbeddingMigrationPlan, sizes: ChunkSizes, visit: (texts: string[]) => void): Promise<void> {
   const column = (await readContentChunksEmbeddingDim(engine)).exists
     ? quoteIdentifier((await resolveActiveEmbeddingColumnFromEngine(engine, { fallbackToLegacy: true })).name)
     : null;
@@ -48,13 +90,13 @@ async function eachStalePage(engine: BrainEngine, plan: EmbeddingMigrationPlan, 
     AND (cc.${column} IS NULL OR p.embedding_signature IS NULL OR p.embedding_signature <> $1
       OR (cc.${column} IS NOT NULL AND ${falseStampPageWhere(column, 1, 2)}))`;
   let page: ChunkRow[] = [];
-  const flush = () => { if (page.length) visit(wrapChunkTextsForStoredMode(page[0], page)); page = []; };
+  const flush = () => { if (page.length) visit(embeddedTexts(page[0], page, sizes)); page = []; };
   let after = { page: 0, chunk: -1 };
   for (;;) {
     const rows = await engine.executeRaw<ChunkRow>(`SELECT cc.page_id, cc.chunk_index, cc.chunk_text, cc.chunk_source,
         p.title, p.contextual_retrieval_mode
       FROM content_chunks cc JOIN pages p ON p.id=cc.page_id
-      WHERE ($1::text IS NOT NULL AND $2::text IS NOT NULL) AND ${stale}
+      WHERE ($1::text IS NOT NULL AND $2::text IS NOT NULL) AND ${stale} AND NOT ${REPROJECTED_PAGE}
         AND (cc.page_id > $3 OR (cc.page_id = $3 AND cc.chunk_index > $4))
       ORDER BY cc.page_id, cc.chunk_index LIMIT ${SCAN_PAGE}`,
     [`${plan.to_model}:${plan.to_dims}`, plan.to_model, after.page, after.chunk]);
@@ -97,16 +139,21 @@ export async function planMigrationWorstCase(engine: BrainEngine, plan: Embeddin
   add([MIGRATION_PROBE_TEXT]);
   for (let i = 0; i < DRAIN_PROBES; i++) add([EMBED_PROBE_TEXT]);
   for (let i = 0; i < SMOKE_QUERIES; i++) ceilings.push(SMOKE_QUERY_MAX_TOKENS);
-  await eachStalePage(engine, plan, add);
+  const target = resolveMaxChunkTokens(process.env, plan.to_model);
+  const sizes = { run: Math.min(resolveMaxChunkTokens(), target), target };
+  await eachStalePage(engine, plan, sizes, add);
+  await eachReprojectedPage(engine, sizes, add);
   await eachStaleFactBatch(engine, plan, add);
   const embedTokens = ceilings.reduce((sum, n) => sum + n, 0);
   const rerankTokens = opts.rerankerModel ? rerankRequestMaxInputTokens(RERANKER_PROBE.query, RERANKER_PROBE.documents) : 0;
   const overrides = await loadPricingOverrides(engine);
   const embedUsd = usageCostUsd(plan.to_model, embedTokens, 0, 'embed', overrides);
   const rerankUsd = opts.rerankerModel ? usageCostUsd(opts.rerankerModel, rerankTokens, 0, 'rerank', overrides) : 0;
+  const unpriced = [...(embedUsd === null ? [plan.to_model] : []), ...(rerankUsd === null ? [opts.rerankerModel!] : [])];
   return {
     requests: ceilings.length + (opts.rerankerModel ? 1 : 0),
     input_tokens: embedTokens + rerankTokens,
-    usd: embedUsd === null || rerankUsd === null ? null : embedUsd + rerankUsd,
+    usd: embedUsd === null ? null : embedUsd + (rerankUsd ?? 0),
+    unpriced_models: unpriced,
   };
 }
