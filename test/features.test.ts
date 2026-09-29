@@ -4,33 +4,10 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
-import { RECIPE_META, runFeatures } from '../src/commands/features.ts';
+import { RECIPE_META, featuresTeaserForDoctor, runFeatures } from '../src/commands/features.ts';
 import { VERSION } from '../src/version.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { withEnv } from './helpers/with-env.ts';
-
-// Test that features module exports correctly
-describe('features command', () => {
-  it('exports runFeatures', async () => {
-    const mod = await import('../src/commands/features.ts');
-    expect(typeof mod.runFeatures).toBe('function');
-  });
-
-  it('exports featuresTeaserForDoctor', async () => {
-    const mod = await import('../src/commands/features.ts');
-    expect(typeof mod.featuresTeaserForDoctor).toBe('function');
-  });
-});
-
-// Test the embedded recipe metadata
-describe('recipe metadata', () => {
-  it('covers all 7 recipes', async () => {
-    // Import the module and check RECIPE_META via the scan behavior
-    // (RECIPE_META is not exported, but we can verify via features scan output)
-    const mod = await import('../src/commands/features.ts');
-    expect(mod.runFeatures).toBeDefined();
-  });
-});
 
 // #2789: the x-to-brain secret name must be the one the resolver actually
 // reads. The recipe + RECIPE_META used to pin X_BEARER_TOKEN while the
@@ -312,6 +289,14 @@ describe('runFeatures behavior', () => {
     expect(ids).not.toContain('zero-links');
     expect(ids).toContain('zero-timeline');
     expect(ids).toContain('missing-embeddings');
+  });
+
+  it('the doctor teaser names missing embeddings and stays silent on a healthy brain', async () => {
+    await seedHealthyBrain();
+    expect(await featuresTeaserForDoctor(engine)).toBeNull();
+
+    await seedChunks('notes/feature-0', [true, false]);
+    expect(await featuresTeaserForDoctor(engine)).toBe("Tip: 1 missing embeddings. Run 'gbrain features' to fix.");
   });
 
   it('brains under three pages skip the priority-2 checks', async () => {

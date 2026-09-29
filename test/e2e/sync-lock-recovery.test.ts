@@ -201,7 +201,7 @@ describeE2E('v0.41.6.0 — sync lock recovery scenarios', () => {
     return dir;
   }
 
-  async function startSyncAtLockBoundary(dir: string) {
+  async function startSyncAtLockBoundary(dir: string, opts: { importStarted: boolean } = { importStarted: true }) {
     const eng = getEngine();
     const child = spawn(CLI[0], [...CLI.slice(1), 'sync', '--repo', dir, '--full', '--yes', '--no-embed'], {
       env: { ...process.env, GBRAIN_HOME: tmpHome, DATABASE_URL: process.env.DATABASE_URL! } as Record<string, string>,
@@ -216,14 +216,15 @@ describeE2E('v0.41.6.0 — sync lock recovery scenarios', () => {
     });
     const deadline = Date.now() + 30_000;
     let lockHeld = false;
-    while (!exit && Date.now() < deadline && !(lockHeld && /\[import\.files\] \d+\//.test(stderr))) {
+    const atBoundary = () => lockHeld && (!opts.importStarted || /\[import\.files\] \d+\//.test(stderr));
+    while (!exit && Date.now() < deadline && !atBoundary()) {
       if (!lockHeld) {
         const snap = await inspectLock(eng, 'gbrain-sync:default');
         lockHeld = !!snap && snap.holder_pid === child.pid;
       }
       await new Promise(r => setTimeout(r, 20));
     }
-    if (exit || !lockHeld || !/\[import\.files\] \d+\//.test(stderr)) {
+    if (exit || !atBoundary()) {
       child.kill('SIGKILL');
       await exited;
       throw new Error(`sync never reached the held-lock boundary (lockHeld=${lockHeld}, exit=${JSON.stringify(exit)}):\n${stderr.slice(-2000)}`);
@@ -246,6 +247,24 @@ describeE2E('v0.41.6.0 — sync lock recovery scenarios', () => {
       expect(exit.code, run.stderr().slice(-2000)).toBe(143);
       expect(await inspectLock(getEngine(), 'gbrain-sync:default')).toBeNull();
       expect(await importedCount('sigterm-bulk')).toBeLessThan(BULK_FILES);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test('closing the output pipe as soon as the lock row appears still releases the lock', async () => {
+    // The early close delivers a second broken-pipe signal while the first
+    // cleanup pass is still deleting the lock row; that signal must wait for
+    // the pass instead of exiting ahead of the DELETE.
+    const dir = makeBulkRepo('lock-row-pipe-bulk');
+    try {
+      const run = await startSyncAtLockBoundary(dir, { importStarted: false });
+      run.child.stdout!.destroy();
+      run.child.stderr!.destroy();
+      const exit = await run.exited;
+
+      expect([0, 141] as Array<number | null>).toContain(exit.code);
+      expect(await inspectLock(getEngine(), 'gbrain-sync:default')).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
