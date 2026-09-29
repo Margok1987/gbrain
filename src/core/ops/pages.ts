@@ -67,7 +67,8 @@ async function dropPrivateSlugs(
  * entirely, facts fence keeps only `world`-visibility rows.
  */
 function stripPrivacyFencesForRemoteReader(page: Page): Page {
-  return { ...page, compiled_truth: sanitizeRemoteBody(page.compiled_truth, { includeWithdrawn: true }), timeline: sanitizeRemoteBody(page.timeline ?? '', { includeWithdrawn: true }) };
+  const opts = { includeWithdrawn: true, keepMaterializedMarkers: true }; // #5567: markers round-trip remote edits
+  return { ...page, compiled_truth: sanitizeRemoteBody(page.compiled_truth, opts), timeline: sanitizeRemoteBody(page.timeline ?? '', opts) };
 }
 
 const get_page: Operation = {
@@ -111,7 +112,7 @@ const get_page: Operation = {
 
     let snapshot = await ctx.engine.readPageSnapshot(slug, { includeDeleted, excludePrivate, ...sourceOpts, resolveAlias: true });
     let page = snapshot?.page ?? null;
-    if (page && excludePrivate && isPrivatePage(page.frontmatter)) page = null;
+    if (page && excludePrivate && isPrivatePage(page)) page = null;
     let resolved_slug: string | undefined = page && page.slug !== slug ? page.slug : undefined;
 
     if (!page && fuzzy) {
@@ -125,7 +126,7 @@ const get_page: Operation = {
           ? await tx.readPageSnapshot(candidates[0], { includeDeleted, excludePrivate, ...sourceOpts }) : null };
       });
       if (fallback.candidates.length > 1) return { error: 'ambiguous_slug', candidates: fallback.candidates };
-      if (fallback.snapshot && !(excludePrivate && isPrivatePage(fallback.snapshot.page.frontmatter))) {
+      if (fallback.snapshot && !(excludePrivate && isPrivatePage(fallback.snapshot.page))) {
         snapshot = fallback.snapshot;
         page = snapshot.page;
         resolved_slug = page.slug;
@@ -144,7 +145,7 @@ const get_page: Operation = {
           // gbrain-allow-unscoped-getpage: read-only diagnostic existence probe —
           // deliberately spans all sources to name where the slug lives.
           const elsewhere = await ctx.engine.getPage(slug, { includeDeleted });
-          if (elsewhere && !(excludePrivate && isPrivatePage(elsewhere.frontmatter))) {
+          if (elsewhere && !(excludePrivate && isPrivatePage(elsewhere))) {
             hint = `Page exists in source '${elsewhere.source_id}' — pass --source ${elsewhere.source_id} (source_id: '${elsewhere.source_id}' over MCP). ${hint}`;
           }
         } catch {
@@ -243,7 +244,7 @@ const fetch_page: Operation = {
       throw error;
     }
     const page = snapshot?.page;
-    if (!page || (excludePrivate && isPrivatePage(page.frontmatter))) throw missing();
+    if (!page || (excludePrivate && isPrivatePage(page))) throw missing();
     bumpLastRetrievedAt(ctx.engine, [page.id]);
     const tags = snapshot!.tags;
     // Same privacy boundary as get_page: untrusted readers (ctx.remote ===

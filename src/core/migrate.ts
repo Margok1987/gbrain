@@ -6668,6 +6668,37 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS embedded_text_hash TEXT;
       ${MANAGED_WRITER_GUARD_SQL}`,
   },
+  {
+    version: 168,
+    name: 'content_chunks_embedding_input_hash',
+    // #5553: per-chunk embedding-input provenance, written in the same
+    // statement as the vector (src/core/embedding-input-hash.ts). A projection
+    // rebuild keeps a vector only when the stored hash equals the recomputed
+    // one. Same shape as v133 and v166's fact provenance: nullable, no
+    // backfill (a hash cannot be proven for an existing vector), no index
+    // (read only per page during a rebuild; bootstrap-coverage: column-only).
+    // NULL on a contextual page is nulled once and stamped by its re-embed.
+    // Keep in sync with src/schema.sql (regenerate schema-embedded.ts via
+    // build:schema) and src/core/pglite-schema.ts.
+    idempotent: true,
+    sql: `
+      ALTER TABLE content_chunks ADD COLUMN IF NOT EXISTS embedding_input_hash TEXT;
+    `,
+  },
+  {
+    version: 169, name: 'pages_safe_chunk_pending_index', idempotent: true, transaction: false, sql: '',
+    // #5050/#5247: the safe_index_pending probe (ops/search.ts) runs on every
+    // remote search and now counts pages of every kind below the safe-chunk
+    // fence, so the markdown-only partial pages_chunker_version_idx no longer
+    // serves it. This partial index holds only unsealed pages (empty on a
+    // sealed brain). The literal 4 is SAFE_FENCE_CHUNKER_VERSION when this
+    // migration shipped; a later fence bump needs its own index.
+    handler: async engine => {
+      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 169, 'pages_safe_chunk_pending_idx');
+      await engine.runMigration(169, `CREATE INDEX ${engine.kind === 'postgres' ? 'CONCURRENTLY ' : ''}IF NOT EXISTS pages_safe_chunk_pending_idx
+        ON pages (source_id) WHERE chunker_version < 4`);
+    },
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0

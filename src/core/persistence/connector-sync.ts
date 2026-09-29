@@ -13,7 +13,7 @@ import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
 import { sealPageTextProjection } from '../page-state/projections.ts';
 import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
 import { authorizeStoredRequest, authorizeWrite } from './authority.ts';
-import { prepareCanonicalProjections } from './canonical-projections.ts';
+import { materializeTimeline, prepareCanonicalProjections } from './canonical-projections.ts';
 import { digest, sha256 } from './digest.ts';
 import { admitWriteInTransaction, assertReplayIntent, getWriteRequest, getWriteRequestById, intentDigest, receiptFor } from './journal.ts';
 import { acquireWorktree, containsPath, getWorktreeBinding, type WorktreeBinding } from './ownership.ts';
@@ -459,9 +459,13 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
     throw new OperationError('invalid_params', 'The connector import path is invalid.');
   }
   const activePack = p.noSchemaPack ? undefined : (await loadActivePackForEngine(engine, { remote: false, sourceId: row.source_id }).catch(() => null))?.manifest;
-  if (parseMarkdown(p.content, row.slug, { activePack }).slug !== row.slug) throw new OperationError('invalid_params', 'The connector content changes its page identity.');
+  const parsed = parseMarkdown(p.content, row.slug, { activePack });
+  if (parsed.slug !== row.slug) throw new OperationError('invalid_params', 'The connector content changes its page identity.');
+  // #5567: carry materialized and database-only timeline rows forward into the connector render.
+  const carried = await materializeTimeline(engine, parsed, row.slug, snapshot, 'preserving');
+  const content = carried.materialized && snapshot ? serializePageToMarkdown({ ...snapshot.page, ...parsed, timeline: carried.timeline, type: parsed.typeExplicit ? parsed.type : snapshot.page.type }, parsed.tags) : p.content;
   let prepared: PreparedContentImport | undefined;
-  const result = await importFromContent(engine, row.slug, p.content, { sourceId: row.source_id, sourcePath: p.sourcePath,
+  const result = await importFromContent(engine, row.slug, content, { sourceId: row.source_id, sourcePath: p.sourcePath,
     filename: basename(p.sourcePath).replace(/\.mdx?$/i, ''), noEmbed: true, allowEmptyOverwrite: true, activePack,
     prepareFrontmatter: page => {
       if (snapshot?.page.frontmatter.visibility === 'private') page.frontmatter.visibility = 'private';
@@ -470,7 +474,7 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
   if (!prepared || prepared.slug !== row.slug) throw new OperationError('revision_conflict', result.error ?? 'A different page owns this connector content.');
   const ready = prepared;
   if (ready.observedRevision !== (snapshot?.revision ?? null)) throw new OperationError('revision_conflict', 'The connector page changed during preparation.');
-  const project = prepareCanonicalProjections(ready.parsedPage, row.slug, row.source_id);
+  const project = await prepareCanonicalProjections(engine, ready.parsedPage, row.slug, row.source_id, snapshot, 'preserving');
   const tags = [...new Set([...(snapshot?.tags ?? []), ...ready.parsedPage.tags])].sort();
   const page: Page = { ...(snapshot?.page ?? { id: 0, slug: row.slug, source_id: row.source_id, created_at: new Date(row.created_at), updated_at: new Date(row.created_at) }), ...ready.parsedPage };
   const file = await connectorFileTarget(engine, row, snapshot, serializePageToMarkdown(page, tags), p.sourcePath, p.canonicalRoot);

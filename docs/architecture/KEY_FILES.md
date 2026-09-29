@@ -39,7 +39,7 @@ boundary and add its link here rather than raising the cap.
 | [Core Services (2/3)](key-files/core-services-2.md) | `src/core/conversation-parser/` through `src/core/progressive-batch/` |
 | [Core Services (3/3)](key-files/core-services-3.md) | `src/core/think/index.ts` through `src/core/verbs/usage-log.ts` |
 | [Core Utilities (1/2)](key-files/core-utilities-1.md) | `src/core/archive-crawler-config.ts` through `src/core/remediation-checkpoint.ts` |
-| [Core Utilities (2/2)](key-files/core-utilities-2.md) | `src/core/rerank-audit.ts` through `src/core/verbs.ts` |
+| [Core Utilities (2/2)](key-files/core-utilities-2.md) | `src/core/repair/` through `src/core/verbs.ts` |
 | [Engines (1/2)](key-files/engines-1.md) | `src/core/connection-manager.ts` through `src/core/pglite-repair.ts` |
 | [Engines (2/2)](key-files/engines-2.md) | `src/core/pglite-resetwal.ts` through `src/core/worker-pool.ts` |
 | [Entrypoints And Docs](key-files/entrypoints-and-docs.md) | `.agents/gbrain-launcher` through `templates/` |
