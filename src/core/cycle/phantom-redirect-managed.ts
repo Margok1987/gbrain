@@ -50,9 +50,12 @@ export async function redirectManagedPhantom(engine: BrainEngine, page: Page, ca
     phantom_slug: page.slug, phantom_page_id: page.id, phantom_revision: phantom.revision, row_map: [...merged.renumber],
   });
 
+  // The delete is bound to the revision that was merged: an edit committed
+  // since then never reached the canonical page, so the next run remerges it.
   const current = await engine.readPageSnapshot(page.slug, { sourceId });
   if (current?.page.id === page.id) {
-    await submitMaintenanceIntent(engine, authority, page.slug, { kind: 'managed_maintenance_delete', expected_revision: current.revision });
+    if (current.revision !== phantom.revision) return drift('phantom page edited after its merge; delete deferred to the next run');
+    await submitMaintenanceIntent(engine, authority, page.slug, { kind: 'managed_maintenance_delete', expected_revision: phantom.revision });
   }
   logPhantomEvent({ phantom_slug: page.slug, canonical_slug: canonical, outcome: 'redirected',
     fact_count: Number(outcome.facts_moved ?? 0), source_id: sourceId });

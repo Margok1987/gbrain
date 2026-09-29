@@ -87,7 +87,9 @@ async function managed(seed: (f: Fixture) => Promise<void>, run: (f: Fixture) =>
         const ctx = { engine, sourceId, remote: false as const, config: { engine: engine.kind, embedding_disabled: true },
           dryRun: false, logger: { info() {}, warn() {}, error() {} } };
         const fixture: Fixture = { engine, sourceId, root, put: async (slug, content) => {
-          await submitPageMutation(ctx, { operation: 'put_page', params: { slug, content, request_id: randomUUID() } });
+          const prior = await engine.readPageSnapshot(slug, { sourceId });
+          await submitPageMutation(ctx, { operation: 'put_page', params: { slug, content, request_id: randomUUID(),
+            ...(prior ? { expected_revision: prior.revision } : {}) } });
         } };
         await seed(fixture);
         await disposePersistenceConsumer(engine);
@@ -221,6 +223,60 @@ test('managed bulk conversation extraction writes its facts and terminal audit r
     const replay = await runExtractConversationFactsCore(engine, { sourceId, overrideDisabled: true, extractor, types: ['conversation'], force: true });
     expect(replay.orphan_facts_cleaned).toBe(2);
     expect(await facts(engine, sourceId, 'conversations/synthetic-chat')).toHaveLength(2);
+  });
+}, 120_000);
+
+test('republishing a managed conversation page keeps its extracted facts active and the page complete', async () => {
+  // Conversation rows are numbered on the page coordinate but carry no fence;
+  // like the legacy fence reconcile (#1928), the canonical projection must not
+  // expire them as rows that left a fence.
+  await managed(async ({ put }) => { await put('conversations/synthetic-chat', CONVERSATION); }, async ({ engine, sourceId, put }) => {
+    await runExtractConversationFactsCore(engine, { sourceId, overrideDisabled: true, extractor, types: ['conversation'] });
+    await put('conversations/synthetic-chat', CONVERSATION.replace('Staff engineer', 'A staff engineer'));
+    expect((await facts(engine, sourceId, 'conversations/synthetic-chat')).map(f => [f.fact, f.row_num, f.expired_at])).toEqual([
+      ['Alice Example joined Acme Corp as a staff engineer.', 0, null], ['EXTRACTION_COMPLETE', 1, null]]);
+    // The edit changed the snapshot, so the next run replays the page delete-first.
+    const rerun = await runExtractConversationFactsCore(engine, { sourceId, overrideDisabled: true, extractor, types: ['conversation'] });
+    expect([rerun.facts_inserted, rerun.orphan_facts_cleaned]).toEqual([1, 2]);
+    expect((await facts(engine, sourceId, 'conversations/synthetic-chat')).filter(f => f.expired_at === null).map(f => f.fact)).toEqual([
+      'Alice Example joined Acme Corp as a staff engineer.', 'EXTRACTION_COMPLETE']);
+  });
+}, 120_000);
+
+test('managed phantom redirect defers the phantom delete when the phantom is edited after the merge', async () => {
+  await managed(async ({ engine, sourceId, root, put }) => {
+    await put('people/alice-example', PERSON('Alice Example'));
+    await engine.putPage('alice', { type: 'person', title: 'alice', compiled_truth: `# alice\n\n${FENCE('| 1 | Founded Acme | fact | 1.0 | world | high | 2017-01-01 |  | chat |  |')}`.trim(),
+      timeline: '', frontmatter: {} }, { sourceId });
+    const phantom = (await engine.readPageSnapshot('alice', { sourceId }))!;
+    writeFileSync(join(root, 'alice.md'), serializePageToMarkdown(phantom.page, phantom.tags));
+    await runExtractFacts(engine, { sourceId, slugs: ['alice'] });
+  }, async ({ engine, sourceId, root, put }) => {
+    // A coordinated edit to the phantom lands right after the merge commits,
+    // before the redirect rereads the phantom to delete it.
+    const read = engine.readPageSnapshot;
+    let edited = false;
+    engine.readPageSnapshot = (async function (this: BrainEngine, slug: string, opts?: Parameters<BrainEngine['readPageSnapshot']>[1]) {
+      // Transactions inherit this method; only the redirect's own read on the engine triggers the edit.
+      if (this === engine && slug === 'alice' && !edited && new Error().stack?.includes('redirectManagedPhantom') && (await engine.executeRaw(
+        "SELECT 1 FROM persistence_requests WHERE source_id=$1 AND intent->>'kind'='managed_maintenance_phantom_merge' AND state='committed'", [sourceId])).length) {
+        edited = true;
+        await put('alice', `---\ntitle: alice\ntype: person\n---\n# alice\n\n${FENCE([
+          '| 1 | Founded Acme | fact | 1.0 | world | high | 2017-01-01 |  | chat |  |',
+          '| 2 | Moved to Lisbon | fact | 1.0 | world | high | 2020-01-01 |  | chat |  |'].join('\n'))}`);
+      }
+      return read.call(this, slug, opts);
+    }) as BrainEngine['readPageSnapshot'];
+    let result: Awaited<ReturnType<typeof runExtractFacts>>;
+    try { result = await runExtractFacts(engine, { sourceId, brainDir: root }); }
+    finally { delete (engine as { readPageSnapshot?: unknown }).readPageSnapshot; }
+    expect(edited).toBe(true);
+    const alive = await engine.readPageSnapshot('alice', { sourceId, includeDeleted: true });
+    expect(alive?.page.deleted_at ?? null).toBeNull();
+    expect([result.phantomsRedirected, result.phantomsSkippedDrift]).toEqual([0, 1]);
+    expect(alive?.page.compiled_truth).toContain('Moved to Lisbon');
+    expect(readFileSync(join(root, 'alice.md'), 'utf8')).toContain('Moved to Lisbon');
+    expect(await committed(engine, sourceId, 'alice').then(rows => rows.filter(r => r.kind === 'managed_maintenance_delete'))).toEqual([]);
   });
 }, 120_000);
 
