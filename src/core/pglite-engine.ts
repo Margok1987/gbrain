@@ -4,11 +4,11 @@ import { trackPgliteDatabase, PgliteClosingError, notifyPgliteOpened } from './p
 import { mutatePageTag } from './page-state/tags.ts';
 import type { PageKey, PageSnapshot, PageSnapshotOptions, PageWriteOptions } from './page-state/types.ts';
 import { assertPageRevision } from './page-state/types.ts';
-import { lockPageKeys as acquirePageKeys } from './page-state/guards.ts';
+import { lockPageKeys as acquirePageKeys, pageGuardKey, type HeldPageKeys } from './page-state/guards.ts';
 import { readPageSnapshot as readCanonicalPageSnapshot } from './page-state/snapshot.ts';
 import { createPageVersion } from './page-state/versions.ts';
 import { composablePgliteTransaction } from './page-state/transactions.ts';
-import { PgliteStatementCache } from './pglite-statements.ts';
+import { dropRowTypeArrayParsers, PgliteStatementCache } from './pglite-statements.ts';
 import { GRANT_COLUMNS_SQL } from './grants/schema.ts';
 import type { PageReadScope } from './types.ts';
 import type { PageReadPolicy } from './types.ts';
@@ -211,26 +211,6 @@ function pgliteCloseWatchdogMs(): { deadlineMs: number; graceMs: number } {
 }
 
 type PGLiteDB = PGlite;
-
-interface HeldPageKeys { keys: Set<string>; parent: HeldPageKeys | null }
-/** Identity acquirePageKeys guards; null when the key is invalid and must reach its checks. */
-function heldPageKey(key: PageKey): string | null {
-  if (!key.sourceId) return null;
-  try { return JSON.stringify([key.sourceId, validateSlug(key.slug)]); } catch { return null; }
-}
-
-/**
- * PGlite copies `db.parsers` into a fresh object for every query result. Its
- * array-type init registers one parser per composite (table row) array type,
- * most of the map in a gbrain schema, and gbrain never selects those arrays;
- * the per-query copy then dominated short statements. Their values would only
- * have been split into unparsed strings, so drop them after connect.
- */
-async function dropRowTypeArrayParsers(db: PGLiteDB): Promise<void> {
-  const { rows } = await db.query<{ oid: number }>(`SELECT a.oid::int AS oid FROM pg_type a
-    JOIN pg_type e ON e.oid=a.typelem WHERE a.typcategory='A' AND e.typtype='c'`);
-  for (const { oid } of rows) delete db.parsers[oid];
-}
 
 // Tier 3 snapshot fast-restore. Reads a tar dump produced by
 // `bun run scripts/build-pglite-snapshot.ts`. Snapshot is matched against
@@ -1749,10 +1729,10 @@ export class PGLiteEngine implements BrainEngine {
    */
   async lockPageKeys(keys: readonly PageKey[]): Promise<void> {
     if (!this._pageTransaction) throw new Error('lockPageKeys requires engine.transaction()');
-    const pending = keys.filter(key => { const id = heldPageKey(key); return id === null || !this._holdsPageKey(id); });
+    const pending = keys.filter(key => { const id = pageGuardKey(key); return id === null || !this._holdsPageKey(id); });
     if (!pending.length) return;
     await acquirePageKeys(this, pending);
-    for (const key of pending) this._heldPageKeys!.keys.add(heldPageKey(key)!);
+    for (const key of pending) this._heldPageKeys!.keys.add(pageGuardKey(key)!);
   }
 
   private _heldPageKeys: HeldPageKeys | null = null;

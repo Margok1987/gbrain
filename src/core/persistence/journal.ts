@@ -40,15 +40,15 @@ export function capacityError(resource: string): OperationError {
   return new OperationError('queue_capacity', `Write capacity exhausted: ${resource}.`,
     'Inspect writer status and configured persistence limits. Existing requests retain their reserved completion space.');
 }
-/** Creates and locks every counter row in one sorted pass (byte order, like the JS sort). */
 export async function lockCounters(tx: SqlEngine, keys: string[]): Promise<Counter[]> {
   const sorted = [...new Set(keys)].sort();
-  await tx.executeRaw(`INSERT INTO persistence_counters(key) SELECT key FROM unnest($1::text[]) AS k(key)
-    ORDER BY key COLLATE "C" ON CONFLICT DO NOTHING`, [sorted]);
-  const rows = await tx.executeRaw<Counter>(`SELECT * FROM persistence_counters WHERE key=ANY($1::text[])
-    ORDER BY key COLLATE "C" FOR UPDATE`, [sorted]);
-  const byKey = new Map(rows.map(row => [row.key, row]));
-  return sorted.map(key => byKey.get(key)!);
+  for (const key of sorted) await tx.executeRaw('INSERT INTO persistence_counters(key) VALUES ($1) ON CONFLICT DO NOTHING', [key]);
+  const result: Counter[] = [];
+  for (const key of sorted) {
+    const [row] = await tx.executeRaw<Counter>('SELECT * FROM persistence_counters WHERE key=$1 FOR UPDATE', [key]);
+    result.push(row);
+  }
+  return result;
 }
 export async function getWriteRequest(engine: SqlEngine, principal: Principal, requestId: string): Promise<WriteRequest | null> {
   const [row] = await engine.executeRaw<WriteRequest>(

@@ -25,7 +25,7 @@ import { prepareFileTarget } from './page-prepare.ts';
 import { advanceEffectCursor, claimPersistenceEffect, completeEffect, failEffect, renewPersistenceEffectClaim, retryEffect } from './effect-journal.ts';
 import { guardEffectSource, recoverEffectPublication, reserveEffectRecovery } from './effect-recovery.ts';
 import { publishGitEffect } from './effect-git.ts';
-import { isDurabilityHardenedAsync } from '../brain-repo-durability.ts';
+import { isDurabilityHardened } from '../brain-repo-durability.ts';
 import { dispatchFactsBackstopEffect } from './effect-facts.ts';
 import type { EffectRecovery, PersistenceEffect } from './effect-model.ts';
 import { recoveryStagingFile } from './staging.ts';
@@ -259,10 +259,10 @@ async function recordFailure(engine: BrainEngine, effect: PersistenceEffect, err
  */
 export async function runPersistenceEffects(engine: BrainEngine, config: GBrainConfig, opts: EffectWorkerOptions): Promise<number> {
   const limit = Math.max(1, Math.min(opts.limit ?? 2, 20));
-  // One durability probe per worktree root per bounded run.
-  const durability = new Map<string, Promise<boolean>>();
+  // One durability probe (two git processes) per worktree root per bounded run.
+  const durability = new Map<string, boolean>();
   const hardenedRoot = (root: string) => {
-    if (!durability.has(root)) durability.set(root, isDurabilityHardenedAsync(root));
+    if (!durability.has(root)) durability.set(root, isDurabilityHardened(root));
     return durability.get(root)!;
   };
   const recoveries = await selectEffectRecoveries(engine, opts.hostId, limit);
@@ -291,9 +291,7 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     try {
       const unlocked = ['embedding', 'facts-backstop'].includes(effect.kind);
       const binding = effect.worktree_id && !unlocked ? await getWorktreeBinding(engine, effect.source_id, opts.hostId) : null;
-      // Probe durability before locking: the git child processes must not
-      // hold the worktree's publications behind them.
-      const hardened = effect.kind === 'git' && binding?.local_path ? await hardenedRoot(binding.local_path) : undefined;
+      const hardened = effect.kind === 'git' && binding?.local_path ? hardenedRoot(binding.local_path) : undefined;
       if (effect.worktree_id && !unlocked) {
         if (!binding) throw new OperationError('owner_unavailable', 'The canonical effect owner is unavailable.');
         lock = await acquireWorktree(binding);

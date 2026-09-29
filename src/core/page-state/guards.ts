@@ -26,3 +26,11 @@ export async function lockPageKeys(engine: Pick<BrainEngine, 'executeRaw'>, keys
     await engine.executeRaw('SELECT id FROM pages WHERE source_id=$1 AND slug=$2 FOR UPDATE', [key.sourceId, key.slug]);
   }
 }
+
+/** Guards a PGLite transaction already holds, chained through its open savepoints. */
+export interface HeldPageKeys { keys: Set<string>; parent: HeldPageKeys | null }
+/** The identity lockPageKeys guards; null for an invalid key, which must reach its checks. */
+export function pageGuardKey(key: PageKey): string | null {
+  if (!key.sourceId) return null;
+  try { return JSON.stringify([key.sourceId, validateSlug(key.slug)]); } catch { return null; }
+}
