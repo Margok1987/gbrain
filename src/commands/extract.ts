@@ -67,7 +67,7 @@ export { extractTimelineFromContent, type ExtractedTimelineEntry } from '../core
 import { extractTimelineFromContent, retractRemovedTimelineEntries, type ExtractedTimelineEntry } from '../core/timeline-extract.ts';
 import { managedPersistenceEnabled } from '../core/persistence/ownership.ts';
 import { withCoordinatedWrite } from '../core/persistence/context.ts';
-import { canonicalTimelineRows } from '../core/persistence/canonical-projections.ts';
+import { unrecordedCanonicalTimeline } from '../core/persistence/canonical-projections.ts';
 import { PageRevisionConflictError } from '../core/page-state/types.ts';
 import { DerivedLinkEndpointChangedError } from '../core/derived-links.ts';
 import { createProgress } from '../core/progress.ts';
@@ -2226,7 +2226,7 @@ export async function extractStaleFromDB(
         // read stays stale for the next run.
         const published = await engine.transaction(tx => withCoordinatedWrite(tx, [page.source_id], async () => {
           const written = await tx.replaceDerivedLinks(origin, linkRows, linkOpts);
-          const timeline = [...canonicalTimelineRows(fullContent, page.slug).values()].map(entry => ({ slug: page.slug, date: entry.date,
+          const timeline = (await unrecordedCanonicalTimeline(tx, snapshot.page.id, snapshot.page, page.slug)).map(entry => ({ slug: page.slug, date: entry.date,
             source: entry.source, summary: entry.summary, detail: entry.detail || '', source_id: page.source_id }));
           const created = timeline.length ? await tx.addTimelineEntriesBatch(timeline, { auditSite: 'extract.stale' }) : 0;
           await tx.markPagesExtractedBatch([{ slug: page.slug, source_id: page.source_id }], stampIso);

@@ -82,11 +82,6 @@ function canonicalTimeline(body: CanonicalBody, slug: string): Map<string, Extra
   return extractTimeline(safeBody(body), slug);
 }
 
-/** Timeline tuples the coordinator projects from a canonical body (compiled truth and timeline joined by a newline). */
-export function canonicalTimelineRows(body: string, slug: string): Map<string, ExtractedTimelineEntry> {
-  return canonicalTimeline({ compiled_truth: body, timeline: '' }, slug);
-}
-
 /** Tuples whose bullet is introduced by a marker that still matches it. */
 function markedTimeline(body: CanonicalBody, slug: string): Set<string> {
   const lines = safeBody(body).split('\n');
@@ -104,6 +99,17 @@ interface StoredTimelineRow { id: number; date: string; source: string; summary:
 function storedTimeline(engine: BrainEngine, pageId: number): Promise<StoredTimelineRow[]> {
   return engine.executeRaw<StoredTimelineRow>(`SELECT id,date::text AS date,source,summary,detail FROM timeline_entries
     WHERE page_id=$1 AND event_page_id IS NULL ORDER BY date,id`, [pageId]);
+}
+
+/**
+ * Timeline tuples the coordinator projects from a canonical page body that
+ * have no stored row on the page under the same normalized key. Insert-only
+ * callers (managed `extract --stale`) add exactly these, so a stored row that
+ * differs only by whitespace is not duplicated.
+ */
+export async function unrecordedCanonicalTimeline(engine: BrainEngine, pageId: number, body: CanonicalBody, slug: string): Promise<ExtractedTimelineEntry[]> {
+  const stored = new Set((await storedTimeline(engine, pageId)).map(row => timelineKey(row)));
+  return [...canonicalTimeline(body, slug)].filter(([key]) => !stored.has(key)).map(([, entry]) => entry);
 }
 
 /** Classify stored rows against a new body and the writer's prior snapshot. */

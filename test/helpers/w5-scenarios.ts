@@ -16,6 +16,7 @@ import { retryParkedEffects, retryRequestEffects } from '../../src/core/persiste
 import { compactWriteReceipts } from '../../src/core/persistence/journal.ts';
 import { declarePersistenceProtocol } from '../../src/core/persistence/protocol.ts';
 import { localHostId } from '../../src/core/persistence/identity.ts';
+import { withCoordinatedWrite } from '../../src/core/persistence/context.ts';
 import { acquireWorktree, getWorktreeBinding } from '../../src/core/persistence/ownership.ts';
 import { extractStaleFromDB } from '../../src/commands/extract.ts';
 import { computeRecommendations } from '../../src/core/brain-score-recommendations.ts';
@@ -219,6 +220,24 @@ export async function managedStaleSweep(databaseUrl?: string) {
     expect(await stale(engine)).toBe(0);
     expect(await recommended(engine)).toBe(false);
     expect(await extractStale(engine)).toMatchObject({ pagesProcessed: 0, staleRemaining: 0 });
+  }, { databaseUrl });
+}
+
+/** A stored row that differs from its bullet only by whitespace is the same entry to the coordinator; stale extraction must not add a twin. */
+export async function managedStaleSweepKeepsNormalizedTimeline(databaseUrl?: string) {
+  await managedBrain(async ({ engine, ctx }) => {
+    await engine.setConfig('auto_link', 'false');
+    await put(ctx, 'people/alice-example', 'A person.\n\n## Timeline\n\n- **2026-01-02** | test — Met Acme', 'person');
+    await disposePersistenceConsumer(engine);
+    const [alice] = await engine.executeRaw<{ id: number }>("SELECT id FROM pages WHERE slug='people/alice-example'");
+    // A row written before timeline normalization (whitespace differs from the bullet).
+    await engine.transaction(tx => withCoordinatedWrite(tx, ['default'], () =>
+      tx.executeRaw("UPDATE timeline_entries SET summary='Met  Acme ' WHERE page_id=$1", [alice.id])));
+    const timeline = () => engine.executeRaw('SELECT date::text,source,summary FROM timeline_entries WHERE page_id=$1 ORDER BY id', [alice.id]);
+    const before = await timeline();
+    expect(before).toEqual([{ date: '2026-01-02', source: 'test', summary: 'Met  Acme ' }]);
+    expect(await extractStale(engine)).toMatchObject({ pagesProcessed: 1, staleRemaining: 0 });
+    expect(await timeline()).toEqual(before);
   }, { databaseUrl });
 }
 

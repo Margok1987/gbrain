@@ -66,20 +66,26 @@ interface ConnectorIntent extends Record<string, unknown> {
   fileBeforeHash: string | null;
 }
 
-function connectorBindingRoot(sourceId: string, source: ConnectorSource, binding: WorktreeBinding | null): string | null {
-  if (!binding) return null;
+/** The connector binding's owner and incarnation checks; returns the paths they prove present. */
+function checkedConnectorBinding(sourceId: string, source: ConnectorSource, binding: WorktreeBinding) {
   if (binding.owner_host_id !== localHostId() || !binding.local_path || !binding.coordination_path) {
     throw new OperationError('owner_unavailable', 'The connector canonical owner is unavailable on this host.');
   }
   if (binding.source_id !== sourceId || binding.source_incarnation !== source.incarnation || !source.local_path) {
     throw new OperationError('source_changed', 'The connector source does not match its canonical binding.');
   }
-  assertPhysicalRoot(binding.local_path, { worktreeId: binding.worktree_id, coordinationPath: binding.coordination_path });
+  return { localPath: binding.local_path, coordinationPath: binding.coordination_path, sourcePath: source.local_path };
+}
+
+function connectorBindingRoot(sourceId: string, source: ConnectorSource, binding: WorktreeBinding | null): string | null {
+  if (!binding) return null;
+  const { localPath, coordinationPath, sourcePath } = checkedConnectorBinding(sourceId, source, binding);
+  assertPhysicalRoot(localPath, { worktreeId: binding.worktree_id, coordinationPath });
   try {
-    const root = realpathSync(join(binding.local_path, binding.relative_path));
+    const root = realpathSync(join(localPath, binding.relative_path));
     const configured = source.config[source.config.kind === 'google' ? 'g_dir' : 'gh_dir'];
-    const directory = typeof configured === 'string' && configured.length > 0 ? configured : source.local_path;
-    if (!containsPath(binding.local_path, root) || !statSync(root).isDirectory() || realpathSync(source.local_path) !== root || realpathSync(directory) !== root) {
+    const directory = typeof configured === 'string' && configured.length > 0 ? configured : sourcePath;
+    if (!containsPath(localPath, root) || !statSync(root).isDirectory() || realpathSync(sourcePath) !== root || realpathSync(directory) !== root) {
       throw new Error('root mismatch');
     }
     return root;
@@ -132,9 +138,10 @@ export async function beginConnectorSync(engine: BrainEngine, sourceId: string, 
   }
   const authority = await managedSyncAuthority(engine, sourceId, source.incarnation, source.local_path ?? '');
   const binding = await getWorktreeBinding(engine, sourceId);
-  const canonicalRoot = connectorBindingRoot(sourceId, source, binding);
-  if (binding) await (await acquireWorktree(binding, 0, undefined, engine))?.release();
+  // The locked acquisition re-stamps a device-only physical-root change (#5604) before the root is asserted.
+  if (binding) { checkedConnectorBinding(sourceId, source, binding); await (await acquireWorktree(binding, 0, undefined, engine))?.release(); }
   else authority.writer.databaseOnlyReason = 'connector_database';
+  const canonicalRoot = connectorBindingRoot(sourceId, source, binding);
   const session = new ManagedConnectorSync(engine, sourceId, connector, source, authority, binding, canonicalRoot, opts.noEmbed === true, opts.noSchemaPack === true, opts.retryFailed === true, lease);
   await session.load();
   return session;
