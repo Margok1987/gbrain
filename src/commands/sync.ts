@@ -292,6 +292,8 @@ export interface SyncResult {
    * the working tree was imported (detached HEAD or --working-tree).
    */
   uncommitted?: { added: number; modified: number; deleted: number };
+  /** Post-sync link/timeline extraction failure (A15); the affected pages stay stale. */
+  extract_error?: string;
   /**
    * v0.41.13.0 partial-sync fields (only set when status === 'partial').
    *
@@ -3901,6 +3903,7 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
       ` Run 'gbrain extract --stale${opts.sourceId ? ` --source-id ${opts.sourceId}` : ''}' to extract now.`,
     );
   }
+  let extractError: string | undefined;
   if (!opts.noExtract && totalChanges <= 100 && pagesAffected.length > 0) {
     try {
       const { extractLinksForSlugs, extractTimelineForSlugs, stampExtracted, slugsSafeToStamp } = await import('./extract.ts');
@@ -3924,7 +3927,14 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
         slugsSafeToStamp(linksResult, timelineResult)
           .map((slug) => ({ slug, source_id: opts.sourceId ?? 'default' })),
       );
-    } catch { /* extraction is best-effort */ }
+      const failed = [...(linksResult.errors ?? []), ...(timelineResult.errors ?? [])];
+      if (failed.length > 0) extractError = `${failed.length} page(s) not extracted, e.g. ${failed[0]!.slug}: ${failed[0]!.error}`;
+    } catch (e) {
+      extractError = e instanceof Error ? e.message : String(e);
+    }
+    // A15: best-effort (the import stands and failed pages stay stale for
+    // `extract --stale`), but never silent.
+    if (extractError) serr(`  Link/timeline extraction failed: ${extractError}. Run 'gbrain extract --stale${opts.sourceId ? ` --source-id ${opts.sourceId}` : ''}' after fixing it.`);
   }
 
   // v0.31.2: facts extraction now routes through the shared
@@ -4033,6 +4043,7 @@ async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<Sy
     malformedSkipped: malformedSkipped.length,
     ...(typeWarningsEnabled && typeWarnings.length > 0 ? { type_warnings: typeWarnings } : {}),
     ...(uncommittedDrift ? { uncommitted: uncommittedDrift } : {}),
+    ...(extractError ? { extract_error: extractError } : {}),
   };
 }
 

@@ -1602,6 +1602,8 @@ async function extractTimelineFromDir(
 export interface ExtractForSlugsResult {
   created: number;
   processed: string[];
+  /** Pages whose read or write failed; they stay stale for `extract --stale`. */
+  errors?: Array<{ slug: string; error: string }>;
 }
 
 /**
@@ -1641,7 +1643,6 @@ export async function extractLinksForSlugs(
   const pack = (await loadActivePackForLocalEngine(engine, { sourceId }))?.manifest ?? null;
   if (!pack) throw new Error('Cannot extract links: active schema pack is unavailable.');
   const pageTypes = loadFsPageTypes(allFiles, pack);
-  const ownership = await fileLinkOwnership(engine, sourceId);
   const aliases = await loadSlugAliasTargets(engine, sourceId, allSlugs);
   // #4999: resolved HERE, like isGlobalBasenameEnabled above, so every caller
   // (sync, GitHub/Google source inline extracts) honours the configured
@@ -1653,27 +1654,38 @@ export async function extractLinksForSlugs(
   // caller stamps the watermark for these and no others, so a silent skip
   // leaves the page stale and `extract --stale` picks it up next run.
   const processed: string[] = [];
+  const errors: Array<{ slug: string; error: string }> = [];
+  const reads: Array<{ slug: string; relPath: string; content: string; links: LinkBatchInput[] }> = [];
   for (const slug of slugs) {
     const relPath = resolveSlugRelPath(slugToPath, repoPath, slug);
     if (relPath === undefined) continue;
-    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- relPath comes from the slug→path index built by walkMarkdownFiles(repoPath) (repo-relative entries of that walk) or the validated-slug legacy fallback, never from a caller
-    const filePath = join(repoPath, relPath);
+    try {
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- relPath comes from the slug→path index built by walkMarkdownFiles(repoPath) (repo-relative entries of that walk) or the validated-slug legacy fallback, never from a caller
+      const content = readFileSync(join(repoPath, relPath), 'utf-8');
+      reads.push({ slug, relPath, content, links: await extractLinksFromFile(content, relPath, allSlugs, { globalBasename, includeFrontmatter, pack, pageTypes, aliases }) });
+    } catch (e) { errors.push({ slug, error: e instanceof Error ? e.message : String(e) }); }
+  }
+  // A16: metadata for the changed pages and their link endpoints only; the
+  // whole-brain load is deferred to the rare attendance (meeting) page.
+  const ownership = await fileLinkOwnership(engine, sourceId, { slugs: [...new Set(reads.flatMap(read =>
+    [read.slug, ...read.links.flatMap(link => [link.from_slug, link.to_slug])]))] });
+  let attendanceOwnership: Awaited<ReturnType<typeof fileLinkOwnership>> | undefined;
+  for (const { slug, content, links } of reads) {
     try {
       const snapshot = ownership.metadata.get(`${sourceId}\0${slug}`)?.type === 'meeting' || ownership.origins.has(slug)
         ? await engine.readPageSnapshot(slug, { sourceId }) : null;
-      const content = readFileSync(filePath, 'utf-8');
-      const links = await extractLinksFromFile(content, relPath, allSlugs, { globalBasename, includeFrontmatter, pack, pageTypes, aliases });
       let written: number | null | undefined;
       if (snapshot?.page.type === 'meeting' || ownership.origins.has(slug) || links.some(link => link.link_type === 'attended' && link.origin_slug === slug && link.to_slug === slug)) {
         if (!snapshot) throw new Error('Link extraction origin is missing');
-        written = await replaceFileLinks(engine, slug, sourceId, links, includeFrontmatter, snapshot, ownership, content, { pack, globalBasename });
+        attendanceOwnership ??= await fileLinkOwnership(engine, sourceId);
+        written = await replaceFileLinks(engine, slug, sourceId, links, includeFrontmatter, snapshot, attendanceOwnership, content, { pack, globalBasename });
         if (written === null) continue;
       }
       created += written ?? await replacePageFileLinks(engine, slug, sourceId, links, includeFrontmatter, ownership) ?? 0;
       processed.push(slug);
-    } catch { /* skip: unreadable — not processed, stays stale */ }
+    } catch (e) { errors.push({ slug, error: e instanceof Error ? e.message : String(e) }); }
   }
-  return { created, processed };
+  return { created, processed, ...(errors.length ? { errors } : {}) };
 }
 
 export async function extractTimelineForSlugs(
@@ -1691,6 +1703,7 @@ export async function extractTimelineForSlugs(
   const entryOpts = opts?.sourceId ? { sourceId: opts.sourceId } : undefined;
   let created = 0;
   const processed: string[] = [];
+  const errors: Array<{ slug: string; error: string }> = [];
   for (const slug of slugs) {
     const relPath = resolveSlugRelPath(slugToPath, repoPath, slug);
     if (relPath === undefined) continue;
@@ -1704,9 +1717,9 @@ export async function extractTimelineForSlugs(
       for (const entry of entries) {
         try { await engine.addTimelineEntry(entry.slug, { date: entry.date, source: entry.source, summary: entry.summary, detail: entry.detail }, entryOpts); created++; } catch { /* skip */ } // gbrain-allow-direct-insert: gbrain extract single-row fallback for timeline entries
       }
-    } catch { /* skip: unreadable — not processed, stays stale */ }
+    } catch (e) { errors.push({ slug, error: e instanceof Error ? e.message : String(e) }); }
   }
-  return { created, processed };
+  return { created, processed, ...(errors.length ? { errors } : {}) };
 }
 
 // ─── DB-source extractors (v0.10.3 graph layer) ────────────────────────────
