@@ -991,6 +991,16 @@ export async function loadPreRunRevision(engine: BrainEngine, slug: string, sour
 }
 
 /**
+ * C-8: dream output is a page a child created (or one already stamped). A page
+ * that existed before the child's first write keeps its own identity. Refs
+ * without a first-write time (legacy callers) count as dream output.
+ */
+export function isDreamOwnedPage(page: Pick<Page, 'created_at' | 'frontmatter'>, firstWriteAt?: Date): boolean {
+  if (!firstWriteAt || page.frontmatter?.dream_generated === true) return true;
+  return new Date(page.created_at).getTime() >= firstWriteAt.getTime();
+}
+
+/**
  * The verification scope of one written page: null prior for a page created
  * at or after `since`, the pre-run revision for an older page, or 'unchanged'
  * when an older page has no revision since then.
@@ -1011,18 +1021,19 @@ export async function resolveVerifyPrior(engine: BrainEngine, page: Pick<Page, '
  */
 export async function verifyAndRepairDreamPages(
   engine: BrainEngine,
-  refs: Array<{ slug: string; source_id: string; raw_source?: string }>,
+  refs: Array<{ slug: string; source_id: string; raw_source?: string; first_write_at?: Date }>,
   transcriptsByPath: Map<string, TranscriptForVerify>,
   opts: { since: Date; sinceByTranscript?: Map<string, Date>; checkedAt?: string; signal?: AbortSignal },
 ): Promise<QuoteVerifyStats> {
   const stats = emptyQuoteVerifyStats();
   const checkedAt = opts.checkedAt ?? new Date().toISOString().slice(0, 10);
-  const pages = new Map<string, { slug: string; source_id: string; paths: string[] }>();
+  const pages = new Map<string, { slug: string; source_id: string; paths: string[]; first_write_at?: Date }>();
   for (const ref of refs) {
     const key = `${ref.source_id} ${ref.slug}`;
     const known = ref.raw_source && transcriptsByPath.has(ref.raw_source) ? ref.raw_source : undefined;
     const entry = pages.get(key) ?? { slug: ref.slug, source_id: ref.source_id, paths: [] };
     if (known && !entry.paths.includes(known)) entry.paths.push(known);
+    if (ref.first_write_at && (!entry.first_write_at || ref.first_write_at < entry.first_write_at)) entry.first_write_at = ref.first_write_at;
     pages.set(key, entry);
   }
   const cache = new Map<string, GroundedSource>();
@@ -1042,7 +1053,9 @@ export async function verifyAndRepairDreamPages(
     try {
       const page = await engine.getPage(ref.slug, { sourceId: ref.source_id });
       if (!page) { stats.errors++; continue; }
-      const since = ref.paths.reduce((min, p) => {
+      // The child's first write to this page is the ownership boundary: a
+      // page another writer created before it is not the run's own.
+      const since = ref.first_write_at ?? ref.paths.reduce((min, p) => {
         const at = opts.sinceByTranscript?.get(p);
         return at && at < min ? at : min;
       }, opts.since);

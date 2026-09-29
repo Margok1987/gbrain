@@ -85,7 +85,7 @@ import { validateSourceId } from '../utils.ts';
 import { safeSplitIndex } from '../text-safe.ts';
 import { PAGE_SLUG_SEG } from '../cjk.ts';
 import { withChatPhase, estimateChatCostUsd } from '../ai/chat-usage.ts';
-import { verifyAndRepairDreamPages, normForGrounding, readVerifyEpoch, loadChildWriteEpochs, type QuoteVerifyStats, type TranscriptForVerify } from './synthesize-verify.ts';
+import { verifyAndRepairDreamPages, normForGrounding, readVerifyEpoch, loadChildWriteEpochs, isDreamOwnedPage, type QuoteVerifyStats, type TranscriptForVerify } from './synthesize-verify.ts';
 import { passesTriageGate, rescueConfigOf, DEFAULT_RESCUE_FLOOR, DEFAULT_RESCUE_MIN_SEGMENTS, DEFAULT_RESCUE_CONTENT_TYPES, DEFAULT_RESCUE_CONFIG, type RescueConfig, type RescueVerdictLike } from './triage-rescue.ts';
 
 // Slug grammar from validatePageSlug — shared via PAGE_SLUG_SEG (#738).
@@ -2759,7 +2759,7 @@ async function collectChildPutPageSlugs(
   // collects the job ids that produced ≥1 put_page write, so the caller can
   // count zero-page children without a second subagent_tool_executions scan.
   outJobsWithPages?: Set<number>,
-): Promise<Array<{ slug: string; source_id: string; raw_source?: string }>> {
+): Promise<Array<{ slug: string; source_id: string; raw_source?: string; first_write_at?: Date }>> {
   if (childIds.length === 0) return [];
   // Raw fetch — NO SELECT DISTINCT. Preserves per-child slug duplicates so
   // the orchestrator sees what each child wrote. COALESCE handles both
@@ -2772,9 +2772,10 @@ async function collectChildPutPageSlugs(
   // cycle's resolved source via SubagentHandlerData.source_id, and stamps
   // the SAME source here so reverseWriteRefs / provenance reads target the
   // correct (source_id, slug) row. Unset → legacy 'default'.
-  const rows = await engine.executeRaw<{ job_id: number | bigint; slug: string }>(
+  const rows = await engine.executeRaw<{ job_id: number | bigint; slug: string; started_at?: Date | string }>(
     `SELECT job_id,
-            COALESCE(input->>'slug', (input #>> '{}')::jsonb->>'slug') AS slug
+            COALESCE(input->>'slug', (input #>> '{}')::jsonb->>'slug') AS slug,
+            started_at
        FROM subagent_tool_executions
       WHERE job_id = ANY($1::int[])
         AND tool_name = 'brain_put_page'
@@ -2784,6 +2785,9 @@ async function collectChildPutPageSlugs(
   // #1978: slug → source transcript path (first writer wins) so the
   // provenance stamp can record WHERE the synthesized content came from.
   const rewritten = new Map<string, string | undefined>();
+  // Ownership: a page is the run's own only if it did not exist before the
+  // child's first write to it (C-8, #5685 follow-up).
+  const firstWriteAt = new Map<string, Date>();
   for (const r of rows) {
     if (typeof r.slug !== 'string' || r.slug.length === 0) continue;
     // Postgres decodes the BIGINT FK as bigint; both metadata maps are keyed
@@ -2795,10 +2799,14 @@ async function collectChildPutPageSlugs(
     if (!rewritten.has(slug) || rewritten.get(slug) === undefined) {
       rewritten.set(slug, jobRawSource?.get(jobId));
     }
+    const at = r.started_at ? new Date(r.started_at) : null;
+    const known = firstWriteAt.get(slug);
+    if (at && !Number.isNaN(at.getTime()) && (!known || at < known)) firstWriteAt.set(slug, at);
   }
   return Array.from(rewritten.keys()).sort().map(slug => {
     const raw_source = rewritten.get(slug);
-    return { slug, source_id: sourceId, ...(raw_source ? { raw_source } : {}) };
+    const first_write_at = firstWriteAt.get(slug);
+    return { slug, source_id: sourceId, ...(raw_source ? { raw_source } : {}), ...(first_write_at ? { first_write_at } : {}) };
   });
 }
 
@@ -2919,13 +2927,13 @@ function findLegacyCompletion(
 
 async function stampDreamProvenance(
   engine: BrainEngine,
-  refs: Array<{ slug: string; source_id: string; raw_source?: string }>,
+  refs: Array<{ slug: string; source_id: string; raw_source?: string; first_write_at?: Date }>,
   cycleDate: string,
   signal?: AbortSignal,
 ): Promise<void> {
   if (refs.length === 0) return;
   const { executeRawJsonb } = await import('../sql-query.ts');
-  for (const { slug, source_id, raw_source } of refs) {
+  for (const { slug, source_id, raw_source, first_write_at } of refs) {
     // #4077: per-row abort check — the per-row try below is only for stamp
     // failures and must not swallow the cancellation unwind.
     throwIfAborted(signal, '[dream] synthesize provenance');
@@ -2934,15 +2942,21 @@ async function stampDreamProvenance(
         engine,
         `UPDATE pages
             SET frontmatter = COALESCE(frontmatter, '{}'::jsonb)
-                              || $4::jsonb
+                              || $5::jsonb
                               || jsonb_build_object(
                                    'dream_cycle_date',
                                    COALESCE(NULLIF(frontmatter->>'dream_created_cycle_date', ''), NULLIF(frontmatter->>'dream_cycle_date', ''), $3),
                                    'dream_created_cycle_date',
                                    COALESCE(NULLIF(frontmatter->>'dream_created_cycle_date', ''), NULLIF(frontmatter->>'dream_cycle_date', ''), $3)
                                  )
-          WHERE slug = $1 AND source_id = $2`,
-        [slug, source_id, cycleDate],
+          WHERE slug = $1 AND source_id = $2
+            AND ($4::timestamptz IS NULL
+                 OR frontmatter->>'dream_generated' = 'true'
+                 OR created_at >= $4::timestamptz)`,
+        // C-8: a page that existed before the child's first write to it is
+        // not dream output; stamping it would hide it from extract_facts
+        // and transcript discovery forever.
+        [slug, source_id, cycleDate, first_write_at?.toISOString() ?? null],
         // #1978 raw-source persistence: record the transcript path the
         // synthesis was derived from, so `gbrain doctor` (raw_provenance
         // check) can verify every generated page carries a raw trace.
@@ -2963,12 +2977,12 @@ async function stampDreamProvenance(
 async function reverseWriteRefs(
   engine: BrainEngine,
   brainDir: string,
-  refs: Array<{ slug: string; source_id: string }>,
+  refs: Array<{ slug: string; source_id: string; first_write_at?: Date }>,
   nativeSourceId = 'default',
   signal?: AbortSignal,
 ): Promise<number> {
   let count = 0;
-  for (const { slug, source_id } of refs) {
+  for (const { slug, source_id, first_write_at } of refs) {
     throwIfAborted(signal, '[dream] synthesize reverse-write');
     // v0.32.8 F6: validate source_id is filesystem-safe before any join().
     validateSourceId(source_id);
@@ -2979,7 +2993,7 @@ async function reverseWriteRefs(
     // getPage/getTags must not reach this ref's file write.
     throwIfAborted(signal, '[dream] synthesize reverse-write');
     try {
-      const md = renderPageToMarkdown(page, tags);
+      const md = isDreamOwnedPage(page, first_write_at) ? renderPageToMarkdown(page, tags) : serializePageToMarkdown(page, tags);
       // v0.32.8 F6: foreign-source pages land at brainDir/.sources/<id>/<slug>.md
       // so same-slug-different-source pages don't collide. Pages belonging to
       // the cycle's own source (#1586: brainDir IS that source's checkout —
