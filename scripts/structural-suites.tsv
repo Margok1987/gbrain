@@ -167,7 +167,7 @@ test/frontmatter-install-hook.test.ts	frontmatter install-hook (B13)	22	readFile
 test/get-page-federated-scope.test.ts	#2555 get_chunks federated scope	5	source-surface-helper
 test/get-page-federated-scope.test.ts	#4275 alias hop scope: archived sources, include_deleted, fuzzy precedence, grant precedence	5	source-surface-helper
 test/harness-onboarding.test.ts	harness identity and private handoff	5	readFileSync
-test/hook-command.serial.test.ts	user-prompt	14	source-surface-helper
+test/hook-command.serial.test.ts	user-prompt	15	source-surface-helper
 test/hook-push-spawn-env.test.ts	spawnDetachedPush env handoff	2	readFileSync
 test/hook-push-spawn-env.test.ts	tryExecAsync env handoff	1	readFileSync
 test/integrations-install.test.ts	installRecipeIntoHostRepo — happy path	6	readFileSync
