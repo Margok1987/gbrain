@@ -212,6 +212,7 @@ test/pg-access-classify.test.ts	marker contract (skill↔binary lockstep, the UP
 test/pglite-engine.test.ts	PGLiteEngine: v0.13.1 error-wrap on connect() (#223)	1	readFileSync
 test/pglite-repair-command.serial.test.ts	gbrain pglite-repair — interactive confirm wiring (#4318 residual)	1	readFileSync
 test/pglite-wal-repair.serial.test.ts	WAL auto-repair — real-brain regression (#223/#1670/#2575)	6	readFileSync
+test/post-upgrade-banner.test.ts	post-upgrade recovery banner	3	readFileSync
 test/postgres-driver-vendor.test.ts	vendored Postgres driver packaging	3	readFileSync
 test/postgres-engine.test.ts	postgres-engine / search date filtering	1	readFileSync
 test/postgres-engine.test.ts	postgres-engine / search path timeout isolation	7	readFileSync
