@@ -157,7 +157,9 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   ],
   // #3390: runSchemaTransition's DDL path + the stale predicates behave
   // differently on real pgvector than on PGLite.
-  "src/core/embedding-migration*.ts": ["test/e2e/migrate-embeddings-postgres.test.ts", "test/e2e/embedding-recovery-parity.test.ts", "test/e2e/memory-safety-wave-postgres.test.ts", ...MIGRATION_WAVE_TESTS],
+  "src/core/embedding-migration*.ts": ["test/e2e/migrate-embeddings-postgres.test.ts", "test/e2e/embedding-recovery-parity.test.ts", "test/e2e/memory-safety-wave-postgres.test.ts", "test/e2e/embedding-migration-settle-postgres.test.ts", ...MIGRATION_WAVE_TESTS],
+  // #5680: the per-request ceilings the migration reserves and settles under FOR UPDATE.
+  "src/core/ai/embed-batch-plan.ts": ["test/e2e/embedding-migration-settle-postgres.test.ts"],
   "src/core/embedding-readiness.ts": ["test/e2e/embedding-recovery-parity.test.ts"],
   "src/core/facts/embedding-identity.ts": ["test/e2e/embedding-recovery-parity.test.ts", "test/e2e/fact-embedding-backfill-parity.test.ts"],
   "src/core/stored-embedding-identity.ts": ["test/e2e/unsupported-embedding-identity-postgres.test.ts"],
