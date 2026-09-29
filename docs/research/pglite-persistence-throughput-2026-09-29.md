@@ -1,10 +1,10 @@
 # PGLite managed-persistence write throughput (2026-09-29)
 
-**Decision:** ship. The PGLite soak goes from 9.0 to 33.1 committed writes/s in
-matched 1,000-write runs (3.7×). The full 10,000-write gate soak drops from
-1,417 s to 296 s. Postgres does not regress (11.4 → 13.9 writes/s). Every
-durability and crash contract is unchanged, and the full default gate reports
-`full_gate: true` on both engines.
+**Decision:** ship. The PGLite soak goes from 8.9 to 31.7 committed writes/s in
+matched 1,000-write runs on the final commit (3.6×). The full 10,000-write gate
+soak drops from 1,417 s to 277–308 s across three VMs. Postgres does not
+regress (11.2 → 13.5 writes/s). Every durability and crash contract is
+unchanged, and the full default gate reports `full_gate: true` on both engines.
 
 ## Method
 
@@ -89,19 +89,27 @@ per write on this VM. It is required and unchanged.
   interval ago; the managed-root registry skips its directory fsync when no
   record changed.
 
-## Matched throughput, `standard-30`, 3 × 1,000 writes
+## Matched throughput, `standard-30`, 3 × 1,000 writes, final commit
 
 | Engine | master (median, range) | candidate (median, range) | Caller p50 |
 |---|---|---|---|
-| PGLite | 8.97 (8.96–9.01) | 33.14 (33.04–34.17) | 1,713 → 421 ms |
-| Postgres | 11.35 (11.33–11.60) | 13.86 (13.66–14.63) | 1,303 → 1,078 ms |
+| PGLite | 8.92 (8.92–8.98) | 31.68 (31.55–31.72) | 1,731 → 436 ms |
+| Postgres | 11.18 (11.17–11.31) | 13.48 (13.27–13.90) | 1,317 → 1,134 ms |
+
+VM placement moves absolute numbers. On a second VM, one commit earlier,
+PGLite measured 8.97 → 33.14 and Postgres 11.35 → 13.86. On a noisier third VM
+PGLite measured 8.35 → 25.34, where master was slower too. The ratio stayed
+between 3.0× and 3.7×.
 
 ## Full default gate (1,000 schedules, 8 SIGKILL boundaries, 10,000-write soak)
 
 | Engine | master soak | candidate soak | `full_gate` |
 |---|---|---|---|
-| PGLite | 7.06 writes/s, 1,417 s | 33.77 writes/s, 296 s | true / true |
-| Postgres | 11.28 writes/s, 886 s | 17.22 writes/s, 581 s | true / true |
+| PGLite | 7.06 writes/s, 1,417 s | 32.48 writes/s, 308 s (final commit); 36.11 / 277 s and 33.77 / 296 s on earlier commits and other VMs | true / true |
+| Postgres | 11.28 writes/s, 886 s | 13.76–17.22 writes/s, 581–727 s | true / true |
+
+The whole default PGLite gate (crash cases, schedules and soak) takes
+337–373 s.
 
 ## Read latency (`scripts/persistence/performance.ts`, median of 3 runs)
 
@@ -138,8 +146,9 @@ changed by this work.
 ## Follow-up: restore the 10,000-write soak on pull requests
 
 [#5667](https://github.com/garrytan/gbrain/pull/5667) cut pull-request soaks to
-2,500 writes while the PGLite soak ran about 11 writes/s. At 33.8 writes/s the
-full 10,000-write PGLite soak takes 296 s on `standard-30`, and the whole
-default gate takes 356 s. Postgres now takes 581 s for its soak. Proposal: run
+2,500 writes while the PGLite soak ran about 11 writes/s. At 32–36 writes/s the
+full 10,000-write PGLite soak takes 277–308 s on `standard-30`, and the whole
+default gate takes 337–373 s. The Postgres soak takes 581–727 s, down from
+886 s. Proposal: run
 the full default gate (10,000 writes) on pull requests again for both engines,
 keeping #5667's timeout headroom, and drop the 2,500-write PR variant.
