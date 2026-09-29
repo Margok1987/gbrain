@@ -1524,6 +1524,7 @@ export async function hybridSearch(
       : await Promise.all([
           engine.searchKeyword(query, searchOpts).catch((err: unknown) => {
             if (isDbAccessFailure(err)) keywordAccessError = err;
+            pushDegraded(degraded, 'keyword_arm_failed', isTimeoutError(err) ? 'timeout' : 'provider_error');
             warnOncePerProcess(
               'search-keyword-arm-failed',
               `[gbrain] searchKeyword arm failed (fail-open, keyword candidates skipped): ` +
@@ -1533,6 +1534,7 @@ export async function hybridSearch(
           }),
           engine.searchTitles(query, searchOpts).catch((err: unknown) => {
             if (isDbAccessFailure(err)) titleAccessError = err;
+            pushDegraded(degraded, 'title_arm_failed', isTimeoutError(err) ? 'timeout' : 'provider_error');
             warnOncePerProcess(
               'search-titles-arm-failed',
               `[gbrain] searchTitles arm failed (fail-open, title candidates skipped): ` +

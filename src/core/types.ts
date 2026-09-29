@@ -1837,6 +1837,8 @@ export const DEGRADED_STAGES = [
   'expansion_partial',
   'rescore_skipped',
   'vector_arm_failed',
+  'keyword_arm_failed',
+  'title_arm_failed',
   'budget_dropped_all',
   'budget_truncated',
   'keyword_zero',
