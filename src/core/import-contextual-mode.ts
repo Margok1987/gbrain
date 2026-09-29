@@ -31,7 +31,8 @@ export async function resolveImportContextualMode(engine: BrainEngine, sourceId:
   }
   const resolution = resolveContextualRetrievalMode({ pageFrontmatter: frontmatter ?? {}, source,
     globalMode: knobs.contextual_retrieval, killSwitchDisabled: knobs.contextual_retrieval_disabled });
-  const mode = resolution.mode === 'none' ? 'none' : 'title';
+  const effectiveCRMode = resolution.mode === 'per_chunk_synopsis' ? 'title' : resolution.mode;
+  const mode = effectiveCRMode === 'none' ? 'none' : 'title';
   // The inline path never uses per_chunk_synopsis, so the doc-cap field stays out of the hash.
   return { mode, corpusGeneration: mode === 'none' ? null : computeCorpusGeneration({ crMode: mode, synopsisModel: DEFAULT_SYNOPSIS_MODEL }) };
 }
