@@ -461,16 +461,13 @@ async function tryExactSlug(
   source_id: string,
   candidate: string,
 ): Promise<string | null> {
-  try {
-    const rows = await engine.executeRaw<{ slug: string }>(
-      `SELECT slug FROM pages WHERE source_id = $1 AND slug = $2 AND deleted_at IS NULL LIMIT 1`,
-      [source_id, candidate],
-    );
-    if (rows.length > 0) return rows[0].slug;
-  } catch {
-    // Defensive: fail open. Caller still gets a slug from the fallback.
-  }
-  return null;
+  // A database error propagates: degrading to the fallback slug would
+  // silently attribute the caller's facts to a different entity.
+  const rows = await engine.executeRaw<{ slug: string }>(
+    `SELECT slug FROM pages WHERE source_id = $1 AND slug = $2 AND deleted_at IS NULL LIMIT 1`,
+    [source_id, candidate],
+  );
+  return rows[0]?.slug ?? null;
 }
 
 async function tryFuzzyMatch(
@@ -515,11 +512,19 @@ async function tryFuzzyMatch(
     }
     // Phantom canonicals: a clear winner only, with a margin over the runner-up.
     if (rows.length > 0 && rows[0].score >= 0.7 && (rows.length === 1 || rows[0].score - rows[1].score >= 0.1)) return rows[0].slug;
-  } catch {
-    // pg_trgm functions might not be available on every engine config;
-    // fall through to slugify.
+  } catch (err) {
+    // pg_trgm might not be installed on every engine config: that brain has
+    // no fuzzy arm and falls through to slugify. Any other database error
+    // propagates rather than becoming a silent misattribution.
+    if (!isMissingTrigramError(err)) throw err;
   }
   return null;
+}
+
+function isMissingTrigramError(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null && 'code' in err ? String((err as { code?: unknown }).code) : '';
+  const message = err instanceof Error ? err.message : String(err);
+  return code === '42883' || /function similarity|operator does not exist: text %/i.test(message);
 }
 
 /**

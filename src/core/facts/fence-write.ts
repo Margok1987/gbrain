@@ -409,7 +409,8 @@ export async function writeFactsToFence(
       //    Degrades to the previous file-only behaviour if the lookup fails
       //    (pre-v51 brain without the fence columns, or a transient DB error):
       //    a fence write must not become impossible just because the counter
-      //    hint is unavailable.
+      //    hint is unavailable. The degradation is reported, never silent,
+      //    because file-only numbering is the duplicate-key class above.
       let dbMaxRowNum = 0;
       try {
         const rows = await engine.executeRaw<{ max_row_num: number | null }>(
@@ -418,8 +419,8 @@ export async function writeFactsToFence(
           [target.sourceId, target.slug],
         );
         dbMaxRowNum = Number(rows[0]?.max_row_num ?? 0);
-      } catch {
-        dbMaxRowNum = 0;
+      } catch (err) {
+        console.warn(`[facts.fence] FACTS_ROW_NUM_HINT_UNAVAILABLE: ${target.slug} (source ${target.sourceId}): ${err instanceof Error ? err.message : String(err)}; numbering from the file alone`);
       }
       const { facts: existingFenceFacts } = parseFactsFence(body);
       const fileMaxRowNum = existingFenceFacts.length > 0
@@ -494,7 +495,11 @@ export async function writeFactsToFence(
             sanitizeText(reparsed.compiled_truth), sanitizeText(reparsed.timeline),
             existing.content_hash || contentHash(existing));
         }
-      } catch { /* degrades to the pre-#4872 window (stale until the next sync) */ }
+      } catch (err) {
+        // The file is committed; the page cache stays stale until the next
+        // sync (reconcile refuses destructive work meanwhile). Say so.
+        console.warn(`[facts.fence] FACTS_PAGE_MIRROR_FAILED: ${target.slug} (source ${target.sourceId}): ${err instanceof Error ? err.message : String(err)}; pages cache stale until the next sync`);
+      }
 
       // 6. Stamp the DB. extractFactsFromFenceText handles the
       //    validFrom/validUntil date derivation + the strikethrough
