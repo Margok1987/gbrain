@@ -215,7 +215,7 @@ const PROJECTION_JOB_PROBES = `CROSS JOIN LATERAL (SELECT s.id FROM sources s
  * threshold, a refresh is due once 50 rows plus 10% of the table changed; a
  * process's first drained rebuild always refreshes.
  */
-const statisticsDebt = new WeakMap<BrainEngine, { rebuilt: number; rows: number }>();
+const statisticsDebt = new WeakMap<BrainEngine, { rebuilt: number; rows: number | null }>();
 
 /** Bounded and keyless. Unsupported media remains queued for its source importer. */
 export async function rebuildPendingPageProjections(engine: BrainEngine, limit = 20): Promise<{ rebuilt: number; superseded: number }> {
@@ -251,9 +251,9 @@ export async function rebuildPendingPageProjections(engine: BrainEngine, limit =
   }
   if (rebuilt > 0) {
     const debt = statisticsDebt.get(engine);
-    const owed = { rebuilt: (debt?.rebuilt ?? 0) + rebuilt, rows: debt?.rows ?? 0 };
+    const owed = { rebuilt: (debt?.rebuilt ?? 0) + rebuilt, rows: debt?.rows ?? null };
     statisticsDebt.set(engine, owed);
-    if (debt && owed.rebuilt < 50 + owed.rows * 0.1) return { rebuilt, superseded };
+    if (owed.rows !== null && owed.rebuilt < 50 + owed.rows * 0.1) return { rebuilt, superseded };
     const remaining = await engine.executeRaw(`SELECT 1 FROM page_projection_jobs j
       ${PROJECTION_JOB_PROBES}
       WHERE j.reason<>'rebuild_failed' LIMIT 1`);
