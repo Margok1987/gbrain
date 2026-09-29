@@ -50,3 +50,20 @@ consolidation").
 
 The doc-pins lane recorded its probe results inline in its report; it has no
 separate probe log.
+
+## Implementation evidence
+
+`implementation/` holds the per-slice evidence tables from the fix wave that
+acted on these reports (v0.59.20.0): each deleted test's probe and surviving
+owner, each new test's mutation, and each dead module's disposition.
+
+| File | Slice |
+| --- | --- |
+| `implementation/security.md` | Source-config secret surfaces |
+| `implementation/holes.md` | Coverage holes filled |
+| `implementation/e2e-lanes.md` | E2E lane corrections |
+| `implementation/deletions-guards.md` | Blind/duplicate test deletions, placeholder guard, source-read policy, docs |
+| `implementation/dead-modules.md` | Dead-module clusters and the orphan permitted list |
+| `implementation/pending-deletions.md` | Deletions that waited on new owners; process-cleanup fix |
+| `implementation/lane-pilot.md` | Lane-move pilot and measurements |
+| `implementation/rewrites.md` | Behavior rewrites, doc claims, docs-CLI truth check |
