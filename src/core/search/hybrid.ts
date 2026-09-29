@@ -68,7 +68,7 @@ import {
 } from './fusion-lists.ts';
 import { normalizeAlias } from './alias-normalize.ts';
 import { stampEvidence, markKeywordHits } from './evidence.ts';
-import { applyExactLookupTier } from './exact-lookup.ts';
+import { applyExactLookupTier, type ExactLookupOpts } from './exact-lookup.ts';
 import { pinRelationalRows, normalizeRelationalRerankPin, type RelationalRerankPinDecision } from './relational-rerank-pin.ts';
 import { normalizeKeywordArmConfidenceFloor, type KeywordArmConfidenceDecision } from './arm-confidence.ts';
 import { decideMetadataBoosts, lexicalArmsVoted, normalizeMetadataBoostGate, type MetadataBoostGate } from './metadata-boost-gate.ts';
@@ -918,11 +918,33 @@ const MAX_ALIAS_INJECT = 3;           // cap injected pages per query (collision
  * Fail-open: pre-v110 brains (no page_aliases table) and any lookup error
  * degrade to the input unchanged (D9). Returns a NEW array; caller re-slices.
  */
+/**
+ * Read-policy + exclude contract shared by the post-arm identity injections
+ * (alias hop, exact-lookup tier). They add pages the engine arms never
+ * filtered, so they re-apply the arms' exact-slug and prefix excludes.
+ * `excludeSlugPrefixes` is the RESOLVED list (defaults + GBRAIN_SEARCH_EXCLUDE
+ * + per-call, minus include_slug_prefixes — see resolveHardExcludes).
+ */
+export interface IdentityTierOpts {
+  sourceId?: string;
+  sourceIds?: string[];
+  excludePrivate?: boolean;
+  requireSafeChunks?: boolean;
+  excludeSlugs?: string[];
+  excludeSlugPrefixes?: string[];
+}
+
+/** True when an identity injection must skip `slug` under the caller's excludes. */
+export function isExcludedIdentity(slug: string, opts: Pick<IdentityTierOpts, 'excludeSlugs' | 'excludeSlugPrefixes'>): boolean {
+  if (opts.excludeSlugs?.includes(slug)) return true;
+  return opts.excludeSlugPrefixes?.some((p) => slug.startsWith(p)) ?? false;
+}
+
 export async function applyAliasHop(
   engine: import('../engine.ts').BrainEngine,
   results: SearchResult[],
   query: string,
-  opts: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; requireSafeChunks?: boolean; excludeSlugs?: string[] },
+  opts: IdentityTierOpts,
 ): Promise<SearchResult[]> {
   if (!query) return results;
   const qNorm = normalizeAlias(query);
@@ -941,7 +963,7 @@ export async function applyAliasHop(
   // pair so a federated caller boosts/injects the RIGHT source's page, never
   // collapsing or cross-injecting (P0 source-isolation contract).
   const ordered = [...refs]
-    .filter(ref => !opts.excludeSlugs?.includes(ref.slug))
+    .filter(ref => !isExcludedIdentity(ref.slug, opts))
     .sort((a, b) => (a.source_id === b.source_id ? a.slug.localeCompare(b.slug) : a.source_id.localeCompare(b.source_id)))
     .slice(0, MAX_ALIAS_INJECT);
   const out = [...results];
@@ -1397,6 +1419,24 @@ export async function hybridSearch(
     },
   };
   let vectorPoolUnderfill: HybridSearchMeta['vector_pool_underfilled'];
+  // Post-arm identity injections re-apply the arms' exclude contract.
+  const identityTierOpts: IdentityTierOpts = {
+    sourceId: opts?.sourceId,
+    sourceIds: opts?.sourceIds,
+    excludePrivate: opts?.excludePrivate,
+    requireSafeChunks: opts?.requireSafeChunks,
+    excludeSlugs: opts?.exclude_slugs,
+    excludeSlugPrefixes: resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes),
+  };
+  // Intent identity boosts (exact/mentioned title or slug, mentioned alias),
+  // shared by the fused path and both keyword-only paths. Caller re-sorts.
+  const applyIdentityBoosts = async (list: SearchResult[]): Promise<void> => {
+    if (intentWeights.exactMatchBoost === 1.0) return;
+    applyExactMatchBoost(list, query, intentWeights);
+    await applyAliasMentionBoost(list, query, intentWeights, (aliases) => engine.resolveAliases(aliases, {
+      sourceId: opts?.sourceId, sourceIds: opts?.sourceIds, excludePrivate: opts?.excludePrivate,
+    }));
+  };
   // Track what actually ran for the optional onMeta callback (v0.25.0).
   // Caller leaves onMeta undefined → these flags are computed but never
   // surfaced. Capture wrapper passes a closure to receive the meta and
@@ -1504,6 +1544,14 @@ export async function hybridSearch(
   if (keywordAccessError && titleAccessError) {
     throw keywordAccessError;
   }
+  const exactLookupOpts: ExactLookupOpts = {
+    ...identityTierOpts,
+    titleCandidates: titleResults,
+    takesHoldersAllowList: opts?.takesHoldersAllowList,
+    // #4480: gate tier injections on the caller's shape filters.
+    type: opts?.type,
+    types: opts?.types,
+  };
   // #3783 — stamp lexical-arm membership pre-fusion so evidence's
   // keyword_exact label is earned by an actual FTS hit, never by a solid
   // blended score alone. Both arms are the lexical-evidence class (chunk
@@ -1615,29 +1663,14 @@ export async function hybridSearch(
     }
     if (noEmbedResults.length > 0) {
       await runPostFusionStages(engine, noEmbedResults, postFusionOpts);
+      await applyIdentityBoosts(noEmbedResults);
       noEmbedResults.sort((a, b) => b.score - a.score);
     }
     // T3/T4 — alias hop + evidence stamp even without an embedding provider
     // (the named-thing fix is most valuable exactly when vector is unavailable).
-    const noEmbedPreExact = await applyAliasHop(engine, dedupResults(noEmbedResults), query, {
-      sourceId: opts?.sourceId,
-      sourceIds: opts?.sourceIds,
-      excludePrivate: opts?.excludePrivate,
-      requireSafeChunks: opts?.requireSafeChunks,
-    });
+    const noEmbedPreExact = await applyAliasHop(engine, dedupResults(noEmbedResults), query, identityTierOpts);
     // #1663 — structural exact-lookup tier (slug / exact-title identity).
-    const noEmbedHopped = await applyExactLookupTier(engine, noEmbedPreExact, query, {
-      sourceId: opts?.sourceId,
-      sourceIds: opts?.sourceIds,
-      titleCandidates: titleResults,
-      excludePrivate: opts?.excludePrivate,
-      requireSafeChunks: opts?.requireSafeChunks,
-      takesHoldersAllowList: opts?.takesHoldersAllowList,
-      // #4480: gate tier injections on the caller's shape filters.
-      type: opts?.type,
-      types: opts?.types,
-      excludeSlugs: opts?.exclude_slugs,
-    });
+    const noEmbedHopped = await applyExactLookupTier(engine, noEmbedPreExact, query, exactLookupOpts);
     stampEvidence(noEmbedHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
     // #3995 — guaranteed page-1 relational evidence: a fired arm's answer is
     // often lexically unrecoverable, so its single-arm fused row can land
@@ -2012,27 +2045,12 @@ export async function hybridSearch(
     }
     if (fallbackResults.length > 0) {
       await runPostFusionStages(engine, fallbackResults, postFusionOpts);
+      await applyIdentityBoosts(fallbackResults);
       fallbackResults.sort((a, b) => b.score - a.score);
     }
-    const kwPreExact = await applyAliasHop(engine, dedupResults(fallbackResults), query, {
-      sourceId: opts?.sourceId,
-      sourceIds: opts?.sourceIds,
-      excludePrivate: opts?.excludePrivate,
-      requireSafeChunks: opts?.requireSafeChunks,
-    });
+    const kwPreExact = await applyAliasHop(engine, dedupResults(fallbackResults), query, identityTierOpts);
     // #1663 — structural exact-lookup tier (slug / exact-title identity).
-    const kwHopped = await applyExactLookupTier(engine, kwPreExact, query, {
-      sourceId: opts?.sourceId,
-      sourceIds: opts?.sourceIds,
-      titleCandidates: titleResults,
-      excludePrivate: opts?.excludePrivate,
-      requireSafeChunks: opts?.requireSafeChunks,
-      takesHoldersAllowList: opts?.takesHoldersAllowList,
-      // #4480: gate tier injections on the caller's shape filters.
-      type: opts?.type,
-      types: opts?.types,
-      excludeSlugs: opts?.exclude_slugs,
-    });
+    const kwHopped = await applyExactLookupTier(engine, kwPreExact, query, exactLookupOpts);
     stampEvidence(kwHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
     const kwSliced = kwHopped.slice(offset, offset + limit);
     // v0.32.3 search-lite: budget enforcement on the keyword-fallback path too.
@@ -2189,12 +2207,7 @@ export async function hybridSearch(
     });
     // v0.32.x search-lite: intent exact-match boost (entity/event intents).
     // No-op when boost factor is 1.0 (general intent or weighting disabled).
-    if (intentWeights.exactMatchBoost !== 1.0) {
-      applyExactMatchBoost(fused, query, intentWeights);
-      await applyAliasMentionBoost(fused, query, intentWeights, (aliases) => engine.resolveAliases(aliases, {
-        sourceId: opts?.sourceId, sourceIds: opts?.sourceIds, excludePrivate: opts?.excludePrivate,
-      }));
-    }
+    await applyIdentityBoosts(fused);
     fused.sort((a, b) => b.score - a.score);
   }
 
@@ -2315,13 +2328,7 @@ export async function hybridSearch(
   // T3 — free-text alias hop. Runs AFTER rerank so a query that is a page's
   // declared chosen name reliably surfaces that page regardless of how the
   // reranker scored body chunks. Fail-open on pre-v110 brains.
-  const preExact = await applyAliasHop(engine, rerankPinned, query, {
-    sourceId: opts?.sourceId,
-    sourceIds: opts?.sourceIds,
-    excludePrivate: opts?.excludePrivate,
-    requireSafeChunks: opts?.requireSafeChunks,
-    excludeSlugs: opts?.exclude_slugs,
-  });
+  const preExact = await applyAliasHop(engine, rerankPinned, query, identityTierOpts);
 
   // #1663 — structural exact-lookup tier: a query that IS a page identity
   // (slug / exact normalized title) gets that page at rank-1 regardless of
@@ -2329,18 +2336,7 @@ export async function hybridSearch(
   // the already-fetched title arm (no extra queries); pure no-op for
   // non-lookup-shaped queries. Runs after the alias hop so all three
   // identity surfaces (alias, slug, title) share the same injection shape.
-  const aliasHopped = await applyExactLookupTier(engine, preExact, query, {
-    sourceId: opts?.sourceId,
-    sourceIds: opts?.sourceIds,
-    titleCandidates: titleResults,
-    excludePrivate: opts?.excludePrivate,
-    requireSafeChunks: opts?.requireSafeChunks,
-    takesHoldersAllowList: opts?.takesHoldersAllowList,
-    // #4480: gate tier injections on the caller's shape filters.
-    type: opts?.type,
-    types: opts?.types,
-    excludeSlugs: opts?.exclude_slugs,
-  });
+  const aliasHopped = await applyExactLookupTier(engine, preExact, query, exactLookupOpts);
 
   // T4 — stamp evidence + create_safety so the agent's don't-duplicate
   // decision keys off WHY a page matched, not a raw blended score. Stamp on
