@@ -4,6 +4,9 @@
 history that exists only in the database, derived pages without an explicit
 visibility, and pages indexed before the safe-chunk fence. `gbrain repair`
 fixes those three kinds. Every run is a preview unless you pass `--apply`.
+`gbrain doctor --remediation-plan` lists the same kinds as repair steps, and
+`gbrain doctor --remediate --yes --include-repairs` runs them under a budget
+(see [Run repairs through doctor](#run-repairs-through-doctor)).
 
 **Say to your agent:** *"Doctor says some timeline history is only in the
 database. Show me what `gbrain repair` would change, then apply it."* The
@@ -57,7 +60,10 @@ gbrain repair --all --apply                    # every kind in order
 ```
 
 `--apply` writes without a prompt, so review the preview first. With
-`--apply` you must name a kind or pass `--all`; `--yes` is refused. `--all`
+`--apply` you must name a kind or pass `--all`; `--yes` is refused, and so is
+any other option the table below does not list, including `--max-usd`: a
+refused run changes nothing. To cap paid embedding work, run the repairs
+through `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. `--all`
 runs `timeline`, then `visibility`, then `safe-chunks`, and stops at the
 first kind that stops.
 
@@ -72,9 +78,9 @@ left for the next run. Nothing is deleted.
 | `--apply` | Write the repair. Without it, only preview. |
 | `--source <id>` | Limit the run to one active source. The default is every active (non-archived) source. An unknown or archived id is refused. |
 | `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each of the three kinds). Rerun the same command to continue. |
-| `--no-embed` | `safe-chunks` only: re-seal chunk text and skip embedding. Run `gbrain embed --stale` later. |
+| `--no-embed` | Kinds that embed (`safe-chunks`): re-seal chunk text and skip embedding. Run `gbrain embed --stale` later. |
 | `--all` | Run every kind in order. |
-| `--json` | Print `{ scope, mode, results[] }`, one result per kind with `affected`, `sample`, `residuals`, `cost`, `capacity`, `resumed_from`, `applied`, `skipped`, `complete`, `stopped` and `apply_command`. |
+| `--json` | Print `{ scope, mode, results[], paid_kinds }`, one result per kind with `paid`, `affected`, `sample`, `residuals`, `cost`, `capacity`, `resumed_from`, `applied`, `skipped`, `complete`, `stopped` and `apply_command`. |
 
 The command exits 1 when a run stops early (capacity, a pending write, or a
 held writer). A `--limit` batch that leaves work behind exits 0, so scripts
@@ -86,7 +92,7 @@ should also check `results[].complete`.
 | --- | --- | --- | --- |
 | `timeline` | `timeline_history` | Re-saves each page with its current body through a revision-bound `put_page`. The save writes each database-only timeline entry back into the page as a bullet preceded by `<!-- gbrain:materialized v1 <hash> -->`. | `kept_unrenderable_rows`: entries that would change if written as a bullet (for example an empty source). They stay in the database. |
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
-| `safe-chunks` | `contextual_retrieval_coverage` (`details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
+| `safe-chunks` | `safe_index_pending` (also `contextual_retrieval_coverage`, `details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 
 Timeline rows that an earlier version of a page produced and its current text
 no longer has are removals, not history, so `timeline` neither counts nor
@@ -149,7 +155,8 @@ every private page.
 
 ```bash
 gbrain repair --json     # every kind reports "affected": 0
-gbrain doctor --json     # timeline_history, derived_visibility, unsealed_pages
+gbrain doctor --json     # timeline_history, derived_visibility, safe_index_pending
+gbrain doctor --remediation-plan   # no repair steps left
 ```
 
 Items the repair leaves alone can keep a doctor warning: concepts without
@@ -157,8 +164,142 @@ lineage still count under `derived_visibility`, and code pages without a
 source path or unsupported page kinds still count as unsealed pages. Check
 the residual counters before treating a remaining warning as a failed repair.
 
+## Run repairs through doctor
+
+**Say to your agent:** *"Preview what doctor would fix after the upgrade, then
+run the repairs I agree to with a $2 cap."*
+
+`gbrain doctor --remediation-plan` previews two kinds of step. Job steps come
+from the brain score and `--target-score`. Repair steps come from every
+`gbrain repair` kind that has pending items, whatever the score target, and
+each is marked `requires user agreement`. Every step prints the exact command
+that applies it, and the plan ends with one combined command:
+
+```text
+Repair steps: 2 (requires user agreement; PROTECTED, run on this host only; independent of the score target)
+  R1. timeline — 12 item(s) (free) [requires user agreement]
+     apply: gbrain repair timeline --apply
+  R2. safe-chunks — 40 item(s) (~$0.0031 embeddings) [requires user agreement]
+     apply: gbrain repair safe-chunks --apply
+
+Apply everything after the user agrees: gbrain doctor --remediate --yes --include-repairs --max-usd 0.01
+Ask the user before applying any repair step.
+```
+
+`gbrain doctor --remediate --yes` runs job steps only. Repair steps run only
+when you also pass `--include-repairs`, which records the user's agreement;
+without it they are listed as `N repair steps skipped (user agreement required):
+re-run with --include-repairs`. Repair steps are PROTECTED: they run in this
+process on the brain host, and a remote caller cannot include them. They run
+even when the score target is unreachable (a keyless brain often cannot reach
+90); `--target-score` governs job steps only, and an included repair step runs
+to completion.
+
+`--max-usd <n>` is a cumulative cap across the run and every `--resume`. A paid
+step (one that may queue embeddings) whose estimate exceeds what is left is not
+started; the free steps still run, and the run then stops as budget-exhausted
+with a resume command that repeats the cap and `--include-repairs`:
+
+```text
+Resume with:
+  gbrain doctor --remediate --yes --include-repairs --max-usd 0 --resume 3f9c2a1b7d4e5f60
+```
+
+The checkpoint lives in `~/.gbrain/remediation/<plan hash>.json` on this host
+and records the brain, the cap, the `--include-repairs` agreement, the spend so
+far and the original steps. `--resume` without `--max-usd` reuses the recorded
+cap and prints it; a higher `--max-usd` raises it. A resume only continues the
+original steps: repair kinds or job steps found later need a fresh run and a
+fresh agreement. A checkpoint recorded for another brain is refused. Pass
+`--no-embed` to keep repair steps free.
+
+With `--json`, the result adds `repairs[]` (one entry per repair step, with
+`status` `completed`, `stopped`, `failed`, `budget_refused` or
+`budget_exhausted`), `repairs_skipped[]`, `budget`, `repairs_completed`,
+`healthy` and `findings[]`. Each finding has a `check_id`, a `message` and a
+`class`:
+
+| Class | Meaning |
+| --- | --- |
+| `cleared` | The finding was present before the run and is gone after it. |
+| `pending` | A repairable finding remains: its step stopped, was refused by the budget, left items behind, or the check could not run. |
+| `consent_required` | A repairable finding whose step was skipped for lack of `--include-repairs`; `command` applies it. |
+| `operator_required` | Needs a named manual action on the brain host (`instruction`), for example raising a journal limit, retrying a parked effect, or quarantining self-captures. |
+| `unsupported` | No command can clear it yet; it is reported so it is never hidden (a stale queued embedding effect). |
+
+Exit status: `0` when no automatically repairable finding remains and no step
+failed, even if operator-required or unsupported findings remain (they are
+listed); `1` when a repairable finding remains, a step failed, or the budget
+ran out; `2` when the score target is unreachable and there was no repair step
+to run, or a resume was refused. `healthy` is true only when every wave check
+is clean; `repairs_completed` counts the repair steps that finished.
+
+## Recover after upgrading to this release
+
+**Say to your agent:** *"We just upgraded gbrain. Check what needs repair and
+walk me through it before changing anything."*
+
+1. `gbrain post-upgrade` runs the recovery checks once and, when something
+   needs attention, prints an `[AGENT] Relay this to your operator` banner with
+   each finding's count. It never applies anything.
+2. Preview: `gbrain doctor --remediation-plan`. Show the user the repair steps
+   and their estimated cost, and ask before applying.
+3. After the user agrees, apply with a budget:
+   `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`
+   (the plan prints `<n>` filled in).
+4. If it stops as budget-exhausted, ask the user again, then run the printed
+   resume command (raise `--max-usd` only with their agreement).
+5. Follow each `operator_required` instruction the run prints, and note the
+   `unsupported` ones.
+6. Verify: `gbrain doctor --remediation-plan` lists no repair steps.
+
+Hosted and thin-client callers see the same checks in `gbrain remote doctor`
+as one line each, for example
+`timeline_history: ... host operator action required: on the brain host run gbrain doctor --remediation-plan`.
+A line that says `Unknown:` means the check could not run; it is not a clean
+result. Ask the brain host's operator to run the steps above.
+
+## Quarantine self-captured corpus files
+
+`gbrain doctor` reports `self_capture` when the dream session corpus
+(`dream.synthesize.session_corpus_dir`) still holds files captured from
+gbrain's own `claude-cli` sessions (#5413). Dream and the sweep already skip
+the ones they can identify, but nothing removes them. The check never moves
+or deletes files. It lists what it classified (a harness transcript under a
+gbrain scratch project matches the file) and counts what it cannot decide (no
+harness transcript is left for that session).
+
+To quarantine the classified files on the brain host:
+
+```bash
+gbrain doctor --json > /tmp/gbrain-doctor.json
+# Review the list first:
+jq -r '.checks[] | select(.name=="self_capture") | .details.classified_sample[]' /tmp/gbrain-doctor.json
+# Then run the exact commands doctor printed (one mkdir, one move per file, sidecars included):
+jq -r '.checks[] | select(.name=="self_capture") | .details.quarantine_commands[]' /tmp/gbrain-doctor.json | sh
+gbrain doctor --json | jq '.checks[] | select(.name=="self_capture") | .details'
+```
+
+The quarantine directory is a sibling of the corpus directory
+(`<corpus>.quarantine`), so dream never reads it. Doctor prints at most 20 move
+commands per run; rerun the sequence until `classified` reaches 0. Review the
+`unclassifiable` files by hand; delete the quarantine directory only when you
+are sure you do not need it.
+
+## Stale queued embedding effects
+
+`gbrain doctor` reports `stale_embedding_effects` when a committed write still
+has a queued embedding effect an hour later that no consumer has claimed
+(#5629). It blocks shared-skill activation with `writer_not_quiesced`, and the
+refusal names the effect. Inspect it with
+`gbrain sources writer status <source> --json`. Inspection cannot clear it:
+`gbrain sources writer retry-effects` only handles failed effects, and the
+path that reconciles or re-queues a stale queued effect (never silently
+dropping it) is not built yet. Doctor remediation reports it as `unsupported`.
+
 ## Related
 
 - [Write refusal reasons](write-refusals.md) — what a refused write means and the recovery command
 - [Concurrent writes and durable receipts](concurrent-writes.md) — receipts, retries and capacity limits
 - [v0.60.5.0 upgrade steps](../../skills/migrations/v0.60.5.0.md) — the backup-first upgrade that introduced these repairs
+- [Topologies: claim and activate runbook](../architecture/topologies.md#claim-and-activate-runbook) — quiescence checklist, the writer admin lock

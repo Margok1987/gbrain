@@ -485,6 +485,81 @@ parent, persistence home and stable lock/coordination directory together across
 recreation. Storage preflight reports each location and can identify Linux
 overlay/tmpfs backing, but a mount shown as present is **not** attested durable.
 
+### Claim and activate runbook
+
+Managed mode cannot be turned off from the CLI (there is no deactivate command
+yet, #5455), so treat activation as a one-way step. Take a database backup
+first: for Postgres, `pg_dump` the brain database; for PGLite, stop every gbrain
+process and copy the database directory.
+
+Quiesce every writer on every host that uses this database before activating:
+
+1. Stop `gbrain serve` (stdio and HTTP) on each host.
+2. Pause autopilot on each host with `gbrain autopilot pause --reason "writer activation"`
+   and confirm with `gbrain autopilot status`. The pause survives
+   `gbrain upgrade` and `gbrain autopilot --install`; `gbrain autopilot resume`
+   clears it afterwards.
+3. Stop `gbrain jobs work` workers and supervisors that are not autopilot's.
+4. Disable cron entries, Git hooks and harness hooks that run `gbrain sync`,
+   `embed`, `extract`, `dream` or `import`.
+5. Upgrade every remaining host to this release, even ones you only read from.
+
+Then run the sequence, re-reading status between every step, because
+`admin_state` rotates after every change and a stale value refuses with
+`writer_admin_state_changed`:
+
+```bash
+gbrain sources writer status --brain host --json          # note admin_state
+gbrain sources writer claim default --brain host --path /absolute/canonical/source \
+  --admin-intent writer_claim --expected-state <admin_state> --json
+gbrain sources writer status --brain host --json          # fresh admin_state
+gbrain sources writer activate --brain host --confirm-quiesced --dry-run --json
+gbrain sources writer activate --brain host --confirm-quiesced \
+  --admin-intent writer_activate --expected-state <fresh admin_state> --json
+```
+
+After activation, managed sync requires `--no-pull` (Git pull/rebase needs an
+explicit drained maintenance window) and refuses `--skip-failed` and
+`--include-gitignored`; after fixing a failed item run
+`gbrain sync --no-pull --retry-failed` with the same source and options. Resume
+autopilot with `gbrain autopilot resume` and re-enable the hooks you stopped.
+
+When activation refuses with `writer_not_quiesced` because of queued work, the
+refusal names the blocking effect (effect id, kind, source, page and request id)
+and the command that inspects it, `gbrain sources writer status <source> --json`.
+A committed write whose queued embedding effect is never claimed cannot be
+cleared by any command yet (`retry-effects` handles failed effects only);
+`gbrain doctor` reports it as `stale_embedding_effects`.
+
+### Writer admin lock
+
+`gbrain sources writer lock` sets an opt-in, brain-level admin lock; while it
+is set, writer claim, activate, transfer prepare and transfer accept refuse for
+every caller with `writer_admin_locked`, whose hint tells an agent to stop and
+ask the operator. Only these four administrative changes are blocked: ordinary
+writes continue, including the automatic first-write claim on a PGLite brain.
+There is no `--force`; the escape hatch is the local unlock. Remote callers can
+neither lock nor unlock, and generic `gbrain config set`/`unset` and config
+import refuse the reserved key. The lock guards against routine or accidental
+agent administration; it is not a security boundary against a caller with the
+same shell. Binaries older than this release do not consult it.
+`gbrain sources writer status` shows `admin_lock` (whether it is set, when, and
+by which host) and the selected brain.
+
+To administer a locked brain, the operator runs, on the brain host:
+
+```bash
+gbrain sources writer unlock --brain host
+gbrain sources writer status default --brain host --json   # fresh admin_state
+# ... the reviewed claim, activate or transfer commands above ...
+gbrain sources writer lock --brain host
+```
+
+If administration fails midway, still run `gbrain sources writer lock` before
+investigating, so no agent can retry the change meanwhile. `lock` refuses while
+a transfer is prepared but not accepted; finish or abandon the transfer first.
+`lock` and `unlock` are idempotent and print the resulting state.
+
 ### Supported managed work and explicit repair
 
 Once active, ordinary authorized local atom extraction, fact fences/backstop,

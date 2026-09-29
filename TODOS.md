@@ -1,5 +1,26 @@
 # TODOS
 
+## Fix wave 3 recovery-layer follow-ups (filed 2026-09-29, follow-up from v0.60.11.0)
+
+- [ ] **P1 — Bounded replay window for lifetime request IDs (wave-2 CEO-E7).**
+  **What:** every admitted write keeps a permanent request ID for replay protection, so the principal and brain lifetime-ID limits only move later (`persistence_capacity` warns at 80% and names a `gbrain config set` value). **Fix:** a bounded replay window with a documented horizon and an eviction rule that never replays a committed write twice; size it from the default of 600 admissions a day (about 417 days of headroom at the default limit). **Effort:** L. **Priority:** P1.
+- [ ] **P1 — `gbrain sources writer deactivate` (#5455).**
+  **What:** managed mode is a one-way door: the claim and activate runbook in `docs/architecture/topologies.md` tells operators to take a database backup because nothing turns activation off. **Fix:** a deliberate, state-bound deactivate with the same `--admin-intent` / `--expected-state` contract and quiescence checks, honoring the writer admin lock. **Effort:** M. **Priority:** P1.
+- [ ] **P1 — Opt-in `min_writer_version` floor.**
+  **What:** the `writer_version` doctor advisory only observes: a binary older than v0.60.5.0 can still delete database-only timeline rows. **Fix:** an opt-in floor enforced at admission and publication by the database (reusing the `writer_protocol_floor` trigger pattern), a binary version declaration older binaries lack, quiescence to enable it, and a floor that cannot be lowered. Eng estimate 1,500-3,000 changed lines against 800-1,500 for the advisory. **Effort:** L. **Priority:** P1.
+- [ ] **P1 — #5629: reconcile or re-queue a stale queued embedding effect.**
+  **What:** a committed write whose queued embedding effect is never claimed blocks shared-skill activation (`writer_not_quiesced` names it; doctor reports `stale_embedding_effects` as unsupported), and `retry-effects` refuses effects that have not failed. **Fix:** let the operator reconcile existing vectors or re-queue the effect under the owner, never silently drop the embedding obligation; then reclassify the doctor finding as repairable. **Effort:** M. **Priority:** P1.
+- [ ] **P2 — #5522: write the reproduction first.** Plausible but unreproduced; no code until a failing repro exists. **Priority:** P2.
+- [ ] **P2 — #5226 part 2.** Revisit only after part 1 is confirmed fixed with pacing on. **Priority:** P2.
+- [ ] **P3 — Database remediation run record with a reservation ledger.**
+  **What:** the remediation cap, consent and spend live in the local checkpoint (`~/.gbrain/remediation/<plan hash>.json`), which covers one host. **Fix:** a `remediation_runs` record plus per-attempt reservations that delegated workers enforce, so a cap holds across processes and hosts. **Effort:** L. **Priority:** P3.
+- [ ] **P3 — Host-label registry for writer-version warnings.** The advisory names hosts by persistence host UUID because no hostname is recorded (`identity.ts` `host.json`). Record an operator-chosen label per host and show it beside the UUID. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — `source-paths` / `source-uris` repair kinds and the metadata-repair intent (dropped from W8).** Revisit when `invalid_source_uri` reports arrive; the manual step in `docs/guides/write-refusals.md` stands until then. **Priority:** P3.
+- [ ] **P3 — Doctor check for unpushed managed commits by age (#5198 thread).** **Priority:** P3.
+- [ ] **P3 — #3783 with #5691: query-side embedding prefixes behind a setting.** **Priority:** P3.
+- [ ] **P3 — #5392 inert single-writer mode.** Recommended no: resolve through the #5198/#5254 family instead. Recorded so the decision is visible. **Priority:** P3.
+- [ ] **P3 — Retire `safeChunkUpgradeAdvisory`.** Post-upgrade now reports `safe_index_pending` through the recovery banner; the function remains only for `test/safe-chunk-reseal.test.ts`. Move that assertion onto the doctor check and delete the function. **Effort:** S. **Priority:** P3.
+
 ## Test-audit follow-ups (filed 2026-09-29)
 
 Evidence for each item is in `docs/test-audit/2026-09-29/`.
