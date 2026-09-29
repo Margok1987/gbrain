@@ -168,7 +168,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/embedding-readiness.ts": ["test/e2e/embedding-recovery-parity.test.ts"],
   "src/core/facts/embedding-identity.ts": ["test/e2e/embedding-recovery-parity.test.ts", "test/e2e/fact-embedding-backfill-parity.test.ts"],
   "src/core/stored-embedding-identity.ts": ["test/e2e/unsupported-embedding-identity-postgres.test.ts"],
-  "src/commands/extract.ts": ["test/e2e/multi-source-bug-class.test.ts", "test/e2e/attendance-retrieval-postgres.test.ts", "test/e2e/extract-timeline-attendance-postgres.test.ts"],
+  "src/commands/extract.ts": ["test/e2e/multi-source-bug-class.test.ts", "test/e2e/attendance-retrieval-postgres.test.ts", "test/e2e/extract-timeline-attendance-postgres.test.ts", "test/e2e/w5-persistence-postgres.test.ts"],
   "src/commands/extract-attendance-repair.ts": ["test/e2e/attendance-repair-postgres.test.ts"],
   "src/commands/migrate-engine.ts": [
     "test/e2e/multi-source-bug-class.test.ts",
@@ -239,7 +239,9 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/timeline-materialize.test.ts",
     "test/e2e/derived-visibility-repair.test.ts",
     "test/e2e/repair-command.test.ts",
+    "test/e2e/w5-persistence-postgres.test.ts",
   ],
+  "src/core/brain-score-recommendations.ts": ["test/e2e/w5-persistence-postgres.test.ts"],
   "src/core/repair/**": ["test/e2e/repair-command.test.ts", "test/e2e/derived-visibility-repair.test.ts", "test/e2e/safe-chunk-reseal.test.ts"],
   "src/commands/repair.ts": ["test/e2e/repair-command.test.ts"],
   "src/core/timeline-marker.ts": ["test/e2e/timeline-materialize.test.ts"],

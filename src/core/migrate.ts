@@ -2,7 +2,7 @@ import { SOURCE_INGESTION_RECEIPTS_SCHEMA_SQL } from './company-brain/receipt-sc
 import { MANAGED_WRITER_GUARD_SQL } from './persistence/writer-guard-schema.ts';
 import { PERSISTENCE_TOPOLOGY_SCHEMA_SQL } from './persistence/topology-schema.ts';
 import { PERSISTENCE_SCHEMA_STATEMENTS, PERSISTENCE_REQUEST_RECOVERY_INDEX_SQL, PERSISTENCE_DATABASE_PENDING_INDEX_SQL } from './persistence/schema.ts';
-import { PERSISTENCE_EFFECT_SCHEMA_SQL } from './persistence/effect-schema.ts';
+import { PERSISTENCE_EFFECT_PARKED_INDEX_SQL, PERSISTENCE_EFFECT_SCHEMA_SQL } from './persistence/effect-schema.ts';
 import { PAGE_PROJECTION_SCHEMA_SQL, PAGE_PROJECTION_ACTIVATION_SQL } from './page-state/projection-schema.ts';
 import { LEASE_TOKEN_SCHEMA_SQL } from './lease-schema.ts';
 import { PAGE_STATE_SCHEMA_SQL, PAGE_VERSION_DELETION_SCHEMA_SQL } from './page-state/schema.ts';
@@ -6667,6 +6667,15 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     sql: `ALTER TABLE facts ADD COLUMN IF NOT EXISTS embedding_model TEXT;
       ALTER TABLE facts ADD COLUMN IF NOT EXISTS embedded_text_hash TEXT;
       ${MANAGED_WRITER_GUARD_SQL}`,
+  },
+  {
+    version: 167, name: 'index_parked_persistence_effects', idempotent: true, transaction: false, sql: '',
+    handler: async engine => {
+      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 167, 'persistence_effects_parked');
+      await engine.runMigration(167, engine.kind === 'postgres'
+        ? PERSISTENCE_EFFECT_PARKED_INDEX_SQL.replace('CREATE INDEX', 'CREATE INDEX CONCURRENTLY')
+        : PERSISTENCE_EFFECT_PARKED_INDEX_SQL);
+    },
   },
   {
     version: 168,

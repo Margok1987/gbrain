@@ -82,6 +82,11 @@ function canonicalTimeline(body: CanonicalBody, slug: string): Map<string, Extra
   return extractTimeline(safeBody(body), slug);
 }
 
+/** Timeline tuples the coordinator projects from a canonical body (compiled truth and timeline joined by a newline). */
+export function canonicalTimelineRows(body: string, slug: string): Map<string, ExtractedTimelineEntry> {
+  return canonicalTimeline({ compiled_truth: body, timeline: '' }, slug);
+}
+
 /** Tuples whose bullet is introduced by a marker that still matches it. */
 function markedTimeline(body: CanonicalBody, slug: string): Set<string> {
   const lines = safeBody(body).split('\n');
