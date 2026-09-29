@@ -27,6 +27,7 @@ export class PersistenceConsumer {
   private maintenanceWorker: Promise<unknown> | undefined;
   private nextMaintenance = 0;
   private publishedSinceMaintenance = 0;
+  private maintenanceVolume = 50;
   private lastScan = 0;
   private progressWake = false;
   private lastError: { code: string; at: string; phase?: string } | undefined;
@@ -84,12 +85,13 @@ export class PersistenceConsumer {
       .catch(error => this.report(error)).finally(() => { this.topologyWorker = undefined; });
     if (!this.effectsWorker) this.effectsWorker = this.drainEffects().catch(error => this.report(error))
       .finally(() => { this.effectsWorker = undefined; });
-    // Queue upkeep also follows publication volume, so a busy owner never
-    // plans against statistics from a much smaller queue.
-    if (!this.maintenanceWorker && (Date.now() >= this.nextMaintenance || this.publishedSinceMaintenance >= 1000)) {
+    // Queue upkeep also follows publication volume, like autovacuum's scale
+    // factor, so a busy owner never plans against a much smaller queue.
+    if (!this.maintenanceWorker && (Date.now() >= this.nextMaintenance || this.publishedSinceMaintenance >= this.maintenanceVolume)) {
       this.nextMaintenance = Date.now() + 60_000;
       this.publishedSinceMaintenance = 0;
-      this.maintenanceWorker = compactWriteReceipts(this.engine).then(() => vacuumPersistenceQueues(this.engine)).catch(error => this.report(error))
+      this.maintenanceWorker = compactWriteReceipts(this.engine).then(() => vacuumPersistenceQueues(this.engine))
+        .then(rows => { this.maintenanceVolume = 50 + Math.ceil(rows * 0.2); }).catch(error => this.report(error))
         .finally(() => { this.maintenanceWorker = undefined; });
     }
     if (!this.projectionWorker) this.projectionWorker = rebuildPendingPageProjections(this.engine, 2)

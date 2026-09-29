@@ -255,9 +255,11 @@ export async function markRecovering(engine: SqlEngine, row: WriteRequest, reaso
  * planner statistics current, so receipt lookups keep using the request-id
  * index and claims do not walk dead queue entries.
  */
-export async function vacuumPersistenceQueues(engine: BrainEngine): Promise<void> {
-  if (engine.kind !== 'pglite') return;
+export async function vacuumPersistenceQueues(engine: BrainEngine): Promise<number> {
+  if (engine.kind !== 'pglite') return 0;
   await engine.executeRaw('VACUUM (ANALYZE) persistence_requests, persistence_effects, persistence_counters, page_projection_jobs, page_write_guards');
+  const [requests] = await engine.executeRaw<{ rows: number }>("SELECT GREATEST(reltuples,0)::float8 AS rows FROM pg_class WHERE oid='persistence_requests'::regclass");
+  return Number(requests?.rows ?? 0);
 }
 
 export async function compactWriteReceipts(engine: BrainEngine, retentionDays = 30): Promise<number> {
