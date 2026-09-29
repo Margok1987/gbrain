@@ -10,6 +10,36 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.11.0] - 2026-09-29
+
+**Managed brains run their whole maintenance cycle again: every maintenance writer publishes through the coordinator, and one refused phase no longer kills the job.**
+
+On a brain with managed persistence turned on, a dozen maintenance writers still used the old direct writer, which a managed brain refuses. `synthesize_concepts` was the worst: it paid for synthesis and then threw, so the scheduled global maintenance job died on every run and no later phase ran. Chronicle extraction, the purge of deleted pages, enrichment, `add_link` / `remove_link`, `gbrain bootstrap verify`, the facts writers and several smaller phases had the same problem. They all publish through the persistence coordinator now, with the same authority checks, revisions and crash recovery as `put_page`, and each checks writer authority before it spends anything on a model.
+
+Embedding migrations also stop stranding a brain without vectors when the cost cap sits near the estimate, and saving a page to an unbound Postgres source now tells you exactly how to fix it.
+
+### To take advantage of v0.60.11.0
+
+Run `gbrain upgrade` on the brain host. Migration v182 adds one nullable column (`pages.database_only_reason`) and starts no service. Then run `gbrain doctor` once: the new `unbound_source` check counts pages saved database-only to a source with no canonical owner.
+
+### Itemized changes
+
+- **`synthesize_concepts` on managed brains (#5484).** Concepts publish through the maintenance coordinator in the same order as before: private first, then the provenance edges, then promotion to world. Republishing a concept keeps its facts and takes fences, timeline and tags, or holds the concept untouched when those fences are ambiguous. The authority check runs before any model call.
+- **A failing phase no longer kills maintenance.** A phase that throws is now reported as a failed phase with its error, and the phases after it still run. The job still reports the failure: the cycle is partial, global freshness is not stamped, and `gbrain dream` exits non-zero. Cancellation, a lost cycle lease and budget exhaustion still stop the job. A phase that fails after paying for model calls is counted in doctor's `dream_paid_loop` check under a `dream:phase:<phase>:<source>` key.
+- **More writers go through the coordinator (#5280, #5523, #5405).**
+  - Life Chronicle events publish with their timeline row on the source page in one write, and a deleted event is never brought back.
+  - The purge phase, `gbrain pages purge-deleted`, the purge job and `purge_deleted_pages` purge each expired tombstone through a coordinated `delete_page --purge`. A tombstone that can't be purged is reported, not forced.
+  - `gbrain enrich`, the `enrich_thin` phase, the drift report and `grade_takes` auto-resolutions publish through the coordinator; `propose_takes` skips its legacy receipt page on managed brains, and the lint phase reports issues without rewriting managed files.
+  - `add_link` and `remove_link` are coordinated database-only writes. A manual link survives re-derivation and its page's next sync.
+  - `gbrain bootstrap verify` cleans up its probe pages through the coordinator.
+  - Fact-fence reconciliation in `extract_facts`, the phantom-page redirect, direct fact-fence writes, Google open-loop extraction, bulk `gbrain extract-conversation-facts` and the `conversation_facts_backfill` phase commit through the coordinator.
+  - Deliberate administrative refusals (`sources add/remove/reclone/archive/restore/purge`, engine migration, shared-secret sync delegation) are unchanged.
+- **Every phase and mutating operation is classified.** `src/core/cycle/phase-table.ts` classifies each cycle phase for managed brains, and `docs/architecture/managed-mutating-writers.tsv` classifies every mutating operation and the CLI writers above. The canonical-writer census now also counts direct `importFromContent` calls and fails on an unclassified operation.
+- **Unbound Postgres sources (#5254).** Saving a page to a source that has a checkout folder but no designated owner still refuses by default, but the error (`owner_unavailable`, detail `unbound_source`) now names both fixes: bind the source with the printed `gbrain sources writer claim` command, or run `gbrain config set persistence.unbound_write database_only` to allow database-only saves. With the opt-in, new and already database-only pages save to the database and the result says why no file was written; pages that came from a markdown file keep refusing. Such pages stay database-only after binding (a publication racing a bind fails instead of committing), and sync never overwrites them. The `unbound_source` doctor check is ok while the source is unbound and warns once it is bound.
+- **Embedding migration budget (#5680).** Each provider request is charged at its maximum size and then settled to what the provider reported, once per attempt, summed across retries and splits; usage above the reservation stops further requests. A request's maximum is now sized to its own texts instead of the provider's whole batch limit. The plan prints a worst-case authorization next to the estimate. When `--max-cost-usd` is below it, the migration stops before touching any vector and prints your cap, the worst case and the exact command that covers it (error `embedding_budget_below_worst_case`).
+
+Thanks to @akinduroifedayo, whose PR #5631 supplied the concept and chronicle publication approach adopted here.
+
 ## [0.60.10.0] - 2026-09-29
 
 **Local PGLite brains now commit writes about 3.7× faster, with the same durability.**
