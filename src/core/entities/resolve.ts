@@ -215,16 +215,23 @@ async function findExactBasenameCandidates(
  * v0.40.2.0 — resolution-source-tagged variant for trajectory routing.
  *
  * Same resolution chain as `resolveEntitySlug` but returns the source
- * (`exact_page` | `fuzzy_match` | `fallback_slugify`) alongside the slug
- * so trajectory callers can gate on `resolution_source !==
- * 'fallback_slugify'` — querying findTrajectory on an invented slug
- * always returns [] and wastes a SQL round-trip. Codex Problem 5 from
- * v0.40.2.0 outside-voice review.
+ * (`exact_page` | `alias_exact` | `prefix_expansion` | `fuzzy_match` |
+ * `fallback_slugify`) alongside the slug so trajectory callers can gate on
+ * `resolution_source !== 'fallback_slugify'` — querying findTrajectory on an
+ * invented slug always returns [] and wastes a SQL round-trip.
+ *
+ * `prefix_expansion` is the bare single-token branch: it picks the sole
+ * `<dir>/<token>-*` page because it is the only candidate, not because
+ * anything confirms the mention is the same person or company (a bare
+ * "Victor" in an unrelated transcript landed on the brain's one
+ * `people/victor-*` page). It still verifies a live page, so
+ * `!== 'fallback_slugify'` gates are unaffected; `facts/backstop.ts` flags
+ * facts written through it as unverified.
  *
  * The original `resolveEntitySlug` keeps its existing contract (returns
  * just the slug) for all pre-v0.40 call sites — no caller-side churn.
  */
-export type ResolutionSource = 'exact_page' | 'alias_exact' | 'fuzzy_match' | 'fallback_slugify';
+export type ResolutionSource = 'exact_page' | 'alias_exact' | 'prefix_expansion' | 'fuzzy_match' | 'fallback_slugify';
 
 export interface ResolveResult {
   slug: string;
@@ -255,7 +262,7 @@ export async function resolveEntitySlugWithSource(
 
   if (isBareName(trimmed)) {
     const expanded = await tryUnambiguousPrefixExpansion(engine, source_id, slugify(trimmed));
-    if (expanded) return { slug: expanded, source: 'fuzzy_match' };
+    if (expanded) return { slug: expanded, source: 'prefix_expansion' };
   } else {
     const fuzzy = await tryFuzzyMatch(engine, source_id, trimmed);
     if (fuzzy) return { slug: fuzzy, source: 'fuzzy_match' };
