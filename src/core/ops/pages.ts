@@ -580,6 +580,7 @@ const capture: Operation = {
     ...PAGE_MUTATION_PARAMS,
     ...CAPTURE_EVENT_PARAMS,
     content: { type: 'string', required: true, description: 'Markdown or plain text to capture. File paths are NOT accepted over MCP — read the file yourself and pass its content (the CLI --file lane is local-only).' },
+    local_file: { type: 'string', required: false, description: 'Trusted local CLI only (--file): the absolute path of the captured file. Recorded as the page origin only when it lies inside the source and names the slug; the path itself is never stored. Remote callers are refused.' },
     slug: { type: 'string', required: false, description: "Target slug. Default: inbox/YYYY-MM-DD-<sha8-of-content> (stable per content — recapturing identical text hits the same slug); type diary/event routes under life/. Fenced clients: the default lands under your first bound prefix." },
     type: { type: 'string', required: false, description: "Page type for the stamped frontmatter. Omitted: the content's frontmatter `type:` when present, else 'note'. An explicit type (this param or a frontmatter `type:`) must be declared by the active schema pack; undeclared types are rejected before writing, naming the declared vocabulary." },
   },
