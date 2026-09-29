@@ -41,14 +41,15 @@ const LOCAL_MODEL_PROVIDERS = new Set(['ollama', 'lmstudio', 'llama-server']);
 const FALLBACK_PRICING: ModelPricing = canonicalLookup('anthropic:claude-sonnet-4-6') ?? { input: 3.0, output: 15.0 };
 
 /**
- * Parse a dream budget config value. `0` spends nothing, `unlimited` is no
- * cap (Infinity); a negative, empty or non-numeric value uses `fallback`.
+ * Parse a dream budget config value. `0` (or a negative value) spends
+ * nothing, `unlimited` is no cap (Infinity); an empty or non-numeric value
+ * uses `fallback`.
  */
 export function parseBudgetUsd(raw: string | number | null | undefined, fallback: number): number {
   if (typeof raw === 'string' && raw.trim().toLowerCase() === 'unlimited') return Infinity;
   if (raw === null || raw === undefined || (typeof raw === 'string' && raw.trim() === '')) return fallback;
   const value = Number(raw);
-  return Number.isFinite(value) && value >= 0 ? value : fallback;
+  return Number.isFinite(value) ? Math.max(0, value) : fallback;
 }
 
 /** `dream.budget.allow_unpriced=true` lets unpriced models bypass the gate. */

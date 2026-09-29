@@ -55,13 +55,13 @@ describe('BudgetMeter fails closed', () => {
     expect(open.check({ modelId: 'proxy:unknown-alias', estimatedInputTokens: 1e7, maxOutputTokens: 1e6, label: 'u2' }).allowed).toBe(true);
   });
 
-  test('parseBudgetUsd: 0 is honored, unlimited is Infinity, garbage and negatives fall back', () => {
+  test('parseBudgetUsd: 0 is honored, negatives clamp to 0, unlimited is Infinity, garbage falls back', () => {
     expect(parseBudgetUsd('0', 1)).toBe(0);
     expect(parseBudgetUsd('2.5', 1)).toBe(2.5);
     expect(parseBudgetUsd(3, 1)).toBe(3);
     expect(parseBudgetUsd('unlimited', 1)).toBe(Infinity);
     expect(parseBudgetUsd(' Unlimited ', 1)).toBe(Infinity);
-    expect(parseBudgetUsd('-1', 1)).toBe(1);
+    expect(parseBudgetUsd('-1', 1)).toBe(0);
     expect(parseBudgetUsd('abc', 1)).toBe(1);
     expect(parseBudgetUsd('', 1)).toBe(1);
     expect(parseBudgetUsd(null, 1)).toBe(1);
