@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGlite } from '@electric-sql/pglite';
 import { PgliteStatementCache } from '../src/core/pglite-statements.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 
 describe('PGLite named statement cache', () => {
   let raw: PGlite;
@@ -72,3 +73,13 @@ describe('PGLite named statement cache', () => {
     expect((await db.query('SELECT label FROM items WHERE id=$1', [11])).rows).toEqual([{ label: 'committed-2' }]);
   });
 });
+
+test('a disconnected engine releases its PGLite instance with the statement cache', async () => {
+  const engine = new PGLiteEngine();
+  await engine.connect({});
+  await engine.executeRaw('SELECT 1');
+  await engine.executeRaw('SELECT 1');
+  expect((engine as unknown as { _statements: unknown })._statements).not.toBeNull();
+  await engine.disconnect();
+  expect((engine as unknown as { _statements: unknown })._statements).toBeNull();
+}, 60_000);

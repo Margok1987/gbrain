@@ -1007,6 +1007,7 @@ export class PGLiteEngine implements BrainEngine {
       if (lock?.acquired) await releaseLock(lock);
       this._lock = null;
       this._dbWork = null;
+      this._statements = null;
     } finally {
       // A slow close keeps the watchdog armed until it actually settles. On a
       // failed close the lock is retained; callers must terminate the process.
