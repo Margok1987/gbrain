@@ -289,11 +289,12 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     attempted++;
     let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
     try {
-      const binding = effect.worktree_id ? await getWorktreeBinding(engine, effect.source_id, opts.hostId) : null;
+      const unlocked = ['embedding', 'facts-backstop'].includes(effect.kind);
+      const binding = effect.worktree_id && !unlocked ? await getWorktreeBinding(engine, effect.source_id, opts.hostId) : null;
       // Probe durability before locking: the git child processes must not
       // hold the worktree's publications behind them.
       const hardened = effect.kind === 'git' && binding?.local_path ? await hardenedRoot(binding.local_path) : undefined;
-      if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) {
+      if (effect.worktree_id && !unlocked) {
         if (!binding) throw new OperationError('owner_unavailable', 'The canonical effect owner is unavailable.');
         lock = await acquireWorktree(binding);
         if (!lock) throw new OperationError('writer_busy', 'The canonical worktree is busy.');

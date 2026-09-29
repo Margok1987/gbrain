@@ -151,7 +151,7 @@ export class PersistenceConsumer {
   }
   /** Effects keep pace with publication: full batches continue without waiting for the next tick. */
   private async drainEffects(): Promise<void> {
-    const limit = 8;
+    const limit = 20;
     while (!this.stopping && await runPersistenceEffects(this.engine, this.config,
       { hostId: this.hostId, limit, signal: this.abort.signal }) >= limit);
   }
