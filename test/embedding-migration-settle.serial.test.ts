@@ -78,7 +78,7 @@ for (const kind of testBackends()) {
       await engine.executeRaw("UPDATE content_chunks SET model='synthetic:legacy-model'");
     }
 
-    async function cli(args: string[]) {
+    async function cli(args: string[], target: { to: string; dim: number } = { to: model, dim: dimensions }) {
       const home = mkdtempSync(join(tmpdir(), 'migration-settle-'));
       mkdirSync(join(home, '.gbrain'));
       writeFileSync(join(home, '.gbrain', 'config.json'), JSON.stringify({ engine: kind, embedding_model: model, embedding_dimensions: dimensions, openai_api_key: 'synthetic-only' }));
@@ -87,9 +87,9 @@ for (const kind of testBackends()) {
       const errSpy = spyOn(console, 'error').mockImplementation((...a: unknown[]) => { out.push(a.join(' ')); });
       let code = -1;
       try {
-        await withEnv({ GBRAIN_HOME: home, GBRAIN_EMBEDDING_MODEL: undefined, GBRAIN_EMBEDDING_DIMENSIONS: undefined }, async () => {
+        await withEnv({ GBRAIN_HOME: home, GBRAIN_EMBEDDING_MODEL: undefined, GBRAIN_EMBEDDING_DIMENSIONS: undefined, NVIDIA_API_KEY: 'synthetic-only' }, async () => {
           try {
-            await runMigrateEmbeddings(engine, ['--to', model, '--dim', String(dimensions), ...(args.includes('--reranker') ? [] : ['--reranker', 'off']), '--yes', ...args],
+            await runMigrateEmbeddings(engine, ['--to', target.to, '--dim', String(target.dim), ...(args.includes('--reranker') ? [] : ['--reranker', 'off']), '--yes', ...args],
               { exit: (value: number): never => { throw new ExitSignal(value); } });
           } catch (error) {
             if (!(error instanceof ExitSignal)) throw error;
@@ -345,6 +345,50 @@ for (const kind of testBackends()) {
       expect(envelope.docs).toEndWith('docs/guides/write-refusals.md#embedding_budget_below_worst_case');
       expect(transportCalls).toBe(0);
       expect(await vectors()).toEqual(before);
+    });
+
+    test('healing an oversized stale chunk budgets the siblings it re-indexes', async () => {
+      const rate = 1_000;
+      await engine.setConfig('pricing.overrides', JSON.stringify({ [model]: rate }));
+      const oversized = Array.from({ length: 400 }, (_, i) => `Synthetic oversized sentence ${i} about nu xi omicron.`).join(' ');
+      const siblings = [1, 2].map(i => `Synthetic sibling ${i}. ${'Pi rho sigma tau upsilon. '.repeat(90)}`);
+      await engine.putPage('settle-heal', { type: 'note', title: 'Synthetic heal', compiled_truth: [oversized, ...siblings].join('\n\n') });
+      await installFixtureChunks(engine, 'settle-heal', [oversized, ...siblings].map((chunk_text, chunk_index) => ({ chunk_index,
+        chunk_source: 'compiled_truth' as const, chunk_text, ...(chunk_index > 0 && { embedding: new Float32Array(dimensions).fill(0.2) }) })));
+      await engine.executeRaw('UPDATE pages SET embedding_signature=$1', [`${model}:${dimensions}`]);
+      await engine.executeRaw('UPDATE content_chunks SET model=$1, embedded_text_hash=md5(chunk_text) WHERE embedding IS NOT NULL', [model]);
+      await engine.setConfig('embedding_migration.state', JSON.stringify({ version: 2, to_model: model, to_dims: dimensions,
+        from_model: 'synthetic:legacy-model', from_dims: dimensions, started_at: '2026-01-01T00:00:00.000Z',
+        authorization_version: 1, authorization_generation: 1, budget: { max_cost_usd: 0, debited_usd: 0, requests: 0 } }));
+      const preview = await cli(['--dry-run']);
+      const printed = /Worst-case authorization: \$(\d+(?:\.\d+)?)/.exec(preview.text);
+      expect(printed).not.toBeNull();
+      stubTransport(value => Buffer.byteLength(value, 'utf8'));
+      const run = await cli(['--max-cost-usd', printed![1], '--json']);
+      expect(run.text).toContain('"status": "completed"');
+      expect((await vectors()).every(row => row.embedding !== null)).toBe(true);
+    });
+
+    test('projection recovery at the current limit followed by the target-limit heal fits the printed worst case', async () => {
+      const target = { to: 'nvidia:nvidia/nv-embedqa-e5-v5', dim: 1024 };
+      const perInput = 512;
+      await engine.setConfig('pricing.overrides', JSON.stringify({ [model]: 1_000, [target.to]: 1_000 }));
+      const body = Array.from({ length: 300 }, (_, i) => `Synthetic recovery sentence ${i} phi chi psi omega alpha beta.`).join(' ');
+      await engine.putPage('settle-recover', { type: 'note', title: 'Synthetic recover', compiled_truth: body });
+      configureGateway({ embedding_model: model, embedding_dimensions: dimensions, env: { OPENAI_API_KEY: 'synthetic-only', NVIDIA_API_KEY: 'synthetic-only' } });
+      try {
+        const preview = await cli(['--dry-run'], target);
+        const printed = /Worst-case authorization: \$(\d+(?:\.\d+)?)/.exec(preview.text);
+        expect(printed).not.toBeNull();
+        __setEmbedTransportForTests(async ({ values }: { values: string[] }) => ({ values, warnings: [],
+          embeddings: values.map(() => Array.from({ length: target.dim }, (_, i) => (i + 1) / target.dim)),
+          usage: { tokens: values.reduce((sum, value) => sum + Math.min(perInput, Buffer.byteLength(value, 'utf8')), 0) } }));
+        const run = await cli(['--max-cost-usd', printed![1], '--json'], target);
+        expect(run.text).toContain('"status": "completed"');
+        expect((await vectors()).every(row => row.embedding !== null)).toBe(true);
+      } finally {
+        await runSchemaTransition(engine, dimensions);
+      }
     });
   });
 }
