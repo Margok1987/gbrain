@@ -2,17 +2,20 @@
  * Characters folded to a space before hashing, so punctuation variants of one
  * claim share a fingerprint. Explicit (not [[:punct:]]) so the SQL and the JS
  * overlay agree regardless of database locale; non-ASCII letters survive.
+ * `+` and `#` are kept ("C++", "C#", "F#" never collide with "C" or "F"), and a
+ * dot folds only when a space, another dot or the end follows it, so sentence
+ * periods fold while ".NET", "Node.js" and "3.5" keep theirs.
  */
-export const FINGERPRINT_PUNCTUATION = '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~\u2018\u2019\u201a\u201c\u201d\u201e\u00ab\u00bb\u2039\u203a\u2013\u2014\u2015\u2026\u00b7\u2022\u00a1\u00bf';
+export const FINGERPRINT_PUNCTUATION = '!"$%&\'()*,-/:;<=>?@[\\]^_`{|}~\u2018\u2019\u201a\u201c\u201d\u201e\u00ab\u00bb\u2039\u203a\u2013\u2014\u2015\u2026\u00b7\u2022\u00a1\u00bf';
 
 /** JS twin of gbrain_fact_normalize for text the database already lowercased and space-collapsed. */
 export function normalizeLoweredClaim(claim: string): string {
   let out = '';
   for (const char of claim) out += FINGERPRINT_PUNCTUATION.includes(char) ? ' ' : char;
-  return out.replace(/ +/g, ' ').replace(/^ | $/g, '');
+  return out.replace(/ +/g, ' ').replace(/\.(?=[. ]|$)/g, ' ').replace(/ +/g, ' ').replace(/^ | $/g, '');
 }
 
-const NORMALIZE_CLAIM_SQL = `btrim(regexp_replace(translate(lower(claim), '${FINGERPRINT_PUNCTUATION.replace(/'/g, "''")}', '${' '.repeat([...FINGERPRINT_PUNCTUATION].length)}'), '[[:space:]]+', ' ', 'g'), ' ')`;
+const NORMALIZE_CLAIM_SQL = `btrim(regexp_replace(regexp_replace(regexp_replace(translate(lower(claim), '${FINGERPRINT_PUNCTUATION.replace(/'/g, "''")}', '${' '.repeat([...FINGERPRINT_PUNCTUATION].length)}'), '[[:space:]]+', ' ', 'g'), '\\.(?=[. ]|$)', ' ', 'g'), ' +', ' ', 'g'), ' ')`;
 
 /**
  * Durable withdrawal survives deletion/recreation of the derived facts index.

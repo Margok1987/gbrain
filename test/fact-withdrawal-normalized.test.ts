@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { recordFactWithdrawal, isFactWithdrawn } from '../src/core/facts/withdrawal.ts';
-import { FACT_WITHDRAWAL_NORMALIZED_SQL } from '../src/core/facts/withdrawal-schema.ts';
+import { FACT_WITHDRAWAL_NORMALIZED_SQL, normalizeLoweredClaim } from '../src/core/facts/withdrawal-schema.ts';
 import { renderFactsTable, parseFactsFence } from '../src/core/facts-fence.ts';
 
 let engine: PGLiteEngine;
@@ -35,6 +35,30 @@ test('punctuation, casing and spacing variants re-extracted after forget stay wi
   }
   const other = await engine.insertFact({ fact: 'Used to live in Kyoto', visibility: 'world', source: 'synthetic' }, { source_id: sourceId });
   expect(await expired(other.id)).toBe(false);
+});
+
+test('symbols that carry meaning in names keep their claims distinct; sentence punctuation still folds', async () => {
+  const sourceId = await source('normalized-symbols');
+  const insert = (fact: string) => engine.insertFact({ fact, visibility: 'world', source: 'synthetic' }, { source_id: sourceId });
+  const knowsC = await insert('Knows C');
+  const kept = await Promise.all(['Knows C++', 'Knows C#', 'Knows F#', 'Uses .NET', 'Uses Node.js', 'Rated 3.5 stars'].map(insert));
+  for (const fact of ['Knows F', 'Uses NET', 'Uses Nodejs', 'Rated 35 stars']) expect((await recordFactWithdrawal(engine, (await insert(fact)).id, sourceId)).withdrawn).toBe(true);
+  expect((await recordFactWithdrawal(engine, knowsC.id, sourceId)).withdrawn).toBe(true);
+  for (const fact of kept) expect(await expired(fact.id)).toBe(false);
+  for (const claim of ['Knows C++', 'Knows C#', 'Uses .NET', 'Uses Node.js']) expect(await isFactWithdrawn(engine, sourceId, 'world', claim, null)).toBe(false);
+  expect(await isFactWithdrawn(engine, sourceId, 'world', 'knows c.', null)).toBe(true);
+
+  const email = await insert('Prefers email.');
+  expect((await recordFactWithdrawal(engine, email.id, sourceId)).withdrawn).toBe(true);
+  expect(await expired((await insert('prefers email')).id)).toBe(true);
+  expect(await isFactWithdrawn(engine, sourceId, 'world', 'Prefers   Email...', null)).toBe(true);
+});
+
+test('the JS overlay normalization matches the database for every folding rule', async () => {
+  const claims = ['knows c++.', 'knows c#!', 'uses .net.', 'uses node.js, daily', 'prefers email...', 'e.g. this', 'a . b', '"quoted" — dash…', 'rated 3.5 stars.', 'tokyo 東京。'];
+  const rows = await engine.executeRaw<{ claim: string; norm: string }>(`SELECT c AS claim,gbrain_fact_normalize(c) AS norm
+    FROM unnest($1::text[]) c`, [claims]);
+  expect(rows.map(row => normalizeLoweredClaim(row.claim))).toEqual(rows.map(row => row.norm));
 });
 
 test('discovery and the snapshot overlay strike a punctuation variant fence row', async () => {

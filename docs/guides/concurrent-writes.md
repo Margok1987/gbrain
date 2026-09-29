@@ -350,7 +350,10 @@ upgrade fall back to the source's whole withdrawal ledger (at most 256 claims).
 
 Fingerprints fold case, whitespace and punctuation (migration v170), so a
 punctuation or casing variant re-extracted from unchanged prose stays
-withdrawn. Rows recorded before v170 keep their exact fingerprint and keep
+withdrawn. Symbols that carry meaning in names are kept: `+`, `#` and
+in-word dots, so "C++", "C#", ".NET" and "Node.js" stay distinct from
+"C", "NET" and "Nodejs"; a dot folds only when a space, another dot or the
+end of the claim follows it. Rows recorded before v170 keep their exact fingerprint and keep
 matching; v170 adds a folded row wherever a fact row still holds the claim text
 and expires active facts that became matching. A paraphrase with different
 words is a different claim.
