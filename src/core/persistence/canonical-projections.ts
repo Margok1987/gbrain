@@ -9,6 +9,14 @@ import { extractTimelineFromContent } from '../timeline-extract.ts';
 import { sanitizeRemoteBody } from '../remote-body.ts';
 import { OperationError } from '../ops/contract.ts';
 
+/** Timeline tuples the coordinator projects from a canonical body, keyed by (date, source, summary). */
+export function canonicalTimelineRows(body: string, slug: string) {
+  const safe=sanitizeRemoteBody(body);
+  const timeline=new Map(extractTimelineFromContent(safe,slug).map(t=>[JSON.stringify([t.date,t.source,t.summary]),t]));
+  for (const t of parseTimelineEntries(safe)) timeline.set(JSON.stringify([t.date,t.source??'markdown',t.summary]),{...t,source:t.source??'markdown',slug});
+  return timeline;
+}
+
 /** Compile synchronous, provider-free projections before entering publication. */
 export function prepareCanonicalProjections(page: ParsedPage, slug: string, sourceId: string): (tx: BrainEngine) => Promise<void> {
   const fields=[page.compiled_truth,page.timeline ?? ''];
@@ -23,9 +31,7 @@ export function prepareCanonicalProjections(page: ParsedPage, slug: string, sour
   }
   const body=fields.join('\n');
   const factRows=extractFactsFromFenceText(facts,slug,sourceId);
-  const safe=sanitizeRemoteBody(body);
-  const timeline=new Map(extractTimelineFromContent(safe,slug).map(t=>[JSON.stringify([t.date,t.source,t.summary]),t]));
-  for (const t of parseTimelineEntries(safe)) timeline.set(JSON.stringify([t.date,t.source??'markdown',t.summary]),{...t,source:t.source??'markdown',slug});
+  const timeline=canonicalTimelineRows(body,slug);
   return async tx=>{
     const snapshot=await tx.readPageSnapshot(slug,{sourceId});
     if (!snapshot) return;

@@ -10,6 +10,76 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.59.16.0] - 2026-09-29
+
+**Managed brains stop running out of write room silently, and one stuck file no longer freezes backups or migrations.**
+
+A managed brain keeps a small permanent receipt for every write, and busy brains
+could hit the built-in ceiling after a few weeks and refuse every write. The
+limits you were told to raise now work with a plain `gbrain config set`, the
+defaults are sized for a year of a busy maintenance schedule, and old receipts
+are cleaned up on a schedule you can change. `gbrain doctor` now warns at 80% and
+prints the exact command to raise the limit, and a refused write says the same.
+This is a mitigation: accepted write IDs are permanent replay protection, so a
+very write-heavy brain still needs larger limits.
+
+Pages stored only in the database (a `storage.db_only` directory) no longer block
+the upgrade migrations or retry their Git backup forever. When some other file
+keeps failing to reach Git or a withdrawal, it is set aside after five failures in
+a row, the rest of the backup continues, and doctor names the page and the command
+that retries it once you have fixed the cause.
+
+`gbrain extract --stale` now works on managed brains instead of failing every
+cycle, and doctor stops recommending it once links are current or when it cannot
+run.
+
+| Before | After |
+|---|---|
+| Receipt limit reached after about 8,000 writes; `config set` rejected the fix | Keys accepted; defaults last a year at 600 writes a day |
+| Retention fixed at 30 days | `persistence.receipt_retention_days` |
+| One failing Git target stalled every later page | Target set aside after five failures; the rest commit |
+| db_only pages failed the grandfather migration | Published database-only; later migrations run |
+| `extract --stale` dead-lettered on every managed run | Coordinated, and the recommendation clears |
+
+## To take advantage of v0.59.16.0
+
+`gbrain upgrade` applies schema v167 (an index for set-aside backup work). If it
+did not, run `gbrain apply-migrations --yes --no-autopilot-install`. Then run one
+full `gbrain doctor` and act on `persistence_capacity` or `parked_effects` if they
+warn. Your agent reads [the upgrade guide](skills/migrations/v0.59.16.0.md).
+
+### Itemized changes
+
+#### Write capacity
+- `persistence.limits.*` and `persistence.receipt_retention_days` are registered
+  config keys; malformed values are refused at `config set` time instead of
+  breaking every later write.
+- Default limits per principal rise to 250,000 permanent write IDs and 1.5 GiB of
+  receipt space (8 GiB per brain), enough for 600 writes a day for a year.
+- Receipt cleanup skips receipts whose backup or withdrawal work is unfinished
+  without letting them block cleanup of newer receipts.
+- `persistence_capacity` doctor warning and `queue_capacity` refusals name the
+  exact key and a value that covers about one more year at your current write rate.
+
+#### Backups and migrations
+- Pages under a declared `storage.db_only` directory publish database-only when
+  their file is absent, pass the v0.13.1 grandfather step, and skip the Git
+  backup. The grandfather check verifies only the pages that run wrote.
+  Contributed by @andreineacsu.
+- A Git or withdrawal target that fails five times in a row is set aside; the
+  scan continues and the work is reported unfinished, never complete. Contention
+  and dependency waits never count.
+- `gbrain sources writer retry-effects <source> --request-id <id> [--dry-run]`
+  previews set-aside targets and authorizes one more attempt for each.
+- `parked_effects` doctor warning names each set-aside page and its retry command.
+
+#### Link extraction
+- Managed `extract --stale` publishes links, timeline rows and its freshness
+  stamp together through the write coordinator; pages edited mid-run stay stale
+  for the next run.
+- `extract.stale` is withheld from doctor and autopilot plans when the active
+  schema pack is unavailable.
+
 ## [0.59.11.0] - 2026-09-28
 
 **Your brain stops losing notes, stops linking people to the wrong person, and forgets links and dates you deleted.**
