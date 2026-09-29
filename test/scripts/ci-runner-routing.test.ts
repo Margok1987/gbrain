@@ -44,9 +44,10 @@ describe('CI runner routing', () => {
     for (const name of ['verify', 'serial-tests']) expect(load('test.yml').jobs[name]['runs-on'], name).toBe(pooled);
     // E2E files run one bun process at a time against the job's Postgres:
     // full-corpus shard 1 took 668s on 4 vCPUs, 704s on 8 and 741s on 16.
-    for (const name of ['jsonb-parity', 'selected-e2e', 'tier1', 'tier2', 'coverage-full-unit', 'coverage-full-slow', 'coverage-full-e2e']) {
+    for (const name of ['jsonb-parity', 'selected-e2e', 'tier2', 'coverage-full-unit', 'coverage-full-slow', 'coverage-full-e2e']) {
       expect(load('e2e.yml').jobs[name]['runs-on'], name).toBe(single);
     }
+    expect(load('e2e.yml').jobs.tier1['runs-on']).toBe(normal);
     expect(load('e2e.yml').jobs['coverage-full-serial']['runs-on']).toBe(pooled);
     expect(load('persistence-validation.yml').jobs['read-performance']['runs-on']).toBe(single);
     expect(load('persistence-validation.yml').jobs.invariants['runs-on']).toBe(single);

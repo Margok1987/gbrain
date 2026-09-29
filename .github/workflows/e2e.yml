@@ -203,7 +203,10 @@ jobs:
 
   tier1:
     name: Tier 1 (Mechanical)
-    runs-on: ubicloud-standard-4-ubuntu-2404
+    # Tier 1 stays on 16 vCPUs: on 4 its CLI `init --url` spawns in
+    # mechanical.test.ts went from ~2s to past their 15-30s kill timeouts
+    # (measured September 29, 2026), while every other E2E lane ran as fast.
+    runs-on: ubicloud-standard-16-ubuntu-2404
     timeout-minutes: 30
     services:
       postgres:
