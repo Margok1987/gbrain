@@ -292,8 +292,11 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
   const run = async (claimed: PersistenceEffect, binding: WorktreeBinding | null, hardened?: boolean) => {
     let effect = claimed;
     let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
+    // A single-file git effect in a repository without the durability hook
+    // only records its outcome; it runs no git command, so it needs no lock.
+    const recordOnly = effect.kind === 'git' && hardened === false && !targetedWithdrawalEffect(effect) && !effect.data.source_scan;
     try {
-      if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) {
+      if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind) && !recordOnly) {
         if (!binding) throw new OperationError('owner_unavailable', 'The canonical effect owner is unavailable.');
         lock = await acquireWorktree(binding);
         if (!lock) throw new OperationError('writer_busy', 'The canonical worktree is busy.');
