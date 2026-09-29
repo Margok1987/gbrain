@@ -146,6 +146,16 @@ const DEFAULT_TRIAGE_CONCURRENCY = 4;
  * page counts drop; `details.synthesis.avg_turns` telemetry shows cap pressure.
  */
 const DEFAULT_MAX_TURNS = 16;
+/**
+ * #5425 (opt-in via dream.synthesize.attribution_rules, text by @clatyceo):
+ * keep who-proposed-what and later corrections explicit. Off by default: a
+ * matched run (Sonnet 4.6, 6 assistant-proposal transcripts x 4) found no
+ * misattribution to fix in either arm (0 vs 1 flagged sentences, accepted
+ * proposals kept 4/4 in both). The grounding gate's decision_misattributed
+ * check is the default, mechanical guard.
+ */
+const SYNTH_ATTRIBUTION_RULE = '8. Keep the speaker and source timing explicit: distinguish what the user requested, decided, or accepted from what the assistant proposed, reported, inferred, or planned. A later correction, withdrawal, or scope narrowing overrides earlier text; express only the final scope when it is clear. Do not merge assistant-added evidence fields, recovery notes, deadlines, or next steps into user agreement unless the user explicitly accepted them.';
+
 /** C-13: per-run USD cap on child submissions (`dream.synthesize.budget_usd`; `unlimited` removes it). */
 const DEFAULT_SYNTH_BUDGET_USD = 5;
 
@@ -847,6 +857,7 @@ async function runPhaseSynthesizeInner(
         config.originalsPrefix,
         config.mode,
         summaryDate,
+        config.attributionRules,
       ));
       // One check for the whole chunk set: a transcript never half-submits.
       const callsPerChild = config.mode === 'agentic' ? config.maxTurns : 1;
@@ -1442,6 +1453,8 @@ export interface SynthConfig {
   budgetUsd: number;
   /** dream.budget.allow_unpriced: unpriced models bypass the budget gate. */
   allowUnpriced: boolean;
+  /** dream.synthesize.attribution_rules: add SYNTH_ATTRIBUTION_RULE to the prompt (#5425, opt-in). */
+  attributionRules: boolean;
   cooldownHours: number;
   /**
    * D1: Override the per-chunk token budget (model_context × HEADROOM_RATIO
@@ -1707,6 +1720,7 @@ export async function loadSynthConfig(engine: BrainEngine): Promise<SynthConfig>
     maxSubmissionsPerSourcePerDay,
     budgetUsd: parseBudgetUsd(await engine.getConfig('dream.synthesize.budget_usd'), DEFAULT_SYNTH_BUDGET_USD),
     allowUnpriced: await loadAllowUnpriced(engine),
+    attributionRules: (await engine.getConfig('dream.synthesize.attribution_rules'))?.trim() === 'true',
     cooldownHours,
     maxPromptTokens,
     maxChunksPerTranscript,
@@ -2703,6 +2717,8 @@ function buildSynthesisPrompt(
   // C-15: the child dates undated originals from this hint, so it is the
   // cycle's calendar date, not the UTC day.
   cycleDate: string = utcDate(),
+  // #5425: opt-in speaker/withdrawal rule (dream.synthesize.attribution_rules).
+  attributionRules = false,
 ): string {
   const dateHint = t.inferredDate ?? cycleDate;
   const baseSlugSegment = sanitizeForSlug(t.basename) || `session-${dateHint}`;
@@ -2748,7 +2764,8 @@ OUTPUT POLICY (ALL of these are required)
 4. Slug discipline: lowercase alphanumeric and hyphens only, slash-separated segments. NO underscores, NO file extensions.
 5. Self-contained opening: begin every new page's body with a 2-3 sentence summary that a reader unfamiliar with this transcript could understand on its own, before any quotes or detail. Do not assume the reader has the source conversation for context.
 6. Preserve concrete facts: carry the specific numbers, dates, dollar amounts, names, and who-decided-what OF the salient content you write about, exactly as the transcript states them. Do not add routine logistics for their own sake.
-7. Ground every claim in the transcript. Attribute speculation as speculation ("the user wondered whether..."), and never state a completion state or outcome the transcript does not show.
+7. Ground every claim in the transcript. Attribute speculation as speculation ("the user wondered whether..."), and never state a completion state or outcome the transcript does not show.${attributionRules ? `
+${SYNTH_ATTRIBUTION_RULE}` : ''}
 
 TASKS
 A. Reflections (self-knowledge, pattern recognition, emotional processing):
