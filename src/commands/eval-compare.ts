@@ -156,6 +156,7 @@ export interface PairedComparison {
 function readPerQueryRows(record: ParsedRecord, repoRoot: string): { rows: Map<string, QueryRow> } | { reason: string } {
   const output = record.params?.output;
   if (typeof output !== 'string' || !output) return { reason: 'record has no params.output per-query file' };
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal, javascript.express.security.audit.express-path-join-resolve-traversal.express-path-join-resolve-traversal -- trusted local CLI reading the operator's own run ledger; the path is only read and parsed into per-question numbers, never written or echoed.
   const path = isAbsolute(output) ? output : join(repoRoot, output);
   if (!existsSync(path)) return { reason: `per-query file not found: ${output}` };
   const rows = new Map<string, QueryRow>();
