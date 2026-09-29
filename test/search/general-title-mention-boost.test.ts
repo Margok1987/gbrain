@@ -67,30 +67,6 @@ describe('applyTitleMentionBoost', () => {
   });
 });
 
-describe('relational questions are not title-boosted', () => {
-  test('"who invested in Pulse Labs" leaves the Pulse Labs page unboosted', async () => {
-    const engine = new PGLiteEngine();
-    await engine.connect({});
-    await engine.initSchema();
-    try {
-      for (const [slug, type, text] of [['companies/pulse-labs', 'company', 'Pulse Labs builds sensors.'], ['notes/pulse-labs-update', 'note', 'Pulse Labs raised a seed round.']]) {
-        await engine.putPage(slug, { type, title: 'Pulse Labs', compiled_truth: text } as any);
-        const snap = (await readProjectionSnapshot(engine, slug, 'default', { allowUnsealed: true }))!;
-        await installPageProjection(engine, snap, [{
-          chunk_index: 0, chunk_text: text, chunk_source: 'compiled_truth', embedding: basisEmbedding(3, 1536), token_count: 5,
-        }] as any, { seal: true });
-      }
-      const q = 'Who invested in Pulse Labs?';
-      expect(classifyQuery(q).intent).not.toBe('entity');
-      const out = await hybridSearch(engine, q, { reranker: { enabled: false, topNIn: 0, topNOut: null } as any, relationalRetrieval: false, queryEmbedFn: () => basisEmbedding(3, 1536) });
-      expect(out.length).toBeGreaterThan(0);
-      expect(out.some(r => r.exact_match_boost === TITLE_MENTION_BOOST)).toBe(false);
-    } finally {
-      await engine.disconnect();
-    }
-  }, 60_000);
-});
-
 describe('general-intent question ranks the mentioned title first (PGLite)', () => {
   let engine: PGLiteEngine;
   beforeAll(async () => { engine = new PGLiteEngine(); await engine.connect({}); await engine.initSchema(); }, 120_000);
@@ -103,6 +79,18 @@ describe('general-intent question ranks the mentioned title first (PGLite)', () 
       chunk_index: 0, chunk_text: text, chunk_source: 'compiled_truth', embedding: basisEmbedding(dim, 1536), token_count: 10,
     }] as any, { seal: true });
   }
+
+  test('a relational question ("who invested in Pulse Labs") is not title-boosted', async () => {
+    await seed('companies/pulse-labs', 'Pulse Labs', 'Pulse Labs builds sensors.', 3);
+    await seed('notes/pulse-labs-update', 'Pulse Labs', 'Pulse Labs raised a seed round.', 3);
+    const q = 'Who invested in Pulse Labs?';
+    expect(classifyQuery(q).intent).not.toBe('entity');
+    const out = await hybridSearch(engine, q, {
+      reranker: { enabled: false, topNIn: 0, topNOut: null } as any, relationalRetrieval: false, queryEmbedFn: () => basisEmbedding(3, 1536),
+    });
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.some(r => r.exact_match_boost === TITLE_MENTION_BOOST)).toBe(false);
+  }, 60_000);
 
   test('"Which document is Harbor Street Lease Amendment?"', async () => {
     await seed('notes/harbor-lease', 'Harbor Street Lease Amendment', 'Signed amendment extending the term and adjusting rent.', 5);
