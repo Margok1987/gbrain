@@ -97,11 +97,12 @@ export async function migrateConnectorCheckpoints(engine: Sql, log: (line: strin
   // One statement, bounded by its own timeout; no long transaction around the scan.
   const receipts = await engine.transaction(async tx => {
     await tx.executeRaw("SELECT set_config('statement_timeout','120s',true)");
-    return tx.executeRaw<{ source_id: string; source_incarnation: string; checkpoint_key: string | null; compacted: boolean; committed_at: string }>(`
-      SELECT DISTINCT ON (source_id, source_incarnation) source_id, source_incarnation::text, intent->>'checkpointKey' AS checkpoint_key,
+    return tx.executeRaw<{ source_id: string; source_incarnation: string; kind: string | null; checkpoint_key: string | null; compacted: boolean; committed_at: string }>(`
+      SELECT DISTINCT ON (source_id, source_incarnation) source_id, source_incarnation::text, intent->>'kind' AS kind, intent->>'checkpointKey' AS checkpoint_key,
              COALESCE(compacted,false) AS compacted, COALESCE(completed_at,updated_at)::text AS committed_at
         FROM persistence_requests
-       WHERE state='committed' AND intent->>'kind' IN ('managed_connector_checkpoint','connector_v2_checkpoint')
+       -- Compaction nulls the intent but keeps the slug, so a compacted newest receipt is still found (and re-walks).
+       WHERE state='committed' AND slug='__managed_connector_checkpoint__' AND operation='submit_job'
        ORDER BY source_id, source_incarnation, sequence DESC`);
   });
   const newest = new Map(receipts.map(row => [`${row.source_id}\u0000${row.source_incarnation}`, row]));
@@ -109,7 +110,8 @@ export async function migrateConnectorCheckpoints(engine: Sql, log: (line: strin
   for (const [key, source] of await loadableConnectorKeys(engine)) {
     if (source.archived) continue;
     const receipt = newest.get(`${source.id}\u0000${source.incarnation}`);
-    if (!receipt) continue;
+    // No managed checkpoint yet, or already saved by this release under its stable key.
+    if (!receipt || receipt.kind === 'connector_v2_checkpoint') continue;
     let recovery: Pick<ConnectorState, 'upgrade_recovery' | 'resumed_from'> = { upgrade_recovery: 'rewalking_once', resumed_from: null };
     if (!receipt.compacted && receipt.checkpoint_key) {
       await engine.executeRaw(`INSERT INTO op_checkpoints(op,fingerprint,completed_keys)
