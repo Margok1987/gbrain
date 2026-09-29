@@ -107,7 +107,7 @@ import { privatePagesFilterFragment, privateLinkOriginFilterFragment, privateTim
 import { unverifiedExtractionFragment } from './extraction-review.ts';
 import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defaults.ts';
 import { readStoredEmbeddingIdentity } from './stored-embedding-identity.ts';
-import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP } from './engine-constants.ts';
+import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP, TRAVERSE_WALK_ROW_CAP } from './engine-constants.ts';
 import { PageMissingError } from './engine-errors.ts';
 import { SOURCE_CONFIG_OBJECT_SQL } from './source-config-sql.ts';
 import { shouldExcludeFromOrphanReporting, loadOrphanPolicyOverrides } from './orphan-policy.ts';
@@ -3464,7 +3464,8 @@ export class PostgresEngine implements BrainEngine {
            WHERE l2.from_page_id = g.id AND p3.deleted_at IS NULL ${privacy('p3', 'l2')} ${aggScope}),
           '[]'::jsonb
         ) as links
-      FROM graph g
+      FROM (SELECT DISTINCT id, slug, title, type, depth
+            FROM (SELECT id, slug, title, type, depth FROM graph LIMIT ${TRAVERSE_WALK_ROW_CAP}) capped) g
       ORDER BY g.depth, g.slug
     `;
 
@@ -3543,15 +3544,18 @@ export class PostgresEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON l.from_page_id = w.id
           JOIN pages p2 ON p2.id = l.to_page_id
-          WHERE w.depth < ${depth}
+          WHERE w.depth + 1 < ${depth}
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             AND (${!linkTypeMatches} OR l.link_type = ${linkType ?? ''})
             ${stepScope}
-        )
-        SELECT w.slug as from_slug, p2.slug as to_slug,
+        ),
+        capped AS (SELECT id, slug, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, slug, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               w.slug as from_slug, p2.slug as to_slug,
                l.link_type, l.context, w.depth + 1 as depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON l.from_page_id = w.id
         JOIN pages p2 ON p2.id = l.to_page_id
         WHERE w.depth < ${depth}
@@ -3571,15 +3575,18 @@ export class PostgresEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON l.to_page_id = w.id
           JOIN pages p2 ON p2.id = l.from_page_id
-          WHERE w.depth < ${depth}
+          WHERE w.depth + 1 < ${depth}
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             AND (${!linkTypeMatches} OR l.link_type = ${linkType ?? ''})
             ${stepScope}
-        )
-        SELECT p2.slug as from_slug, w.slug as to_slug,
+        ),
+        capped AS (SELECT id, slug, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, slug, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               p2.slug as from_slug, w.slug as to_slug,
                l.link_type, l.context, w.depth + 1 as depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON l.to_page_id = w.id
         JOIN pages p2 ON p2.id = l.from_page_id
         WHERE w.depth < ${depth}
@@ -3599,15 +3606,18 @@ export class PostgresEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON (l.from_page_id = w.id OR l.to_page_id = w.id)
           JOIN pages p2 ON p2.id = CASE WHEN l.from_page_id = w.id THEN l.to_page_id ELSE l.from_page_id END
-          WHERE w.depth < ${depth}
+          WHERE w.depth + 1 < ${depth}
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             AND (${!linkTypeMatches} OR l.link_type = ${linkType ?? ''})
             ${stepScope}
-        )
-        SELECT pf.slug as from_slug, pt.slug as to_slug,
+        ),
+        capped AS (SELECT id, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               pf.slug as from_slug, pt.slug as to_slug,
                l.link_type, l.context, w.depth + 1 as depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON (l.from_page_id = w.id OR l.to_page_id = w.id)
         JOIN pages pf ON pf.id = l.from_page_id
         JOIN pages pt ON pt.id = l.to_page_id
@@ -3624,7 +3634,7 @@ export class PostgresEngine implements BrainEngine {
 
     // Row cap: the LIMIT above fetched CAP + 1 rows; the probe row only tells
     // us the walk overflowed and is dropped with everything past the cap.
-    const truncated = rows.length > TRAVERSE_PATH_ROW_CAP;
+    const truncated = rows.length > TRAVERSE_PATH_ROW_CAP || (rows as Array<{ walk_truncated?: boolean }>).some((r) => r.walk_truncated === true);
     const bounded = (truncated ? rows.slice(0, TRAVERSE_PATH_ROW_CAP) : rows) as Record<string, unknown>[];
     // Dedup edges (same edge can appear via multiple visited paths).
     const seen = new Set<string>();

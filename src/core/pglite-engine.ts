@@ -75,7 +75,7 @@ import { withVectorSettings } from './search/vector-settings.ts';
 import { PGLITE_SCHEMA_SQL, getPGLiteSchema } from './pglite-schema.ts';
 import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defaults.ts';
 import { readStoredEmbeddingIdentity } from './stored-embedding-identity.ts';
-import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP } from './engine-constants.ts';
+import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP, TRAVERSE_WALK_ROW_CAP } from './engine-constants.ts';
 import { PageMissingError } from './engine-errors.ts';
 import { SOURCE_CONFIG_OBJECT_SQL } from './source-config-sql.ts';
 import { SAFE_FENCE_CHUNKER_VERSION, bodyWriteChunkVersion, chunkWriteInvalidation, currentTextProjectionFilter, requiresSafeChunks, safeChunksFilter } from './search/safe-chunks.ts';
@@ -4264,7 +4264,8 @@ export class PGLiteEngine implements BrainEngine {
            WHERE l2.from_page_id = g.id AND p3.deleted_at IS NULL ${privacy('p3', 'l2')} ${aggScope}),
           '[]'::jsonb
         ) as links
-      FROM graph g
+      FROM (SELECT DISTINCT id, slug, title, type, depth
+            FROM (SELECT id, slug, title, type, depth FROM graph LIMIT ${TRAVERSE_WALK_ROW_CAP}) capped) g
       ORDER BY g.depth, g.slug`,
       params
     );
@@ -4339,15 +4340,18 @@ export class PGLiteEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON l.from_page_id = w.id
           JOIN pages p2 ON p2.id = l.to_page_id
-          WHERE w.depth < $2
+          WHERE w.depth + 1 < $2
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             ${linkTypeWhere}
             ${stepScope}
-        )
-        SELECT w.slug AS from_slug, p2.slug AS to_slug,
+        ),
+        capped AS (SELECT id, slug, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, slug, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               w.slug AS from_slug, p2.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON l.from_page_id = w.id
         JOIN pages p2 ON p2.id = l.to_page_id
         WHERE w.depth < $2
@@ -4367,15 +4371,18 @@ export class PGLiteEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON l.to_page_id = w.id
           JOIN pages p2 ON p2.id = l.from_page_id
-          WHERE w.depth < $2
+          WHERE w.depth + 1 < $2
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             ${linkTypeWhere}
             ${stepScope}
-        )
-        SELECT p2.slug AS from_slug, w.slug AS to_slug,
+        ),
+        capped AS (SELECT id, slug, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, slug, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               p2.slug AS from_slug, w.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON l.to_page_id = w.id
         JOIN pages p2 ON p2.id = l.from_page_id
         WHERE w.depth < $2
@@ -4397,15 +4404,18 @@ export class PGLiteEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON (l.from_page_id = w.id OR l.to_page_id = w.id)
           JOIN pages p2 ON p2.id = CASE WHEN l.from_page_id = w.id THEN l.to_page_id ELSE l.from_page_id END
-          WHERE w.depth < $2
+          WHERE w.depth + 1 < $2
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             ${linkTypeWhere}
             ${stepScope}
-        )
-        SELECT pf.slug AS from_slug, pt.slug AS to_slug,
+        ),
+        capped AS (SELECT id, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               pf.slug AS from_slug, pt.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON (l.from_page_id = w.id OR l.to_page_id = w.id)
         JOIN pages pf ON pf.id = l.from_page_id
         JOIN pages pt ON pt.id = l.to_page_id
@@ -4423,7 +4433,7 @@ export class PGLiteEngine implements BrainEngine {
     const { rows } = await this.db.query(sql, params);
     // Row cap: the LIMIT above fetched CAP + 1 rows; the probe row only tells
     // us the walk overflowed and is dropped with everything past the cap.
-    const truncated = rows.length > TRAVERSE_PATH_ROW_CAP;
+    const truncated = rows.length > TRAVERSE_PATH_ROW_CAP || (rows as Array<{ walk_truncated?: boolean }>).some((r) => r.walk_truncated === true);
     const bounded = (truncated ? rows.slice(0, TRAVERSE_PATH_ROW_CAP) : rows) as Record<string, unknown>[];
     // Dedup edges (same from/to/type/depth can appear via multiple visited paths).
     const seen = new Set<string>();
