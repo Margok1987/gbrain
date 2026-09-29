@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.59.12.0] - 2026-09-28
+## [0.59.17.0] - 2026-09-28
 
 **Forgetting one person's fact no longer erases it for everyone, and several maintenance jobs stop quietly losing or overwriting your notes.**
 
@@ -53,7 +53,7 @@ gbrain dream --phase extract_facts         # a bad page now shows FACTS_RECONCIL
 - A facts table with a confidence outside 0 to 1 (for example `7`) is now reported as malformed and that page's facts are left as they were until you fix the cell.
 - A conversation that fails 3 times at the same version is skipped until it changes upstream. `gbrain connectors sync <provider> --full` retries everything.
 
-### To take advantage of v0.59.12.0
+### To take advantage of v0.59.17.0
 
 `gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor`
 warns about a partial migration:
@@ -102,6 +102,52 @@ warns about a partial migration:
 
 - New regression suites: `test/facts-withdrawal-subject.test.ts`, `test/facts-supersede-not-withdrawal.test.ts`, `test/extract-facts-poison-page.test.ts`, `test/cycle/synthesize-concepts-human-owned.test.ts`, `test/transcripts-retitle.test.ts`, `test/e2e/connectors-sync-checkpoints-pglite.test.ts`, plus new cases in `test/phantom-redirect.test.ts` and `test/cycle-synthesize-daily-cap.test.ts`. All run on in-memory PGLite with no provider calls.
 - `watermarkKey` and `lastSyncAtKey` now take a source id; read connector progress through `readConnectorState`.
+
+## [0.59.13.0] - 2026-09-28
+
+**Search now credits a page when several retrieval methods agree on it, keeps the reranker's order, and stops hiding timeline evidence behind "who is" questions.**
+
+GBrain finds candidates three ways: by words, by meaning and by title. Each method picks the best passage from a page, and they often pick different passages. Search used to count those as separate candidates, so a page that every method ranked first could lose to a page every method ranked second. Votes for a page now add up, whichever passage each method chose.
+
+Several other ranking paths quietly undid good work. Name lookups re-sorted results after the reranker had ordered them. Questions phrased like "who is ..." or "tell me about ..." searched only page summaries, so an answer that lived in a dated timeline entry could not be found. A name mentioned inside a question never triggered the name-match boost. Those are fixed.
+
+| Situation | Before | Now |
+| --- | --- | --- |
+| Page ranked first by two methods through different passages | Could lose to a page ranked second by both | Ranks first |
+| Name lookup after reranking | Non-matching results fell back to pre-rerank order | Reranker order kept |
+| "Who is the founder of X?" with the answer in a timeline entry | Answer invisible | Found; summaries get a mild preference |
+| "Tell me about the widget tracker" (a declared alias) | No name boost | Named page boosted |
+| Reranker times out or errors | Nothing on the wire said so | Response reports `rerank_failed` |
+| Entity with more than 100 tracked values | "Latest" value was the 100th oldest | Latest value is the newest |
+
+The LongMemEval harness also stopped leaking its answer key. Every correct conversation in that dataset has an id starting with `answer_`, and that id reached page names and the answer model's prompt. Sessions are now imported under opaque ids; scoring still uses the real ids privately.
+
+Measured honestly: on a fixed 215-question LongMemEval slice with the reranker off, strict session recall at 5 moved from 203 to 202 (one question lost, none gained), with the same answer-bearing passages returned. The page-voting fix corrects ranking on pages with several matching passages; it is not a recall win on that benchmark.
+
+### To take advantage of v0.59.13.0
+
+Run `gbrain upgrade`. There is no migration. Ranking changes apply to the next search. `gbrain search "<query>" --explain` shows `exact_match_boost` when a name in your question matched a page, and a `degraded` line when the reranker failed. If you compare against older LongMemEval receipts, re-run both sides: session ids in new rows are opaque in slugs and prompts.
+
+### Itemized changes
+
+- Fusion votes per page: each retrieval list adds one vote per page at its best rank, and the page's lead passage carries the summed vote. The page's other passages keep their own votes, so they cannot push other pages out of a short result list (`src/core/search/rrf-page-fusion.ts`).
+- The alias hop and the exact-lookup tier move identity results to the front without re-sorting everything else, so the reranker's order survives.
+- An automatically detected "entity" question no longer restricts search to page summaries. It applies a 1.2x summary preference instead of 2x. An explicit `detail: low` keeps the strict filter.
+- The name-match boost fires when a page title, slug or declared alias is mentioned inside the question, not only when the whole question equals it.
+- A hard reranker failure (timeout, provider error, budget) stamps the `rerank_failed` degraded stage. The LongMemEval reranker gate treats it as un-reranked.
+- Trajectory reads return the newest N facts, in chronological order, on both engines.
+- Unified multimodal search re-scores against the multimodal embedding column, and cosine similarity returns 0 for vectors of different sizes instead of a wrong number.
+- `hybridSearch` passes `exclude_slugs`, `exclude_slug_prefixes` and `include_slug_prefixes` to every retrieval method. The embedded engine's keyword search honors `exclude_slugs` and `type` like Postgres.
+- The compiled-truth guarantee adds a summary passage instead of evicting a matching one, and results stay in score order.
+- Backlink boosts count distinct linking pages, ignoring self-links and duplicate edges.
+- `get_tags` returns nothing to remote callers for private or deleted pages.
+- `gbrain eval --strategy vector` embeds queries the way search does, so vector baselines are not handicapped on providers with separate query and document modes.
+- NamedThingBench counts a failed search as an error and a miss; any error fails the gate.
+- README, capabilities and retrieval docs cite the September 9, 2026 BrainBench refresh (relationship questions: P@5 0.3421, R@5 0.9791) instead of the retired 49.1% / "+31.4 points" claim.
+
+### For contributors
+
+- New test files: `test/search/rrf-page-grain.test.ts`, `test/search/identity-tiers-keep-rerank-order.test.ts`, `test/search/auto-entity-detail-soft.test.ts`, `test/search/title-mention-boost.test.ts`, `test/search/exclude-filters-hybrid.test.ts`, `test/search/eval-vector-query-embed.test.ts`, `test/get-tags-remote-privacy.test.ts`, `test/longmemeval-gold-leak.slow.test.ts`; Postgres parity cases for keyword excludes, trajectory limits and tag visibility in `test/e2e/engine-parity.test.ts`.
 
 ## [0.59.11.0] - 2026-09-28
 
