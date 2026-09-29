@@ -783,10 +783,6 @@ export class PGLiteEngine implements BrainEngine {
     const opening = this._connectInternal(config).then(async () => {
       try {
         await dropRowTypeArrayParsers(this.db);
-        // Cached statements skip parse and describe but still plan per call,
-        // exactly as unnamed statements always have: generic plans for
-        // optional-filter SQL can be far worse on PGLite's missing statistics.
-        await this.db.exec('SET plan_cache_mode = force_custom_plan');
         if (registerRoots) await registerManagedFilesystemEngine(this, config.database_path);
       }
       catch (error) {
