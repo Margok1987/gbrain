@@ -84,7 +84,9 @@ even if a custom base URL still serves its old model.
    provider call or vector change; the refusal names your cap, the worst case
    and the exact `--max-cost-usd` value that covers it. Each attempt reserves
    its maximum, then settles to the provider's reported usage, so the unused
-   headroom returns and retries and batch splits draw from it. A response
+   headroom returns and retries and batch splits draw from it. A provider
+   token-limit rejection bills nothing and releases its reservation, so the
+   gateway's split of that batch fits inside the same worst case. A response
    without usage, or a crash before settlement, keeps the maximum debit.
    Usage above the reservation is debited, recorded as overshoot, and stops
    further dispatch until you re-run with `--max-cost-usd`. A reranker without

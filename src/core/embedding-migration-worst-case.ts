@@ -8,8 +8,11 @@
  * through the same projection preparation at the tighter of the current and
  * target chunk sizes), every stale fact in the fact backfill's batches, the
  * completion smoke-check queries, and the reranker probe when the run
- * switches rerankers. The per-request ceiling is additive over texts, so a
- * batch split or retry of the same texts settles from the same headroom.
+ * switches rerankers. Stale chunks include the drain's content drift (a
+ * stored text hash that no longer matches the chunk text). The per-request
+ * ceiling is additive over texts, and a provider token-limit rejection settles
+ * unbilled, so the gateway's split of the same texts settles from the
+ * parent's headroom.
  * An unpriced reranker is left out of `usd` and listed in `unpriced_models`:
  * its probe refuses without dispatch and the switch is reported as failed,
  * while the known embedding bound is still enforced.
@@ -88,6 +91,7 @@ async function eachStalePage(engine: BrainEngine, plan: EmbeddingMigrationPlan, 
     : null;
   const stale = column === null ? 'true' : `p.deleted_at IS NULL AND NOT (COALESCE(p.frontmatter,'{}'::jsonb) ? 'embed_skip')
     AND (cc.${column} IS NULL OR p.embedding_signature IS NULL OR p.embedding_signature <> $1
+      OR (cc.embedded_text_hash IS NOT NULL AND cc.embedded_text_hash <> md5(cc.chunk_text))
       OR (cc.${column} IS NOT NULL AND ${falseStampPageWhere(column, 1, 2)}))`;
   let page: ChunkRow[] = [];
   const flush = () => { if (page.length) visit(embeddedTexts(page[0], page, sizes)); page = []; };
