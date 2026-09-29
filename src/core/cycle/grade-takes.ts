@@ -45,6 +45,8 @@ import { GBrainError } from '../types.ts';
 import type { OperationContext } from '../operations.ts';
 import type { BrainEngine, Take, TakeResolution } from '../engine.ts';
 import type { PhaseStatus, CyclePhase } from '../cycle.ts';
+import { managedPersistenceEnabled } from '../persistence/ownership.ts';
+import { submitPageMutation } from '../persistence/page-mutations.ts';
 
 /**
  * Bump when the judge prompt or the JSON output shape changes. Old verdicts
@@ -585,6 +587,9 @@ class GradeTakesPhase extends BaseCyclePhase {
       opts.reporter.start('grade_takes.takes' as never, takes.length);
     }
 
+    // #5280: a managed brain refuses the raw takes update; resolutions go
+    // through the coordinated, markdown-canonical takes_resolve mutation.
+    const managed = await managedPersistenceEnabled(engine);
     const now = new Date();
     for (const take of takes) {
       // Phase deadline check (gbrain#4168). Break, not throw: verdicts
@@ -781,7 +786,16 @@ class GradeTakesPhase extends BaseCyclePhase {
       // Apply to canonical takes if eligible.
       if (shouldApply && resolution) {
         try {
-          await engine.resolveTake(take.page_id, take.row_num, resolution);
+          if (managed) {
+            const [page] = await engine.executeRaw<{ source_id: string }>('SELECT source_id FROM pages WHERE id=$1', [take.page_id]);
+            await submitPageMutation({ engine, config: { engine: engine.kind } as never, remote: false, sourceId: page?.source_id ?? 'default',
+              dryRun: false, logger: { info() {}, warn() {}, error() {} } }, { operation: 'takes_resolve', params: {
+              slug: take.page_slug, source_id: page?.source_id ?? 'default', row_num: take.row_num, quality: resolution.quality,
+              evidence: resolution.source, resolved_by: resolution.resolvedBy,
+              request_id: createHash('sha256').update(`grade_takes:${take.id}:${recordedSig}`).digest('hex').replace(/^(.{8})(.{4}).(.{3}).(.{3})(.{12}).*/, '$1-$2-4$3-a$4-$5') } });
+          } else {
+            await engine.resolveTake(take.page_id, take.row_num, resolution);
+          }
           result.auto_applied += 1;
 
           // T11 / E4 — gstack-learnings coupling on incorrect / partial
