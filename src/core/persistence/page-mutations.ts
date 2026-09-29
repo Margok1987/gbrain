@@ -164,7 +164,7 @@ export async function submitPageMutation(ctx: OperationContext,
   }
   if (writeThrough && root && !binding) {
     if (ctx.engine.kind !== 'pglite') throw new OperationError('owner_unavailable', 'This source has no designated canonical owner.', WRITER_INSPECTION_HINT);
-    binding = await claimWorktree(ctx.engine, sourceId, root);
+    binding = await claimWorktree(ctx.engine, sourceId, root, undefined, undefined, { automatic: true });
   }
   const row = await admitWrite(ctx.engine, { principal, operation: input.operation, sourceId, sourceIncarnation: source.incarnation,
     slug, pageId: snapshot?.page.id ?? null, requestId, callerIntent, intent, authority,

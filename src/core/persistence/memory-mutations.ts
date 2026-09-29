@@ -81,7 +81,7 @@ export async function submitRememberMutation(ctx: OperationContext, params: Reco
   const root = source.local_path || (sourceId === 'default' ? await ctx.engine.getConfig('sync.repo_path') : null);
   if (fence && writeThrough && root && !binding) {
     if (ctx.engine.kind !== 'pglite') throw new OperationError('owner_unavailable', 'This source has no designated canonical owner.', WRITER_INSPECTION_HINT);
-    binding = await claimWorktree(ctx.engine, sourceId, root);
+    binding = await claimWorktree(ctx.engine, sourceId, root, undefined, undefined, { automatic: true });
   }
   const row = await admitWrite(ctx.engine, { principal, operation: 'remember', sourceId, sourceIncarnation: source.incarnation,
     slug, pageId: snapshot?.page.id ?? null, requestId, callerIntent,

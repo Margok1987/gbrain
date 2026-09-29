@@ -7,6 +7,7 @@ import type { NativeLockHandle } from './native-lock.ts';
 import { declarePersistenceProtocol } from './protocol.ts';
 import { managedFilesystemDatastorePath, refreshManagedFilesystemRoots } from './filesystem-guard.ts';
 import { assertWriterAdminState, WRITER_INSPECTION_HINT } from './admin-intent.ts';
+import { assertWriterAdminUnlocked } from './admin-lock.ts';
 
 export async function activateSharedSkillPersistence(engine: BrainEngine,
   options: { confirmQuiesced?: boolean; dryRun?: boolean; expectedState?: string } = {}): Promise<{ activated: boolean; protocol_version: 2; filesystem_sources: number; drift_audit?: ActivationReport['drift_audit'] }> {
@@ -44,6 +45,7 @@ export async function activateSharedSkillPersistence(engine: BrainEngine,
       await tx.executeRaw("SELECT set_config('synchronous_commit','on',true),set_config('lock_timeout','1s',true)");
       await assertWriterAdminState(tx, options.expectedState);
       await tx.executeRaw('SELECT singleton FROM persistence_brain WHERE singleton=1 FOR UPDATE');
+      await assertWriterAdminUnlocked(tx);
       await tx.executeRaw('SELECT id FROM persistence_worktrees ORDER BY id FOR UPDATE');
       await tx.executeRaw('SELECT id FROM sources ORDER BY id FOR SHARE');
       await tx.executeRaw('LOCK TABLE gbrain_cycle_locks IN SHARE MODE');

@@ -7,6 +7,7 @@ import { localHostId, existingLocalHostId, persistenceHome, registerLocalWriter 
 import { nativeLockCapability, tryAcquireNativeLock, type NativeLockHandle } from './native-lock.ts';
 import { managedFilesystemDatastorePath, refreshManagedFilesystemRoots } from './filesystem-guard.ts';
 import { assertWriterAdminState, WRITER_INSPECTION_HINT } from './admin-intent.ts';
+import { assertWriterAdminUnlocked } from './admin-lock.ts';
 import { inspectLegacyWriterLocks } from './legacy-locks.ts';
 import { deleteLockRowExact } from '../db-lock.ts';
 
@@ -101,6 +102,7 @@ export async function activatePersistence(engine: BrainEngine, opts: { confirmQu
       await tx.executeRaw("SELECT set_config('lock_timeout','2000ms',true),set_config('synchronous_commit','on',true)");
       await assertWriterAdminState(tx, opts.expectedState);
       const [current] = await tx.executeRaw<{ enabled: boolean }>('SELECT enabled FROM persistence_brain WHERE singleton=1 FOR UPDATE');
+      await assertWriterAdminUnlocked(tx);
       if (current?.enabled) return { enabled: true, activated: false, filesystem_sources: initial.length, native_lock: native };
       const currentSources = await configuredSources(tx, true);
       const bindings = await validatedBindings(tx, currentSources, hostId, true);
