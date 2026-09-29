@@ -82,8 +82,11 @@ Seven of the knobs deserve a sentence:
   replayed at every budget): strict `recall_all@5` climbs monotonically as
   the budget shrinks — 255/470 legacy → 394/470 at 0.25 — but even 0.25
   trails plain hybrid (439/470) by 43 questions on the held-out decision set,
-  so the bundles keep `null` and the knob is an operator lever; if you keep
-  expansion on, `0.25` recovers most of the loss. **Say to your agent:**
+  so the bundles keep `null` and the knob is an operator lever. That receipt
+  predates page-grain fusion and the relaxed-keyword demotion: on the current
+  ranking (halfA430, 215 questions, frozen variants) legacy expansion scores
+  205/215, budget `1.0` 203/215, `0.25` 202/215 and no expansion 202/215, so
+  capping the variants no longer helps. **Say to your agent:**
   *"Cap how much query expansion can outvote my original query"* (no skill backs this; your agent
   runs `gbrain config set search.expansion_variant_budget <b>`, and
   `gbrain config set search.expansion_variant_budget legacy` restores the
