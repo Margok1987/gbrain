@@ -225,9 +225,12 @@ keep its slugs relative to that folder."*
 
 **Write-through.** When a write creates a page in a subfolder source,
 gbrain writes `<source path>/<slug>.md` and records the stored path in the
-source's mode, so the next sync of that file finds the same page instead of
-creating a twin. Pages that already have a stored path keep writing to that
-file.
+source's mode. In `source-root` mode the next sync of that file finds the
+same page instead of creating a twin. In `git-root` mode the recorded path
+adds the subfolder prefix that the unprefixed slug lacks, so the next sync
+can refuse that file with a slug/origin mismatch; there, add new pages as
+files in the checkout and sync them. Pages that already have a stored path
+keep writing to that file.
 
 **Older stored paths.** Before v0.60.5.0, write-through recorded
 Git-root-style paths (`notes/people/alice-example.md`) for pages in
