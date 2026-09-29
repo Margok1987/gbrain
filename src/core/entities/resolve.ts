@@ -115,6 +115,15 @@ export function isIdentityEntity(slug: string, type?: string | null): boolean {
   return (type != null && IDENTITY_TYPES.has(type)) || IDENTITY_DIRS.some(dir => slug.startsWith(dir));
 }
 
+const FACT_ENTITY_TYPES = new Set(['concept', 'project', 'deal']);
+const FACT_ENTITY_DIRS = ['hosts/', 'projects/', 'concepts/', 'deals/'];
+
+/** Pages a fuzzy fact attribution may land on: entities, never meetings, notes or other documents. */
+function isFactEntityPage(slug: string, type: string | null): boolean {
+  return isIdentityEntity(slug, type) || (type != null && FACT_ENTITY_TYPES.has(type))
+    || FACT_ENTITY_DIRS.some(dir => slug.startsWith(dir));
+}
+
 function nameTokens(value: string): string {
   const folded = foldNonDecomposingLatin(value).normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
   const tokens = folded.split(/[^\p{L}\p{N}]+/u).filter(token => token && !NAME_NOISE_TOKENS.has(token));
@@ -474,8 +483,8 @@ async function tryFuzzyMatch(
   // tends to be display-name-shaped ("Alice Example" vs "alice-example"). Cap at
   // 3 candidates; pick the first deterministic one.
   try {
-    const rows = await engine.executeRaw<{ slug: string; title: string; score: number }>(
-      `SELECT slug, title,
+    const rows = await engine.executeRaw<{ slug: string; title: string; type: string | null; score: number }>(
+      `SELECT slug, title, type,
          GREATEST(
            similarity(lower(title), $2),
            similarity(slug, $3)
@@ -495,7 +504,13 @@ async function tryFuzzyMatch(
     // and facts about a person with no page to a meeting page that carries
     // their name. Entity resolution takes a candidate only when it names the
     // same entity; anything else falls back to the reference's own slug.
-    if (sameNameOnly) return rows.find(row => sameEntityName(raw, row.title, row.slug))?.slug ?? null;
+    // Only entity pages are candidates (a meeting titled "Dana Jones Example"
+    // is not Dana), and two entity pages carrying the same name are
+    // ambiguous: neither wins by trigram score.
+    if (sameNameOnly) {
+      const named = rows.filter(row => isFactEntityPage(row.slug, row.type) && sameEntityName(raw, row.title, row.slug));
+      return named.length === 1 ? named[0].slug : null;
+    }
     if (rows.length > 0 && rows[0].score >= 0.7) return rows[0].slug;
   } catch {
     // pg_trgm functions might not be available on every engine config;
