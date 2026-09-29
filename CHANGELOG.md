@@ -12,17 +12,17 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.60.7.0] - 2026-09-29
 
-**Local PGLite brains now commit writes about 3.5× faster, with the same durability.**
+**Local PGLite brains now commit writes about 3.7× faster, with the same durability.**
 
 A local brain's resident writer spent most of each write on overhead. It parsed and planned every SQL statement from scratch, reopened hundreds of database files per write, blocked on two `git` subprocesses, and ran work that grew with the size of the brain. PGLite never runs autovacuum, so receipt lookups ended up scanning every request a writer had ever made. Every write still takes the same path, with the same staged files, fsyncs, recovery records and crash boundaries.
 
 | On a Ubicloud standard-30, same VM, matched runs | Before | After |
 | --- | --- | --- |
-| PGLite, 1,000-write soak (median of 3) | 8.92 writes/s | 31.68 writes/s |
-| PGLite, time for a caller's write to commit (p50) | 1.73 s | 0.44 s |
-| PGLite, 10,000-write validation soak | 1,417 s | 277–351 s |
-| Postgres, 1,000-write soak (median of 3) | 11.18 writes/s | 13.48 writes/s |
-| Postgres, 10,000-write validation soak | 886 s | 581–838 s |
+| PGLite, 1,000-write soak (median of 3) | 7.20 writes/s | 26.86 writes/s |
+| PGLite, time for a caller's write to commit (p50) | 2.14 s | 0.55 s |
+| Postgres, 1,000-write soak (median of 3) | 11.22 writes/s | 12.93 writes/s |
+
+The 10,000-write validation soak now takes 335 s on PGLite (29.9 writes/s; master took 1,417 s when last measured) and 692 s on Postgres (14.5 writes/s; master 886 s).
 
 All eight SIGKILL crash boundaries and the full default validation gate pass on both engines.
 

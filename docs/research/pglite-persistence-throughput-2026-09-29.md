@@ -120,6 +120,18 @@ wake costs Postgres nothing measurable and the soak stays about 12% above
 master. Matched 3 × 1,000 on the wake commit: PGLite 8.88 → 31.27, Postgres
 11.90 → 14.86 (medians).
 
+## After merging master v0.60.5.0 (#5689)
+
+#5689 added a WAL checkpoint guard that probes `pg_control_checkpoint()` before
+every outermost PGLite transaction (about 12 probes per write, ~4% of
+throughput when disabled locally), an idle-probe consumer backoff, and effect
+parking. Master and this change both lost throughput; the ratio held. Matched
+3 × 1,000 on one `standard-30`: PGLite 7.20 (7.16–7.26) → 26.86 (26.69–28.70)
+writes/s, caller p50 2,144 → 548 ms; Postgres 11.22 (11.19–11.25) → 12.93
+(12.77–13.10). Full default gate on the merged head: `full_gate: true` on both
+engines with all 8 crash cases; PGLite soak 29.87 writes/s (335 s), Postgres
+14.46 writes/s (692 s).
+
 ## Read latency (`scripts/persistence/performance.ts`, median of 3 runs)
 
 The statement cache is engine-wide, so read paths were checked against master
@@ -176,12 +188,14 @@ the same workload (4,000 searches).
   default and unchanged. Neither `max_files_per_process` nor any other GUC
   raises the ~48-file descriptor cache.
 
-## Follow-up: restore the 10,000-write soak on pull requests
+## Follow-up: where the 10,000-write soak should run
 
 [#5667](https://github.com/garrytan/gbrain/pull/5667) cut pull-request soaks to
-2,500 writes while the PGLite soak ran about 11 writes/s. At 32–36 writes/s the
-full 10,000-write PGLite soak takes 277–308 s on `standard-30`, and the whole
-default gate takes 337–373 s. The Postgres soak takes 581–727 s, down from
-886 s. Proposal: run
-the full default gate (10,000 writes) on pull requests again for both engines,
-keeping #5667's timeout headroom, and drop the 2,500-write PR variant.
+2,500 writes while the PGLite soak ran about 11 writes/s. The full 10,000-write
+soak now takes 277–351 s on PGLite and 581–838 s on Postgres on `standard-30`.
+Recommendation: keep 2,500 writes on pull requests, and run the full default
+gate (10,000 writes, both engines) nightly and before each release. Two of the
+regressions fixed here grew with queue size (receipt lookups scanning every
+request without vacuum, and `ANALYZE` after every drained rebuild); 10,000
+writes shows that kind of growth much more clearly than 2,500, but it does not
+need to gate every pull request.
