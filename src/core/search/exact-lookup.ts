@@ -37,7 +37,8 @@ import type { BrainEngine } from '../engine.ts';
 import type { SearchResult, PageReadPolicy } from '../types.ts';
 import { normalizeAlias } from './alias-normalize.ts';
 import { isLookupShapedQuery } from './query-intent.ts';
-import { applySupersedeDownrank, isExcludedIdentity } from './hybrid.ts';
+import { applySupersedeDownrank } from './hybrid.ts';
+import { isExcludedIdentity } from './alias-hop.ts';
 
 /** Cap on tier injections per query (mirrors the alias hop's discipline). */
 export const MAX_EXACT_LOOKUP_INJECT = 3;
