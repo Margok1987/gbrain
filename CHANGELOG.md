@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.59.17.0] - 2026-09-29
+## [0.59.19.0] - 2026-09-29
 
 **Local PGLite brains now commit writes about 3.5× faster, with the same durability.**
 
@@ -26,7 +26,7 @@ A local brain's resident writer spent most of each write on overhead. It parsed 
 
 All eight SIGKILL crash boundaries and the full default validation gate pass on both engines.
 
-### To take advantage of v0.59.17.0
+### To take advantage of v0.59.19.0
 
 Run `gbrain upgrade`. There is no migration. The resident writer picks up the changes when it restarts.
 
@@ -37,6 +37,99 @@ Run `gbrain upgrade`. There is no migration. The resident writer picks up the ch
 - **Git effects no longer block the writer.** The durability-hook check runs its `git` probes asynchronously, once per worktree root per effect batch, and never while holding the worktree lock. When the repository has no durability hook, a git effect only proves the root with the lock and records its outcome without holding it. Effects drain in batches of 20 and keep pace with publication.
 - **Fewer statements per write.** Page guards already held in a transaction are not taken again. Counter updates use one statement per step. The publication's final page read is reused when queuing effects and sealing projections. Exact-slug page reads keep alias resolution out of the parameters. Idle-time scans run at most once per poll interval while writes are flowing.
 - **Research record.** `docs/research/pglite-persistence-throughput-2026-09-29.md` has the owner profile before and after, the matched numbers, and the approaches that were tried and rejected.
+
+## [0.59.17.0] - 2026-09-28
+
+**Forgetting one person's fact no longer erases it for everyone, and several maintenance jobs stop quietly losing or overwriting your notes.**
+
+Say you tell your agent to forget that alice-example "prefers email". Before this release, gbrain forgot that sentence for every person in the brain: bob-example's identical fact was switched off too, rewritten as forgotten in his page the next time it was imported, and nobody could ever be remembered as preferring email again. Now a forget applies to the person or company it was about. Updating a fact ("works at acme-example" becomes "left acme-example") is also no longer treated as a forget, so the old wording can come back later and the update does not touch unrelated pages. That matters most for Gmail commitment tracking, which updates facts every time a due date moves.
+
+The nightly maintenance cycle got safer too. One broken facts table no longer stops every page after it from updating. A hand-written concept page is never replaced by a generated summary. A short page whose real content is its timeline is no longer mistaken for an empty duplicate and deleted. Cleaning up old background jobs no longer makes the brain pay to summarize the same conversations again.
+
+Live ChatGPT and Claude sync keeps up with renamed conversations, tracks progress separately for each source, keeps moving when you cap a run with `--limit`, and sets aside a conversation that keeps failing instead of re-fetching everything forever.
+
+### What changes for you
+
+| Situation | Before | Now |
+| --- | --- | --- |
+| Forget alice-example's "Prefers email" | Also switched off for bob-example and blocked for everyone | Only alice-example's fact is forgotten |
+| A remembered fact is updated | Old wording blocked forever, whole source re-indexed | Old row marked as replaced; nothing else touched |
+| One page's facts table has a bad row | Every later page stopped updating, every night | That page is reported; the rest update |
+| You wrote `concepts/flywheel` yourself | Replaced by a generated paragraph | Left untouched and reported |
+| Page `alice` holds only a title and a timeline | Deleted as an empty duplicate | Kept |
+| `gbrain jobs prune` after 30 days | Every transcript summarized (and paid for) again | Nothing re-runs |
+| Renamed ChatGPT/Claude conversation | New messages silently dropped | The existing page updates with them |
+| `gbrain connectors sync --limit 50`, run daily | The same newest 50 forever | 50 new ones each run until caught up |
+| Syncing the same account into a second source | Only the last week arrived | Full history |
+| One conversation always fails to download | Every run re-fetched the whole window | Set aside after 3 tries; progress continues |
+
+### How to use it
+
+Nothing to configure. Useful checks after upgrading:
+
+```bash
+gbrain connectors status --json            # watermark and last sync for the scheduled source
+gbrain connectors sync chatgpt --limit 50  # repeat until status is "success"; each run moves on
+gbrain dream --phase extract_facts         # a bad page now shows FACTS_RECONCILE_FAILED instead of failing the phase
+```
+
+**Say to your agent:** *"Forget that alice-example prefers email."* Only alice-example's fact is withdrawn.
+
+### Things to watch
+
+- Forgets you made before this release keep applying to every entity, exactly as they did, so upgrading never brings a forgotten fact back. New forgets are scoped to one entity. A fact that was never about anyone in particular still withdraws everywhere in its source.
+- A facts table with a confidence outside 0 to 1 (for example `7`) is now reported as malformed and that page's facts are left as they were until you fix the cell.
+- A conversation that fails 3 times at the same version is skipped until it changes upstream. `gbrain connectors sync <provider> --full` retries everything.
+
+### To take advantage of v0.59.17.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor`
+warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **No agent action is needed.** Migrations v167 to v169 are schema-only; there is no `skills/migrations` file for this release.
+3. **Verify the outcome:**
+   ```bash
+   gbrain doctor
+   gbrain connectors status
+   gbrain stats
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+#### Forget and supersession
+
+- Fact withdrawals are keyed by `(source_id, visibility, subject, fact_hash)`. `subject` is the forgotten row's `entity_slug`. `'*'` applies to every entity: subjectless facts use it, and so does every row recorded before migration v169. `recordFactWithdrawal`, the `facts_preserve_withdrawal` trigger, `isFactWithdrawn` (now takes the entity), the import and `get_page` snapshot overlays, and fact-embedding backfill all match `subject = '*' OR subject = entity_slug`. Fence rows match on their page slug.
+- `updateSlug` (both engines) and the phantom-redirect merge move a page's withdrawals to the new slug, so a rename never restores a forgotten claim.
+- `writeSingleFact` supersession strikes the old fence row with a `#N` supersession reference through `forgetFactInFence(..., { supersededBy })` and records no withdrawal. This path no longer invalidates the whole source, including from Gmail loop extraction.
+
+#### Cycle phases
+
+- `extract_facts` reconciles each page in isolation. A failure is reported as `<slug>: FACTS_RECONCILE_FAILED: <message>`, counted in `pagesFailed`, and booked as a halt in the extract rollup. `parseFactsFence` rejects confidence outside 0..1 as `FACTS_TABLE_MALFORMED`. Migration v167 makes `facts.superseded_by` `ON DELETE SET NULL`.
+- `synthesize_concepts` checks `concepts/<x>` before any LLM spend and skips pages without `synthesized_by: synthesize_concepts-*`, listing them in `details.skipped_human_owned`.
+- The phantom-redirect residue gate counts timeline text, `timeline_entries` rows, and frontmatter keys beyond `title`/`type`/`tags`.
+- `MinionQueue.prune` archives completed `dream:synth%` keys into the new `dream_synthesis_completions` table (migration v168) in the same statement that deletes them; synthesis idempotency reads both.
+
+#### Transcripts and chat connectors
+
+- `runTranscriptsIngest` imports a session at the slug its existing page already uses (matched on part 1's `frontmatter.id`), so a retitled or re-dated conversation updates in place.
+- Connector sync state is keyed by `(provider, source)`: `connectors.<p>.source.<id>.{watermark_iso,last_sync_at,synced,failed}`. A legacy per-provider watermark still applies to the scheduled `connectors.source_id` source until it writes its own. `auth_error_at` stays per provider.
+- Listed conversations whose `updatedAt` a source already ingested are skipped before the `--limit` cap. A conversation that fails `QUARANTINE_ATTEMPTS` (3) times at one `updatedAt` is quarantined and reported in `quarantined`; it stops holding the watermark back. Results also report `skippedUnchanged`.
+
+### For contributors
+
+- New regression suites: `test/facts-withdrawal-subject.test.ts`, `test/facts-supersede-not-withdrawal.test.ts`, `test/extract-facts-poison-page.test.ts`, `test/cycle/synthesize-concepts-human-owned.test.ts`, `test/transcripts-retitle.test.ts`, `test/e2e/connectors-sync-checkpoints-pglite.test.ts`, plus new cases in `test/phantom-redirect.test.ts` and `test/cycle-synthesize-daily-cap.test.ts`. All run on in-memory PGLite with no provider calls.
+- `watermarkKey` and `lastSyncAtKey` now take a source id; read connector progress through `readConnectorState`.
 
 ## [0.59.13.0] - 2026-09-28
 
