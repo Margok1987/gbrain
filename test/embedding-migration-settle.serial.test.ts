@@ -178,7 +178,7 @@ for (const kind of testBackends()) {
       expect(Object.keys(settled.pending ?? {})).toEqual([]);
     });
 
-    test('a retried request settles the sum of its attempts across a batch split', async () => {
+    test('a retried request settles the sum of its attempts; a token-limit split settles from the parent headroom', async () => {
       const debit = await authorizeMigrationBudget(engine, await plan(), 1);
       const reserved: number[] = [];
       let attempts = 0;
@@ -191,9 +191,13 @@ for (const kind of testBackends()) {
         () => embed(['a'.repeat(400), 'b'.repeat(400)], { embeddingModel: model, dimensions }));
       expect(attempts).toBe(3);
       expect(reserved).toHaveLength(3);
-      const settled = await budget();
-      expect(settled.requests).toBe(3);
-      expect(settled.debited_usd).toBeCloseTo(usd(reserved[0]) + usd(10) + usd(10), 12);
+      expect(reserved[1] + reserved[2]).toBe(reserved[0]);
+      const split = await budget();
+      expect(split.requests).toBe(3);
+      expect(split.debited_usd).toBeCloseTo(usd(10) + usd(10), 12);
+      await expect(withAIInvocationGuard(debit, () => invokeAI(call(40_000), async () => { throw new Error('Synthetic timeout'); }, () => null))).rejects.toThrow();
+      await withAIInvocationGuard(debit, () => invokeAI(call(40_000), async () => 'ok', () => usage(500)));
+      expect((await budget()).debited_usd).toBeCloseTo(usd(20) + usd(40_000) + usd(500), 12);
     });
 
     test('usage above the reservation debits actual, records the overshoot and stops dispatch', async () => {
@@ -262,6 +266,51 @@ for (const kind of testBackends()) {
       expect(run.text).toContain('embedding_budget_below_worst_case');
       expect(transportCalls).toBe(0);
       expect(await vectors()).toEqual(before);
+    });
+
+    test('a batch split after a token-limit rejection settles within the printed worst case', async () => {
+      const rate = 1_000;
+      await engine.setConfig('pricing.overrides', JSON.stringify({ [model]: rate }));
+      const texts = [0, 1, 2].map(i => `Synthetic split chunk ${i}. ${'Iota kappa lambda mu. '.repeat(40)}`);
+      await engine.putPage('settle-split', { type: 'note', title: 'Synthetic split', compiled_truth: texts.join('\n\n') });
+      await installFixtureChunks(engine, 'settle-split', texts.map((chunk_text, chunk_index) => ({ chunk_index, chunk_source: 'compiled_truth' as const,
+        chunk_text, embedding: new Float32Array(dimensions).fill(0.2) })));
+      await engine.executeRaw("UPDATE pages SET embedding_signature=NULL");
+      await engine.executeRaw("UPDATE content_chunks SET model='synthetic:legacy-model'");
+      const preview = await cli(['--dry-run']);
+      const printed = /Worst-case authorization: \$(\d+(?:\.\d+)?)/.exec(preview.text);
+      expect(printed).not.toBeNull();
+      let rejected = 0;
+      __setEmbedTransportForTests(async ({ values }: { values: string[] }) => {
+        if (values.length > 1) { rejected++; throw new Error("Invalid 'input': maximum request size is 300000 tokens per request."); }
+        return { values, warnings: [], embeddings: values.map(vector), usage: { tokens: Buffer.byteLength(values[0], 'utf8') } };
+      });
+      const run = await cli(['--max-cost-usd', printed![1], '--json']);
+      expect(rejected).toBeGreaterThan(0);
+      expect(run.text).toContain('"status": "completed"');
+      expect((await vectors()).every(row => row.embedding !== null)).toBe(true);
+    });
+
+    test('content-drift chunks on a same-target resume count toward the printed worst case', async () => {
+      const rate = 1_000;
+      await engine.setConfig('pricing.overrides', JSON.stringify({ [model]: rate }));
+      await seedPages(4);
+      await engine.executeRaw('UPDATE pages SET embedding_signature=$1', [`${model}:${dimensions}`]);
+      await engine.executeRaw('UPDATE content_chunks SET model=$1, embedded_text_hash=md5(chunk_text)', [model]);
+      await engine.executeRaw(`UPDATE content_chunks cc SET embedded_text_hash=md5('Synthetic obsolete text')
+        FROM pages p WHERE p.id=cc.page_id AND p.slug IN ('settle-0','settle-1','settle-2')`);
+      await engine.setConfig('embedding_migration.state', JSON.stringify({ version: 2, to_model: model, to_dims: dimensions,
+        from_model: 'synthetic:legacy-model', from_dims: dimensions, started_at: '2026-01-01T00:00:00.000Z',
+        authorization_version: 1, authorization_generation: 1, budget: { max_cost_usd: 0, debited_usd: 0, requests: 0 } }));
+      const preview = await cli(['--dry-run']);
+      const printed = /Worst-case authorization: \$(\d+(?:\.\d+)?)/.exec(preview.text);
+      expect(printed).not.toBeNull();
+      stubTransport(value => Buffer.byteLength(value, 'utf8'));
+      const run = await cli(['--max-cost-usd', printed![1], '--json']);
+      expect(run.text).toContain('"status": "completed"');
+      const drifted = await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM content_chunks
+        WHERE embedding IS NULL OR embedded_text_hash IS DISTINCT FROM md5(chunk_text)`);
+      expect(drifted[0].n).toBe(0);
     });
 
     test('a cap near the estimate completes instead of dropping every vector and stalling', async () => {
