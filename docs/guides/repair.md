@@ -88,6 +88,12 @@ should also check `results[].complete`.
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
 | `safe-chunks` | `contextual_retrieval_coverage` (`details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 
+Timeline rows that an earlier version of a page produced and its current text
+no longer has are removals, not history, so `timeline` neither counts nor
+restores them. Doctor reports those as `timeline_orphans`; preview their
+removal with `gbrain extract timeline --prune-orphans --dry-run`, then run it
+without `--dry-run`.
+
 A timeline repair can make pages gain marked bullets. That is the fix: the
 history is now visible in the page and survives later edits. Deleting a marked
 bullet in a save that passes the current `expected_revision` deletes its entry.
