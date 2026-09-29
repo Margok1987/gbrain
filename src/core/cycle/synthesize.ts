@@ -66,6 +66,8 @@ import { clampSubagentBudgets, CYCLE_DEADLINE_RESERVE_MS, MIN_PATTERNS_SUBAGENT_
 import { isQueueQuotaExceededError } from '../minions/admission.ts';
 import { waitForCompletionRenewing, TimeoutError } from '../minions/wait-for-completion.ts';
 import type { MinionJobInput, SubagentHandlerData } from '../minions/types.ts';
+import { resolveMaxOutputTokens } from '../minions/handlers/subagent.ts';
+import { BudgetMeter, loadAllowUnpriced, parseBudgetUsd } from './budget-meter.ts';
 import { runSubagentsInline, runDrainRenewalTick, percentile, INLINE_LOCK_MS } from './inline-drain.ts';
 import { buildManifestContext, buildLinkManifest, type ManifestContext } from './link-manifest.ts';
 import { resolveCycleDate, utcDate } from './cycle-date.ts';
@@ -144,6 +146,8 @@ const DEFAULT_TRIAGE_CONCURRENCY = 4;
  * page counts drop; `details.synthesis.avg_turns` telemetry shows cap pressure.
  */
 const DEFAULT_MAX_TURNS = 16;
+/** C-13: per-run USD cap on child submissions (`dream.synthesize.budget_usd`; `unlimited` removes it). */
+const DEFAULT_SYNTH_BUDGET_USD = 5;
 
 /**
  * Compute per-chunk character budget for the resolved model + config override.
@@ -648,23 +652,28 @@ async function runPhaseSynthesizeInner(
     // Per-source daily submission cap (D2D: default 0 = disabled; opt-in
     // backstop via dream.synthesize.max_submissions_per_source_per_day).
     // Bypassed for explicit --input/--date/--from/--to runs, same rule as the
-    // cooldown. Fail-open: if the count query throws (pool reap mid-phase),
-    // warn and skip the cap for this run — backstop availability must never
-    // cost phase availability (db-pacer posture).
+    // cooldown. Fail-closed (C-13): an operator who set a spend cap gets no
+    // uncounted submissions; if the count query throws, this run submits
+    // nothing and the next run retries.
     const dailyCap = config.maxSubmissionsPerSourcePerDay;
-    let capActive = dailyCap > 0 && !explicitTarget;
+    const capActive = dailyCap > 0 && !explicitTarget;
     let submittedToday = 0;
+    let capUnavailable = false;
     if (capActive) {
       try {
         submittedToday = await countRecentSynthSubmissions(engine, cycleSourceId);
       } catch (e) {
-        capActive = false;
+        capUnavailable = true;
         process.stderr.write(
           `[dream] daily-cap count query failed (${e instanceof Error ? e.message : String(e)}); ` +
-          `skipping the cap for this run\n`,
+          `submitting nothing this run\n`,
         );
       }
     }
+    // C-13: USD gate checked before every submission, from the prompt size and
+    // the child's output cap (one call in oneshot mode, max_turns in agentic).
+    const synthMeter = new BudgetMeter({ budgetUsd: config.budgetUsd, allowUnpriced: config.allowUnpriced, phase: 'synthesize' });
+    const childMaxOutputTokens = resolveMaxOutputTokens(undefined, await engine.getConfig('agent.max_output_tokens').catch(() => null), config.model);
 
     // Admission-quota latch: once a submit is rejected, every later transcript
     // this run would be rejected too — record one skip per remaining file
@@ -680,6 +689,10 @@ async function runPhaseSynthesizeInner(
       throwIfAborted(opts.signal, '[dream] synthesize fan-out');
       if (quotaHit) {
         skipReports.push({ filePath: t.filePath, reason: 'admission_quota: submission stopped this run' });
+        continue;
+      }
+      if (capUnavailable) {
+        skipReports.push({ filePath: t.filePath, reason: 'daily_cap_unavailable: count query failed' });
         continue;
       }
       if (budgetExhaustedDeferrals.length > 0) {
@@ -822,18 +835,32 @@ async function runPhaseSynthesizeInner(
       // (adversarial finding). Coalesced rows are another run's bookkeeping
       // and must not be cancelled.
       const transcriptFreshIds: number[] = [];
+      const prompts = chunks.map((chunk, i) => buildSynthesisPrompt(
+        t, chunk, i, chunks.length, priorContradictionsBlock, config.outputRoot,
+        buildTriageMapBlock(triageVerdict, chunk, chunks.length),
+        manifestBlock,
+        allowedSlugPrefixes,
+        // #4117: validated per-lane namespaces.
+        config.reflectionsPrefix,
+        config.originalsPrefix,
+        config.mode,
+      ));
+      // One check for the whole chunk set: a transcript never half-submits.
+      const callsPerChild = config.mode === 'agentic' ? config.maxTurns : 1;
+      const spend = synthMeter.check({
+        modelId: subagentModel,
+        estimatedInputTokens: callsPerChild * prompts.reduce((n, p) => n + Math.ceil(p.length / 4), 0),
+        maxOutputTokens: callsPerChild * chunks.length * childMaxOutputTokens,
+        label: `synthesize:${basename(t.filePath)}`,
+      });
+      if (!spend.allowed) {
+        process.stderr.write(`[dream] synthesize budget: ${spend.reason}; deferring ${basename(t.filePath)} and the rest of this run\n`);
+        budgetExhaustedDeferrals.push(basename(t.filePath));
+        continue;
+      }
       for (let i = 0; i < chunks.length; i++) {
         const childData: SubagentHandlerData = {
-          prompt: buildSynthesisPrompt(
-            t, chunks[i], i, chunks.length, priorContradictionsBlock, config.outputRoot,
-            buildTriageMapBlock(triageVerdict, chunks[i], chunks.length),
-            manifestBlock,
-            allowedSlugPrefixes,
-            // #4117: validated per-lane namespaces.
-            config.reflectionsPrefix,
-            config.originalsPrefix,
-            config.mode,
-          ),
+          prompt: prompts[i],
           model: subagentModel,
           max_turns: config.maxTurns,
           allowed_slug_prefixes: allowedSlugPrefixes,
@@ -960,6 +987,9 @@ async function runPhaseSynthesizeInner(
         transcripts_processed: 0,
         pages_written: 0,
         children_submitted: 0,
+        budget_deferred_transcripts: budgetExhaustedDeferrals,
+        budget_usd: config.budgetUsd,
+        estimated_spend_usd: synthMeter.totalSpent,
         skips: skipReports,
         verdicts,
         triage: triageDetails,
@@ -1235,6 +1265,9 @@ async function runPhaseSynthesizeInner(
           transcripts_discovered: transcripts.length,
           children_submitted: childIds.length,
           child_outcomes: childOutcomes,
+          budget_deferred_transcripts: budgetExhaustedDeferrals,
+          budget_usd: config.budgetUsd,
+          estimated_spend_usd: synthMeter.totalSpent,
           skips: skipReports,
           verdicts,
           triage: triageDetails,
@@ -1289,6 +1322,8 @@ async function runPhaseSynthesizeInner(
       // when chunking is in play.
       children_submitted: childIds.length,
       budget_deferred_transcripts: budgetExhaustedDeferrals,
+      budget_usd: config.budgetUsd,
+      estimated_spend_usd: synthMeter.totalSpent,
       // D5 cap hits + D8 legacy-key skips + daily_cap_reached. Empty when nothing skipped.
       skips: skipReports,
       summary_slug: summarySlug,
@@ -1400,6 +1435,10 @@ export interface SynthConfig {
   maxTurns: number;
   /** dream.synthesize.max_submissions_per_source_per_day, default 0 = disabled (D2D). Docs recommend 200 for busy deployments. */
   maxSubmissionsPerSourcePerDay: number;
+  /** dream.synthesize.budget_usd, default 5. 0 submits nothing; `unlimited` removes the cap (C-13). */
+  budgetUsd: number;
+  /** dream.budget.allow_unpriced: unpriced models bypass the budget gate. */
+  allowUnpriced: boolean;
   cooldownHours: number;
   /**
    * D1: Override the per-chunk token budget (model_context × HEADROOM_RATIO
@@ -1663,6 +1702,8 @@ export async function loadSynthConfig(engine: BrainEngine): Promise<SynthConfig>
     },
     maxTurns,
     maxSubmissionsPerSourcePerDay,
+    budgetUsd: parseBudgetUsd(await engine.getConfig('dream.synthesize.budget_usd'), DEFAULT_SYNTH_BUDGET_USD),
+    allowUnpriced: await loadAllowUnpriced(engine),
     cooldownHours,
     maxPromptTokens,
     maxChunksPerTranscript,
