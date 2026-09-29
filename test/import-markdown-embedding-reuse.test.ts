@@ -104,4 +104,12 @@ describe('markdown import reuses unchanged chunk vectors (A13)', () => {
     const count = (await vectors(slug)).size;
     expect(embedded.length).toBe(count);
   });
+
+  test('--force-rechunk re-embeds every chunk', async () => {
+    const slug = 'notes/reuse-force';
+    await importFromContent(engine, slug, page('Force', ['alpha', 'bravo', 'charlie']));
+    embedded = [];
+    await importFromContent(engine, slug, page('Force', ['alpha', 'bravo', 'delta']), { forceRechunk: true });
+    expect(embedded.length).toBe((await vectors(slug)).size);
+  });
 });

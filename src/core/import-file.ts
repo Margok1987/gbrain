@@ -845,7 +845,7 @@ export async function importFromContent(
   // signature are unchanged, and neither body holds protected fences — so no
   // reused vector can carry a private sibling fragment.
   const reused = new Set<number>();
-  if (existing && !existing.deleted_at && !opts.noEmbed && !opts.prepare && !opts.onPostCommitEmbedding && chunks.length > 0
+  if (existing && !existing.deleted_at && !opts.noEmbed && !opts.forceRechunk && !opts.prepare && !opts.onPostCommitEmbedding && chunks.length > 0
     && !hasProtectedBody(`${existing.compiled_truth}\n${existing.timeline ?? ''}`) && !hasProtectedBody(`${parsed.compiled_truth}\n${parsed.timeline ?? ''}`)) {
     const [prior] = await engine.executeRaw<{ embedding_signature: string | null; contextual_retrieval_mode: string | null; corpus_generation: string | null }>(
       'SELECT embedding_signature, contextual_retrieval_mode, corpus_generation FROM pages WHERE source_id = $1 AND slug = $2', [sourceId ?? 'default', slug]);
