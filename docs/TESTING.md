@@ -1105,6 +1105,17 @@ Any change under `skills/` must regenerate it: `bun run scripts/generate-skills-
 `bun run verify`) regenerates to a tmp file and diffs, failing CI on drift; at runtime
 `gbrain doctor` reports the same drift as a warn-only `skills_manifest_integrity` check.
 
+### Docs CLI truth check
+
+`test/docs-cli-commands.test.ts` checks every `gbrain <verb>` in code fences and
+inline code across README, docs and skills against the registered verbs. In
+`docs/guides/`, `docs/migrations/` and `skills/` it also runs each invocation's
+flags through the CLI's own validator, via `test/helpers/cli-command-surface.ts`.
+When a hit is stale, fix the doc. When the example documents an older release,
+put `<!-- gbrain-cli: historical -->` on the line above its code fence, or on the
+line with the inline code. The test's `ALLOWLIST` is a last resort: it only
+shrinks, every entry needs a reason, and stale entries fail.
+
 ### Test-isolation lint and helpers
 
 **This section is the canonical home of the test-isolation discipline** — CONTRIBUTING.md and other docs link here rather than restating the rules.
