@@ -62,8 +62,9 @@ function concat(parts: Uint8Array[]): Uint8Array {
  * gives the Postgres engine. PGlite's query() parses, plans, and describes
  * every call as an unnamed statement over five protocol round trips; a
  * statement seen twice is prepared once and later runs as one Bind/Execute/Sync
- * batch. PostgreSQL still replans on invalidation and rejects a changed result
- * shape, which drops the entry. Shape-changing SQL clears the cache.
+ * batch. The engine keeps plan_cache_mode=force_custom_plan, so each call is
+ * still planned for its parameters. PostgreSQL rejects a changed result shape,
+ * which drops the entry, and shape-changing SQL clears the cache.
  */
 export class PgliteStatementCache {
   private statements = new Map<string, Statement>();
