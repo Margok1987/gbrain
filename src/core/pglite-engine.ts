@@ -2452,7 +2452,7 @@ export class PGLiteEngine implements BrainEngine {
     const innerLimit = Math.min(limit * 3, MAX_SEARCH_LIMIT * 3);
 
     // Source-aware ranking (v0.22): see postgres-engine.ts for rationale.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -2603,7 +2603,7 @@ export class PGLiteEngine implements BrainEngine {
       console.warn(`[gbrain] Warning: search limit clamped from ${opts.limit} to ${MAX_SEARCH_LIMIT}`);
     }
 
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -2763,7 +2763,7 @@ export class PGLiteEngine implements BrainEngine {
 
     // Source-aware ranking applied here too — searchKeywordChunks is the
     // chunk-grain anchor primitive that two-pass retrieval (Layer 7) uses.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -2854,7 +2854,7 @@ export class PGLiteEngine implements BrainEngine {
     // HNSW; outer SELECT re-ranks by raw_score * source_factor over the
     // narrow candidate pool. innerLimit scales with offset to preserve the
     // pagination contract. See postgres-engine.ts searchVector for rationale.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     // Outer SELECT references the aliased CTE column. Aliasing the CTE as `hc`
     // disambiguates the correlated subquery (`te.page_id = hc.page_id`) from
     // the inner column. Without the alias, an unqualified `page_id` in the

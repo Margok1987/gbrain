@@ -33,7 +33,7 @@ import { embed, embedQuery } from '../embedding.ts';
 import { registerBackgroundWorkDrainer } from '../background-work.ts';
 import { isDbAccessFailure } from '../pg-access-classify.ts';
 import { resolveEmbeddingColumn, isCacheSafe } from './embedding-column.ts';
-import { resolveHardExcludes } from './source-boost.ts';
+import { resolveBoostMap, resolveHardExcludes } from './source-boost.ts';
 import {
   resolveAdaptiveReturn,
   applyAdaptiveReturn,
@@ -1373,6 +1373,9 @@ export async function hybridSearch(
     exclude_slugs: opts?.exclude_slugs,
     exclude_slug_prefixes: opts?.exclude_slug_prefixes,
     include_slug_prefixes: opts?.include_slug_prefixes,
+    // Per-brain `search.source_boosts` (read in the mode snapshot) over the
+    // defaults; the env override still wins inside resolveBoostMap.
+    source_boosts: resolveBoostMap(undefined, modeInput.sourceBoosts),
     // v0.29.1: since/until take precedence over deprecated afterDate/beforeDate.
     // The engine still consumes the legacy field names; this aliasing keeps
     // PR #618 callers compiling while the new names are the public surface.

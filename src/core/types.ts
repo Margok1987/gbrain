@@ -1159,6 +1159,12 @@ export interface SearchOpts extends PageReadPolicy {
    */
   exclude_slug_prefixes?: string[];
   /**
+   * Resolved source-boost map (prefix → factor) for the ranking arms. Set by
+   * hybridSearch from the brain's `search.source_boosts` config; engines
+   * fall back to `resolveBoostMap()` (defaults + env) when absent.
+   */
+  source_boosts?: Record<string, number>;
+  /**
    * Opt-back-in list — subtracts entries from the resolved hard-exclude set.
    * E.g. `include_slug_prefixes: ['test/']` lets a query see test/ pages even
    * though they're hard-excluded by default.

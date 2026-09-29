@@ -1305,6 +1305,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // #4415: per-brain query-intent pattern extensions (JSON bank→regex[]),
   // merged over the shipped banks in src/core/search/query-intent.ts.
   'search.intent_patterns',
+  // Per-brain source-boost map (`prefix:factor,...`; `none` drops the
+  // defaults), read by search/mode.ts loadSearchModeConfig and ops/search.ts.
+  'search.source_boosts',
   // 2026-08 fix wave (E5a): the adaptive-return / autocut / CRAG knobs were
   // read by the search path but never registered — `gbrain config set`
   // rejected them, making the documented config plane a no-op. Read sites:

@@ -1443,7 +1443,7 @@ export class PostgresEngine implements BrainEngine {
     // (test/, attachments/, .raw/ by default) filter at the chunk-rank stage
     // so they never enter the candidate set. (archive/ is demoted, not
     // excluded — issue #1777.)
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -1640,7 +1640,7 @@ export class PostgresEngine implements BrainEngine {
       console.warn(`[gbrain] Warning: search limit clamped from ${opts.limit} to ${MAX_SEARCH_LIMIT}`);
     }
 
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -1792,7 +1792,7 @@ export class PostgresEngine implements BrainEngine {
     // chunk-grain anchor primitive that two-pass retrieval (Layer 7) uses,
     // so curated-vs-bulk dampening should affect the anchor pool. Same
     // detail-gate, same hard-exclude behavior as searchKeyword.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -1953,7 +1953,7 @@ export class PostgresEngine implements BrainEngine {
     //
     // innerLimit scales with offset to preserve the pagination contract:
     // a fixed cap of 100 would silently empty offset > 100.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     // issue #160: the guard predicate is projected as `unverified_stub` in
     // hnsw_candidates (frontmatter isn't otherwise available at re-rank), so
     // unverified auto-extracted stubs get factor 1.0, not the people/ 1.2x.
