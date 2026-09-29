@@ -315,6 +315,46 @@ test('#5280: grade_takes resolves the judged take by page identity when its page
   });
 });
 
+test('#5280: grade_takes never applies a verdict to a fence row replaced before publication, and grades it again next run (Codex review)', async () => {
+  const { runPhaseGradeTakes } = await import('../src/core/cycle/grade-takes.ts');
+  const takes = (claim: string) => ['<!--- gbrain:takes:begin -->', '| # | claim | kind | who | weight | since | source |',
+    '|---|-------|------|-----|--------|-------|--------|', `| 1 | ${claim} | take | brain | 0.6 | 2025-01 | notes |`, '<!--- gbrain:takes:end -->'].join('\n');
+  await managedFixture(async (engine, sourceId) => {
+    await putPage(engine, sourceId, 'notes/regraded', `---\ntitle: Regraded\ntype: note\n---\nDraft.\n\n${takes('Widgets ship in Q3')}\n`);
+  }, async (engine, sourceId) => {
+    const judged: string[] = [];
+    const judge = async ({ take }: { take: { claim: string } }) => {
+      judged.push(take.claim);
+      return take.claim.startsWith('Widgets') || take.claim.startsWith('Gadgets')
+        ? { verdict: 'correct' as const, confidence: 0.99, reasoning: 'shipped' } : { verdict: 'unresolvable' as const, confidence: 0.1, reasoning: 'n/a' };
+    };
+    let replaced = false;
+    const racing = Object.create(engine) as BrainEngine;
+    racing.readPageSnapshot = async (slug, opts) => {
+      if (!replaced && slug === 'notes/regraded' && judged.includes('Widgets ship in Q3')) {
+        replaced = true;
+        const current = await engine.readPageSnapshot(slug, { sourceId });
+        await submitPageMutation(ctxFor(engine, sourceId), { operation: 'put_page', params: { slug, expected_revision: current!.revision,
+          request_id: randomUUID(), content: `---\ntitle: Regraded\ntype: note\n---\nDraft.\n\n${takes('Gadgets ship in Q4')}\n` } });
+      }
+      return engine.readPageSnapshot(slug, opts);
+    };
+    const opts = { autoResolve: true, minAgeMonths: 0, judge: judge as never, evidenceRetriever: (async () => 'evidence') as never, promptVersion: 'w3-replace' };
+    const first = await runPhaseGradeTakes({ engine: racing, sourceId, remote: false, config: {} as never, dryRun: false, logger } as never, opts);
+    expect(first.details.auto_applied).toBe(0);
+    const resolved = () => engine.executeRaw<{ claim: string; resolved_quality: string | null }>(
+      `SELECT t.claim, t.resolved_quality FROM takes t JOIN pages p ON p.id=t.page_id WHERE p.source_id=$1 AND p.slug='notes/regraded' AND t.active`, [sourceId]);
+    expect(await resolved()).toEqual([{ claim: 'Gadgets ship in Q4', resolved_quality: null }]);
+    // The row returns to the judged claim: its cached verdict must not block a retry.
+    const current = await engine.readPageSnapshot('notes/regraded', { sourceId });
+    await submitPageMutation(ctxFor(engine, sourceId), { operation: 'put_page', params: { slug: 'notes/regraded', expected_revision: current!.revision,
+      request_id: randomUUID(), content: `---\ntitle: Regraded\ntype: note\n---\nDraft.\n\n${takes('Widgets ship in Q3')}\n` } });
+    const second = await runPhaseGradeTakes({ engine, sourceId, remote: false, config: {} as never, dryRun: false, logger } as never, opts);
+    expect(second.details.auto_applied).toBe(1);
+    expect(await resolved()).toEqual([{ claim: 'Widgets ship in Q3', resolved_quality: 'correct' }]);
+  });
+});
+
 test('#5280: incremental extract on a managed brain handles only the requested slugs, leaving the backlog to the bounded drain (Codex review)', async () => {
   const { runExtractCore } = await import('../src/commands/extract.ts');
   const { LINK_EXTRACTOR_VERSION_TS } = await import('../src/core/link-extraction.ts');

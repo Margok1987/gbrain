@@ -46,6 +46,7 @@ import type { OperationContext } from '../operations.ts';
 import type { BrainEngine, Take, TakeResolution } from '../engine.ts';
 import type { PhaseStatus, CyclePhase } from '../cycle.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
+import { parseTakesFence } from '../takes-fence.ts';
 import { submitPageMutation } from '../persistence/page-mutations.ts';
 
 /**
@@ -794,12 +795,17 @@ class GradeTakesPhase extends BaseCyclePhase {
                 WHERE p.id=$1 AND p.deleted_at IS NULL AND t.row_num=$2 AND t.claim=$3`, [take.page_id, take.row_num, take.claim]);
             if (!page) throw new Error('the judged take moved or changed during grading; it is graded again next run');
             const snapshot = await engine.readPageSnapshot(page.slug, { sourceId: page.source_id });
-            if (!snapshot || snapshot.page.id !== take.page_id) throw new Error('the judged page changed during grading; it is graded again next run');
+            // The resolution publishes against this exact revision, so the judged
+            // claim must be the row this revision's fence holds.
+            const fenced = snapshot ? parseTakesFence(snapshot.page.compiled_truth ?? '').takes.find(t => t.rowNum === take.row_num) : undefined;
+            if (!snapshot || snapshot.page.id !== take.page_id || fenced?.claim !== take.claim) {
+              throw new Error('the judged page changed during grading; it is graded again next run');
+            }
             await submitPageMutation({ engine, config: { engine: engine.kind } as never, remote: false, sourceId: page.source_id,
               dryRun: false, logger: { info() {}, warn() {}, error() {} } }, { operation: 'takes_resolve', params: {
               slug: page.slug, source_id: page.source_id, expected_revision: snapshot.revision, row_num: take.row_num, quality: resolution.quality,
               evidence: resolution.source, resolved_by: resolution.resolvedBy,
-              request_id: createHash('sha256').update(`grade_takes:${take.id}:${recordedSig}`).digest('hex').replace(/^(.{8})(.{4}).(.{3}).(.{3})(.{12}).*/, '$1-$2-4$3-a$4-$5') } });
+              request_id: createHash('sha256').update(`grade_takes:${take.id}:${recordedSig}:${snapshot.revision}`).digest('hex').replace(/^(.{8})(.{4}).(.{3}).(.{3})(.{12}).*/, '$1-$2-4$3-a$4-$5') } });
           } else {
             await engine.resolveTake(take.page_id, take.row_num, resolution);
           }
@@ -835,6 +841,11 @@ class GradeTakesPhase extends BaseCyclePhase {
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           result.warnings.push(`auto-apply failed on take ${take.id}: ${msg}`);
+          // Managed: drop the cached verdict so the next run grades the take
+          // again instead of skipping it as already applied.
+          if (managed) await engine.executeRaw(`DELETE FROM take_grade_cache
+            WHERE take_id=$1 AND prompt_version=$2 AND judge_model_id=$3 AND evidence_signature=$4`,
+          [take.id, promptVersion, recordedJudgeModelId, recordedSig]);
         }
       }
 
