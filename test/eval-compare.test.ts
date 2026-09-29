@@ -1,6 +1,8 @@
 /**
  * v0.32.3 — eval-compare report tests.
- * Pins the markdown + JSON shape and the metric-glossary integration.
+ * Pins the markdown + JSON shape, the metric-glossary integration, and the
+ * paired statistics computed from per-query rows (aggregate-only runs must
+ * say so and compute nothing).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
@@ -90,7 +92,11 @@ describe('runEvalCompare', () => {
     expect(report.grouped.longmemeval.tokenmax.metrics['ndcg@10']).toBe(0.762);
     expect(report._meta.metric_glossary['recall@10']).toBeDefined();
     expect(report._meta.metric_glossary['ndcg@10']).toBeDefined();
-    expect(report._meta.methodology).toContain('bootstrap');
+    // No per-query rows: nothing statistical is computed, and it says so.
+    expect(report.paired).toEqual([]);
+    expect(report._meta.methodology).toStartWith('Aggregate-only');
+    expect(report._meta.methodology).not.toContain('Bonferroni');
+    expect(report.paired_unavailable.map((u: { run_id: string }) => u.run_id).sort()).toEqual(SAMPLE_RECORDS.map(r => r.run_id).sort());
   });
 
   test('--md output names every mode + metric', async () => {
@@ -132,4 +138,86 @@ describe('runEvalCompare', () => {
     const report = JSON.parse(out);
     expect(report.grouped.longmemeval.conservative.metrics['recall@10']).toBe(0.9);
   });
+
+  test('--md output labels an aggregate-only report', async () => {
+    const path = writeJsonl(SAMPLE_RECORDS);
+    const out = await captureRun(() => runEvalCompare(['--md', '--input', path]));
+    expect(out).toContain('## Paired comparisons');
+    expect(out).toContain('Aggregate-only: no per-query rows');
+    expect(out).not.toContain('| Suite | Baseline');
+  });
 });
+
+// Per-query fixtures: 40 questions. The candidate fixes 12 baseline misses
+// and breaks 2 baseline hits on recall_all; recall_any is identical.
+function perQueryFile(name: string, hits: (i: number) => boolean): string {
+  const path = join(tmp, name);
+  const rows = Array.from({ length: 40 }, (_, i) => ({
+    question_id: `q${String(i).padStart(2, '0')}`,
+    recall_all_hit: hits(i),
+    recall_any_hit: true,
+  }));
+  writeFileSync(path, [...rows.map(r => JSON.stringify(r)), JSON.stringify({ kind: 'by_type_summary' })].join('\n') + '\n', 'utf-8');
+  return path;
+}
+
+describe('runEvalCompare — paired statistics from per-query rows', () => {
+  const baseHit = (i: number) => i < 20;                         // 20/40
+  const candHit = (i: number) => (i < 20 && i !== 0 && i !== 1) || (i >= 20 && i < 32); // 18 kept + 12 fixed = 30/40
+  const records = () => [
+    { ...SAMPLE_RECORDS[0], run_id: 'base-run', mode: 'balanced', params: { output: perQueryFile('base.jsonl', baseHit) } },
+    { ...SAMPLE_RECORDS[1], run_id: 'cand-run', mode: 'balanced', ran_at: '2026-05-13T10:00:00Z', params: { output: perQueryFile('cand.jsonl', candHit) } },
+  ];
+
+  test('--baseline/--candidate computes a paired bootstrap over the joined questions', async () => {
+    const path = writeJsonl(records());
+    const out = await captureRun(() => runEvalCompare(['--json', '--input', path, '--baseline', 'base-run', '--candidate', 'cand-run']));
+    const report = JSON.parse(out);
+    const all = report.paired.find((c: { metric: string }) => c.metric === 'recall_all@k');
+    expect(all).toMatchObject({ n: 40, clusters: 40, wins: 12, losses: 2, ties: 26, baseline_mean: 0.5, candidate_mean: 0.75 });
+    expect(all.delta).toBeCloseTo(0.25, 10);
+    expect(all.ci95[0]).toBeGreaterThan(0);
+    expect(all.ci95[1]).toBeLessThan(0.5);
+    // Sign-flip over questions is the sign test on the 14 discordant pairs:
+    // exact two-sided p = 2 * (1 + 14 + 91) / 2^14 = 0.01294 (Monte Carlo here).
+    expect(all.p_value).toBeGreaterThan(0.008);
+    expect(all.p_value).toBeLessThan(0.02);
+    const any = report.paired.find((c: { metric: string }) => c.metric === 'recall_any@k');
+    expect(any).toMatchObject({ delta: 0, p_value: 1, ci95: [0, 0], significant: false });
+    // Holm across the two-comparison family.
+    expect(all.holm_p_value).toBeCloseTo(Math.min(1, all.p_value * 2), 10);
+    expect(all.significant).toBe(true);
+    expect(report._meta.methodology).toContain('Paired cluster bootstrap');
+    expect(report._meta.methodology).toContain('Holm correction across the 2 comparison(s)');
+  });
+
+  test('deterministic: the same seed reproduces the same numbers; the seed is honored', async () => {
+    const path = writeJsonl(records());
+    const args = ['--json', '--input', path, '--baseline', 'base-run', '--candidate', 'cand-run'];
+    const a = JSON.parse(await captureRun(() => runEvalCompare(args))).paired;
+    const b = JSON.parse(await captureRun(() => runEvalCompare(args))).paired;
+    const c = JSON.parse(await captureRun(() => runEvalCompare([...args, '--seed', '7']))).paired;
+    expect(a).toEqual(b);
+    expect(c[0].ci95).not.toEqual(a[0].ci95);
+  });
+
+  test('mode pairs compare automatically; --md renders the table with a verdict', async () => {
+    const path = writeJsonl([
+      { ...records()[0], mode: 'conservative' },
+      { ...records()[1], mode: 'tokenmax' },
+    ]);
+    const out = await captureRun(() => runEvalCompare(['--md', '--input', path]));
+    expect(out).toContain('| longmemeval | `base-run` (conservative) → `cand-run` (tokenmax) | recall_all@k | 40 (40) |');
+    expect(out).toContain('| significant |');
+    expect(out).toContain('| not significant |');
+  });
+
+  test('a run whose per-query file is missing is listed, not silently skipped', async () => {
+    const path = writeJsonl([records()[0], { ...records()[1], params: { output: join(tmp, 'gone.jsonl') } }]);
+    const report = JSON.parse(await captureRun(() => runEvalCompare(['--json', '--input', path, '--baseline', 'base-run', '--candidate', 'cand-run'])));
+    expect(report.paired).toEqual([]);
+    expect(report.paired_unavailable).toEqual([{ run_id: 'cand-run', reason: expect.stringContaining('not found') }]);
+    expect(report._meta.methodology).toStartWith('Aggregate-only');
+  });
+});
+
