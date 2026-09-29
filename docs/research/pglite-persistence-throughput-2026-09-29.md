@@ -126,6 +126,30 @@ Both engines pass the workload's loaded-versus-idle gate. The Postgres
 differences are within run-to-run noise; the Postgres engine's reads are not
 changed by this work.
 
+## One sequential writer under read load (local 4-core machine, 2 runs)
+
+`test/persistence-performance.test.ts` runs 200 searches beside one writer that
+submits its next write only after the previous one commits. After the throughput
+changes, the reads finished in under a second while that writer committed only
+1–5 writes, each taking about 270 ms. The consumer's post-publication tick now
+claimed immediately, before the caller had admitted its next write, so every
+sequential write waited for the 250 ms poll. On master the extra work between
+publication and the next claim hid this gap.
+
+`waitForWrite` now wakes the local owner for a claim-only tick, with scans still
+bounded by the poll interval. `runReadLatencyWorkload` with 1,000 searches and
+one sequential writer, on PGLite, same machine:
+
+| | master | candidate |
+|---|---|---|
+| Read window for 1,000 searches | 97.5–106.6 s | 6.8–8.4 s |
+| Search p50, idle / loaded | 7.0 / 9.5–9.9 ms | 1.3–1.4 / 2.4–2.6 ms |
+| Sequential writes committed per second | 9.3–10.0 | 17.0–17.3 |
+| Commit p50 / p95 | 96–104 / 132–142 ms | 56–57 / 70 ms |
+
+Before the wake, the candidate measured 4.5 writes/s with a 268 ms commit p50 in
+the same workload (4,000 searches).
+
 ## Tried and rejected
 
 - `plan_cache_mode = force_custom_plan`: this keeps parse savings but replans
