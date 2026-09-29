@@ -58,6 +58,8 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'abandoned_threads',
   'atom_provenance_drift',
   'derived_visibility',
+  'safe_index_pending',
+  'self_capture',
   'brain_score',
   'calibration_freshness',
   'child_table_orphans',
@@ -195,6 +197,7 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'oauth_confidential_client_health',
   'orphan_clones',
   'persistence_capacity',
+  'stale_embedding_effects',
   'pgbouncer_prepare',
   'pglite_data_dir',
   // db-availability loop: engine-fit + repair-recurrence signals.

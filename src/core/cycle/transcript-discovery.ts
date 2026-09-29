@@ -228,7 +228,7 @@ function matchingExcludeLabels(text: string, patterns: CompiledExclude[]): strin
   return hits;
 }
 
-function listTextFiles(dir: string): string[] {
+export function listTextFiles(dir: string): string[] {
   // Recursive walk with descent-time pruning (closes codex C12/C13 spec gap).
   // Accepts BOTH .txt and .md per transcript-discovery's domain rules — does
   // NOT use isSyncable({strategy:'markdown'}) because that predicate rejects
