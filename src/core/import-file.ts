@@ -26,7 +26,8 @@ import { embedMultimodal, currentEmbeddingSignature } from './embedding.ts';
 // transient network backoff) instead of bare embedBatch, so one socket blip
 // mid-sync no longer aborts the whole file import. Same core→commands edge
 // precedent as embed-stale.ts.
-import { embedBatchWithBackoff } from './embed-retry.ts';
+import { embedBatchKeepingUsable, embedBatchWithBackoff } from './embed-retry.ts';
+import { isEmbeddingZeroNormError, type EmbeddingZeroNormError } from './ai/embedding-guard.ts';
 import { slugifyPath, slugifyCodePath, isCodeFilePath, hasMalformedPathSegment } from './sync.ts';
 import type { ChunkInput, Page, PageInput, PageType } from './types.ts';
 import { computeEffectiveDate, fallbackCreatedAt, isValidTimeZone } from './effective-date.ts';
@@ -883,6 +884,7 @@ export async function importFromContent(
     }
   }
 
+  let embeddingPartial: EmbeddingZeroNormError | undefined;
   const embedChunks = async () => {
     const pending = chunks.map((_, i) => i).filter(i => !reused.has(i));
     if (opts.noEmbed || pending.length === 0) return;
@@ -891,9 +893,12 @@ export async function importFromContent(
         ? buildContextualPrefix(parsed.title, null)
         : null;
     const wrappedTexts = pending.map(i => prefix ? wrapChunkForEmbedding(chunks[i].chunk_text, prefix, chunks[i].chunk_source) : chunks[i].chunk_text);
-    const embeddings = await embedBatchWithBackoff(wrappedTexts);
+    // #4616: store the usable vectors; refused chunks stay NULL for embed --stale.
+    const { vectors: embeddings, refused } = await embedBatchKeepingUsable(wrappedTexts);
+    embeddingPartial = refused;
     pending.forEach((i, j) => {
-      chunks[i].embedding = embeddings[j];
+      if (!embeddings[j]) return;
+      chunks[i].embedding = embeddings[j]!;
       // token_count tracks the wrapped string length so cost reporting
       // reflects what we actually sent to the embedder.
       chunks[i].token_count = Math.ceil(wrappedTexts[j].length / 4);
@@ -907,6 +912,10 @@ export async function importFromContent(
   if (!opts.onPostCommitEmbedding) {
     try {
       await embedChunks();
+      if (embeddingPartial) {
+        embeddingDeferred = true;
+        process.stderr.write(`[import] ${slug}: ${embeddingPartial.message} ${embeddingPartial.suggestionFor(slug, sourceId)}\n`);
+      }
     } catch (err) {
       embeddingDeferred = true;
       chunks.forEach((c, i) => { if (!reused.has(i)) { c.embedding = undefined; c.token_count = undefined; } });
@@ -1108,7 +1117,7 @@ export async function importFromContent(
         if (!persistedProjection) return { status: 'superseded' };
         const signature = currentEmbeddingSignature();
         await embedChunks();
-        const installed = await installPageEmbeddings(engine, persistedProjection, chunks, signature ?? undefined);
+        const installed = await installPageEmbeddings(engine, persistedProjection, chunks, embeddingPartial ? undefined : signature ?? undefined);
         return { status: installed ? 'embedded' : 'superseded' };
       } catch {
         return { status: 'failed', error: 'Page content was saved, but embedding failed. Check the embedding provider and database on the brain host, then run gbrain embed --stale --source <source-id>.' };
@@ -1534,6 +1543,8 @@ export async function importCodeFile(
       }
     } catch (e: unknown) {
       codeEmbeddingFailed = true;
+      // #4616: keep the usable vectors of a partially refused batch.
+      if (isEmbeddingZeroNormError(e)) needsEmbedIndexes.forEach((i, j) => { if (e.vectors[j]) chunks[i]!.embedding = e.vectors[j]!; });
       console.warn(`[gbrain] embedding failed for code file ${slug}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }

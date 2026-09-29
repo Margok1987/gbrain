@@ -57,6 +57,7 @@ import type { BrainEngine } from '../engine.ts';
 import { dimsProviderOptions } from './dims.ts';
 import { hasAnthropicKey, stashGatewayAnthropicKeyFromEnv } from './anthropic-key.ts';
 import { AIConfigError, AITransientError, isStructuredOutputRejection, normalizeAIError } from './errors.ts';
+import { isEmbeddingZeroNormError, screenAlignedEmbeddings, screenEmbeddings, sendableEmbeddingInputs } from './embedding-guard.ts';
 import { getProviderCapabilities } from './capabilities.ts';
 import { runGuardrails, hasGuardrails, type GuardrailHook } from '../guardrails.ts';
 import { loadConfig } from '../config.ts';
@@ -1610,9 +1611,12 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
 
   // Pre-split is gated on max_batch_tokens. Recipes without it (e.g. OpenAI)
   // ride the fast path: one embedMany call, no recursion safety net.
-  const tokenBatches = maxBatchTokens
-    ? splitByTokenBudget(truncated, Math.floor(maxBatchTokens * effectiveSafetyFactor(recipe)), charsPerToken)
-    : [truncated];
+  // #4616: empty inputs never reach the provider; screenEmbeddings refuses them per item.
+  const sent = sendableEmbeddingInputs(truncated);
+  const sendable = sent.map(i => truncated[i]!);
+  const tokenBatches = !sendable.length ? [] : maxBatchTokens
+    ? splitByTokenBudget(sendable, Math.floor(maxBatchTokens * effectiveSafetyFactor(recipe)), charsPerToken)
+    : [sendable];
 
   // Hard COUNT cap (e.g. llama-server's "maximum allowed batch size 32").
   // Token budget can't bound item count, so re-split any oversized batch.
@@ -1639,7 +1643,7 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
       const result = await embedSubBatch(batch, model, providerOpts, expected, recipe, modelId, opts);
       allEmbeddings.push(...result);
     }
-    return allEmbeddings;
+    return screenEmbeddings(truncated, sent, allEmbeddings, `${recipe.id}:${modelId}`);
   } catch (err) {
     _embedThrew = true;
     throw err;
@@ -2057,7 +2061,7 @@ export async function embedMultimodal(
     }
   }
 
-  return allEmbeddings;
+  return screenAlignedEmbeddings(allEmbeddings, `${recipe.id}:${parsed.modelId}`);
 }
 
 // Documentation pointer: callers must size-check before calling. Voyage caps
@@ -2218,7 +2222,7 @@ async function embedMultimodalOpenAICompat(
     allEmbeddings.push(new Float32Array(row.embedding));
   }
 
-  return allEmbeddings;
+  return screenAlignedEmbeddings(allEmbeddings, `${recipe.id}:${modelId}`);
 }
 
 // ---- v0.36 cross-modal wave: query-side multimodal embedding + safe variant ----
@@ -2313,6 +2317,10 @@ export async function embedMultimodalSafe(
     } catch (err) {
       if (isAIInvocationPolicyError(err)) throw err;
       lastError = err instanceof Error ? err : new Error(String(err));
+      if (isEmbeddingZeroNormError(err)) {
+        err.vectors.forEach((v, i) => { if (v) embeddings[startIdx + i] = v; else failedIndices.push(startIdx + i); });
+        return;
+      }
       // AIConfigError = permanent misconfig. Retrying smaller won't help.
       if (lastError instanceof AIConfigError) {
         for (let i = 0; i < items.length; i++) failedIndices.push(startIdx + i);

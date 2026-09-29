@@ -36,10 +36,12 @@ import {
 import { tryAcquireDbLock, type DbLockHandle } from '../core/db-lock.ts';
 import { embedBackfillLockId } from '../core/embed-backfill-lock.ts';
 import { AITransientError } from '../core/ai/errors.ts';
+import { isEmbeddingZeroNormError } from '../core/ai/embedding-guard.ts';
 import { wrapChunkTextsForStoredMode } from '../core/embedding-context.ts';
 import {
   restampIfDemotedToTitleTier,
   embedBatchWithBackoff,
+  embedBatchKeepingUsable,
   isEmbedRetriableError,
   isTransientNetworkEmbedError,
   type EmbedBatchWithBackoffOpts,
@@ -84,7 +86,8 @@ const EMBED_UNAVAILABLE_MESSAGE = 'Page or source is unavailable or changed; no 
 function recordFailure(result: EmbedResult, chunkCount: number, slug: string, e: unknown): void {
   result.failures += chunkCount;
   if (result.failure_samples.length < FAILURE_SAMPLE_CAP) {
-    result.failure_samples.push(`${slug}: ${e instanceof Error ? e.message : String(e)}`);
+    const fix = isEmbeddingZeroNormError(e) ? ` ${e.suggestionFor(slug)}` : '';
+    result.failure_samples.push(`${slug}: ${e instanceof Error ? e.message : String(e)}${fix}`);
   }
 }
 
@@ -2145,9 +2148,12 @@ async function embedPageTexts(
   opts: EmbedBatchWithBackoffOpts = {},
 ): Promise<{ embeddings: (Float32Array | null)[]; failed: number; firstError?: unknown }> {
   try {
-    return { embeddings: await embedBatchWithBackoff(texts, opts), failed: 0 };
+    // #4616: the gateway already isolated degenerate items; keep the rest.
+    const { vectors, refused } = await embedBatchKeepingUsable(texts, opts);
+    return { embeddings: vectors, failed: refused?.failures.length ?? 0, firstError: refused };
   } catch (e: unknown) {
     if (opts.abortSignal?.aborted) throw e; // shutdown, not a chunk problem
+    if (isEmbeddingZeroNormError(e)) throw e; // nothing usable: fanning out would re-send the same inputs
     if (texts.length <= 1) throw e; // nothing to isolate
     // #3374 — network-transient exhaustion isn't chunk-specific either:
     // fanning out during an outage multiplies failing calls per page.

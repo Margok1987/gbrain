@@ -3290,6 +3290,10 @@ async function handleCliOnly(command: string, args: string[]) {
           }
           break;
         }
+        if (args.includes('--vectors')) {
+          await (await import('./commands/reindex-vectors.ts')).runReindexVectors(engine, args); // #4616
+          break;
+        }
         if (args.includes('--aliases')) {
           // T8 — backfill the free-text alias layer (page_aliases) for existing
           // pages whose frontmatter `aliases:` predate the import-time projection.
