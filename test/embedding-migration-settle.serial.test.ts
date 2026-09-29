@@ -89,7 +89,7 @@ for (const kind of testBackends()) {
       try {
         await withEnv({ GBRAIN_HOME: home, GBRAIN_EMBEDDING_MODEL: undefined, GBRAIN_EMBEDDING_DIMENSIONS: undefined }, async () => {
           try {
-            await runMigrateEmbeddings(engine, ['--to', model, '--dim', String(dimensions), '--reranker', 'off', '--yes', ...args],
+            await runMigrateEmbeddings(engine, ['--to', model, '--dim', String(dimensions), ...(args.includes('--reranker') ? [] : ['--reranker', 'off']), '--yes', ...args],
               { exit: (value: number): never => { throw new ExitSignal(value); } });
           } catch (error) {
             if (!(error instanceof ExitSignal)) throw error;
@@ -226,6 +226,42 @@ for (const kind of testBackends()) {
       const receipt = JSON.parse((await engine.getConfig('embedding_migration.completed'))!);
       expect(receipt.budget.debited_usd).toBeCloseTo(usd(reportedTokens, rate), 9);
       expect(receipt.verify_search.status).toBe('pass');
+    });
+
+    test('chunks created by projection recovery count toward the printed worst case', async () => {
+      const rate = 1_000;
+      await engine.setConfig('pricing.overrides', JSON.stringify({ [model]: rate }));
+      await seedPages(2);
+      const body = Array.from({ length: 60 }, (_, i) => `Synthetic unsealed paragraph ${i}. ${'Epsilon zeta eta theta. '.repeat(12)}`).join('\n\n');
+      await engine.putPage('settle-unsealed', { type: 'note', title: 'Synthetic unsealed', compiled_truth: body });
+      const [unsealed] = await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM pages p
+        WHERE p.slug='settle-unsealed' AND p.text_projection_revision IS DISTINCT FROM p.knowledge_revision
+          AND NOT EXISTS (SELECT 1 FROM content_chunks c WHERE c.page_id=p.id)`);
+      expect(unsealed.n).toBe(1);
+      const preview = await cli(['--dry-run']);
+      const printed = /Worst-case authorization: \$(\d+(?:\.\d+)?)/.exec(preview.text);
+      expect(printed).not.toBeNull();
+      expect(Number(printed![1])).toBeGreaterThan(usd(Buffer.byteLength(body, 'utf8'), rate));
+      stubTransport(value => Buffer.byteLength(value, 'utf8'));
+      const run = await cli(['--max-cost-usd', printed![1], '--json']);
+      expect(run.text).toContain('"status": "completed"');
+      expect(run.code).toBe(0);
+      const rows = await vectors();
+      expect(rows.filter(row => row.slug === 'settle-unsealed').length).toBeGreaterThan(1);
+      expect(rows.every(row => row.embedding !== null)).toBe(true);
+    });
+
+    test('an unpriced reranker switch still enforces the known embedding worst case', async () => {
+      await seedPages(5);
+      const before = await vectors();
+      const preview = await cli(['--dry-run', '--reranker', 'nan:rerank']);
+      expect(preview.text).toMatch(/Worst-case authorization: \$\d/);
+      expect(preview.text).toContain('nan:rerank has no price');
+      const run = await cli(['--max-cost-usd', '0.001', '--reranker', 'nan:rerank']);
+      expect(run.code).toBe(1);
+      expect(run.text).toContain('embedding_budget_below_worst_case');
+      expect(transportCalls).toBe(0);
+      expect(await vectors()).toEqual(before);
     });
 
     test('a cap near the estimate completes instead of dropping every vector and stalling', async () => {
