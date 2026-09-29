@@ -94,6 +94,29 @@ function markedTimeline(body: CanonicalBody, slug: string): Set<string> {
   return marked;
 }
 
+/**
+ * Character ranges of materialized timeline history in a raw body: each marker
+ * line whose hash matches the bullet after it, that bullet, and its indented
+ * detail lines. This is database history written back into the page, not
+ * newly authored text.
+ */
+export function materializedHistoryRanges(body: string): Array<[number, number]> {
+  const lines = body.split('\n');
+  const starts: number[] = [];
+  let offset = 0;
+  for (const line of lines) { starts.push(offset); offset += line.length + 1; }
+  const ranges: Array<[number, number]> = [];
+  lines.forEach((line, i) => {
+    const hash = materializedMarkerHash(line);
+    if (!hash || i + 1 >= lines.length) return;
+    if (![...extractTimeline(lines[i + 1], '').keys()].some(key => timelineKeyHash(key) === hash)) return;
+    let last = i + 1;
+    while (last + 1 < lines.length && /^[ \t]+\S/.test(lines[last + 1]) && !/^[ \t]*[-*+] /.test(lines[last + 1])) last++;
+    ranges.push([starts[i], starts[last] + lines[last].length]);
+  });
+  return ranges;
+}
+
 interface StoredTimelineRow { id: number; date: string; source: string; summary: string; detail: string }
 
 function storedTimeline(engine: BrainEngine, pageId: number): Promise<StoredTimelineRow[]> {

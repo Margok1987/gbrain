@@ -204,6 +204,27 @@ describe('#5525 a concept whose provenance edges cannot land stays private', () 
   }, 120_000);
 });
 
+describe('#5525 a concept made private while its narrative is generated stays private', () => {
+  test('the tighten-only check reads the concept after the model call', async () => {
+    for (const engine of engines) {
+      await reset(engine);
+      await seed(engine, 'notes/origin', 'note', {});
+      const synthesized = { synthesized_by: 'synthesize_concepts-v0.41' };
+      await seed(engine, 'concepts/race', 'concept', { ...synthesized, visibility: 'world' }, 'An earlier narrative.');
+      for (let i = 1; i <= 5; i++) await seed(engine, `atoms/race-${i}`, 'atom', { visibility: 'world', source_slug: 'notes/origin', concepts: ['concepts/race'] }, `Race atom ${i}.`);
+      let calls = 0;
+      const flippingChat = async (o: ChatOpts): Promise<ChatResult> => {
+        calls++;
+        await seed(engine, 'concepts/race', 'concept', { ...synthesized, visibility: 'private' }, 'An earlier narrative.');
+        return { ...(await stubChat(o)), text: 'The race atoms describe one recurring insight about planning under uncertainty.' };
+      };
+      await runPhaseSynthesizeConcepts(engine, { _chat: flippingChat as never, sourceId: 'default' });
+      expect(calls).toBeGreaterThan(0);
+      expect(await visibilityOf(engine, 'concepts/race')).toBe('private');
+    }
+  }, 120_000);
+});
+
 describe('#5525 a later private flip of an origin page reaches derived atoms and concepts', () => {
   test('flipping the origin hides its world atom and the concept built from it; the backfill then stamps them', async () => {
     for (const engine of engines) {

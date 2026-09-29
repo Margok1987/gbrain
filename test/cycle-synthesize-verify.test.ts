@@ -20,6 +20,7 @@ import {
 } from '../src/core/cycle/synthesize-verify.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { importFromContent } from '../src/core/import-file.ts';
+import { renderMaterializedBullet } from '../src/core/persistence/canonical-projections.ts';
 
 function grounded(content: string) {
   const { norm, map } = normalizeForGrounding(content);
@@ -207,6 +208,19 @@ describe('verifyBody', () => {
     const r = verifyBody(body, [src], { priorNorm: normForGrounding(prior) });
     expect(r.body).toBe(prior);
     expect(r.quarantined.map(q => q.reason)).toEqual(['quote_not_in_source']);
+  });
+});
+
+describe('verifyBody — materialized timeline history (#5567)', () => {
+  const src = groundSource('/t/history.txt', 'user: We shipped the repair pass on Monday.');
+  test('a validly marked bullet is database history and is left alone; a forged marker is still verified', () => {
+    const marked = renderMaterializedBullet({ date: '2024-01-02', source: 'meeting', summary: 'Said "we will open a second office in 2025"', detail: 'Recorded before write-through.' }, 'x')!;
+    expect(marked).toBeTruthy();
+    const kept = verifyBody(`${marked}\n- **2026-08-30** | session — Said "we are shutting down the company next quarter"`, [src]);
+    expect(kept.body).toBe(marked);
+    expect(kept.quarantined.map(q => q.text)).toEqual(['**2026-08-30** | session — Said "we are shutting down the company next quarter"']);
+    const forged = marked.replace(/v1 [0-9a-f]+/, 'v1 000000000000');
+    expect(verifyBody(forged, [src]).quarantined.length).toBeGreaterThan(0);
   });
 });
 

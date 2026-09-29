@@ -61,7 +61,7 @@ import { importFromContent } from '../import-file.ts';
 import { serializePageToMarkdown } from '../markdown.ts';
 import { throwIfAborted } from '../abort-check.ts';
 import type { Page } from '../types.ts';
-import { prepareCanonicalProjections } from '../persistence/canonical-projections.ts';
+import { materializedHistoryRanges, prepareCanonicalProjections } from '../persistence/canonical-projections.ts';
 import { prepareAutomaticLinks } from '../persistence/links-preparation.ts';
 import { isAutoLinkEnabled } from '../link-extraction.ts';
 
@@ -795,8 +795,12 @@ export function verifyBody(body: string, sources: GroundedSource[], opts: { prio
   const provenance: QuoteProvenance[] = [];
   let quotes = 0, exact = 0, normalized = 0, near = 0;
 
+  // Materialized timeline history (#5567) is database history a write rendered
+  // back into the page, not a claim this run authored.
+  const history = materializedHistoryRanges(body);
   for (const u of claimUnits(body, spans)) {
     const text = body.slice(u.start, u.end);
+    if (history.some(([start, end]) => u.start >= start && u.start < end)) continue;
     if (opts.priorNorm !== undefined && opts.priorNorm.includes(normForGrounding(text))) continue;
     const unitSpans = spans.filter(sp => sp.start >= u.start && sp.end < u.end);
     const quoteRanges = unitSpans.map(sp => [sp.start - u.start, sp.end - u.start + 1] as [number, number]);

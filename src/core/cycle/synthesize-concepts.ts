@@ -374,7 +374,8 @@ export async function runPhaseSynthesizeConcepts(
     if (!opts.dryRun) {
       const title = conceptSlug.slice('concepts/'.length);
       // #5525: tighten-only — a concept already private stays private.
-      const visibility = strictestVisibility([group.visibility, existing?.frontmatter?.visibility === 'private' ? 'private' : 'world']);
+      const prior = await engine.getPage(conceptSlug, { sourceId: opts.sourceId ?? 'default' });
+      const visibility = strictestVisibility([group.visibility, prior?.frontmatter?.visibility === 'private' ? 'private' : 'world']);
       // #2163: serialize to markdown and import via the canonical pipeline so
       // the page is chunked (+ embedded when a provider is configured) —
       // mirrors put_page's isAvailable('embedding') → noEmbed gate.

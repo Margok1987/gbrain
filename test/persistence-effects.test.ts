@@ -171,7 +171,7 @@ test('a withdrawal Git scan parks a failing target after five failures and still
   writeFileSync(join(f.root, 'page.md'), serializePageToMarkdown(later.page, later.tags));
   writeFileSync(join(f.root, '.gitignore'), 'aa/\n');
   durableGitRepo(f.root, ['.gitignore', 'page.md']);
-  const row = await withdraw(f); await onlyEffects(row.id);
+  const row = await withdraw(f, { subjectless: true }); await onlyEffects(row.id);
   await engine.executeRaw("UPDATE persistence_effects SET next_attempt_at=now()+interval '1 hour' WHERE request_id=$1::uuid AND kind<>'withdrawal-mirror'", [row.id]);
   await runPersistenceEffects(engine, config, { hostId, limit: 3 });
   const effect = async () => (await engine.executeRaw<{ state: string; error_code: string | null; data: Record<string, unknown> }>(
@@ -191,7 +191,7 @@ test('a parked withdrawal mirror target retries through physical publication wit
   await engine.putPage('z-later', page(body()), { sourceId: f.sourceId });
   const later = (await engine.readPageSnapshot('z-later', { sourceId: f.sourceId }))!;
   const laterFile = join(f.root, 'z-later.md'); writeFileSync(laterFile, serializePageToMarkdown(later.page, later.tags));
-  const row = await withdraw(f); await onlyEffects(row.id);
+  const row = await withdraw(f, { subjectless: true }); await onlyEffects(row.id);
   const mirror = async () => (await engine.executeRaw<{ id: number; state: string; error_code: string | null; data: Record<string, unknown> }>(
     "SELECT id,state,error_code,data FROM persistence_effects WHERE request_id=$1::uuid AND kind='withdrawal-mirror'", [row.id]))[0];
   const attempt = async () => {
