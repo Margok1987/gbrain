@@ -178,6 +178,8 @@ warns about a partial migration:
 - More new suites: `test/relational-intent-paraphrase.test.ts`, `test/search/general-title-mention-boost.test.ts`, `test/search/alias-token-hop.test.ts`, `test/search/source-boost-config.test.ts`, `test/traverse-walk-cap.test.ts`, `test/facts-backstop-unverified-resolution.test.ts`, `test/longmemeval-embed-cache.test.ts` and `test/eval-longmemeval-brain-recycle.test.ts`.
 - `docs/architecture/canonical-writers.tsv` classifies the new canonical write sites (`moveSlugBindings`, the v174 backfill, the managed rename).
 
+**Credits (added later):** three fixes in this release independently repeat earlier community PRs: sub-day TTL (#5320, thanks @VXNCXNX), concept change detection (#5156, thanks @Natetgmaxwell) and managed `extract --stale` through the coordinator (#5513, thanks @openclaw-agent-man).
+
 ## [0.60.5.0] - 2026-09-29
 
 **Your brain stops deleting history it can't see, managed brains stop wedging themselves, and background loops stop spending money and connections on nothing.**
