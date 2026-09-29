@@ -64,7 +64,7 @@ export async function orphanConnectorCheckpoints(engine: Pick<BrainEngine, 'exec
              AND NOT EXISTS (SELECT 1 FROM referenced x WHERE x.key=c.fingerprint))
          OR (c.op='managed-connector-retry' AND NOT (COALESCE(c.completed_keys->0->>'checkpointKey','') = ANY($1::text[]))
              AND NOT EXISTS (SELECT 1 FROM referenced x WHERE x.request_id = c.completed_keys->0->>'requestId' OR x.key = c.completed_keys->0->>'checkpointKey')))
-       AND ($2::timestamptz IS NULL OR c.updated_at <= $2::timestamptz)
+       AND ($2::text IS NULL OR c.updated_at <= $2::text::timestamptz)
        AND ($3::integer IS NULL OR c.updated_at < now() - make_interval(days => $3::integer))
      ORDER BY c.op, c.fingerprint
      LIMIT $5`, [loadable, opts.before ?? null, opts.minAgeDays ?? null, CONNECTOR_STATE_OP, opts.limit ?? 100_000]);
@@ -76,7 +76,7 @@ export async function deleteOrphanConnectorCheckpoints(engine: Pick<BrainEngine,
   const removed = { checkpoints: 0, retries: 0 };
   for (const row of rows) {
     if (!still.has(`${row.op}\u0000${row.fingerprint}`)) continue;
-    const deleted = await engine.executeRaw<{ op: string }>('DELETE FROM op_checkpoints WHERE op=$1 AND fingerprint=$2 AND updated_at=$3::timestamptz RETURNING op',
+    const deleted = await engine.executeRaw<{ op: string }>('DELETE FROM op_checkpoints WHERE op=$1 AND fingerprint=$2 AND updated_at=$3::text::timestamptz RETURNING op',
       [row.op, row.fingerprint, row.updated_at]);
     if (!deleted.length) continue;
     if (row.op === 'managed-connector') removed.checkpoints++; else removed.retries++;
