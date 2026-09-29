@@ -76,8 +76,8 @@ export async function writeSingleFact(
   sourceId: string,
   input: SingleFactInput,
 ): Promise<SingleFactResult> {
-  const { assertCoordinatedWrite } = await import('../persistence/context.ts');
-  await assertCoordinatedWrite(engine, sourceId);
+  const { managedPersistenceEnabled } = await import('../persistence/ownership.ts');
+  const managed = await managedPersistenceEnabled(engine);
 
   const { resolveEntitySlugWithSource } = await import('../entities/resolve.ts');
   const { cosineSimilarity } = await import('./classify.ts');
@@ -123,6 +123,17 @@ export async function writeSingleFact(
     }
   } else {
     degradedDedup = true;
+  }
+
+  if (managed) {
+    // The coordinator's fact intent owns dedup, the fence row and the file on
+    // a managed brain; the legacy supersession and DB-only writes stay unmanaged.
+    const { publishManagedEntityFacts } = await import('./managed-fact-write.ts');
+    const written = await publishManagedEntityFacts(engine, sourceId, resolvedSlug, [{ fact: factText, kind, notability: 'medium',
+      source: input.provenance, visibility, confidence: input.confidence ?? 1.0, validFrom: new Date(), validUntil,
+      embedding, embedding_model: embeddingModel, sessionId: input.sessionId ?? null }]);
+    return { id: written.ids[0], status: written.inserted ? 'inserted' : 'duplicate', entity_slug: resolvedSlug,
+      valid_until: validUntil, degraded_dedup: degradedDedup };
   }
 
   // Dedup + supersession decision (same candidates + threshold as the pipeline).
