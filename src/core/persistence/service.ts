@@ -97,7 +97,7 @@ export function assertPersistenceAccepting(engine: BrainEngine): void {
 /** The waiter never owns a provider, database connection, or kernel lock. */
 export async function waitForWrite(engine: BrainEngine, row: WriteRequest, config: GBrainConfig, waitMs = 5000): Promise<WriteRequest> {
   if (isTerminal(row)) return row;
-  startPersistenceConsumer(engine, config);
+  startPersistenceConsumer(engine, config).wake();
   const service = services.get(engine)!;
   let reads = receiptReads.get(engine);
   if (!reads) { reads = new Map(); receiptReads.set(engine, reads); }

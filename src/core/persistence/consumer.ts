@@ -44,6 +44,8 @@ export class PersistenceConsumer {
     this.hostId = opts.hostId ?? localHostId();
   }
   start(): void { this.stopping = false; this.abort = new AbortController(); this.schedule(0); }
+  /** A newly admitted local write is claimable now; scans stay bounded by the poll interval. */
+  wake(): void { this.progressWake = true; this.schedule(0); }
   private schedule(ms: number): void {
     if (this.stopping) return;
     if (ms === 0 && this.tickPromise) { this.wakeRequested = true; return; }
