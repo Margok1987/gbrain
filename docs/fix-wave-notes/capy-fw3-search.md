@@ -77,9 +77,9 @@ branch.
 ## Measurements
 
 All paid runs used `openai:text-embedding-3-large@1536` through one shared
-embed cache, so arms compare the same vectors. Total embedding spend was
-about $3.5 (the LongMemEval haystacks), plus about $0.25 for the relational
-runs and the title-benchmark corpus.
+embed cache, so arms compare the same vectors. Spend was not metered; from
+haystack size the LongMemEval embeddings cost roughly $3-4, and the two
+relational runs about $0.07 each.
 
 **LongMemEval** (`halfA430` split, 215 scored questions, `--retrieval-only
 --top-k 5 --mode balanced --reranker off --autocut off --no-trajectory`):
@@ -109,8 +109,8 @@ query-embedding cache for all arms), hit@1:
 | long question containing the title | 33 | 34 | 33 |
 | mentions one title, asks for another | 24 | 0 | 24 |
 
-Shipped rule vs master: +3/−0 per query (wins in 3 of 6 domains, split
-evenly across both domain halves). The rejected variant is the naive
+Shipped rule vs master: +3/−0 per query (one win in the first three
+domains, two in the last three). The rejected variant is the naive
 "title mentioned anywhere" boost. After the relational and concept
 exclusions the benchmark result is unchanged.
 
