@@ -74,12 +74,16 @@ describe('PGLite named statement cache', () => {
   });
 });
 
-test('a disconnected engine releases its PGLite instance with the statement cache', async () => {
-  const engine = new PGLiteEngine();
-  await engine.connect({});
-  await engine.executeRaw('SELECT 1');
-  await engine.executeRaw('SELECT 1');
-  expect((engine as unknown as { _statements: unknown })._statements).not.toBeNull();
-  await engine.disconnect();
-  expect((engine as unknown as { _statements: unknown })._statements).toBeNull();
-}, 60_000);
+describe('PGLite engine statement cache lifecycle', () => {
+  let engine: PGLiteEngine;
+  beforeAll(async () => { engine = new PGLiteEngine(); await engine.connect({}); }, 60_000);
+  afterAll(async () => { await engine?.disconnect(); });
+
+  test('a disconnected engine releases its PGLite instance with the statement cache', async () => {
+    await engine.executeRaw('SELECT 1');
+    await engine.executeRaw('SELECT 1');
+    expect((engine as unknown as { _statements: unknown })._statements).not.toBeNull();
+    await engine.disconnect();
+    expect((engine as unknown as { _statements: unknown })._statements).toBeNull();
+  });
+});
