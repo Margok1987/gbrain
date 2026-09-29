@@ -37,6 +37,7 @@ describe('post-upgrade recovery banner', () => {
   }, 180_000);
 
   test('post-upgrade prints the banner and no longer prints an applying safe-chunk advisory', () => {
+    // test-reads-source-ok[structural]: runPostUpgrade needs a configured brain plus a full migration run; this pins that it calls the banner and no longer prints the applying advisory.
     const source = readFileSync(join(import.meta.dir, '..', 'src', 'commands', 'upgrade.ts'), 'utf8');
     expect(source).toContain('postUpgradeRecoveryBanner(engine');
     expect(source).not.toContain('safeChunkUpgradeAdvisory');

@@ -198,6 +198,7 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'orphan_clones',
   'persistence_capacity',
   'stale_embedding_effects',
+  'writer_version',
   'pgbouncer_prepare',
   'pglite_data_dir',
   // db-availability loop: engine-fit + repair-recurrence signals.

@@ -120,6 +120,9 @@ export async function scriptedRecoveryRun(databaseUrl?: string): Promise<{ wall_
     expect(byId.parked_effects).toMatchObject({ class: 'operator_required' });
     expect(byId.self_capture).toMatchObject({ class: 'operator_required' });
     expect(byId.self_capture.instruction).toContain('Quarantine');
+    expect(byId.writer_version).toMatchObject({ class: 'operator_required' });
+    expect(byId.writer_version.instruction).toContain('gbrain upgrade');
+    expect(byId.writer_version.message).toContain('0.60.4.0');
     expect(byId.stale_embedding_effects).toMatchObject({ class: 'unsupported' });
     expect(byId.stale_embedding_effects.message).toContain('inspection cannot clear it');
     expect(run.body.repairs_completed).toBe(3);

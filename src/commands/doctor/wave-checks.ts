@@ -89,6 +89,13 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     run: async engine => (await import('./checks/dream-breaker.ts')).dreamPaidLoopCheck(engine),
   },
   {
+    id: 'writer_version', resolution: 'operator', registration: 'wave',
+    impact: 'A writer older than this release admitted or published a recent write',
+    instruction: 'Run `gbrain upgrade` on each host doctor names (by host UUID), then restart its gbrain processes; an older writer may still delete database-only timeline rows.',
+    count: d => Number(d.count ?? 0),
+    run: async engine => (await import('./checks/writer-version.ts')).writerVersionCheck(engine),
+  },
+  {
     id: 'self_capture', resolution: 'operator', registration: 'wave',
     count: d => Number(d.classified ?? 0),
     impact: 'The session corpus still holds files captured from gbrain\'s own model sessions',
@@ -106,7 +113,7 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
 
 /** A check that could not run reports unknown, never ok. */
 export function checkHealthUnknown(check: Check): boolean {
-  return check.details?.health === 'unknown';
+  return check.details?.health === 'unknown' || check.details?.count === 'unknown';
 }
 
 export interface WaveFinding { spec: WaveCheckSpec; check: Check; state: 'ok' | 'finding' | 'unknown' }

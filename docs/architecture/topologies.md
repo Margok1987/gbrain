@@ -539,8 +539,9 @@ every caller with `writer_admin_locked`, whose hint tells an agent to stop and
 ask the operator. Only these four administrative changes are blocked: ordinary
 writes continue, including the automatic first-write claim on a PGLite brain.
 There is no `--force`; the escape hatch is the local unlock. Remote callers can
-neither lock nor unlock, and generic `gbrain config set`/`unset` and config
-import refuse the reserved key. The lock guards against routine or accidental
+neither lock nor unlock, and generic `gbrain config set`/`unset` (including
+`--pattern`) refuse the reserved key `persistence.writer_admin_lock`. Dry runs
+of the four operations refuse too. The lock guards against routine or accidental
 agent administration; it is not a security boundary against a caller with the
 same shell. Binaries older than this release do not consult it.
 `gbrain sources writer status` shows `admin_lock` (whether it is set, when, and
@@ -556,8 +557,10 @@ gbrain sources writer lock --brain host
 ```
 
 If administration fails midway, still run `gbrain sources writer lock` before
-investigating, so no agent can retry the change meanwhile. `lock` refuses while
-a transfer is prepared but not accepted; finish or abandon the transfer first.
+investigating, so no agent can retry the change meanwhile. `lock` refuses with
+`writer_transfer_conflict` while a transfer is prepared but not accepted; finish
+or abandon the transfer first. Shared-skill setup, which claims a checkout as
+administration rather than as an ordinary first write, is refused while locked.
 `lock` and `unlock` are idempotent and print the resulting state.
 
 ### Supported managed work and explicit repair

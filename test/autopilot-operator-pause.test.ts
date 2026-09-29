@@ -81,6 +81,7 @@ describe('autopilot operator pause', () => {
 
   test('the daemon loop and job workers consult both markers', () => {
     const root = join(import.meta.dir, '..', 'src');
+    // test-reads-source-ok[structural]: no in-process autopilot tick or worker claim harness exists (TODOS: extract a testable tick); pin both markers at the gates.
     const daemon = readFileSync(join(root, 'commands', 'autopilot.ts'), 'utf8');
     const worker = readFileSync(join(root, 'core', 'minions', 'worker.ts'), 'utf8');
     expect(daemon).toContain('if (autopilotPaused()) {\n      // Self-heal an orphan');

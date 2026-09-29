@@ -20,8 +20,8 @@ import { CLAUDE_CLI_CWD_PREFIX } from '../../src/core/ai/providers/claude-cli-sc
 import { managedBrain, type ManagedBrain } from './managed-brain.ts';
 import { withEnv } from './with-env.ts';
 
-export type WaveFindingKind = 'timeline' | 'visibility' | 'safe_index' | 'capacity' | 'parked' | 'self_capture' | 'stale_embedding';
-export const ALL_WAVE_FINDINGS: WaveFindingKind[] = ['timeline', 'visibility', 'safe_index', 'capacity', 'parked', 'self_capture', 'stale_embedding'];
+export type WaveFindingKind = 'timeline' | 'visibility' | 'safe_index' | 'capacity' | 'parked' | 'self_capture' | 'stale_embedding' | 'old_writer';
+export const ALL_WAVE_FINDINGS: WaveFindingKind[] = ['timeline', 'visibility', 'safe_index', 'capacity', 'parked', 'self_capture', 'stale_embedding', 'old_writer'];
 
 export const put = (ctx: OperationContext, slug: string, body: string, type = 'note', extra = '') => submitPageMutation(ctx, { operation: 'put_page',
   params: { slug, request_id: randomUUID(), content: `---\ntype: ${type}\ntitle: ${slug}\n${extra}---\n\n${body}\n` } });
@@ -73,6 +73,11 @@ export async function seedWaveFindings(brain: ManagedBrain, home: string, kinds:
         VALUES($1::uuid,'embedding','{}'::jsonb,'queued',$2,$3::uuid,$4::uuid,now()+interval '10 years',now()-interval '3 hours')`,
       [request!.id, request!.source_id, request!.source_incarnation, request!.worktree_id]);
     }
+  }
+  if (kinds.includes('old_writer')) {
+    // A recent write published by a consumer older than v0.60.5.0 (writer_version).
+    await protocol(engine, `UPDATE persistence_requests SET consumer_version='0.60.4.0',published_at=now()
+      WHERE id=(SELECT id FROM persistence_requests WHERE slug='notes/base' AND state='committed' ORDER BY sequence LIMIT 1)`);
   }
   if (kinds.includes('self_capture')) {
     const self = join(claudeDir, 'projects', `-tmp-${CLAUDE_CLI_CWD_PREFIX}9001`);
