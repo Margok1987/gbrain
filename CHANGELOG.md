@@ -10,6 +10,97 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.2.0] - 2026-09-29
+
+**Index rebuilds keep vectors that are still correct, pages remote search was hiding come back, and `recall --grep` finds older facts.**
+
+On pages that use contextual retrieval (the title or synopsis wrapper), every
+index rebuild and every oversize-chunk heal used to erase all of the page's
+vectors, even when nothing had changed, so they had to be embedded again at
+your expense. Each vector now records exactly what it was built from. A rebuild
+keeps it when the page would produce the same input and clears only the chunks
+whose input changed. In synopsis mode an edit to the page body clears every
+synopsis chunk, since each synopsis read the whole body.
+
+Pages chunked before the safe-chunk index version, markdown and code, are
+withheld from remote and MCP search. Re-importing their unchanged content
+(`gbrain sync --full`, `gbrain import`) used to skip them, so they stayed hidden.
+It now re-seals them without writing the page, and the sync summary says how
+many chunks still need embedding and what that costs. `gbrain repair
+safe-chunks` re-seals the rest on any brain, managed brains included, without
+using journal capacity. `gbrain doctor` and the remote `safe_index_pending`
+signal now count code pages too, and the signal also appears when a search
+returned some results but others were withheld.
+
+`gbrain recall --grep <text>` now filters in the database before applying
+`--limit`, so a matching fact older than the newest rows is found instead of
+"No matching facts."
+
+| Situation | Before | After |
+| --- | --- | --- |
+| Rebuild or oversize heal of an unchanged title-mode page | Every vector erased | Every vector kept |
+| One chunk of a title-mode page edited, then rebuilt | Every vector erased | Only that chunk re-embedded |
+| Synopsis-mode page body edited | Every vector erased | Synopsis chunks re-embedded; title-tier chunks kept |
+| `sync --full` over an unchanged page below the safe-chunk version | Skipped; stays hidden from remote search | Re-sealed, no page write |
+| Code page below the safe-chunk version | Hidden remotely; invisible to doctor and the hint | Counted; re-sealed by re-import or `repair safe-chunks` |
+| Remote search with some results, other pages withheld | No signal | `safe_index_pending` |
+| `recall --grep x --limit 5` with the match older than 5 newer facts | "No matching facts." | Match found |
+
+### To take advantage of v0.60.2.0
+
+1. Run `gbrain upgrade` on every machine that writes to the brain and restart
+   `gbrain serve`, autopilot, job supervisors and session hooks. Two additive
+   schema migrations run automatically.
+2. Your agent reads `skills/migrations/v0.60.2.0.md`, runs one full
+   `gbrain doctor --json` and relays the safe-chunk count in
+   `contextual_retrieval_coverage`.
+3. On the brain host: `gbrain repair safe-chunks` to preview, then
+   `gbrain repair safe-chunks --apply` (add `--no-embed` to defer embedding).
+4. Verify: `gbrain repair safe-chunks --json` reports 0 items.
+
+The first rebuild of a contextual-retrieval page after upgrading re-embeds it
+once, because vectors from earlier releases carry no record of their input.
+Health scores may drop by the newly counted code pages until the repair runs.
+
+### Itemized changes
+
+- #5553: new nullable `content_chunks.embedding_input_hash` (migration v168, both
+  engines), written in the same statement as the vector by `upsertChunks` and
+  `installPageEmbeddings`. It digests the vector column, model, dimensions, the
+  wrapping tier and the exact embedding input (chunk text; title prefix plus
+  text; or, for the synopsis tier, the page's corpus generation, title,
+  document-body hash and text). Preserving projection installs (queued rebuilds,
+  the oversize heal, connector and code rebuilds) keep a vector only when the
+  stored hash matches the recomputed one; `embedded_text_hash` keeps its
+  meaning. A vector without a record is kept on non-contextual pages, as before,
+  and cleared once on contextual pages.
+- #5050, #5247: unchanged markdown and code re-imports below the safe-chunk
+  fence re-seal through the projection installer (direct imports install at
+  once; coordinated imports stay no-ops and queue a projection job for the
+  persistence consumer). `gbrain import` and `gbrain sync --full` report
+  re-sealed pages, their chunks without vectors and the estimated cost.
+- New `gbrain repair safe-chunks [--source] [--limit] [--no-embed] [--apply]
+  [--json]`, a projection-only repair kind (zero request IDs and receipt bytes);
+  code pages without a recorded path and other page kinds are reported as
+  residuals. On a managed brain, the post-upgrade step prints the safe-chunk
+  count and this command instead of attempting the markdown reindex.
+- The `safe_index_pending` probe and the doctor count cover every page kind and
+  fire on partial results; the probe uses a new partial index of unsealed pages
+  (migration v169, concurrent on Postgres). `gbrain reindex --markdown` is
+  unchanged.
+- #5607: local `gbrain recall --grep` passes the filter to every engine query
+  before `LIMIT` (metacharacters escaped); only `--supersessions` keeps the
+  client-side filter. Adapted from #5619 by @furuchanchan. Thank you.
+
+### For contributors
+
+- New `src/core/embedding-input-hash.ts`, `src/core/repair/safe-chunks.ts`;
+  `ChunkInput.embedding_input_hash`; `installPageEmbeddings` takes an optional
+  `built` tier; `stampEmbeddingInputs`, `embeddingWriteTarget`,
+  `resealSafeChunks` and `projectionBelowSafeFence` in `page-state/projections.ts`;
+  `belowSafeChunkFence` in `search/safe-chunks.ts`. Repair handlers may declare
+  `publication: 'projection'` and receive `{ embed }`.
+
 ## [0.59.15.0] - 2026-09-28
 
 **Database-only timeline history is now written back into its page, derived pages record who may read them, and two repair commands fix what was left behind.**

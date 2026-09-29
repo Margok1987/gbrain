@@ -760,6 +760,8 @@ export interface ChunkInput {
    */
   chunk_source: 'compiled_truth' | 'timeline' | 'fenced_code' | 'image_asset';
   embedding?: Float32Array;
+  /** #5553: embedding-input provenance (see embedding-input-hash.ts); written only with `embedding`. */
+  embedding_input_hash?: string;
   model?: string;
   token_count?: number;
   /**

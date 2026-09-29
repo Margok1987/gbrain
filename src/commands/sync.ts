@@ -292,6 +292,8 @@ export interface SyncResult {
    * the working tree was imported (detached HEAD or --working-tree).
    */
   uncommitted?: { added: number; modified: number; deleted: number };
+  /** #5050: full sync re-sealed unchanged pages at the safe-chunk fence (see RunImportResult.resealed). */
+  resealed?: import('./import.ts').RunImportResult['resealed'];
   /**
    * v0.41.13.0 partial-sync fields (only set when status === 'partial').
    *
@@ -4469,6 +4471,7 @@ async function performFullSync(
     // topologies (codex re-review; same rationale as the incremental path).
     ...(result.malformedSkipped ? { malformedSkipped: result.malformedSkipped } : {}),
     ...(result.type_warnings ? { type_warnings: result.type_warnings } : {}),
+    ...(result.resealed ? { resealed: result.resealed } : {}),
   };
 }
 

@@ -1,9 +1,10 @@
 /**
- * `gbrain repair [<kind>] [--apply] [--source <id>] [--limit <n>] [--json]`
+ * `gbrain repair [<kind>] [--apply] [--source <id>] [--limit <n>] [--no-embed] [--json]`
  *
  * Host-side repairs for residual damage the doctor reports. Every kind is a
  * dry run unless `--apply` is passed; applying publishes each item through a
- * coordinated page write, resumes after an interruption, and stops before
+ * coordinated page write (or, for `safe-chunks`, a projection-only rebuild
+ * that takes no admission), resumes after an interruption, and stops before
  * crossing 90% of a cumulative journal cap. Thin clients refuse (cli.ts).
  */
 import type { BrainEngine } from '../core/engine.ts';
@@ -13,10 +14,11 @@ import { OperationError, type OperationContext } from '../core/ops/contract.ts';
 import { REPAIR_KINDS, resolveRepairScope, runRepair, type RepairHandler, type RepairKind, type RepairResult } from '../core/repair/core.ts';
 import { timelineRepair } from '../core/repair/timeline.ts';
 import { visibilityRepair } from '../core/repair/visibility.ts';
+import { safeChunksRepair } from '../core/repair/safe-chunks.ts';
 
-const HANDLERS: Record<RepairKind, RepairHandler> = { timeline: timelineRepair, visibility: visibilityRepair };
+const HANDLERS: Record<RepairKind, RepairHandler> = { timeline: timelineRepair, visibility: visibilityRepair, 'safe-chunks': safeChunksRepair };
 
-export const REPAIR_HELP = `Usage: gbrain repair [<kind>] [--apply] [--source <id>] [--limit <n>] [--json]
+export const REPAIR_HELP = `Usage: gbrain repair [<kind>] [--apply] [--source <id>] [--limit <n>] [--no-embed] [--json]
        gbrain repair --all [--apply] [--source <id>] [--json]
 
 Repair residual damage that \`gbrain doctor\` reports. Dry run unless --apply.
@@ -27,11 +29,16 @@ Kinds:
   visibility   Stamp explicit visibility on extracted atoms and synthesized
                concepts, tighten-only (#5525). Transcript and missing origins
                become private; nothing is ever loosened.
+  safe-chunks  Re-seal pages of every kind (markdown and code) chunked before the
+               safe-chunk fence, which remote/MCP search withholds (#5050, #5247).
+               Projection-only: no page write and no journal admission. Unchanged
+               vectors are kept; the rest are embedded unless --no-embed.
 
 Options:
   --apply        Write the repair (no prompt). Without it, only preview.
   --source <id>  Limit to one source (default: every active source).
   --limit <n>    Repair at most n items; rerun the same command to continue.
+  --no-embed     safe-chunks: re-seal text only; embed later with gbrain embed --stale.
   --all          Run every kind in order (${REPAIR_KINDS.join(', ')}).
   --json         Machine-readable output with a stable shape.
 
@@ -64,6 +71,7 @@ export async function runRepairCommand(engine: BrainEngine, args: string[]): Pro
   if (args.includes('--help') || args.includes('-h')) { console.log(REPAIR_HELP); return; }
   if (args.includes('--yes')) throw new OperationError('invalid_params', '`--yes` is not accepted by gbrain repair; pass --apply to write.');
   const json = args.includes('--json');
+  const noEmbed = args.includes('--no-embed');
   const apply = args.includes('--apply');
   const source = flag(args, '--source');
   const limitText = flag(args, '--limit');
@@ -84,7 +92,8 @@ export async function runRepairCommand(engine: BrainEngine, args: string[]): Pro
   try { embeddingModel = config.embedding_disabled ? undefined : (await import('../core/ai/gateway.ts')).getEmbeddingModel(); } catch { embeddingModel = undefined; }
   const results: RepairResult[] = [];
   for (const k of kinds) {
-    const result = await runRepair(ctx, HANDLERS[k], scope, { apply, limit, embeddingModel, sourceFlag: source });
+    const result = await runRepair(ctx, HANDLERS[k], scope, { apply, limit, embeddingModel, sourceFlag: source,
+      embed: !noEmbed && embeddingModel !== undefined, applyArgs: noEmbed && k === 'safe-chunks' ? ['--no-embed'] : [] });
     results.push(result);
     if (result.stopped) break;
   }

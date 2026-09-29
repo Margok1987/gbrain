@@ -4,7 +4,10 @@
  *
  * Every applied item is one coordinated page write (a `put_page` bound to the
  * page's current revision), so a repair never bypasses the persistence
- * coordinator and each item commits or fails on its own. Items are processed in
+ * coordinator and each item commits or fails on its own. A kind that only
+ * rebuilds derived projections (`safe-chunks`) takes no admission instead: its
+ * items cost no lifetime IDs or receipt bytes and never hit the capacity stop.
+ * Items are processed in
  * a stable order and the cursor after the last committed item is stored in
  * `op_checkpoints` under a fingerprint of (kind, brain, sources): a rerun with
  * the same scope resumes after it, and a finished scan clears it.
@@ -19,7 +22,7 @@ import { getWriteRequest } from '../persistence/journal.ts';
 import { initializeLocalPersistence, requestPrincipalForContext } from '../persistence/page-mutations.ts';
 import { lookupEmbeddingPrice, estimateCostFromChars } from '../embedding-pricing.ts';
 
-export const REPAIR_KINDS = ['timeline', 'visibility'] as const;
+export const REPAIR_KINDS = ['timeline', 'visibility', 'safe-chunks'] as const;
 export type RepairKind = typeof REPAIR_KINDS[number];
 
 export interface RepairScope { brain_id: string; source_ids: string[] }
@@ -41,10 +44,12 @@ export interface RepairPlan {
 
 export interface RepairHandler {
   kind: RepairKind;
+  /** `projection`: items rebuild derived rows only and take no journal admission. Default `coordinated`. */
+  publication?: 'coordinated' | 'projection';
   /** Pending items after `after`, in cursor order. */
   plan(engine: BrainEngine, scope: RepairScope, after: RepairCursor | null): Promise<RepairPlan>;
-  /** Apply one item through a coordinated write; `false` when it no longer needs repair. */
-  apply(ctx: OperationContext, item: RepairItem): Promise<boolean>;
+  /** Apply one item; `false` when it no longer needs repair. `embed` is false under --no-embed. */
+  apply(ctx: OperationContext, item: RepairItem, opts?: { embed: boolean }): Promise<boolean>;
 }
 
 export interface RepairResult {
@@ -141,20 +146,21 @@ function writerHeld(error: unknown): error is OperationError {
 }
 
 export async function runRepair(ctx: OperationContext, handler: RepairHandler, scope: RepairScope,
-  opts: { apply: boolean; limit?: number; embeddingModel?: string; sourceFlag?: string }): Promise<RepairResult> {
+  opts: { apply: boolean; limit?: number; embeddingModel?: string; sourceFlag?: string; embed?: boolean; applyArgs?: string[] }): Promise<RepairResult> {
   if (opts.apply) await initializeLocalPersistence(ctx);
   const resumed = await readCursor(ctx.engine, handler.kind, scope);
   const plan = await handler.plan(ctx.engine, scope, resumed);
   const pending = opts.limit !== undefined ? plan.items.slice(0, opts.limit) : plan.items;
   const counters = await capacity(ctx);
+  const admits = (handler.publication ?? 'coordinated') === 'coordinated' ? pending.length : 0;
   const result: RepairResult = {
     kind: handler.kind, mode: opts.apply ? 'apply' : 'dry_run', scope, affected: plan.items.length,
     sample: plan.items.slice(0, SAMPLE).map(item => `${item.source_id}:${item.slug}`), residuals: plan.residuals,
-    cost: { lifetime_ids: pending.length, receipt_bytes: pending.length * RECEIPT_BYTES, embedding_pages: pending.length,
+    cost: { lifetime_ids: admits, receipt_bytes: admits * RECEIPT_BYTES, embedding_pages: pending.length,
       embedding_usd: embeddingUsd(pending.reduce((sum, item) => sum + item.chars, 0), opts.embeddingModel) },
     capacity: counters.map(({ scope: key, resource, used, limit, stop_at }) => ({ scope: key, resource, used, limit, stop_at })),
     resumed_from: resumed, applied: 0, skipped: 0, complete: false,
-    apply_command: `gbrain repair ${handler.kind}${opts.sourceFlag ? ` --source ${opts.sourceFlag}` : ''} --apply`,
+    apply_command: `gbrain repair ${handler.kind}${opts.sourceFlag ? ` --source ${opts.sourceFlag}` : ''}${(opts.applyArgs ?? []).map(arg => ` ${arg}`).join('')} --apply`,
   };
   if (!opts.apply) {
     result.complete = pending.length === plan.items.length;
@@ -162,7 +168,7 @@ export async function runRepair(ctx: OperationContext, handler: RepairHandler, s
   }
   for (const [index, item] of pending.entries()) {
     const remaining = pending.length - index;
-    const full = (await capacity(ctx)).find(c => c.used + (c.resource === 'lifetime_ids' ? 1 : RECEIPT_BYTES) > c.stop_at);
+    const full = admits ? (await capacity(ctx)).find(c => c.used + (c.resource === 'lifetime_ids' ? 1 : RECEIPT_BYTES) > c.stop_at) : undefined;
     if (full) {
       const perItem = full.resource === 'lifetime_ids' ? 1 : RECEIPT_BYTES;
       const needed = Math.ceil((full.used + remaining * perItem) / STOP_RATIO) + 1;
@@ -171,7 +177,7 @@ export async function runRepair(ctx: OperationContext, handler: RepairHandler, s
       return result;
     }
     try {
-      if (await handler.apply({ ...ctx, sourceId: item.source_id }, item)) result.applied++;
+      if (await handler.apply({ ...ctx, sourceId: item.source_id }, item, { embed: opts.embed === true })) result.applied++;
       else result.skipped++;
     } catch (error) {
       // A page edited since planning is left for the next full scan.
