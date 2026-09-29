@@ -101,6 +101,21 @@ per write on this VM. It is required and unchanged.
 | PGLite | 7.06 writes/s, 1,417 s | 33.77 writes/s, 296 s | true / true |
 | Postgres | 11.28 writes/s, 886 s | 17.22 writes/s, 581 s | true / true |
 
+## Read latency (`scripts/persistence/performance.ts`, median of 3 runs)
+
+The statement cache is engine-wide, so read paths were checked against master
+on the same VM: 500 pages, 200 search queries, alone and under 4 concurrent
+writers.
+
+| Engine | master idle p50 / p95 | candidate idle p50 / p95 | master loaded p50 / p95 | candidate loaded p50 / p95 |
+|---|---|---|---|---|
+| PGLite | 11.6 / 19.3 ms | 8.2 / 16.6 ms | 12.5 / 17.3 ms | 8.9 / 16.0 ms |
+| Postgres | 21.1 / 30.2 ms | 23.0 / 32.1 ms | 18.1 / 30.1 ms | 18.4 / 32.0 ms |
+
+Both engines pass the workload's loaded-versus-idle gate. The Postgres
+differences are within run-to-run noise; the Postgres engine's reads are not
+changed by this work.
+
 ## Tried and rejected
 
 - `plan_cache_mode = force_custom_plan`: this keeps parse savings but replans
