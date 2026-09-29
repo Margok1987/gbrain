@@ -38,6 +38,7 @@ test('new canonical write callsites require a reviewed inventory and an enforcem
 });
 test('a planted bypass in a converted writer or a new file fails the census', () => {
   const inventory = loadInventory();
+  // test-reads-source-ok[structural]: the census is a source-text tripwire by design; the planted copy proves it flags a new bypass.
   const links = readFileSync(join(root, 'src/core/ops/links.ts'), 'utf8');
   const concepts = readFileSync(join(root, 'src/core/cycle/synthesize-concepts.ts'), 'utf8');
   expect(gapsFor([['src/core/ops/links.ts', links], ['src/core/cycle/synthesize-concepts.ts', concepts]], inventory)).toEqual([]);
