@@ -208,6 +208,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/persistence-runtime-matrix.test.ts",
     "test/e2e/persistence-admin-intent.test.ts",
     "test/e2e/persistence-writer-admin-lock.test.ts",
+    "test/e2e/persistence-writer-stamps.test.ts",
     "test/e2e/persistence-recovery.test.ts",
     "test/e2e/managed-sync-failures.test.ts",
     "test/e2e/managed-connector-routing.test.ts",
@@ -440,4 +441,5 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/backup.ts": ["test/e2e/backup-coverage-parity.test.ts"],
   "src/commands/doctor/checks/backup-coverage.ts": ["test/e2e/backup-coverage-parity.test.ts"],
   "src/commands/doctor/checks/sync-failures.ts": ["test/e2e/managed-sync-failures.test.ts"],
+  "src/commands/doctor/checks/writer-version.ts": ["test/e2e/persistence-writer-stamps.test.ts"],
 };

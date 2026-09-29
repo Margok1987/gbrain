@@ -56,7 +56,7 @@ is prepared and not yet accepted. There is no --force: the escape hatch is the l
 (operator workflow: unlock, administer, lock). The lock guards against routine or accidental
 agent administration; it is not a security boundary against a caller with the same shell.
 Binaries older than this release do not consult the lock. status shows admin_lock,
-local_host_id and blocking effects.`;
+local_host_id, blocking effects and the latest admitter/consumer versions per host.`;
 
 export const LOCAL_WRITER_HELP = `Usage:
   gbrain auth local-writer list [--limit <1-1000>] [--before <uuid>] [--json]

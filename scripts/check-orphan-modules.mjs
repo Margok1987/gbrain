@@ -60,6 +60,7 @@ const ALLOWLIST = new Map([
 // string in a reviewer-visible edit. Modules reached from `scripts/**` carry
 // reason 'script-reachable', which the guard verifies.
 const PERMITTED_TEST_ONLY = [
+  { path: 'src/commands/doctor/checks/writer-version.ts', reason: 'held: fix wave 3 Lane D registers writer_version in doctor.ts at integration (doctor.ts is at its module-size ceiling); remove this entry when wired' },
   { path: 'src/core/bootstrap/template-repo.ts', reason: 'script-reachable' },
   { path: 'src/core/eval-contradictions/fixture-redact.ts', reason: 'script-reachable' },
   { path: 'src/eval/longmemeval/diagnostics.ts', reason: 'script-reachable' },

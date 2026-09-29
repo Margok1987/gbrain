@@ -16,6 +16,7 @@ import { assertWriterAdminState, requireWriterAdminIntent, writerAdminState, WRI
 import { writerOnboardingPreflight } from './onboarding.ts';
 import { assertWriterAdminUnlocked, readWriterAdminLock, setWriterAdminLock } from './admin-lock.ts';
 import { listBlockingEffects } from './blocking-effects.ts';
+import { listWriterVersions } from './writer-versions.ts';
 
 const invalid = (message: string) => new OperationError('invalid_params', message);
 function source(value: unknown): string {
@@ -159,10 +160,11 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
       'SELECT writer_protocol_floor,skill_bundles_enabled FROM persistence_brain WHERE singleton=1');
     const adminLock = await readWriterAdminLock(engine);
     const blockingEffects = await listBlockingEffects(engine, { sourceId: params.source_id as string | undefined, limit: 20 });
+    const writerVersions = await listWriterVersions(engine);
     await assertWriterAdminState(engine, adminState, false);
     return { ...diagnostics, host_id: existingLocalHostId(), local_host_id: existingLocalHostId(), bindings, admin_state: adminState,
       admin_lock: { locked: adminLock.locked, set_at: adminLock.set_at, host_id: adminLock.host_id }, blocking_effects: blockingEffects,
-      onboarding, shared_skills: sharedSkills, ...(native ? { native_lock: native } : {}) };
+      writer_versions: writerVersions, onboarding, shared_skills: sharedSkills, ...(native ? { native_lock: native } : {}) };
   }
   if (operation === 'writer_claim') {
     keys(params, ['source_id', 'path', 'dry_run', 'admin_intent', 'expected_state']);
