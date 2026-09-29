@@ -2903,6 +2903,10 @@ async function handleCliOnly(command: string, args: string[]) {
     if (await (await import('./commands/reindex-code-delegate.ts')).maybeDelegateReindexCode(loadConfig(), args)) return;
   }
 
+  if (command === 'extract' && args.includes('--stale') && !hasHelpFlag(args)) {
+    if (await (await import('./commands/extract-stale-delegate.ts')).maybeDelegateExtractStale(loadConfig(), args)) return;
+  }
+
   if (command === 'embed' && args.includes('--facts')) {
     if (await (await import('./commands/embed-facts-delegate.ts')).maybeDelegateFactEmbed(loadConfig(), args)) return;
   }
