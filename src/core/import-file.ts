@@ -823,42 +823,6 @@ export async function importFromContent(
     effectiveCRMode = resolution.mode === 'per_chunk_synopsis' ? 'title' : resolution.mode;
   }
 
-  const embedChunks = async () => {
-    if (opts.noEmbed || chunks.length === 0) return;
-    const safeTitle = sanitizeTitle(parsed.title);
-    const prefix =
-      modeRequiresWrapper(effectiveCRMode) && !modeRequiresSynopsis(effectiveCRMode)
-        ? buildContextualPrefix(safeTitle, null)
-        : null;
-    const wrappedTexts = prefix
-      ? chunks.map((c) => wrapChunkForEmbedding(c.chunk_text, prefix, c.chunk_source))
-      : chunks.map((c) => c.chunk_text);
-    const embeddings = await embedBatchWithBackoff(wrappedTexts);
-    for (let i = 0; i < chunks.length; i++) {
-      chunks[i].embedding = embeddings[i];
-      // token_count tracks the wrapped string length so cost reporting
-      // reflects what we actually sent to the embedder.
-      chunks[i].token_count = Math.ceil(wrappedTexts[i].length / 4);
-    }
-  };
-  // An embedding outage never blocks the text write: the page and its chunks
-  // commit with NULL vectors and no embedding signature, and the stale sweep
-  // (`gbrain embed --stale`, sync's embed pass, the cycle) embeds them once
-  // the provider recovers.
-  let embeddingDeferred = false;
-  if (!opts.onPostCommitEmbedding) {
-    try {
-      await embedChunks();
-    } catch (err) {
-      embeddingDeferred = true;
-      for (const c of chunks) { c.embedding = undefined; c.token_count = undefined; }
-      process.stderr.write(
-        `[import] ${slug}: embedding failed (${err instanceof Error ? err.message : String(err)}); ` +
-        `text saved, chunks queued for \`gbrain embed --stale\`.\n`
-      );
-    }
-  }
-
   // v0.40.3.0: corpus_generation hash for D27 P1-5 cache invalidation.
   // Record the selected wrapper generation for inline or deferred embedding;
   // 'none' writes NULL. The separate embedding signature certifies vectors.
@@ -874,6 +838,64 @@ export async function importFromContent(
           // backfill handler which threads SYNOPSIS_DOC_MAX_CHARS through
           // the service layer.
         });
+
+  // A13: an edit re-embeds only chunks whose embedding input changed. A stored
+  // vector is reused for a chunk with the same source and exact text when the
+  // old index is sealed, the wrapper (mode, generation, title) and embedding
+  // signature are unchanged, and neither body holds protected fences — so no
+  // reused vector can carry a private sibling fragment.
+  const reused = new Set<number>();
+  if (existing && !existing.deleted_at && !opts.noEmbed && !opts.prepare && !opts.onPostCommitEmbedding && chunks.length > 0
+    && !hasProtectedBody(`${existing.compiled_truth}\n${existing.timeline ?? ''}`) && !hasProtectedBody(`${parsed.compiled_truth}\n${parsed.timeline ?? ''}`)) {
+    const [prior] = await engine.executeRaw<{ embedding_signature: string | null; contextual_retrieval_mode: string | null; corpus_generation: string | null }>(
+      'SELECT embedding_signature, contextual_retrieval_mode, corpus_generation FROM pages WHERE source_id = $1 AND slug = $2', [sourceId ?? 'default', slug]);
+    const signature = currentEmbeddingSignature();
+    if (prior && signature && prior.embedding_signature === signature && (prior.contextual_retrieval_mode ?? 'none') === effectiveCRMode
+      && (prior.corpus_generation ?? null) === corpusGeneration && (effectiveCRMode === 'none' || sanitizeTitle(existing.title) === sanitizeTitle(parsed.title))) {
+      const stored = await engine.getChunks(slug, { sourceId: sourceId ?? 'default', includeEmbedding: true, requireSafeChunks: true });
+      for (const [i, matched] of planEmbeddingReuse(stored, chunks, c => `${c.chunk_source}\0${c.chunk_text}`).reuse) {
+        chunks[i].embedding = matched.embedding as Float32Array;
+        chunks[i].token_count = matched.token_count ?? undefined;
+        if (matched.model) chunks[i].model = matched.model;
+        reused.add(i);
+      }
+    }
+  }
+
+  const embedChunks = async () => {
+    const pending = chunks.map((_, i) => i).filter(i => !reused.has(i));
+    if (opts.noEmbed || pending.length === 0) return;
+    const safeTitle = sanitizeTitle(parsed.title);
+    const prefix =
+      modeRequiresWrapper(effectiveCRMode) && !modeRequiresSynopsis(effectiveCRMode)
+        ? buildContextualPrefix(safeTitle, null)
+        : null;
+    const wrappedTexts = pending.map(i => prefix ? wrapChunkForEmbedding(chunks[i].chunk_text, prefix, chunks[i].chunk_source) : chunks[i].chunk_text);
+    const embeddings = await embedBatchWithBackoff(wrappedTexts);
+    pending.forEach((i, j) => {
+      chunks[i].embedding = embeddings[j];
+      // token_count tracks the wrapped string length so cost reporting
+      // reflects what we actually sent to the embedder.
+      chunks[i].token_count = Math.ceil(wrappedTexts[j].length / 4);
+    });
+  };
+  // An embedding outage never blocks the text write: the page and its chunks
+  // commit with NULL vectors and no embedding signature, and the stale sweep
+  // (`gbrain embed --stale`, sync's embed pass, the cycle) embeds them once
+  // the provider recovers.
+  let embeddingDeferred = false;
+  if (!opts.onPostCommitEmbedding) {
+    try {
+      await embedChunks();
+    } catch (err) {
+      embeddingDeferred = true;
+      chunks.forEach((c, i) => { if (!reused.has(i)) { c.embedding = undefined; c.token_count = undefined; } });
+      process.stderr.write(
+        `[import] ${slug}: embedding failed (${err instanceof Error ? err.message : String(err)}); ` +
+        `text saved, chunks queued for \`gbrain embed --stale\`.\n`
+      );
+    }
+  }
 
   // Transaction wraps the canonical DB writes. Every per-page tx call carries the
   // caller's sourceId so writes target (sourceId, slug) rather than the
@@ -965,9 +987,9 @@ export async function importFromContent(
       await tx.addTag(slug, tag, txOpts);
     }
 
-    // A new seal cannot inherit vectors or metadata from an older index, even
-    // when a public fragment is unchanged: its old contextual vector may have
-    // included a private sibling fragment. Replace every derived row atomically.
+    // Replace every derived row atomically. Only vectors the A13 reuse gate
+    // above admitted carry over; a new seal otherwise inherits nothing from an
+    // older index, whose contextual vector may have included a private sibling.
     await tx.deleteChunks(slug, txOpts);
     if (chunks.length > 0) {
       await tx.upsertChunks(slug, chunks, txOpts);
