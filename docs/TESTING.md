@@ -803,7 +803,7 @@ source binding is not detected and remains the authoring gate's job. Rerun with
 ### Registry-walking ratchets
 
 Structural suites that walk a registry so the NEXT gap of a known class
-cannot ship silently. All allowlists below are shrink-only.
+cannot ship silently. All allowlists below are shrink-only unless noted.
 
 - `test/operations-coverage-ledger.test.ts` — every op in
   `src/core/operations.ts` maps to a covering test file in a checked-in
@@ -827,9 +827,30 @@ cannot ship silently. All allowlists below are shrink-only.
   test corpus for references, so a never-called engine method can't ship.
 - `scripts/check-orphan-modules.mjs` (verify battery, guard-manifest
   registered with bad/good fixtures) — transitive import walk from the
-  cli/mcp/engine entrypoints; a src module reachable from no entrypoint
-  fails unless in the 4-entry reasoned allowlist, and the
-  test-only-reachable tier has a shrink-only ceiling.
+  cli/mcp/engine entrypoints; see [Orphan-module guard](#orphan-module-guard).
+
+#### Orphan-module guard
+
+`bun run check:orphan-modules` walks static, dynamic and `require` relative
+imports from the runtime entrypoints (CLI, MCP server, plugin engines, admin,
+package `exports`). Every `src/` module it cannot reach needs a disposition:
+
+- Imported by nothing, not even tests: fails as `hard-orphan` unless it has a
+  reasoned `ALLOWLIST` entry (shrink-only).
+- Imported only by tests (or scripts): fails as `unpermitted-test-only`
+  unless it is named in `PERMITTED_TEST_ONLY` with a `reason`. The set may
+  grow only with a reason in a reviewer-visible edit; modules reached from
+  `scripts/**` use reason `script-reachable`, which the guard verifies.
+- A permitted entry whose module was deleted, wired into a runtime
+  entrypoint, dropped by every test, or tagged `script-reachable` without a
+  `scripts/**` importer fails as `stale-permitted-entry`. Remove or correct
+  the record; never restore code to satisfy the list.
+
+Each failure prints the rule, the module, the tests that import it, the
+reason, the remedy, the rerun command and this anchor. Fixture mode
+(`GBRAIN_GUARD_ROOT`) reads the permitted set from
+`<root>/permitted-test-only.json`; `test/scripts/check-orphan-modules.test.ts`
+proves every rule fails on a bad tree.
 
 The takes-bootstrap graduation instrument (`evals/takes-bootstrap/`: 123-case
 corpus, scorer, live harness + $0 replay) is CI-guarded keyless by
@@ -1348,10 +1369,8 @@ Unit tests and what they cover:
 - `test/dry-fix.test.ts` — auto-fix: three shape-aware expander pure-function tests; five guards (working-tree-dirty, no-git-backup, inside-code-fence, already-delegated within 40 lines, ambiguous-multi-match, block-is-callout).
 - `test/doctor-fix.test.ts` — `gbrain doctor --fix` CLI integration: dry-run preview, apply path, JSON output shape.
 - `test/backoff.test.ts` — load-aware throttling, concurrency limits, active hours.
-- `test/fail-improve.test.ts` — deterministic/LLM cascade, JSONL logging, test generation, rotation.
 - `test/transcription.test.ts` — provider detection, format validation, API key errors.
 - `test/enrichment-service.test.ts` — entity slugification, extraction, tier escalation.
-- `test/data-research.test.ts` — recipe validation, MRR/ARR extraction, dedup, tracker parsing, HTML stripping.
 - `test/minions.test.ts` — Minions job queue: CRUD, state machine, backoff, stall detection, dependencies, worker lifecycle, lock management, claim mechanics, depth/child-cap, timeouts, cascade kill, idempotency, `child_done` inbox, attachments, removeOnComplete/Fail, `max_stalled` clamp/default/plumbing coverage.
 - `test/minion-queue-renewlock-signal.test.ts` — `renewLock` forwards its optional AbortSignal to `executeRawDirect` (stub-engine capture); legacy 3-arg calls unchanged; token-fence miss returns false.
 - `test/cycle-drain-renewal.test.ts` — `runDrainRenewalTick` (cycle drain): per-call signal aborted on timeout (slot released), onLost once on a lost fence, throws swallowed, hung renewal resolves at the deadline. Plus two structural source-text pins on `inline-drain.ts` (the shape guard only covers `worker.ts`): the renewal must not go back to a raw `setInterval(() => queue.renewLock(...))`, and the handler invocation must stay wrapped in `withChatPhase('job:<name>')` so a drained child's gateway spend is attributed to the child rather than absorbed by an enclosing `phase:` tag.

@@ -4077,9 +4077,10 @@ infra and reaches into third-party packs that live outside the host skills dir.
 > `list_brain_skillpack` op (NOT folded into `list_skills` — the host catalog is
 > host-global and ignores `ctx.sourceId`, so per-source packs needed their own
 > tenancy-correct surface). `get_skill` gained an optional `source_id` for
-> per-source fetch disambiguation. The `tools:` version-skew lint below is now
-> implemented (`src/core/skillpack/brain-pack-lint.ts`, run by
-> `gbrain skillpack init-brain-pack`). STILL DEFERRED to this PR2: thin-client
+> per-source fetch disambiguation. The `tools:` version-skew lint below was
+> written (`src/core/skillpack/brain-pack-lint.ts`) but never wired into
+> `gbrain skillpack init-brain-pack`, and was deleted in the test-reduction fix
+> wave. STILL DEFERRED to this PR2: thin-client
 > BINARY install (`build_skillpack` download) — a thin client today gets the
 > pack's git scaffold spec and `resolveSource`s it on its own machine. The
 > `include_skillpacks` host-global merge below is intentionally still open
@@ -4927,7 +4928,7 @@ note. Filing it as a TODO would imply it's ready to pull; it isn't.
   CEO D16. Closes the unbounded-growth concern that codex flagged as
   load-bearing pass-3 #5.
 
-- [ ] **v0.41.1: full E5 A/B dispatcher (currently scaffolded as dry-run only).**
+- [x] **v0.41.1: full E5 A/B dispatcher (currently scaffolded as dry-run only).** **Closed in the test-reduction fix wave:** the lease-cap controller never had a runtime caller; it, its tests, `scripts/e5-lease-cap-ab.ts` and the dry-run receipt fixture were deleted.
   `scripts/e5-lease-cap-ab.ts` ships the spec + harness + receipt fixture
   shape but the real-run dispatcher (queue submit + worker spin-up + 15-min
   429 injector + tick loop + cost-tracking) is deferred. v0.41.1 follow-up
@@ -4946,7 +4947,7 @@ note. Filing it as a TODO would imply it's ready to pull; it isn't.
   case, already shipped); one accepts an existing tx (rate-leases +
   maxWaiting use cases). Filed via Eng D9.
 
-- [ ] **v0.42: semantic-aware `prompt_too_long` reduction in E6 self-fix.**
+- [x] **v0.42: semantic-aware `prompt_too_long` reduction in E6 self-fix.** **Closed in the test-reduction fix wave:** `src/core/minions/self-fix.ts` never had a runtime caller and was deleted.
   v0.41 ships truncate-with-leaf-preservation (first 1000 + last 2000 chars).
   Codex pass-1 #11 specified the right strategy: walk the conversation, drop
   tool_result blocks first (largest non-task content), summarize older
@@ -5443,7 +5444,9 @@ at plan time and got carved out:
   with the right shape so these drop in cleanly.
 
 - [ ] **v0.40.7+: T16 — hermetic schema-authoring eval gate.**
-  Extend `src/commands/eval-schema-authoring.ts` into a PGLite harness
+  Rebuild `gbrain eval schema-authoring` as a PGLite harness (the unwired
+  v0.39 scaffold and its `aggregateVerdict` were deleted in the test-reduction fix wave;
+  recover them from git history)
   driving detect → suggest → add-type → sync end-to-end on 3 fixtures.
   Filing-accuracy delta metric (not top-3 hit rate per codex C18). DI
   seam via `suggestFn`. 3 hours CC + placeholder-name fixtures.
@@ -5669,7 +5672,7 @@ contributor traps.
 
 - [ ] **T18 follow-through — DELETE `skills/_brain-filing-rules.{md,json}`.** v0.39.0.0 shipped step (a) of the 4-step deprecation sequence: `gbrain schema show --as-filing-rules` emits the JSON shape the legacy file held. v0.39.1 ships steps (b) + (c) + (d): migrate `filing-audit.ts:79`, `synthesize.ts:619`, `patterns.ts:305`, `check-resolvable.ts:196+:226` to consume `gbrain schema show --as-filing-rules` output; update 5 test files (filing-audit.test.ts, check-resolvable.test.ts, dry-fix.test.ts, resolver.test.ts, cycle-patterns.test.ts); then DELETE the two files. Codex finding #3 from /plan-eng-review made this load-bearing — premature deletion makes protected synthesize/patterns phases fail with NO_ALLOWLIST. Sequencing matters.
 - [ ] **T19 follow-through — per-source pack federation across mounts.** v0.39.0.0 ships the correct REJECTION posture (`SchemaPackTrustGateError` when sources resolve to divergent packs). v0.40 ships the true per-source closure via `buildPerSourceBindings` + `buildSourceClosureCte` (engine already provides; the read-path callers need to thread the per-source pack identity through the SQL generation step). Reference: codex finding #2 from /plan-eng-review.
-- [ ] **T16 follow-through — hermetic eval-schema-authoring CLI harness.** v0.39.0.0 ships the aggregator (`aggregateVerdict`) + scaffold; v0.39.1 wires the in-process PGLite engine + fixture brain replay (3 fixtures: 1 hand-curated `notion-refugee` + 2 synthetic via faker per D6(eng)). Pattern: mirror `src/eval/longmemeval/harness.ts`.
+- [ ] **T16 follow-through — hermetic eval-schema-authoring CLI harness.** v0.39.0.0 shipped the aggregator (`aggregateVerdict`) + scaffold, deleted unwired in the test-reduction fix wave (recover from git history); v0.39.1 wires the in-process PGLite engine + fixture brain replay (3 fixtures: 1 hand-curated `notion-refugee` + 2 synthetic via faker per D6(eng)). Pattern: mirror `src/eval/longmemeval/harness.ts`.
 - [ ] **T1.5 follow-through — wire `whoknows` / `find_experts` / `enrichment-service` / `facts/eligibility` to consume pack-aware type sets.** v0.39.0.0 added the seam (`activePack` parameter threaded through parseMarkdown/import/sync). The runtime sites that compute their type filter still use the v0.38 hardcoded constants. v0.39.1 migrates each call site to read from `loadActivePackForOp(ctx)` + use `expertTypesFromPack` / `extractableTypesFromPack` (helpers already exist in `src/core/schema-pack/`). Per the T19 closure fix, this is now safe to wire (federated_read with divergent packs throws permission_denied at the load step).
 - [ ] **D14 thesis retro — authoring vs derivation framing.** v0.39.0.0 ships the cathedral with 6 verbs marked experimental-tier + T15 schema-events audit + T23 `gbrain schema usage` for measurement. v0.40+ retro reads 60-90 days of usage telemetry and decides which experimental verbs to deprecate per codex's derivation-thesis structural argument. Pass condition: each verb gets >=5% of the cathedral's invocations. Below 5% = deprecation candidate.
 
@@ -5694,9 +5697,9 @@ contributor traps.
 
 - [ ] **Async-batched audit writes.** Sync `appendFileSync` is fine at typical volumes (~5ms × 100 crosses = ~500ms — not noticeable inside a $1 brainstorm run). Profiling trigger criterion: when 100+ crosses on a large brain shows audit-write time dominating wall-clock cost, switch to an async write queue. Fixing prematurely costs complexity for no measurable benefit.
 
-- [ ] **`BudgetLedger` unification with `BudgetTracker`.** `src/core/enrichment/budget.ts` defines a separate `BudgetLedger` primitive for per-day, per-scope/resolverId enrichment caps. Different shape from `BudgetTracker` (daily reset windows + multi-tier scope keys). Unification is possible but requires careful schema design to preserve enrichment's existing report semantics. Deferred because: (a) BudgetTracker covers the per-command case cleanly today, (b) the existing BudgetLedger isn't a customer-facing surface — it backs `gbrain enrich`'s internal accounting, (c) merging them would require a schema migration on the enrichment budget audit JSONL. Revisit when the enrichment surface gets its next major touch.
+- [x] **`BudgetLedger` unification with `BudgetTracker`.** **Closed in the test-reduction fix wave:** `BudgetLedger` never had a runtime caller (the claim below that it backs `gbrain enrich` was wrong; `gbrain enrich` uses `BudgetTracker`), so it was deleted. The `budget_ledger` migration stays. `src/core/enrichment/budget.ts` defines a separate `BudgetLedger` primitive for per-day, per-scope/resolverId enrichment caps. Different shape from `BudgetTracker` (daily reset windows + multi-tier scope keys). Unification is possible but requires careful schema design to preserve enrichment's existing report semantics. Deferred because: (a) BudgetTracker covers the per-command case cleanly today, (b) the existing BudgetLedger isn't a customer-facing surface — it backs `gbrain enrich`'s internal accounting, (c) merging them would require a schema migration on the enrichment budget audit JSONL. Revisit when the enrichment surface gets its next major touch.
 
-- [ ] **judges.ts internal chunking → payload-fitter delegation.** v0.37.x ships `src/core/diarize/payload-fitter.ts` with the batch strategy ready to consume from `src/core/brainstorm/judges.ts`'s `runJudge` chunking path. Today judges.ts keeps its own copy of the chunking loop (~30 lines) — straightforward refactor: replace the inline split with `fit({strategy:'batch', items: ideas, maxTokensPerCall, estimateTokens})` and concatenate results. The cost-guardrails test suite already pins the public contract; the refactor is mechanical. Touch one function; trivial.
+- [x] **judges.ts internal chunking → payload-fitter delegation.** **Closed in the test-reduction fix wave:** payload-fitter never had a runtime caller and was deleted; `judges.ts` keeps its own chunking loop. v0.37.x ships `src/core/diarize/payload-fitter.ts` with the batch strategy ready to consume from `src/core/brainstorm/judges.ts`'s `runJudge` chunking path. Today judges.ts keeps its own copy of the chunking loop (~30 lines) — straightforward refactor: replace the inline split with `fit({strategy:'batch', items: ideas, maxTokensPerCall, estimateTokens})` and concatenate results. The cost-guardrails test suite already pins the public contract; the refactor is mechanical. Touch one function; trivial.
 
 ## v0.37 PGLite fresh-install fix wave — deferred follow-ups (v0.37.x+ / v0.38.x)
 

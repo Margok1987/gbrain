@@ -58,8 +58,8 @@ CHECKS=(
   # scripts/guards-manifest.tsv (package.json's stale `check:all` copy deleted).
   "check:guard-self-test"
   # B4 (test-gap wave 2): runtime-reachability walk over src/** — hard-fails
-  # true orphans (unreachable from every entrypoint AND every test), ratchets
-  # the test-only-reachable tier. Whole-tree readFileSync walk, ~1s.
+  # true orphans (unreachable from every entrypoint AND every test) and any
+  # test-only module without a reasoned PERMITTED_TEST_ONLY entry. ~1s.
   "check:orphan-modules"
   # No-op placeholder assertions (expect(true).toBe(true) and friends) in
   # test/**/*.test.ts; TypeScript AST scan, ~3s over the full corpus.

@@ -84,11 +84,8 @@ test/e2e/migration-v35-auto-rls.test.ts
 test/e2e/migration-v35-event-trigger.test.ts
 test/e2e/migration-v47-notability.test.ts
 test/e2e/migration-v50-ingest-log-source-id.test.ts
-test/e2e/minions-budget-cathedral.test.ts
-test/e2e/minions-controller-bounce-only.test.ts
 test/e2e/minions-field-report-repro.test.ts
 test/e2e/minions-prefix-strip-smoke.test.ts
-test/e2e/minions-self-fix-flow.test.ts
 test/e2e/multi-source-emotional-weight-pglite.test.ts
 test/e2e/multimodal-postgres.test.ts
 test/e2e/non-tty-output.serial.test.ts
