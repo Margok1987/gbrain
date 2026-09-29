@@ -257,8 +257,12 @@ export async function runPhasePatterns(
       max_turns: 30,
       // #4217/CDX-12: a patterns child whose every put_page failed must
       // dead-letter (its whole purpose is writing pattern pages), not report
-      // completed with zero pages.
+      // completed with zero pages. #5540: a clean finish that examined the
+      // evidence and named nothing completes, so the #4879 watermark stamps
+      // instead of re-billing the same reflections every run. Older workers
+      // ignore the opt-in and keep the strict behavior.
       require_writes: true,
+      allow_clean_zero_writes: true,
       allowed_slug_prefixes: allowedSlugPrefixes,
       // #1586: scope every child tool call to the cycle's resolved source so
       // put_page writes land there instead of the hardcoded 'default'.
@@ -470,6 +474,11 @@ async function getSlugPrefixConfig(engine: BrainEngine, key: string, fallback: s
   return trimmed || fallback;
 }
 
+/** Where pattern pages land; also a dream output directory synthesize discovery excludes (#5471). */
+export async function loadPatternsOutputSlugPrefix(engine: BrainEngine, outputRoot: string): Promise<string> {
+  return getSlugPrefixConfig(engine, 'dream.patterns.output_slug_prefix', `${outputRoot}/personal/patterns`);
+}
+
 async function loadPatternsConfig(engine: BrainEngine): Promise<PatternsConfig> {
   const enabledStr = await engine.getConfig('dream.patterns.enabled');
   const enabled = enabledStr === null ? true : enabledStr === 'true';
@@ -493,9 +502,7 @@ async function loadPatternsConfig(engine: BrainEngine): Promise<PatternsConfig> 
     sourceSlugPrefix: await getSlugPrefixConfig(
       engine, 'dream.patterns.source_slug_prefix', `${outputRoot}/personal/reflections`,
     ),
-    outputSlugPrefix: await getSlugPrefixConfig(
-      engine, 'dream.patterns.output_slug_prefix', `${outputRoot}/personal/patterns`,
-    ),
+    outputSlugPrefix: await loadPatternsOutputSlugPrefix(engine, outputRoot),
     subagentTimeoutMs: await getNumberConfig(
       engine, 'dream.patterns.subagent_timeout_ms', DEFAULT_PATTERNS_SUBAGENT_TIMEOUT_MS,
     ),

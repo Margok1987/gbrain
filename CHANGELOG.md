@@ -10,6 +10,66 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.3.0] - 2026-09-28
+
+**Dream stops paying for the same transcripts every cycle, and claude.ai and ChatGPT connectors can finish connecting.**
+
+A synthesis model that looks at a transcript and decides nothing is worth writing
+now counts as done. Before, that answer was treated as a failure, so the next
+autopilot cycle sent the same transcript again, and paid again. The patterns
+phase had the same problem when it reviewed your reflections and found no new
+pattern. Real failures still fail and retry: every write refused, a cut-off
+answer, or prose that never called the write tool.
+
+Dream also stops feeding on its own output. Sessions gbrain runs through the
+`claude-cli` provider no longer land in your transcript corpus, and captures
+already there are skipped by synthesis and by the background sweep. Pages a
+failed synthesis run left without their dream marker are skipped by location, so
+a corpus folder that covers your brain checkout no longer re-synthesizes them.
+
+| Situation | Before | Now |
+| --- | --- | --- |
+| Synthesis model skips a transcript | Job fails, transcript re-billed next cycle | Job completes, cooldown applies |
+| Patterns run finds nothing new | Job fails, same reflections re-run | Job completes, evidence marked consumed |
+| gbrain's own `claude-cli` session ends | Written into the dream corpus | Skipped |
+| Unmarked dream output inside the corpus folder | Synthesized again | Skipped by path |
+| claude.ai connector on a writer client | Always read-only | Gets write when the client allows it |
+| ChatGPT connector sends the site root as its resource | Endless reconnect loop | Connects |
+| Any other unexpected resource | Token minted, then refused | Clear `invalid_target` error naming the right URL |
+| `gbrain mcp expose --funnel` on current Tailscale | Refused as "Funnel not enabled" | Publishes |
+
+### To take advantage of v0.60.3.0
+
+Run `gbrain upgrade`. No migration or repair step is needed: synthesis, patterns
+and the sweep pick up the new rules on their next run.
+
+- **claude.ai connector stuck read-only:** remove and re-add the connector after
+  upgrading, so it requests write again. A client registered read-only stays
+  read-only.
+- **ChatGPT connector looping:** reconnect it. Existing grants bound to your
+  server's root URL keep working and are bound to `/mcp` from now on.
+- **Self-captures already in your corpus:** synthesis and the sweep skip the ones
+  gbrain can still identify. Captures older than Claude Code's own transcript
+  retention can't be identified and are processed as ordinary transcripts;
+  remove them by hand if you find any.
+
+### Itemized changes
+
+#### Dream and paid loops
+
+- An explicit oneshot skip (`{"pages":[],"skipped":true}`) completes the synthesis job, so the transcript keeps its completion record and the phase cooldown stamps. Contributed by @mariopenterman (#5590, #5193).
+- The patterns phase submits its child with `allow_clean_zero_writes`: a clean finish that ran at least one tool and wrote nothing completes, so the evidence watermark stamps. Older workers ignore the field and keep the strict behavior. Contributed by @Masashi-Ono0611 (#5540).
+- Both rules live in one predicate. Every attempted write failing, a dirty stop, a prose-only finish and a run whose only tools failed still dead-letter.
+- `gbrain hook session-end` skips sessions whose transcript path or working directory carries the `claude-cli` scratch fingerprint, recording `segment: self_transcript` in the heartbeat. Contributed by @furuchanchan (#5413).
+- Synthesis discovery and the sweep's corpus pass skip corpus files whose session id matches a `claude-cli` scratch session Claude Code still has on disk. The sweep marks them processed so they are not retried every tick (#5413).
+- Synthesis discovery skips files under the reflections, originals, patterns and cycle-summary directories of the brain checkout, matched on resolved paths (symlinks included), whatever their frontmatter says. `--unsafe-bypass-dream-guard` turns this off along with the marker check (#5471).
+
+#### Remote MCP connections
+
+- The `/mcp` sign-in challenge suggests `read write`. Clients that request exactly the suggested scope now get write when their registration allows it; the grant is still capped to the registered scope. Contributed by @howardpark (#5277).
+- `/authorize`, code exchange and token refresh share one resource check derived from `--public-url`. The server's origin is accepted as an alias of its `/mcp` resource; any other resource is refused with `invalid_target` and a description naming the accepted URL, before a sign-in request is created or a code is spent (#5222).
+- `gbrain mcp expose --funnel` recognizes the Funnel capability in the forms current Tailscale reports (`funnel` and `https://tailscale.com/cap/funnel-ports?ports=…`) as well as the older URL form (#5599).
+
 ## [0.59.13.0] - 2026-09-28
 
 **Search now credits a page when several retrieval methods agree on it, keeps the reranker's order, and stops hiding timeline evidence behind "who is" questions.**
