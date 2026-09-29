@@ -111,3 +111,25 @@ test('an identical file still becomes the page origin, and a Git subfolder sourc
     }
   });
 }, 180_000);
+
+test('a Git subfolder page never matches a source-relative file whose scanned slug is another page', async () => {
+  await withEnv({ GBRAIN_HOME: home, OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined }, async () => {
+    for (const engine of engines) {
+      await disposePersistenceConsumer(engine);
+      await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+      const id = `unbound-${randomUUID().slice(0, 12)}`, repo = join(home, id), root = join(repo, 'docs');
+      mkdirSync(join(root, 'architecture'), { recursive: true });
+      execFileSync('git', ['init', '-q', repo]);
+      await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,\'{"slug_root_mode":"git-root"}\')', [id, root]);
+      // In Git-root mode this file's slug is docs/architecture/topologies, not architecture/topologies.
+      await importFromContent(engine, 'architecture/topologies', databaseSide, { sourceId: id, noEmbed: true });
+      writeFileSync(join(root, 'architecture/topologies.md'), fileSide);
+      await claimWorktree(engine, id, root);
+      const registration = await registerLocalWriter(engine, 'cli');
+      await withVerifiedLocalRegistration(engine, registration, async () => {
+        await expect(runReconcilePreview(engine, { source_id: id, slug: 'architecture/topologies' })).rejects.toMatchObject({ code: 'source_changed' });
+      });
+      expect(readFileSync(join(root, 'architecture/topologies.md'), 'utf8')).toBe(fileSide);
+    }
+  });
+}, 180_000);

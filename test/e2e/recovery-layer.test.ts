@@ -5,7 +5,7 @@
 import { describe, test } from 'bun:test';
 import {
   budgetAndResumeContract, planListsRepairStepsIndependentOfTarget, remediateWithoutConsentSkipsRepairs,
-  remoteCallerCannotRunRepairs, remoteLinesForWaveFindings, scriptedRecoveryRun, swallowedExhaustionIsReported,
+  remoteCallerCannotRunRepairs, remoteLinesForWaveFindings, scriptedRecoveryRun, swallowedExhaustionIsReported, jobsRecheckedAfterRepairReservations, pendingEmbeddingsResume,
 } from '../helpers/wave-scenarios.ts';
 
 const url = process.env.DATABASE_URL;
@@ -20,4 +20,6 @@ describe.skipIf(!url)('recovery layer (Postgres)', () => {
   test('zero budget, paid refusal and resume contract', () => budgetAndResumeContract(url), 240_000);
   test('remote caller cannot run repairs', () => remoteCallerCannotRunRepairs(url), 240_000);
   test('a swallowed budget exhaustion is still reported', () => swallowedExhaustionIsReported(url), 240_000);
+  test('job steps are rechecked after repair reservations', () => jobsRecheckedAfterRepairReservations(url), 240_000);
+  test('pending embeddings resume from the checkpoint', () => pendingEmbeddingsResume(url), 240_000);
 });

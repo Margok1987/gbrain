@@ -54,6 +54,8 @@ export interface RemediationCheckpoint {
   /** Settled spend across the original run and its resumes. */
   spent_usd?: number;
   manifest?: { job_ids: string[]; repair_kinds: string[] };
+  /** Sources whose re-sealed pages still need embeddings after the budget ran out mid-repair. */
+  pending_embed_sources?: string[];
 }
 
 function checkpointDir(): string {

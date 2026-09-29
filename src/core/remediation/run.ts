@@ -111,7 +111,9 @@ export async function runRemediation(
   let repairSteps: RepairPlanStep[] = repairs
     ? await planRepairSteps(engine, { noEmbed: repairs.noEmbed, kinds: manifest ? manifest.repair_kinds as RepairPlanStep['kind'][] : undefined })
     : [];
-  if (initialPlan.target_unreachable && !(includeRepairs && repairSteps.length)) {
+  // Embeddings a budget stop left behind after re-sealing; the re-sealed pages no longer show up in a repair plan.
+  let pendingEmbedSources = includeRepairs && manifest ? [...(cp?.pending_embed_sources ?? [])] : [];
+  if (initialPlan.target_unreachable && !(includeRepairs && (repairSteps.length || pendingEmbedSources.length))) {
     hooks.onTargetUnreachable?.(targetScore, initialPlan.max_reachable_score);
     return synthetic(initialPlan.brain_score_current, {
       target_unreachable: { target: targetScore, ceiling: initialPlan.max_reachable_score },
@@ -127,7 +129,7 @@ export async function runRemediation(
     .filter((r) => r.status === 'remediable' && (!manifest || manifest.job_ids.includes(r.id)));
   const skippedRepairs = includeRepairs ? [] : repairSteps;
   if (!includeRepairs) repairSteps = [];
-  if (recs.length === 0 && repairSteps.length === 0) {
+  if (recs.length === 0 && repairSteps.length === 0 && pendingEmbedSources.length === 0) {
     hooks.onNothingToDo?.(initialHealth.brain_score, targetScore);
     return {
       ...synthetic(initialHealth.brain_score),
@@ -203,16 +205,16 @@ export async function runRemediation(
   // patterns, consolidate) or a repair step auto-enforces the cap. On
   // BudgetExhausted, the onExhausted callback persists the checkpoint BEFORE
   // the throw propagates; the caller hook surfaces the actionable --resume hint.
-  const remediateTracker = new BudgetTracker({
-    label: 'remediation.run',
-    maxCostUsd: remainingCap,
-  });
-  // Effect kinds embed in the persistence consumer, outside this tracker, so their estimate is reserved up front.
+  // Repairs run first under their own tracker; job steps then get a tracker capped at what the repairs left,
+  // so in-process spend, reserved effect estimates and job spend all draw on one cumulative cap.
+  const repairTracker = new BudgetTracker({ label: 'remediation.repairs', maxCostUsd: remainingCap });
+  let jobTracker: InstanceType<typeof BudgetTracker> | undefined;
+  // Effect kinds embed in the persistence consumer, outside any tracker, so their estimate is reserved up front.
   let reservedUsd = 0;
   let trackerExhausted = false;
-  remediateTracker.onExhausted(() => { trackerExhausted = true; });
-  const settledUsd = () => spentBefore + remediateTracker.totalSpent + reservedUsd;
-  const remainingUsd = () => remainingCap === undefined ? undefined : Math.max(0, remainingCap - remediateTracker.totalSpent - reservedUsd);
+  const spentThisRun = () => repairTracker.totalSpent + reservedUsd + (jobTracker?.totalSpent ?? 0);
+  const settledUsd = () => spentBefore + spentThisRun();
+  const remainingUsd = () => remainingCap === undefined ? undefined : Math.max(0, remainingCap - spentThisRun());
 
   let exhaustionSnapshot: NonNullable<RemediationResult['budget_exhausted']> | undefined;
   const saveCheckpoint = () => {
@@ -237,22 +239,52 @@ export async function runRemediation(
       ...(repairs ? {
         brain_id: brainId, max_usd: maxUsd ?? null, include_repairs: includeRepairs,
         spent_usd: settledUsd(), manifest: originalManifest,
+        ...(pendingEmbedSources.length ? { pending_embed_sources: pendingEmbedSources } : {}),
       } : {}),
     });
   };
-  remediateTracker.onExhausted(saveCheckpoint);
+  const watch = (tracker: InstanceType<typeof BudgetTracker>) => {
+    tracker.onExhausted(() => { trackerExhausted = true; });
+    tracker.onExhausted(saveCheckpoint);
+  };
+  watch(repairTracker);
 
   const runRepairs = async (): Promise<void> => {
-    if (!repairs || repairSteps.length === 0) return;
+    if (!repairs) return;
+    if (pendingEmbedSources.length) {
+      const { embedStaleForSource } = await import('../embed-stale.ts');
+      let status: RepairStepResult['status'] = 'completed';
+      let embedded = 0;
+      if (remainingUsd() === 0) status = 'budget_refused';
+      for (const sourceId of status === 'completed' ? [...pendingEmbedSources] : []) {
+        if (trackerExhausted) break;
+        let result: Awaited<ReturnType<typeof embedStaleForSource>> | undefined;
+        try { result = await embedStaleForSource(engine, sourceId); } catch (error) { if (!(error instanceof BudgetExhausted)) throw error; }
+        embedded += result?.embedded ?? 0;
+        // A source is done only when the pass finished without leaving chunks behind.
+        if (!trackerExhausted && result && !result.failures && result.complete !== false && !result.remaining) {
+          pendingEmbedSources = pendingEmbedSources.filter((id) => id !== sourceId);
+        }
+      }
+      if (trackerExhausted) status = 'budget_exhausted';
+      else if (status === 'completed' && pendingEmbedSources.length) status = 'stopped';
+      repairResults.push({ id: 'repair:safe-chunks:embeddings', kind: 'safe-chunks', status, applied: embedded, skipped: 0,
+        ...(status === 'budget_exhausted' || status === 'budget_refused' ? { message: 'The --max-usd budget does not cover the embeddings of re-sealed pages; resume with a higher cap to continue.' }
+          : status === 'stopped' ? { message: `Some re-sealed pages still lack embeddings (${pendingEmbedSources.join(', ')}); check the embedding provider, then run gbrain embed --stale.` } : {}) });
+    }
+    if (repairSteps.length === 0) return;
     for (const step of repairSteps) hooks.onRepairStepStart?.(step);
     const results = await runRepairSteps(engine, repairSteps, { remote: repairs.remote, noEmbed: repairs.noEmbed, remainingUsd,
       charge: (usd) => { reservedUsd += usd; }, exhausted: () => trackerExhausted,
       onStep: (step, result) => hooks.onRepairStepEnd?.(step, result) });
     repairResults.push(...results);
+    // A re-seal whose embeddings the budget cut short resumes as an embedding pass over the same sources.
+    if (results.some((r) => r.kind === 'safe-chunks' && r.status === 'budget_exhausted')) {
+      pendingEmbedSources = [...new Set([...pendingEmbedSources, ...(await (await import('../repair/core.ts')).resolveRepairScope(engine)).source_ids])];
+    }
   };
 
   const runLoop = async (): Promise<void> => {
-    await runRepairs();
     let stepCount = 0;
     const totalSteps = recs.length;
     while (recs.length > 0 && stepCount < maxJobs) {
@@ -370,7 +402,18 @@ export async function runRemediation(
 
   let budgetAbort: NonNullable<RemediationResult['budget_exhausted']> | undefined;
   try {
-    await withBudgetTracker(remediateTracker, runLoop);
+    try { await withBudgetTracker(repairTracker, runRepairs); }
+    catch (err) { if (!(err instanceof BudgetExhausted)) throw err; }
+    // Job estimates are rechecked against what the repairs left, including reserved effect estimates.
+    const afterRepairs = remainingUsd();
+    if (recs.length && afterRepairs !== undefined && (trackerExhausted || estJobUsd > afterRepairs)) {
+      hooks.onBudgetRefused?.(estJobUsd, afterRepairs);
+      jobsBudgetRefused = true;
+      recs = [];
+    }
+    jobTracker = new BudgetTracker({ label: 'remediation.run', maxCostUsd: afterRepairs });
+    watch(jobTracker);
+    await withBudgetTracker(jobTracker, runLoop);
   } catch (err) {
     if (err instanceof BudgetExhausted) {
       budgetAbort = exhaustionSnapshot;
@@ -378,6 +421,8 @@ export async function runRemediation(
       throw err;
     }
   }
+  // Tracker snapshots are per phase; report the operator's cumulative cap and settled spend.
+  if (budgetAbort) budgetAbort = { ...budgetAbort, spent: settledUsd(), cap: maxUsd ?? budgetAbort.cap };
   // A paid repair step the cap refused (or that ran out mid-step) ends the
   // run as budget-exhausted even though the free steps completed.
   const refusedRepair = repairResults.find((r) => r.status === 'budget_refused' || r.status === 'budget_exhausted');

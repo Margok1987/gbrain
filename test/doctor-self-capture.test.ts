@@ -6,7 +6,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -73,6 +73,18 @@ describe('self_capture doctor check', () => {
     const after = await selfCaptureCheck(engine, { projectsRoot: projects });
     expect(after).toMatchObject({ status: 'ok', details: { classified: 0, unclassifiable: 1 } });
     expect(after.message).toContain('cannot be decided');
+  });
+
+  test.skipIf(process.getuid?.() === 0)('an unreadable nested corpus directory makes health unknown, never an exact count', async () => {
+    const locked = join(corpus, 'locked');
+    mkdirSync(locked);
+    writeFileSync(join(locked, 'self-a.txt'), 'hidden');
+    chmodSync(locked, 0o000);
+    try {
+      await engine.setConfig('dream.synthesize.session_corpus_dir', corpus);
+      const check = await selfCaptureCheck(engine, { projectsRoot: projects });
+      expect(check).toMatchObject({ status: 'warn', details: { health: 'unknown', count: 'lower_bound', unreadable_dirs: 1 } });
+    } finally { chmodSync(locked, 0o755); rmSync(locked, { recursive: true, force: true }); }
   });
 
   test('an unreadable or missing corpus directory reports unknown health, never an exact zero', async () => {

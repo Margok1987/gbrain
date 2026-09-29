@@ -223,3 +223,44 @@ export async function swallowedExhaustionIsReported(databaseUrl?: string) {
     }, { databaseUrl, kinds: ['safe_index'] });
   } finally { resetGateway(); }
 }
+
+/** Reserved effect-repair estimates reduce what job steps may spend: a job that fit before the repairs is refused after them. */
+export async function jobsRecheckedAfterRepairReservations(databaseUrl?: string) {
+  configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: 1536, env: {} });
+  try {
+    await waveBrain(async ({ engine }) => {
+      const { makeRemediationStep } = await import('../../src/core/remediation-step.ts');
+      const job = makeRemediationStep({ id: 'test.paid-job', job: 'lint', params: {}, severity: 'low', est_seconds: 1, est_usd_cost: 1,
+        rationale: 'a job whose estimate equals the whole cap' } as never);
+      const result = await runRemediation(engine, { targetScore: 0, maxUsd: 1, extraRemediations: [job], repairs: { include: true, remote: false } });
+      expect(result.repairs).toEqual([expect.objectContaining({ kind: 'timeline', status: 'completed' })]);
+      expect(result.submitted).toEqual([]);
+      expect(result.budget_exhausted).toMatchObject({ cap: 1, reason: 'max_usd' });
+      expect(result.budget!.spent_usd).toBeGreaterThan(0);
+    }, { databaseUrl, kinds: ['timeline'] });
+  } finally { resetGateway(); }
+}
+
+/** Embeddings a budget stop left after re-sealing resume from the checkpoint even though the pages left the repair plan. */
+export async function pendingEmbeddingsResume(databaseUrl?: string) {
+  configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: 1536, env: {} });
+  try {
+    await waveBrain(async ({ engine }) => {
+      await capture(async () => { const { runRepairCommand } = await import('../../src/commands/repair.ts'); await runRepairCommand(engine, ['safe-chunks', '--apply', '--no-embed']); });
+      const { planRepairSteps } = await import('../../src/core/remediation/repairs.ts');
+      expect(await planRepairSteps(engine)).toEqual([]);
+      const brainId = (await engine.executeRaw<{ brain_id: string }>('SELECT brain_id FROM persistence_brain WHERE singleton=1'))[0]!.brain_id;
+      saveRemediationCheckpoint({ schema_version: 1, plan_hash: 'pendingembeds001', doctor_run_id: 'x', target_score: 90, started_at: new Date().toISOString(),
+        completed: [], aborted_at: new Date().toISOString(), abort_reason: 'budget_exhausted', brain_id: brainId, max_usd: 0, include_repairs: true,
+        spent_usd: 0, manifest: { job_ids: [], repair_kinds: ['safe-chunks'] }, pending_embed_sources: ['default'] });
+      const stopped = await runRemediation(engine, { resume: true, resumePlanHash: 'pendingembeds001', repairs: { include: false, remote: false } });
+      expect(stopped.repairs).toEqual([expect.objectContaining({ id: 'repair:safe-chunks:embeddings', status: 'budget_refused' })]);
+      expect(stopped.budget_exhausted).toMatchObject({ cap: 0 });
+      expect(loadRemediationCheckpoint('pendingembeds001')!.pending_embed_sources).toEqual(['default']);
+      // With a raised cap the pass runs; with no provider key nothing is embedded, so it reports the gap instead of completing.
+      const ran = await runRemediation(engine, { resume: true, resumePlanHash: 'pendingembeds001', maxUsd: 5, repairs: { include: false, remote: false } });
+      expect(ran.repairs).toEqual([expect.objectContaining({ id: 'repair:safe-chunks:embeddings', status: 'stopped' })]);
+      expect(ran.repairs![0]!.message).toContain('gbrain embed --stale');
+    }, { databaseUrl, kinds: ['safe_index'] });
+  } finally { resetGateway(); }
+}
