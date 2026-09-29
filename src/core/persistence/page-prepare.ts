@@ -69,6 +69,10 @@ function putProvenance(row: WriteRequest, snapshot: PageSnapshot | null, parsed:
 export async function prepareFileTarget(engine: BrainEngine, row: Pick<WriteRequest, 'source_id' | 'worktree_id' | 'slug'>, snapshot: PageSnapshot | null,
   content: string | null, hostId?: string, options: { allowMissing?: boolean; capture?: { path: string; hash: string } } = {}): Promise<PreparedMutation['file']> {
   if (!row.worktree_id) return undefined;
+  // #5254: a page written while its source was unbound stays database-only in
+  // every state (live, tombstone, restore, revert, delete, purge); any file at
+  // its derived path is not its canonical file and is neither written nor removed.
+  if (snapshot && !snapshot.page.source_path && await isUnboundSourcePage(engine, row.source_id, row.slug)) return undefined;
   const binding = await getWorktreeBinding(engine, row.source_id, hostId);
   if (!binding?.local_path) throw new OperationError('owner_unavailable', 'The canonical worktree is unavailable on this host.');
   const root = join(binding.local_path, binding.relative_path);
@@ -83,7 +87,7 @@ export async function prepareFileTarget(engine: BrainEngine, row: Pick<WriteRequ
     // A declared db_only page has no canonical file by design and publishes to
     // the database only. gbrain.yml is consulted only here, where the write
     // would otherwise refuse, so an invalid config can only change the refusal.
-    if (isSourceDbOnlySlug(root, row.slug, 'refuse') || await isUnboundSourcePage(engine, row.source_id, row.slug)) return undefined;
+    if (isSourceDbOnlySlug(root, row.slug, 'refuse')) return undefined;
     throw new OperationError('source_changed', 'The canonical file was removed outside coordinated publication.',
       'Import the local deletion or recover the canonical file before editing this page.');
   }
@@ -114,8 +118,8 @@ export async function prepareFileTarget(engine: BrainEngine, row: Pick<WriteRequ
 /**
  * Receipt reason for a page write that publishes no file. Invariant: for a
  * bound row, prepareFileTarget returns no target only for a live declared
- * db_only page, or a page written while its source was unbound (#5254), whose
- * file is absent; every other case returns a target or throws.
+ * db_only page whose file is absent, or a page written while its source was
+ * unbound (#5254) in any state; every other case returns a target or throws.
  */
 export function databaseOnlyPublication(row: Pick<WriteRequest, 'worktree_id'>, file: PreparedMutation['file']): Pick<PreparedMutation, 'databaseOnlyReason'> {
   return row.worktree_id && !file ? { databaseOnlyReason: 'db_only' } : {};

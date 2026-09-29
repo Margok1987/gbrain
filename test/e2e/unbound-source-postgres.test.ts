@@ -243,6 +243,43 @@ d('#5254 Postgres put_page to an unbound filesystem source', () => {
     expect(await classification()).toBe('unbound_source');
   });
 
+  test('after binding, delete, restore and revert of a database-only page never touch a canonical file', async () => {
+    await engine.setConfig('persistence.unbound_write', 'database_only');
+    expect((await put('Original while unbound.')).payload.state).toBe('committed');
+    expect((await put('Second while unbound.')).payload.state).toBe('committed');
+    await bindAndActivate();
+    const file = join(root, `${slug}.md`);
+    const mutate = async (name: string, params: Record<string, unknown> = {}) => {
+      const current = await engine.readPageSnapshot(slug, { sourceId: 'default', includeDeleted: true });
+      const result = await dispatch(name, { slug, request_id: randomUUID(), expected_revision: current!.revision, ...params });
+      expect(result.response.isError, JSON.stringify(result.payload)).not.toBe(true);
+      expect(result.payload.state).toBe('committed');
+      expect(existsSync(file)).toBe(false);
+      expect(await classification()).toBe('unbound_source');
+      return result;
+    };
+    await mutate('delete_page');
+    expect((await mutate('restore_page')).payload.write_through).toMatchObject({ written: false, skipped: 'unbound_source' });
+    expect((await engine.getPage(slug, { sourceId: 'default' }))?.compiled_truth).toContain('Second while unbound.');
+    const [version] = await engine.executeRaw<{ id: number }>(
+      "SELECT v.id FROM page_versions v JOIN pages p ON p.id=v.page_id WHERE p.source_id='default' AND p.slug=$1 AND v.compiled_truth LIKE '%Original while unbound.%' ORDER BY v.id LIMIT 1", [slug]);
+    await mutate('delete_page');
+    await mutate('revert_version', { version_id: Number(version.id) });
+    expect((await engine.getPage(slug, { sourceId: 'default' }))?.compiled_truth).toContain('Original while unbound.');
+    // An unrelated file at the page's path is neither refused against nor removed by a delete.
+    writeFileSync(file, content('Unrelated file.'));
+    const current = await engine.readPageSnapshot(slug, { sourceId: 'default', includeDeleted: true });
+    const deleted = await dispatch('delete_page', { slug, request_id: randomUUID(), expected_revision: current!.revision });
+    expect(deleted.payload.state, JSON.stringify(deleted.payload)).toBe('committed');
+    expect(existsSync(file)).toBe(true);
+    const tombstone = await engine.readPageSnapshot(slug, { sourceId: 'default', includeDeleted: true });
+    const purged = await submitPageMutation(localContext(), { operation: 'delete_page',
+      params: { slug, purge: true, request_id: randomUUID(), expected_revision: tombstone!.revision } });
+    expect(purged.state).toBe('committed');
+    expect(await engine.readPageSnapshot(slug, { sourceId: 'default', includeDeleted: true })).toBeNull();
+    expect(existsSync(file)).toBe(true);
+  });
+
   test('doctor reports the unbound_source count: ok with the bind command while unbound, warn after binding', async () => {
     const { checkUnboundSource } = await import('../../src/commands/doctor/checks/unbound-source.ts');
     const empty = await checkUnboundSource(engine);
