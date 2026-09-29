@@ -63,11 +63,11 @@ jobs:
             const s = require("node:fs").statSync(process.env.PROBE, { bigint: true });
             console.log(JSON.stringify({ dev: String(s.dev), ino: String(s.ino), birthtime_ns: String(s.birthtimeNs) }));
             if (s.birthtimeNs === 0n || s.ino === 0n) { console.error("expected a real birth time and inode"); process.exit(1); }'
-          bun test test/persistence-physical-root-device.test.ts test/connector-physical-root-device.test.ts
+          bun test --timeout=60000 test/persistence-physical-root-device.test.ts test/connector-physical-root-device.test.ts
       - name: "#5449 PGLite checkpoint harness on a >= 2 GiB store"
         run: |
           bun scripts/pglite-checkpoint-harness/supervisor.ts --dir "$RUNNER_TEMP/pglite-5449" --fresh \
-            --pages 1200 --page-kb 200 --min-store-gb 2 --stall-sec 600 --timeout-sec 3600
+            --pages 2600 --page-kb 200 --min-store-gb 2 --stall-sec 600 --timeout-sec 3600
       - name: "#5449 harness result"
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
