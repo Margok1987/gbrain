@@ -241,7 +241,7 @@ CREATE TABLE IF NOT EXISTS content_chunks (
   -- #4246 (v133): md5(chunk_text) at embed time. NULL = no embedding or
   -- pre-v133 row (grandfathered by invalidateContentDriftEmbeddings).
   embedded_text_hash TEXT,
-  -- #5553 (v168): embedding-input provenance written with the vector.
+  -- #5553 (v171): embedding-input provenance written with the vector.
   embedding_input_hash TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   -- v0.19.0: code chunk metadata (markdown chunks leave NULL).
@@ -1282,6 +1282,13 @@ CREATE TABLE IF NOT EXISTS extract_atoms_page_state (
 CREATE INDEX IF NOT EXISTS extract_atoms_page_state_tombstoned_idx
   ON extract_atoms_page_state (source_incarnation, content_hash, page_id) WHERE tombstoned;
 CREATE INDEX IF NOT EXISTS extract_atoms_page_state_page_idx ON extract_atoms_page_state (page_id);
+-- Durable record that a transcript was synthesized; survives minion_jobs pruning.
+CREATE TABLE IF NOT EXISTS dream_synthesis_completions (
+  source_id TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (source_id, idempotency_key)
+);
 
 `;
 

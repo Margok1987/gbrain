@@ -20,7 +20,7 @@ import { repairTimelineDedupIndex, repairLegacyTimelineSourceRows } from './time
 import { repairPagesUpsertArbiter } from './pages-upsert-arbiter.ts';
 import { repairLinkSourceCheck, LINK_SOURCE_GATE_MIGRATION_VERSION } from './link-source-check-repair.ts';
 import { GRANT_COLUMNS_SQL, GRANT_AUDIT_SCHEMA_SQL, GRANT_SPEND_COLUMNS_SQL } from './grants/schema.ts';
-import { FACT_WITHDRAWAL_SCHEMA_SQL, FACT_WITHDRAWAL_BACKFILL_SQL } from './facts/withdrawal-schema.ts';
+import { FACT_WITHDRAWAL_SCHEMA_SQL, FACT_WITHDRAWAL_BACKFILL_SQL, FACT_WITHDRAWAL_SUBJECT_SQL } from './facts/withdrawal-schema.ts';
 import { repairLegacyClientGrants } from './grants/migration.ts';
 import { PROJECTION_STATISTICS_SQL, verifyProjectionStatistics } from './search/projection-statistics.ts';
 import { SHARED_SKILLS_SCHEMA_SQL } from './shared-skills/schema-all.ts';
@@ -6669,16 +6669,56 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
       ${MANAGED_WRITER_GUARD_SQL}`,
   },
   {
-    version: 167, name: 'index_parked_persistence_effects', idempotent: true, transaction: false, sql: '',
+    // A legacy DB-only row can name a fence row as its successor. The fence
+    // reconcile deletes and reinserts that row, so a NO ACTION reference made
+    // the page fail to reconcile on every cycle. The superseded row stays
+    // expired; only the pointer to the replaced row clears.
+    version: 167,
+    name: 'facts_superseded_by_set_null',
+    idempotent: true,
+    sql: `
+      ALTER TABLE facts DROP CONSTRAINT IF EXISTS facts_superseded_by_fkey;
+      ALTER TABLE facts ADD CONSTRAINT facts_superseded_by_fkey
+        FOREIGN KEY (superseded_by) REFERENCES facts(id) ON DELETE SET NULL NOT VALID;
+      ALTER TABLE facts VALIDATE CONSTRAINT facts_superseded_by_fkey;
+    `,
+  },
+  {
+    // The only record that a transcript was synthesized was its completed
+    // subagent job row, which `jobs prune` deletes after 30 days; the next
+    // cycle then paid to synthesize it again. Prune archives the keys here.
+    version: 168,
+    name: 'dream_synthesis_completions',
+    idempotent: true,
+    sql: `
+      CREATE TABLE IF NOT EXISTS dream_synthesis_completions (
+        source_id TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (source_id, idempotency_key)
+      );
+    `,
+  },
+  {
+    // A withdrawal keyed only on the claim text expired and blocked that claim
+    // for every entity in the source. New withdrawals carry the forgotten
+    // row's subject; existing rows keep the source-wide '*' subject.
+    version: 169,
+    name: 'fact_withdrawal_subject',
+    idempotent: true,
+    sql: FACT_WITHDRAWAL_SUBJECT_SQL,
+  },
+  {
+    version: 170, name: 'index_parked_persistence_effects', idempotent: true, transaction: false, sql: '',
     handler: async engine => {
-      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 167, 'persistence_effects_parked');
-      await engine.runMigration(167, engine.kind === 'postgres'
+      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 170, 'persistence_effects_parked');
+      await engine.runMigration(170, engine.kind === 'postgres'
         ? PERSISTENCE_EFFECT_PARKED_INDEX_SQL.replace('CREATE INDEX', 'CREATE INDEX CONCURRENTLY')
         : PERSISTENCE_EFFECT_PARKED_INDEX_SQL);
     },
   },
   {
-    version: 168,
+    version: 171,
     name: 'content_chunks_embedding_input_hash',
     // #5553: per-chunk embedding-input provenance, written in the same
     // statement as the vector (src/core/embedding-input-hash.ts). A projection
@@ -6695,7 +6735,7 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     `,
   },
   {
-    version: 169, name: 'pages_safe_chunk_pending_index', idempotent: true, transaction: false, sql: '',
+    version: 172, name: 'pages_safe_chunk_pending_index', idempotent: true, transaction: false, sql: '',
     // #5050/#5247: the safe_index_pending probe (ops/search.ts) runs on every
     // remote search and now counts pages of every kind below the safe-chunk
     // fence, so the markdown-only partial pages_chunker_version_idx no longer
@@ -6703,18 +6743,18 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     // sealed brain). The literal 4 is SAFE_FENCE_CHUNKER_VERSION when this
     // migration shipped; a later fence bump needs its own index.
     handler: async engine => {
-      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 169, 'pages_safe_chunk_pending_idx');
-      await engine.runMigration(169, `CREATE INDEX ${engine.kind === 'postgres' ? 'CONCURRENTLY ' : ''}IF NOT EXISTS pages_safe_chunk_pending_idx
+      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 172, 'pages_safe_chunk_pending_idx');
+      await engine.runMigration(172, `CREATE INDEX ${engine.kind === 'postgres' ? 'CONCURRENTLY ' : ''}IF NOT EXISTS pages_safe_chunk_pending_idx
         ON pages (source_id) WHERE chunker_version < 4`);
     },
   },
   {
     // Paid-loop breaker (dream-breaker.ts) and its doctor check count dead
     // subagent submissions by finish time over the last 24 h.
-    version: 170, name: 'minion_jobs_dead_subagent_finished_index', idempotent: true, transaction: false, sql: '',
+    version: 173, name: 'minion_jobs_dead_subagent_finished_index', idempotent: true, transaction: false, sql: '',
     handler: async engine => {
-      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 170, 'idx_minion_jobs_dead_subagent_finished');
-      await engine.runMigration(170, `CREATE INDEX ${engine.kind === 'postgres' ? 'CONCURRENTLY ' : ''}IF NOT EXISTS idx_minion_jobs_dead_subagent_finished
+      if (engine.kind === 'postgres') await dropInvalidConcurrentIndex(engine, 173, 'idx_minion_jobs_dead_subagent_finished');
+      await engine.runMigration(173, `CREATE INDEX ${engine.kind === 'postgres' ? 'CONCURRENTLY ' : ''}IF NOT EXISTS idx_minion_jobs_dead_subagent_finished
         ON minion_jobs (finished_at) WHERE name = 'subagent' AND status = 'dead'`);
     },
   },

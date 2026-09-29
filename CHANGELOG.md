@@ -43,7 +43,7 @@ Dream stops paying for the same transcripts every cycle, and after three failure
 
 1. **Back up the database itself before upgrading:** `pg_dump` for Postgres, or a copy of the PGLite data directory made while gbrain is stopped.
 2. **Upgrade every machine that writes to the brain** and restart `gbrain serve`, autopilot, job supervisors and session hooks, so no older writer keeps running.
-3. **Run the orchestrator manually if schema work did not finish.** Migrations 167 to 170 add one column and three indexes.
+3. **Run the orchestrator manually if schema work did not finish.** Migrations 170 to 173 add one column and three indexes.
    ```bash
    gbrain apply-migrations --yes --no-autopilot-install
    ```
@@ -97,7 +97,7 @@ Health scores may dip after upgrading because doctor now counts things it used t
 #### Capacity and migrations
 
 - **Write capacity lasts much longer (#5470, mitigation).** `persistence.limits.*` and the new `persistence.receipt_retention_days` (default 30) are registered config keys, and malformed values are refused at set time. Defaults rise to 250,000 lifetime IDs and 1.5 GiB receipt bytes per principal and 8 GiB per brain. Compaction skips receipts with unfinished effects before its limit. The `persistence_capacity` doctor check warns at 80%, and `queue_capacity` refusals name the key and a value sized for another year. A very write-heavy connector still needs explicit limits.
-- Migration 167 adds a partial index for parked effects. Migration 168 adds nullable `content_chunks.embedding_input_hash`. Migration 169 adds a partial index of pages below the safe-chunk fence (concurrent on Postgres). Migration 170 adds a partial index on dead subagent jobs' finish time.
+- Migration 170 adds a partial index for parked effects. Migration 171 adds nullable `content_chunks.embedding_input_hash`. Migration 172 adds a partial index of pages below the safe-chunk fence (concurrent on Postgres). Migration 173 adds a partial index on dead subagent jobs' finish time.
 
 #### Paid loops and connectors
 
@@ -126,6 +126,142 @@ Health scores may dip after upgrading because doctor now counts things it used t
 - New write errors: `take_row_collision`, `invalid_source_uri`.
 - New dual-engine suites: `canonical-projection-history`, `derived-page-visibility`, `timeline-materialize`, `derived-visibility-repair`, `repair-command`, `safe-chunk-reseal`, `projection-embedding-input-hash`, `recall-grep-local-cli`, `persistence-capacity`, `persistence-effect-parking`, `extract-stale-managed`, `persistence-git-subdir-origin`, `persistence-guard-digest`, `persistence-physical-root-device`, `persistence-sync-cursor-options`, `capture-file-source-path`, `oauth-resource-canonical`, `persistence-consumer-idle`, `pglite-checkpoint-guard`, `dream-breaker`, `cycle-synthesize-breaker`, with Postgres arms in `test/e2e/`.
 - Intentional contract changes in existing tests: `serve-http-oauth` read-only discovery requests `read write` (the token stays `read`); `cycle-write-path-mini-eval` asserts that a declining child completes; `write-through` and `put-page-persistence` pin Git-root mode; `persistence-cli-delegation` expects `local_file`.
+
+## [0.59.18.0] - 2026-09-29
+
+**Dream no longer keeps made-up quotes, wrong-speaker quotes or invented numbers as memory, and `gbrain eval compare` computes the statistics it claims.**
+
+When the nightly dream cycle turns a conversation into brain pages, a mechanical check compares each quote with the transcript. Until now, a quote it could not find lost its quotation marks and stayed on the page as ordinary text, so an invented sentence became searchable memory. Pages that already existed (person pages, earlier reflections) were not checked at all, a close-match repair could splice in the next speaker's words, and numbers the transcript never mentioned were only counted.
+
+Now any sentence that fails the check leaves the page body and is kept word for word in the page's `unverified_claims` frontmatter, which `get_page` shows but search, recall and think do not read. A sentence fails when its quote appears in no source transcript, only matches across two speakers, is attributed to someone other than the person who said it, or when it states a number or date the transcript does not contain. Pages that already existed are checked on the sentences the run added, against the transcripts that wrote them. Timeline entries, facts and links derived from a failed sentence are removed with it. Each kept quote records its source file, character span and speaker in `grounding.quotes`.
+
+Measured on a fixed three-cycle experiment (3 transcripts, a scripted model that writes 13 supported claims and 17 invented ones, including edits into existing pages), counting what search and recall can read after the third cycle:
+
+| After 3 dream cycles | v0.59.13.0 | v0.59.18.0 |
+| --- | --- | --- |
+| Invented claims in active memory (of 17) | 17 | 2 |
+| of which fabricated quotes (of 6) | 6 | 0 |
+| of which speaker-swapped quotes (of 3) | 3 | 0 |
+| of which invented numbers (of 6) | 6 | 0 |
+| of which unquoted inventions with no number (of 2) | 2 | 2 |
+| Supported claims kept (of 13) | 13 | 13 |
+
+The fixture was written alongside the check, so treat it as a regression pin, not a hallucination rate for a real model. Plain-prose inventions with no quote or number are not mechanically checkable and still get through.
+
+`gbrain eval compare` printed "paired bootstrap with Bonferroni correction" but computed only side-by-side averages. It now computes paired statistics from per-question rows: for runs whose ledger record points at their per-question output, it joins the rows by question and reports a 95% bootstrap interval, a p-value and a Holm-corrected p-value for each metric. Runs without per-question rows are labeled aggregate-only, with no significance claim.
+
+### To take advantage of v0.59.18.0
+
+Run `gbrain upgrade`. There is no migration. The check applies to the next dream cycle; existing pages are not rescanned. To review what was held back, run `gbrain get <slug>` and read `unverified_claims`. To compare two LongMemEval runs with real statistics, record both with `gbrain eval longmemeval --record --output <file>` and run `gbrain eval compare --baseline <run_id> --candidate <run_id>`.
+
+### Itemized changes
+
+- `synthesize-verify.ts` checks sentence-sized claim units (sentences, list items, table rows) instead of bare quote spans, and quarantines a failing unit whole instead of removing its quotation marks.
+- Close-match quote repairs stay inside one speaker's turn and are trimmed to the matched words (write-path audit C-6); any match that touches a speaker label is refused.
+- Attribution check: when a sentence names a transcript speaker, the quote must come from that speaker's turn.
+- Numbers and dates are compared by value, so `$250K`, `$250,000` and `250 thousand` agree, as do `2026-03-14` and `March 14th`; the transcript file name counts as a source for dates.
+- Verification covers every page a child wrote. A page created during the run is checked whole; an older page is checked on the sentences missing from its revision before the run (`page_versions`), against every transcript that wrote it. Epochs come from the child jobs' creation time, so resumed children still count their own pages.
+- The unmanaged write-back re-projects timeline entries, facts, takes and links from the verified body in the same transaction. The managed path already re-projected timeline entries, facts and takes through its page publication.
+- New telemetry in `details.synthesis.quote_verify`: `quarantined_claims`, `pages_with_quarantine`, `preexisting_diffed`, `skipped_unchanged` and one counter per failure reason. `stripped`, `skipped_preexisting` and `numeric_claim_warns` are gone.
+- `gbrain eval compare`: `--baseline`, `--candidate`, `--draws`, `--seed`; JSON gains `paired` and `paired_unavailable`; Markdown gains a "Paired comparisons" table with a significant / not significant verdict. A per-question file path in the ledger must resolve inside the repository root; paths that escape it are refused and never read. The statistics module (`src/core/eval/paired-bootstrap.ts`) is a port of the gbrain-evals situation-recall comparator with a two-sided p-value.
+
+### For contributors
+
+- New tests: `test/cycle-repeated-consolidation.test.ts` (fails on v0.59.13.0, passes here), `test/eval-paired-bootstrap.test.ts`; extended `test/cycle-synthesize-verify.test.ts`, `test/eval-compare.test.ts`, `test/cycle-write-path-mini-eval.test.ts`.
+- `bun run scripts/repeated-consolidation-experiment.ts [--per-cycle]` prints the experiment as JSON ($0, no network). Record in `docs/eval/FIX_WAVE_BASELINES.md`.
+
+## [0.59.17.0] - 2026-09-28
+
+**Forgetting one person's fact no longer erases it for everyone, and several maintenance jobs stop quietly losing or overwriting your notes.**
+
+Say you tell your agent to forget that alice-example "prefers email". Before this release, gbrain forgot that sentence for every person in the brain: bob-example's identical fact was switched off too, rewritten as forgotten in his page the next time it was imported, and nobody could ever be remembered as preferring email again. Now a forget applies to the person or company it was about. Updating a fact ("works at acme-example" becomes "left acme-example") is also no longer treated as a forget, so the old wording can come back later and the update does not touch unrelated pages. That matters most for Gmail commitment tracking, which updates facts every time a due date moves.
+
+The nightly maintenance cycle got safer too. One broken facts table no longer stops every page after it from updating. A hand-written concept page is never replaced by a generated summary. A short page whose real content is its timeline is no longer mistaken for an empty duplicate and deleted. Cleaning up old background jobs no longer makes the brain pay to summarize the same conversations again.
+
+Live ChatGPT and Claude sync keeps up with renamed conversations, tracks progress separately for each source, keeps moving when you cap a run with `--limit`, and sets aside a conversation that keeps failing instead of re-fetching everything forever.
+
+### What changes for you
+
+| Situation | Before | Now |
+| --- | --- | --- |
+| Forget alice-example's "Prefers email" | Also switched off for bob-example and blocked for everyone | Only alice-example's fact is forgotten |
+| A remembered fact is updated | Old wording blocked forever, whole source re-indexed | Old row marked as replaced; nothing else touched |
+| One page's facts table has a bad row | Every later page stopped updating, every night | That page is reported; the rest update |
+| You wrote `concepts/flywheel` yourself | Replaced by a generated paragraph | Left untouched and reported |
+| Page `alice` holds only a title and a timeline | Deleted as an empty duplicate | Kept |
+| `gbrain jobs prune` after 30 days | Every transcript summarized (and paid for) again | Nothing re-runs |
+| Renamed ChatGPT/Claude conversation | New messages silently dropped | The existing page updates with them |
+| `gbrain connectors sync --limit 50`, run daily | The same newest 50 forever | 50 new ones each run until caught up |
+| Syncing the same account into a second source | Only the last week arrived | Full history |
+| One conversation always fails to download | Every run re-fetched the whole window | Set aside after 3 tries; progress continues |
+
+### How to use it
+
+Nothing to configure. Useful checks after upgrading:
+
+```bash
+gbrain connectors status --json            # watermark and last sync for the scheduled source
+gbrain connectors sync chatgpt --limit 50  # repeat until status is "success"; each run moves on
+gbrain dream --phase extract_facts         # a bad page now shows FACTS_RECONCILE_FAILED instead of failing the phase
+```
+
+**Say to your agent:** *"Forget that alice-example prefers email."* Only alice-example's fact is withdrawn.
+
+### Things to watch
+
+- Forgets you made before this release keep applying to every entity, exactly as they did, so upgrading never brings a forgotten fact back. New forgets are scoped to one entity. A fact that was never about anyone in particular still withdraws everywhere in its source.
+- A facts table with a confidence outside 0 to 1 (for example `7`) is now reported as malformed and that page's facts are left as they were until you fix the cell.
+- A conversation that fails 3 times at the same version is skipped until it changes upstream. `gbrain connectors sync <provider> --full` retries everything.
+
+### To take advantage of v0.59.17.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor`
+warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **No agent action is needed.** Migrations v167 to v169 are schema-only; there is no `skills/migrations` file for this release.
+3. **Verify the outcome:**
+   ```bash
+   gbrain doctor
+   gbrain connectors status
+   gbrain stats
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+#### Forget and supersession
+
+- Fact withdrawals are keyed by `(source_id, visibility, subject, fact_hash)`. `subject` is the forgotten row's `entity_slug`. `'*'` applies to every entity: subjectless facts use it, and so does every row recorded before migration v169. `recordFactWithdrawal`, the `facts_preserve_withdrawal` trigger, `isFactWithdrawn` (now takes the entity), the import and `get_page` snapshot overlays, and fact-embedding backfill all match `subject = '*' OR subject = entity_slug`. Fence rows match on their page slug.
+- `updateSlug` (both engines) and the phantom-redirect merge move a page's withdrawals to the new slug, so a rename never restores a forgotten claim.
+- `writeSingleFact` supersession strikes the old fence row with a `#N` supersession reference through `forgetFactInFence(..., { supersededBy })` and records no withdrawal. This path no longer invalidates the whole source, including from Gmail loop extraction.
+
+#### Cycle phases
+
+- `extract_facts` reconciles each page in isolation. A failure is reported as `<slug>: FACTS_RECONCILE_FAILED: <message>`, counted in `pagesFailed`, and booked as a halt in the extract rollup. `parseFactsFence` rejects confidence outside 0..1 as `FACTS_TABLE_MALFORMED`. Migration v167 makes `facts.superseded_by` `ON DELETE SET NULL`.
+- `synthesize_concepts` checks `concepts/<x>` before any LLM spend and skips pages without `synthesized_by: synthesize_concepts-*`, listing them in `details.skipped_human_owned`.
+- The phantom-redirect residue gate counts timeline text, `timeline_entries` rows, and frontmatter keys beyond `title`/`type`/`tags`.
+- `MinionQueue.prune` archives completed `dream:synth%` keys into the new `dream_synthesis_completions` table (migration v168) in the same statement that deletes them; synthesis idempotency reads both.
+
+#### Transcripts and chat connectors
+
+- `runTranscriptsIngest` imports a session at the slug its existing page already uses (matched on part 1's `frontmatter.id`), so a retitled or re-dated conversation updates in place.
+- Connector sync state is keyed by `(provider, source)`: `connectors.<p>.source.<id>.{watermark_iso,last_sync_at,synced,failed}`. A legacy per-provider watermark still applies to the scheduled `connectors.source_id` source until it writes its own. `auth_error_at` stays per provider.
+- Listed conversations whose `updatedAt` a source already ingested are skipped before the `--limit` cap. A conversation that fails `QUARANTINE_ATTEMPTS` (3) times at one `updatedAt` is quarantined and reported in `quarantined`; it stops holding the watermark back. Results also report `skippedUnchanged`.
+
+### For contributors
+
+- New regression suites: `test/facts-withdrawal-subject.test.ts`, `test/facts-supersede-not-withdrawal.test.ts`, `test/extract-facts-poison-page.test.ts`, `test/cycle/synthesize-concepts-human-owned.test.ts`, `test/transcripts-retitle.test.ts`, `test/e2e/connectors-sync-checkpoints-pglite.test.ts`, plus new cases in `test/phantom-redirect.test.ts` and `test/cycle-synthesize-daily-cap.test.ts`. All run on in-memory PGLite with no provider calls.
+- `watermarkKey` and `lastSyncAtKey` now take a source id; read connector progress through `readConnectorState`.
 
 ## [0.59.13.0] - 2026-09-28
 

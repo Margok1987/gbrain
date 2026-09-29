@@ -1,7 +1,7 @@
 /**
  * Dream paid-loop breaker on Postgres: the released key lands as a real jsonb
  * member through postgres.js (not a double-encoded string scalar), the shared
- * counter trips on it, and migration 170's partial index is valid.
+ * counter trips on it, and migration 173's partial index is valid.
  */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { hasDatabase, setupDB, teardownDB, getEngine } from './helpers.ts';
@@ -35,7 +35,7 @@ describePg('dream paid-loop breaker — Postgres', () => {
     expect((await loadDreamBreaker(engine))!.tripped.has(KEY)).toBe(false);
   });
 
-  test('migration 170 leaves a valid partial index on dead subagent finish times', async () => {
+  test('migration 173 leaves a valid partial index on dead subagent finish times', async () => {
     const rows = await getEngine().executeRaw<{ valid: boolean; def: string }>(
       `SELECT i.indisvalid AS valid, pg_get_indexdef(i.indexrelid) AS def FROM pg_index i
         WHERE i.indexrelid = to_regclass('idx_minion_jobs_dead_subagent_finished')`);
