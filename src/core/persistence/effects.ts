@@ -433,12 +433,15 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
       for (const effect of effects) {
         const attempt: EffectAttempt = {};
         try {
-          await engine.transaction(async tx => {
-            await guardEffectSource(tx, effect, opts.hostId);
+          // Sources sharing a worktree have their own relative roots: validate each path against its own binding.
+          const own = await engine.transaction(async tx => {
+            const guarded = await guardEffectSource(tx, effect, opts.hostId);
             const blocked = await tx.executeRaw('SELECT id FROM persistence_requests WHERE worktree_id=$1::uuid AND recovery IS NOT NULL LIMIT 1', [effect.worktree_id]);
             if (blocked.length) throw new OperationError('recovery_required', 'Canonical publication recovery must finish first.');
+            return guarded;
           });
-          const path = await singleFileGitTarget(engine, effect, binding, attempt);
+          if (!own?.local_path || own.local_path !== binding.local_path) throw new OperationError('source_changed', 'The effect canonical binding changed.');
+          const path = await singleFileGitTarget(engine, effect, { ...own, local_path: own.local_path }, attempt);
           if (path !== null) targets.push({ effect, path, attempt });
         } catch (error) { await recordFailure(engine, effect, error, opts.signal, attempt.target); }
       }
@@ -490,8 +493,10 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
       pushed = await pushGitRoot(root, opts.signal);
     } catch (error) { failure = error; } finally { await lock?.release(); }
     for (const { effect, git, target } of items) {
-      if (pushed) await completeEffect(engine, effect, { git, ...pushed });
-      else await recordFailure(engine, effect, failure, opts.signal, target);
+      try {
+        if (!pushed) throw failure;
+        await completeEffect(engine, effect, { git, ...pushed });
+      } catch (error) { await recordFailure(engine, effect, error, opts.signal, target); }
     }
   }
   return attempted;

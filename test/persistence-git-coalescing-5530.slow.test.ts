@@ -245,4 +245,24 @@ for (const kind of testBackends()) describe(`#5530 Git effect coalescing (${kind
     expect(await gitStates(engine)).toEqual({ committed: 4 });
     if (admitted.status === 'admitted') expect((await admitted.complete()).revision).toBeTruthy();
   }), 300_000);
+  test('sources sharing one worktree are each validated against their own binding', () => withBrain(kind, async ({ engine, home, ctx }) => {
+    const repo = makeRepo(home, 'content');
+    mkdirSync(join(repo.root, 'nested'));
+    await bindSource(engine, 'default', repo);
+    await engine.executeRaw("INSERT INTO sources (id, name, local_path) VALUES ('nested', 'nested', $1)", [join(repo.root, 'nested')]);
+    await claimWorktree(engine, 'nested', join(repo.root, 'nested'), localHostId());
+    await activateSharedSkillPersistence(engine, { confirmQuiesced: true });
+    const [shared] = await engine.executeRaw<{ n: number }>('SELECT count(DISTINCT worktree_id)::int AS n FROM persistence_source_bindings');
+    expect(Number(shared!.n)).toBe(1);
+    harden(repo);
+    const commitsBefore = repo.commits();
+    // The nested source's effect is claimed first, so it seeds the group.
+    await pauseGitEffects(engine, async () => { await seed(ctx('nested'), 2, 700); await seed(ctx('default'), 3); });
+    await release(engine);
+    await pass(engine);
+    expect(await gitStates(engine)).toEqual({ committed: 5 });
+    expect(repo.commits() - commitsBefore).toBe(1);
+    expect(git(repo.root, 'show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort())
+      .toEqual(['nested/notes/page-0700.md', 'nested/notes/page-0701.md', 'notes/page-0000.md', 'notes/page-0001.md', 'notes/page-0002.md']);
+  }), 300_000);
 });
