@@ -111,6 +111,15 @@ between 3.0× and 3.7×.
 The whole default PGLite gate (crash cases, schedules and soak) takes
 337–373 s.
 
+After the sequential-writer wake (below), the full default gate passed again on
+both engines with `full_gate: true` and all 8 crash cases: PGLite soak 28.52
+writes/s (351 s), Postgres soak 11.93 writes/s (838 s), on a VM with no master
+control. A same-VM 10,000-write Postgres soak then measured master 12.50,
+the pre-wake candidate 14.16 and the final candidate 14.00 writes/s, so the
+wake costs Postgres nothing measurable and the soak stays about 12% above
+master. Matched 3 × 1,000 on the wake commit: PGLite 8.88 → 31.27, Postgres
+11.90 → 14.86 (medians).
+
 ## Read latency (`scripts/persistence/performance.ts`, median of 3 runs)
 
 The statement cache is engine-wide, so read paths were checked against master
