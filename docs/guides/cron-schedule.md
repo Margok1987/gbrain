@@ -236,6 +236,14 @@ deliberate answer: the model explicitly skipped the transcript
 nothing new. It completes so the cooldown stamps instead of re-billing the
 same input.
 
+A dream key whose submissions died `dream.breaker.max_dead_submissions`
+times (default 3; `0` disables) within 24 hours is refused before the next
+submission, and `gbrain doctor` reports it as `dream_paid_loop`. Fix the
+cause first (a missing provider key, a quota, a failing transcript), then
+`gbrain dream reset-key --list` shows the refused keys and
+`gbrain dream reset-key '<key>'` re-enables one. Details in
+[spend controls](../operations/spend-controls.md#dream-paid-loop-breaker-dreambreakermax_dead_submissions).
+
 Three more fields answer "what did that cost and did it land":
 
 - `spend` — what the phase actually spent, `cost_basis: 'in+out+cache_read'`.
