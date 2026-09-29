@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { targetedWithdrawalEffect, upgradeWithdrawalEffect } from './effect-targets.ts';
 import { existsSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
@@ -42,6 +43,16 @@ export interface EffectWorkerOptions {
 }
 
 export async function selectedEffectPage(engine: BrainEngine, effect: PersistenceEffect): Promise<PageSnapshot | null> {
+  if (targetedWithdrawalEffect(effect)) {
+    for (const target of effect.data.targets!) {
+      if (effect.data.after_slug !== undefined && target.slug <= effect.data.after_slug) continue;
+      const snapshot = await engine.readPageSnapshot(target.slug, { sourceId: effect.source_id, includeDeleted: true });
+      if (snapshot?.page.id !== target.page_id || snapshot.sourceIncarnation !== effect.source_incarnation) continue;
+      if (effect.kind === 'embedding' && (snapshot.page.deleted_at || snapshot.revision !== target.revision)) continue;
+      return snapshot;
+    }
+    return null;
+  }
   let slug = effect.data.slug;
   if (effect.data.source_scan || effect.kind === 'withdrawal-mirror') {
     const [row] = await engine.executeRaw<{ slug: string }>('SELECT slug FROM pages WHERE source_id=$1 AND ($2::text IS NULL OR slug>$2) ORDER BY slug LIMIT 1',
@@ -53,7 +64,7 @@ export async function selectedEffectPage(engine: BrainEngine, effect: Persistenc
 }
 
 async function finishPage(engine: BrainEngine, effect: PersistenceEffect, snapshot: PageSnapshot | null, outcome: Record<string, unknown> = {}): Promise<void> {
-  if (snapshot && (effect.data.source_scan || effect.kind === 'withdrawal-mirror')) await advanceEffectCursor(engine, effect, snapshot.page.slug);
+  if (snapshot && (targetedWithdrawalEffect(effect) || effect.data.source_scan || effect.kind === 'withdrawal-mirror')) await advanceEffectCursor(engine, effect, snapshot.page.slug);
   else await completeEffect(engine, effect, outcome);
 }
 
@@ -94,10 +105,11 @@ async function mirrorPage(engine: BrainEngine, effect: PersistenceEffect, bindin
 async function gitPage(engine: BrainEngine, effect: PersistenceEffect, binding: WorktreeBinding | null, opts: EffectWorkerOptions,
   hardened: boolean | undefined): Promise<void> {
   if (!binding?.local_path) { await completeEffect(engine, effect, { git: 'skipped', reason: 'no_repo_configured' }); return; }
-  // Only a source scan walks pages; a single-file effect completes by its recorded hash.
-  const snapshot = effect.data.source_scan ? await selectedEffectPage(engine, effect) : null;
+  // Only a page walk reads snapshots; a single-file effect completes by its recorded hash.
+  const walk = targetedWithdrawalEffect(effect) || effect.data.source_scan;
+  const snapshot = walk ? await selectedEffectPage(engine, effect) : null;
   let path: string;
-  if (effect.data.source_scan) {
+  if (walk) {
     if (!snapshot) { await completeEffect(engine, effect); return; }
     const file = await prepareFileTarget(engine, { ...effect, slug: snapshot.page.slug }, snapshot,
       snapshot.page.deleted_at ? null : serializePageToMarkdown(snapshot.page, snapshot.tags), opts.hostId, { allowMissing: true });
@@ -141,7 +153,7 @@ export async function readEmbeddingEffectProjection(engine: BrainEngine, effect:
 async function embedPage(engine: BrainEngine, config: GBrainConfig, effect: PersistenceEffect, opts: EffectWorkerOptions): Promise<void> {
   const snapshot = await selectedEffectPage(engine, effect);
   if (!snapshot || snapshot.page.deleted_at) { await finishPage(engine, effect, snapshot); return; }
-  if (!effect.data.source_scan && (snapshot.revision !== effect.revision || snapshot.page.id !== effect.data.page_id)) {
+  if (!targetedWithdrawalEffect(effect) && !effect.data.source_scan && (snapshot.revision !== effect.revision || snapshot.page.id !== effect.data.page_id)) {
     await completeEffect(engine, effect, { embedding: 'superseded', reason: 'revision_changed' }); return;
   }
   const signature = opts.embedding?.signature ?? currentEmbeddingSignature();
@@ -197,7 +209,7 @@ async function embedPage(engine: BrainEngine, config: GBrainConfig, effect: Pers
       return installed;
     });
     if (!installed) {
-      if (effect.data.source_scan) throw new OperationError('revision_conflict', 'The page changed while embedding.');
+      if (targetedWithdrawalEffect(effect) || effect.data.source_scan) throw new OperationError('revision_conflict', 'The page changed while embedding.');
       await completeEffect(engine, effect, { embedding: 'superseded', reason: 'revision_changed' }); return;
     }
     return;
@@ -277,7 +289,8 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     } catch (error) { if (claimed) await recordFailure(engine, claimed, error); }
     finally { await lock.release(); }
   }
-  const run = async (effect: PersistenceEffect, binding: WorktreeBinding | null, hardened?: boolean) => {
+  const run = async (claimed: PersistenceEffect, binding: WorktreeBinding | null, hardened?: boolean) => {
+    let effect = claimed;
     let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
     try {
       if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) {
@@ -292,6 +305,7 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
           if (blocked.length) throw new OperationError('recovery_required', 'Canonical publication recovery must finish first.');
         }
       });
+      effect = await upgradeWithdrawalEffect(engine, effect, opts.hostId);
       if (effect.kind === 'withdrawal-mirror') await mirrorPage(engine, effect, binding, opts);
       else if (effect.kind === 'git') await gitPage(engine, effect, binding, opts, hardened);
       else if (effect.kind === 'facts-backstop') await dispatchFactsBackstopEffect(engine, effect, opts.hostId);

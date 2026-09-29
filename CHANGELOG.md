@@ -10,6 +10,204 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.59.11.0] - 2026-09-28
+
+**Your brain stops losing notes, stops linking people to the wrong person, and forgets links and dates you deleted.**
+
+Several everyday edits used to corrupt memory quietly. Moving a note that carries an `id:` to another folder and running a full sync could leave that note with no page at all. Two different notes sharing an `id:` (templates do this) meant the second one was never indexed. Two files whose names differ only in spaces or case overwrote each other on every edit. When the embedding provider was down, a new note was not saved at all.
+
+The graph drifted too. Removing a `[[link]]` or fixing a dated bullet left the old edge and the old timeline entry behind, because sync only ever added. A link to "Carol Exampl" attached to the page of a different person called "Carol Example", and facts about someone with no page could land on a meeting page. Renaming a page broke every link written against its old name. Dates depended on the syncing computer's time zone, "2024-02-30" became March 1, and undated notes took the import time as their date.
+
+All of that is fixed. Sync now treats the note's text as the truth for its links and timeline, the same way the MCP `put_page` path already did.
+
+| On a synthetic brain (64 near-name people, 4 companies) | Before | After |
+| --- | --- | --- |
+| Link resolver precision (265 probes, recall stays 1.0) | 0.745 (67 wrong entities) | 0.995 (1 wrong) |
+| Fact entity resolver precision | 0.838 (38 wrong) | 1.0 (0 wrong) |
+| Edge precision after 20 sync edits (true edges 34) | 0.374 (91 edges) | 1.0 (34 edges) |
+| Timeline precision after 20 sync edits | 0.104 | 1.0 |
+
+BrainBench (all harnesses, all suites) and the retrieval canary are byte-identical before and after. LONGMEMEVAL_ROW
+
+### To take advantage of v0.59.11.0
+
+Run `gbrain upgrade`. There is no migration. New behavior applies as pages are written; to repair an existing graph, run `gbrain sync --full` (moved and colliding files reconcile, image pages pick up missing visual vectors) and `gbrain extract --stale` for pages edited since their last extraction. Watch the sync output for `slug collision` warnings: rename one of the two files to index both. `gbrain embed --stale` embeds any page saved during a provider outage.
+
+### Itemized changes
+
+- **Moved files keep their page.** When a file's `frontmatter.id` matches a page whose recorded file is gone, import renames that page in place (links, facts and timeline survive) instead of skipping, so a full sync no longer soft-deletes the only live copy. A shared `id:` with different content imports as its own page; only same id plus same content while the old file still exists is skipped as a duplicate. `findDuplicatePage` excludes the caller's own slug and ranks an id match ahead of a text match.
+- **Slug collisions are loud.** Two live files that map to one slug no longer overwrite each other. The file named exactly like the slug owns it; otherwise the current owner keeps it, and the other file reports `skip_reason: slug_collision` with a warning naming both paths.
+- **An embedding outage never blocks a write.** The text and chunks commit with empty vectors and `embedding_deferred: true`; the stale sweep embeds them later. A code file whose embedding failed is no longer stamped as embedded.
+- **Images retry their index.** An unchanged image is skipped only when it has its visual vector (when embedding is on) and OCR (when OCR is on), so images imported under `--no-embed` or an OCR skip are rebuilt. Image pages record their source path, so a deleted image is reconciled by full sync.
+- **Sync reconciles derived data.** The sync and cycle extractors replace a page's own markdown links (other producers' edges stay) and remove timeline rows its previous text produced that the current text no longer does.
+- **Near-names stay unresolved.** Fuzzy matches to a person, company, fund or organization need the same name tokens (case, punctuation, order, accents and suffixes like "Inc" aside). Otherwise the link resolver leaves the reference unresolved and the fact resolver keeps the reference's own slug. The live keyword fallback is source-scoped.
+- **Renames leave an alias.** `updateSlug` records `old -> new` in `slug_aliases` in the same transaction; the link resolver and file-sync extraction resolve old slugs to the renamed page, so inbound edges survive.
+- **Dates are calendar facts.** Date-only values are UTC calendar dates and naive datetimes are read as UTC on every host. Invalid dates such as `2024-02-30` are rejected, including unquoted YAML values. `created`, `created_at`, `date_created` and `date created` are content dates. An undated page falls back to its file's timestamp and keeps that date across edits.
+
+### For contributors
+
+- New tests: `test/import-identity-move.test.ts`, `test/import-slug-collision.test.ts`, `test/import-embed-outage.test.ts`, `test/import-image-retry.test.ts`, `test/sync-derived-reconcile.test.ts`, `test/entity-resolution-near-names.test.ts`, `test/rename-slug-alias.test.ts`, `test/effective-date-calendar.test.ts`.
+- Contract updates in existing tests: an id echo with different content no longer redirects (`test/put-page-dedup-fence.test.ts`, `test/minions/delegated-execution.serial.test.ts`), a rename records its own alias (`test/helpers/deep-research-contract.ts`), the incremental extract test restores the engine methods it wraps (`test/extract-incremental.test.ts`), the cycle diagnostics test drops a page's link replacement instead of a batch (`test/cycle-stale-drain.test.ts`), identity matches against a moved file land at the destination (`test/sync-rename-reconcile.serial.test.ts`), the per-slug sync lanes replace ordinary meeting links while the full-walk lane stays additive (`test/attendance-retrieval.test.ts`), a one-edit person typo falls back to its own slug (`test/entity-resolve.test.ts`), and the effective-date fallback prefers the creation anchor over the last write (`test/effective-date.test.ts`).
+
+## [0.59.10.0] - 2026-09-28
+
+**Memory maintenance preserves what it cannot safely rebuild and tells you what remains unfinished.**
+
+Changing how your brain searches should not erase information it cannot recreate.
+GBrain now checks that saved material can be rebuilt before replacing its search
+data. Archived material stays untouched. If something blocks the work, the command
+explains what needs attention instead of reporting success with unfinished work.
+Retries also remember the spending already authorized, including requests whose
+outcome is uncertain after an interruption.
+
+Forgetting one fact no longer sends every page in its source through a rewrite.
+Only the affected pages are updated, with unrelated content, search data and local
+changes preserved. Interrupted work keeps its recorded intent and resumes within
+the same boundaries.
+
+Exports now describe one consistent point in time. They include all selected pages
+within the documented resource limits, refuse conflicting names and occupied
+output paths, and leave an explicit incomplete marker if publication fails.
+Use a fresh destination for another export. Exported Markdown is still not a full
+database backup.
+
+Gmail imports distinguish attachments present, inspected with none found, not
+inspected, and incompletely inspected. Unavailable messages and threads are
+reported separately. An optional historical repair inspects metadata without
+downloading attachments or replacing your edited message text. It does not mean
+the attachments have been read or indexed.
+
+| Operation | What changes |
+|---|---|
+| Embedding migration | Saved facts participate in repair and completion checks; blocked archived work is reported before spending. |
+| Forgetting | Publication and retry work stay limited to the affected pages. |
+| Export | Conflicts fail before output, and interruption cannot look like a complete export. |
+| Gmail repair | Source-scoped, bounded metadata inspection preserves edits and withdrawals. |
+| MCP search | Provider timeouts remain distinguishable from genuine misses; source-binding warnings do not widen access. |
+
+Older fact vectors with unknown model identity are not treated as compatible
+merely because their dimensions match. Repair is explicit, not an automatic paid
+side effect of upgrading. The reported Windows/Hermes clean-miss issue remains
+unresolved; these diagnostics are not a claimed fix for that environment.
+
+## To take advantage of v0.59.10.0
+
+Stop old writers and verify an engine-appropriate full backup before upgrading.
+Do not run mixed old and new workers during migration. Follow
+[the upgrade guide](skills/migrations/v0.59.10.0.md); Markdown export is not a backup
+substitute.
+
+If the automatic upgrade did not finish its schema work, run
+`gbrain apply-migrations --yes --no-autopilot-install` only after those precautions.
+Inspect `gbrain migrate embeddings --status` and preview a chosen target with
+`--dry-run` before approving any paid repair. New migrations require an explicit
+finite `--max-cost-usd` total. Retained-vector refusals require
+the supported recovery described in [embedding migration](docs/guides/embedding-migration.md),
+not an override or an automatic archive restore.
+
+`forget` can now refuse with `withdrawal_capacity` before changing memory when
+discovery exceeds its safety limits: 12,000 source pages, 40,000 chunks, 40,000
+facts, 64 MiB of combined text or 256 affected pages. Additional manifest,
+per-batch and scan-time limits apply. Follow
+[withdrawal recovery](docs/guides/concurrent-writes.md#withdrawal-recovery)
+for investigation; there is no unsafe override or unchanged-retry workaround.
+
+### Itemized changes
+
+- **Embedding safety:** prepare eligible projections before invalidation, retain
+  protected archived/deleted data, preserve source and lease fences, and verify
+  fresh page/fact convergence before completion. Schema v166 records fact-vector
+  model and exact-text identity; incompatible or unknown generations are withheld
+  from semantic comparison. Paid migration attempts require durable bounded
+  authorization, including retries and verification calls.
+- **Migration replay:** retain existing fact and query-cache vector types and
+  widths when rebuilding supported indexes, instead of assuming the current
+  extension's preferred type. Malformed existing columns refuse without
+  rewriting stored data.
+- **Withdrawal safety:** discover exact affected pages before mutation and
+  persist bounded targets atomically with withdrawal intent. Legacy effect
+  recovery preserves unrelated pages and genuine conflicts.
+- **Export safety:** use a coherent snapshot, bounded staging, global path
+  preflight and native no-replace publication. Existing files and unrelated
+  destination content are never silently overwritten.
+- **Attachment visibility:** retain bounded MIME inspection receipts and expose
+  `gbrain google attachments backfill --source <id>` for preview. Explicit
+  `--yes` authorizes a bounded metadata-only batch on an existing managed source.
+  Traversal completion is distinct from complete inspection.
+- **Search diagnostics:** preserve timeout classification through wrapped
+  provider errors and warn about unresolved stdio source binding without
+  changing grants or revealing private matches.
+
+### For contributors
+
+Recovery coverage runs in separate PGLite and PostgreSQL lanes without increasing
+timeouts. Fixture provenance is explicit, temporary Git repositories do not
+depend on the host identity, and the MCP transport matrix participates in
+diff-aware test selection. Release instructions now default to patch numbering
+and resolve collisions without an approval prompt.
+
+## [0.59.8.0] - 2026-09-28
+
+**Pull request CI now finishes in about 10-12 minutes instead of 20-34.**
+
+Nearly all of the extra time came from one check: 10,000 writes pushed through a
+single PGLite brain, at about 11 writes per second. Pull requests now run the
+same crash-recovery and schedule checks with a 2,500-write soak. Pushes to
+master and manual runs still run the full 10,000-write gate before release.
+
+### Itemized changes
+
+- The persistence invariant jobs pass `--operations=2500` on pull requests and
+  keep the full 10,000-write soak on master pushes and manual dispatches; a
+  workflow test pins the split.
+
+## [0.59.5.0] - 2026-09-28
+
+**The full test gate now runs in about five minutes on Ubicloud instead of about 25 on one Docker host.**
+
+`bun run ci:ubicloud` runs everything `bun run ci:local` runs: gitleaks, guards and
+typecheck, the serial, slow and unit lanes, and every E2E file with PgBouncer
+required. It spreads the work across ten fresh Ubicloud VMs and destroys them
+when it finishes, including after Ctrl-C. It tests your working tree as it is,
+uncommitted edits included, and needs no local Docker or gitleaks.
+
+Work is balanced while the run is going. Every test file waits in one queue,
+heaviest first, and any idle slot on any VM takes the next one. A slow machine
+or a surprisingly long file holds up one slot instead of a whole shard. Each
+run records how long every file took, and the next run orders its queue from
+those timings. In practice, all files except the longest few are done about
+two minutes after the VMs come up. The run then ends when the longest single
+test file finishes.
+
+### To take advantage of v0.59.5.0
+
+Export a Ubicloud project token as `UBICLOUD_API_KEY` (or `UBICLOUD_API_TOKEN`)
+and run `bun run ci:ubicloud`. Use `bun run ci:ubicloud:diff` to narrow E2E to
+the files your diff touches, like `ci:local:diff`. `--vms`, `--size`, `--slots`
+and `--lanes` tune the fleet; failure logs and a run summary land in
+`.context/ci-ubicloud/`.
+
+### Itemized changes
+
+- Add `ci:ubicloud` and `ci:ubicloud:diff`: parallel VM provisioning, one
+  pgvector server and transaction-mode PgBouncer per slot with a bootstrapped
+  schema, a dynamic heaviest-first work queue that spreads the longest files one
+  per VM, per-item logs, one retry for items lost to a dropped connection, and
+  guaranteed teardown.
+- `run-unit-shard.sh`, `run-serial-tests.sh` and `run-slow-tests.sh` accept
+  explicit test files; `run-serial-tests.sh --dry-run-list-exclusive` lists its
+  machine-exclusive files.
+- E2E `setupDB()` disables managed persistence left on by an earlier file
+  before it resets sources, and `sync-lock-overlap-postgres` cleans up through
+  the writer guard, so both pass whichever file reaches a fresh database first.
+- Fix three tests that failed on busy hosts: a PGLite repair fixture used a
+  process ID that can belong to a live process, the E2E runner interrupt test
+  checked for a killed child before it had been reaped, and the hook-under-serve
+  E2E read the serve's own background heartbeat as the hook's.
+- Raise the `fast-uri` (3.1.7) and `ip-address` (10.5.1+) dependency overrides
+  past newly published advisories GHSA-58mr-gqgx-xq4g, GHSA-qw65-cvwx-89v3,
+  GHSA-2vr4-cq9g-pvrc and GHSA-rpw4-54j3-4h4q.
+
 ## [0.59.3.0] - 2026-09-28
 
 **A broken worker installation now asks for repair instead of repeatedly interrupting your jobs.**

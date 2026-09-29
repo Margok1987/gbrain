@@ -7,6 +7,7 @@ import { assertPageRevision } from './page-state/types.ts';
 import { lockPageKeys as acquirePageKeys, pageGuardKey, type HeldPageKeys } from './page-state/guards.ts';
 import { readPageSnapshot as readCanonicalPageSnapshot } from './page-state/snapshot.ts';
 import { createPageVersion } from './page-state/versions.ts';
+import { recordRenameAlias } from './page-state/rename-alias.ts';
 import { composablePgliteTransaction } from './page-state/transactions.ts';
 import { dropRowTypeArrayParsers, PgliteStatementCache } from './pglite-statements.ts';
 import { GRANT_COLUMNS_SQL } from './grants/schema.ts';
@@ -84,7 +85,7 @@ import { acquireLock, releaseLock, type LockHandle } from './pglite-lock.ts';
 // connect() catch. No cycle: pglite-repair.ts imports nothing from this file.
 import { attemptWalRepairAndRetry, closeRepairEpisodeIfOpen, type WalRepairReceipt } from './pglite-repair.ts';
 import { getFtsLanguage } from './fts-language.ts';
-import { splitEmbeddingSignature, currentSpaceChunkPredicate } from './embedding-invalidation.ts';
+import { splitEmbeddingSignature, currentSpaceChunkPredicate, lockEmbeddingSources } from './embedding-invalidation.ts';
 import type {
   Page, PageInput, PageFilters, PageType,
   Chunk, ChunkInput, StaleChunkRow, StalePageRow, ChunklessPageRow,
@@ -1202,7 +1203,13 @@ export class PGLiteEngine implements BrainEngine {
         EXISTS (SELECT 1 FROM information_schema.columns
                 WHERE table_schema='public' AND table_name='minion_jobs' AND column_name='submission_authority') AS minion_jobs_submission_authority_exists,
         EXISTS (SELECT 1 FROM information_schema.columns
-                WHERE table_schema='public' AND table_name='minion_jobs' AND column_name='claim_generation') AS minion_jobs_claim_generation_exists
+                WHERE table_schema='public' AND table_name='minion_jobs' AND column_name='claim_generation') AS minion_jobs_claim_generation_exists,
+        EXISTS (SELECT 1 FROM information_schema.tables
+                WHERE table_schema='public' AND table_name='facts') AS facts_exists,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='facts' AND column_name='embedding_model') AS facts_embedding_model_exists,
+        EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='facts' AND column_name='embedded_text_hash') AS facts_embedded_text_hash_exists
     `);
     const probe = rows[0] as {
       pages_exists: boolean;
@@ -1258,6 +1265,9 @@ export class PGLiteEngine implements BrainEngine {
       minion_jobs_pq_lease_exists: boolean;
       minion_jobs_submission_authority_exists: boolean;
       minion_jobs_claim_generation_exists: boolean;
+      facts_exists: boolean;
+      facts_embedding_model_exists: boolean;
+      facts_embedded_text_hash_exists: boolean;
     };
 
     const needsPagesBootstrap = probe.pages_exists && !probe.source_id_exists;
@@ -1359,6 +1369,8 @@ export class PGLiteEngine implements BrainEngine {
     // partial upgrades too; historical authority remains NULL until reviewed.
     const needsMinionJobsAuthority = probe.minion_jobs_exists
       && (!probe.minion_jobs_submission_authority_exists || !probe.minion_jobs_claim_generation_exists);
+    const needsFactEmbeddingIdentity = probe.facts_exists
+      && (!probe.facts_embedding_model_exists || !probe.facts_embedded_text_hash_exists);
 
     // Fresh installs (no tables yet) and modern brains both no-op.
     if (!needsPagesBootstrap && !needsLinksBootstrap && !needsChunksBootstrap
@@ -1374,9 +1386,16 @@ export class PGLiteEngine implements BrainEngine {
         && !needsPagesLinksExtractedAt
         && !needsTimelineEventPageId
         && !needsMinionJobsTimeoutAt && !needsMinionJobsIdempotencyKey
-        && !needsMinionJobsPrivateQueue && !needsMinionJobsAuthority) return;
+        && !needsMinionJobsPrivateQueue && !needsMinionJobsAuthority && !needsFactEmbeddingIdentity) return;
 
     process.stderr.write('  Schema forward-reference gap detected, applying bootstrap\n');
+
+    if (needsFactEmbeddingIdentity) {
+      await this.db.exec(`
+        ALTER TABLE facts ADD COLUMN IF NOT EXISTS embedding_model TEXT;
+        ALTER TABLE facts ADD COLUMN IF NOT EXISTS embedded_text_hash TEXT;
+      `);
+    }
 
     if (needsPagesBootstrap) {
       // Mirror schema-embedded.ts shape for `sources` so the subsequent
@@ -1747,16 +1766,17 @@ export class PGLiteEngine implements BrainEngine {
    */
   async findDuplicatePage(
     sourceId: string,
-    opts: { hash: string; frontmatterId?: string | null },
+    opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string },
   ): Promise<{ slug: string; id: number } | null> {
     const fmId = opts.frontmatterId ?? null;
     const sql = `SELECT id, slug FROM pages
        WHERE source_id = $1
          AND deleted_at IS NULL
          AND (content_hash = $2 OR (frontmatter->>'id' = $3 AND $3 IS NOT NULL))
-       ORDER BY id
+         AND ($4::text IS NULL OR slug <> $4)
+       ORDER BY (frontmatter->>'id' IS NOT DISTINCT FROM $3) DESC, id
        LIMIT 1`;
-    const { rows } = await this.db.query(sql, [sourceId, opts.hash, fmId]);
+    const { rows } = await this.db.query(sql, [sourceId, opts.hash, fmId, opts.excludeSlug ?? null]);
     if (rows.length === 0) return null;
     const r = rows[0] as { id: number | string; slug: string };
     return { slug: r.slug, id: Number(r.id) };
@@ -2926,6 +2946,11 @@ export class PGLiteEngine implements BrainEngine {
       extraFilter += ` AND p.source_id = $${params.length}`;
     }
 
+    if (resolvedColEarly.name === 'embedding') {
+      params.push(resolvedColEarly.embeddingModel || null);
+      extraFilter += ` AND ((cc.model=$${params.length} AND (cc.embedded_text_hash=md5(cc.chunk_text) OR cc.embedded_text_hash IS NULL))
+        OR ($${params.length}::text IS NULL AND NOT EXISTS(SELECT 1 FROM config WHERE key='embedding_migration.state')))`;
+    }
     const innerLimitIdx = params.length;
     params.push(innerLimit, limit, offset);
     const innerLimitParam = `$${innerLimitIdx + 1}`;
@@ -3376,7 +3401,7 @@ export class PGLiteEngine implements BrainEngine {
    */
   private buildStaleChunkWhere(staleColRef: string, opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean }): { where: string; params: unknown[] } {
     const params: unknown[] = [];
-    const conds: string[] = [];
+    const conds: string[] = ['p.deleted_at IS NULL'];
     if (opts?.signature !== undefined) {
       params.push(opts.signature);
       conds.push(
@@ -3458,18 +3483,23 @@ export class PGLiteEngine implements BrainEngine {
       ? `(p.embedding_signature IS NULL OR p.embedding_signature <> $1)`
       : `p.embedding_signature IS NOT NULL
           AND p.embedding_signature <> $1`;
-    const { rows } = await this.db.query(
-      `UPDATE content_chunks cc
-          SET ${colId} = NULL, embedded_at = NULL
-         FROM pages p
-        WHERE cc.page_id = p.id
-          AND cc.${colId} IS NOT NULL
-          AND NOT ${currentSpaceChunkPredicate(colId, 2, 3)}
-          AND ${sigClause}${srcClause}
-        RETURNING cc.page_id`,
-      params,
-    );
-    return (rows as unknown[]).length;
+    return this.transaction(async tx => {
+      params.push(await lockEmbeddingSources(tx, opts.sourceId));
+      const rows = await tx.executeRaw(
+        `UPDATE content_chunks cc
+            SET ${colId} = NULL, embedded_at = NULL
+           FROM pages p
+          WHERE cc.page_id = p.id
+            AND p.source_id=ANY($${params.length}::text[])
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id=p.source_id AND NOT s.archived)
+            AND cc.${colId} IS NOT NULL
+            AND NOT ${currentSpaceChunkPredicate(colId, 2, 3)}
+            AND ${sigClause}${srcClause}
+          RETURNING cc.page_id`,
+        params,
+      );
+      return (rows as unknown[]).length;
+    });
   }
 
   async invalidateContentDriftEmbeddings(opts?: { sourceId?: string }): Promise<number> {
@@ -3489,19 +3519,25 @@ export class PGLiteEngine implements BrainEngine {
       params.push(opts.sourceId);
       srcClause = ` AND p.source_id = $${params.length}`;
     }
-    const { rows } = await this.db.query(
-      `UPDATE content_chunks cc
-          SET ${colId} = NULL, embedded_at = NULL, embedded_text_hash = NULL
-         FROM pages p
-        WHERE cc.page_id = p.id
-          AND cc.${colId} IS NOT NULL
-          AND cc.embedded_text_hash IS NOT NULL
-          AND cc.embedded_text_hash <> md5(cc.chunk_text)
-          AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')${srcClause}
-        RETURNING cc.page_id`,
-      params,
-    );
-    return (rows as unknown[]).length;
+    return this.transaction(async tx => {
+      params.push(await lockEmbeddingSources(tx, opts?.sourceId));
+      const rows = await tx.executeRaw(
+        `UPDATE content_chunks cc
+            SET ${colId} = NULL, embedded_at = NULL, embedded_text_hash = NULL
+           FROM pages p
+          WHERE cc.page_id = p.id
+            AND p.source_id=ANY($${params.length}::text[])
+            AND EXISTS (SELECT 1 FROM sources s WHERE s.id=p.source_id AND NOT s.archived)
+            AND p.deleted_at IS NULL
+            AND cc.${colId} IS NOT NULL
+            AND cc.embedded_text_hash IS NOT NULL
+            AND cc.embedded_text_hash <> md5(cc.chunk_text)
+            AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')${srcClause}
+          RETURNING cc.page_id`,
+        params,
+      );
+      return (rows as unknown[]).length;
+    });
   }
 
   async listStaleChunks(opts?: {
@@ -3533,7 +3569,7 @@ export class PGLiteEngine implements BrainEngine {
                   p.updated_at
              FROM content_chunks cc
              JOIN pages p ON p.id = cc.page_id
-            WHERE cc.${staleColId} IS NULL
+            WHERE cc.${staleColId} IS NULL AND p.deleted_at IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
             ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
             LIMIT $1`,
@@ -3544,7 +3580,7 @@ export class PGLiteEngine implements BrainEngine {
                   p.updated_at
              FROM content_chunks cc
              JOIN pages p ON p.id = cc.page_id
-            WHERE cc.${staleColId} IS NULL
+            WHERE cc.${staleColId} IS NULL AND p.deleted_at IS NULL
               AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
               AND (
                 p.updated_at < $1::timestamptz
@@ -3563,7 +3599,7 @@ export class PGLiteEngine implements BrainEngine {
                 p.updated_at
            FROM content_chunks cc
            JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${staleColId} IS NULL
+          WHERE cc.${staleColId} IS NULL AND p.deleted_at IS NULL
             AND p.source_id = $1
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
           ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
@@ -3575,7 +3611,7 @@ export class PGLiteEngine implements BrainEngine {
                 p.updated_at
            FROM content_chunks cc
            JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${staleColId} IS NULL
+          WHERE cc.${staleColId} IS NULL AND p.deleted_at IS NULL
             AND p.source_id = $1
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
             AND (
@@ -3600,7 +3636,7 @@ export class PGLiteEngine implements BrainEngine {
                 cc.model, cc.token_count, p.source_id, cc.page_id
            FROM content_chunks cc
            JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${staleColId} IS NULL
+          WHERE cc.${staleColId} IS NULL AND p.deleted_at IS NULL
             AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
             AND (cc.page_id, cc.chunk_index) > ($1, $2)
           ORDER BY cc.page_id, cc.chunk_index
@@ -3614,7 +3650,7 @@ export class PGLiteEngine implements BrainEngine {
               cc.model, cc.token_count, p.source_id, cc.page_id
          FROM content_chunks cc
          JOIN pages p ON p.id = cc.page_id
-        WHERE cc.${staleColId} IS NULL
+        WHERE cc.${staleColId} IS NULL AND p.deleted_at IS NULL
           AND p.source_id = $1
           AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
           AND (cc.page_id, cc.chunk_index) > ($2, $3)
@@ -5231,7 +5267,7 @@ export class PGLiteEngine implements BrainEngine {
     source_id: string,
     entitySlug: string,
     factText: string,
-    opts?: { k?: number; embedding?: Float32Array },
+    opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null },
   ): Promise<FactRow[]> {
     return factsImpl.findCandidateDuplicates(this.factsDeps, source_id, entitySlug, factText, opts);
   }
@@ -5592,7 +5628,7 @@ export class PGLiteEngine implements BrainEngine {
         -- count can reach zero and the embed.stale remediation can converge.
         (SELECT count(*) FROM content_chunks cc
            JOIN scoped_pages p ON p.id = cc.page_id
-          WHERE cc.${colId} IS NULL
+          WHERE cc.${colId} IS NULL AND p.deleted_at IS NULL
             AND NOT jsonb_exists(COALESCE(p.frontmatter, '{}'::jsonb), 'embed_skip')
         ) as missing_embeddings,
         (SELECT count(*) FROM links l
@@ -5777,14 +5813,18 @@ export class PGLiteEngine implements BrainEngine {
     newSlug = validateSlug(newSlug);
     const sourceId = opts?.sourceId ?? 'default';
     // Source-qualify so a rename in source A doesn't sweep up same-slug rows
-    // in sources B/C/D (mirrors postgres-engine.ts).
-    const result = await this.db.query(
-      `UPDATE pages SET slug = $1, updated_at = now() WHERE slug = $2 AND source_id = $3`,
-      [newSlug, oldSlug, sourceId]
-    );
-    // #3056: rows moved — a zero-row UPDATE does not throw, so the count is
-    // the only way callers can see the no-op.
-    return result.affectedRows ?? 0;
+    // in sources B/C/D (mirrors postgres-engine.ts). The rename and its
+    // slug alias commit together.
+    return this.transaction(async tx => {
+      const moved = await tx.executeRaw(
+        `UPDATE pages SET slug = $1, updated_at = now() WHERE slug = $2 AND source_id = $3 RETURNING id`,
+        [newSlug, oldSlug, sourceId]
+      );
+      if (moved.length > 0) await recordRenameAlias(tx, sourceId, oldSlug, newSlug);
+      // #3056: rows moved — a zero-row UPDATE does not throw, so the count is
+      // the only way callers can see the no-op.
+      return moved.length;
+    });
   }
 
   async rewriteLinks(_oldSlug: string, _newSlug: string): Promise<void> {
