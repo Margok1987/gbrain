@@ -104,6 +104,12 @@ export async function publishMaintenancePage(engine: BrainEngine, authority: Mai
     slug, content, revision: options.expectedRevision, file: options.file ?? true, ...projection }), options.file);
 }
 
+/** A maintenance request with its own intent kind, keyed by the intent (a retry replays its receipt). */
+export async function submitMaintenanceIntent(engine: BrainEngine, authority: MaintenanceAuthority, slug: string,
+  intent: Record<string, unknown> & { kind: string; expected_revision: string | null }): Promise<Record<string, unknown>> {
+  return submitMaintenance(engine, authority, slug, intent, maintenanceRequestId({ authority: authority.writer, slug, intent }));
+}
+
 export async function stampMaintenancePage(engine: BrainEngine, authority: MaintenanceAuthority, slug: string,
   cycleDate: string, rawSource?: string): Promise<void> {
   const snapshot = await engine.readPageSnapshot(slug, { sourceId: authority.writer.sourceId });
@@ -189,6 +195,8 @@ export async function prepareMaintenanceMutation(engine: BrainEngine, row: Write
       return { ...outcome, event_projected: projected };
     } };
   }
+  if (row.intent?.kind === 'managed_maintenance_delete') return preparePageMutation(engine, { ...row, operation: 'delete_page' }, config);
+  if (row.intent?.kind === 'managed_maintenance_phantom_merge') return (await import('../cycle/phantom-redirect-managed.ts')).preparePhantomMerge(engine, row, config);
   if (row.intent?.kind !== 'managed_maintenance_consolidate') throw new OperationError('invalid_params', 'Unsupported maintenance request.');
   const p = row.intent;
   const facts = p.facts as FactSnapshot[];
