@@ -31,7 +31,9 @@ Explicit noninteractive administration is supported. Stale state is rejected.
 Use --brain <id> to select a database. Prepare drains the current owner and records
 an exact manifest; accept requires that epoch and matching bytes on the successor.
 Before activation, upgrade and stop older writers on every host, claim every
-filesystem source, and inspect/release remaining legacy locks. --confirm-quiesced
+filesystem source, and inspect/release remaining legacy locks. A claim alone
+fences legacy sync, sources push and lint --fix for that checkout; claim output
+says so while persistence is not activated. --confirm-quiesced
 attests quiescence but does not grant administration intent. --dry-run never enables.
 Self-transfer is opt-in on both phases and only repairs this host's recorded
 canonical root; it never relocates a checkout. Inspect status again after prepare.
@@ -39,12 +41,9 @@ Activation may explicitly remove exact dead local legacy holders with
 --cleanup-dead-local-locks; expiry alone is never evidence of death.
 --shared-skills activates recoverable skill bundles and blocks older writers.
 No command takes over an owner based on a stale heartbeat.
-retry-effects handles parked Git/withdrawal effects and failed embedding effects.
-A Git or withdrawal target parks after five consecutive failures; the command
-previews parked targets with --dry-run and otherwise authorizes one more attempt
-per parked target (a target that fails again parks again). For embeddings it
-reconciles existing complete vectors or authorizes one additional bounded retry
-cycle per request; repeating it never renews that allowance. --dry-run never queues work.
+retry-effects handles embedding effects only: it reconciles existing complete
+vectors or explicitly authorizes one additional bounded retry cycle per request.
+Repeating the command never renews that allowance. --dry-run never queues work.
 It never changes ownership or activation and needs no topology admin-intent.`;
 
 export const LOCAL_WRITER_HELP = `Usage:

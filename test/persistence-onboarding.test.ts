@@ -8,7 +8,7 @@ import type { BrainEngine } from '../src/core/engine.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { dispatchToolCall } from '../src/mcp/dispatch.ts';
 import { performSync } from '../src/commands/sync.ts';
-import { runPersistenceAdministration } from '../src/core/persistence/administration.ts';
+import { CLAIM_BEFORE_ACTIVATION_NOTICE, runPersistenceAdministration } from '../src/core/persistence/administration.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { persistenceHome } from '../src/core/persistence/identity.ts';
 import { PHYSICAL_ROOT_MARKER } from '../src/core/persistence/physical-root-record.ts';
@@ -41,7 +41,11 @@ for (const kind of testBackends()) describe(`deliberate onboarding (${kind})`, (
       expect(await engine.getPage('onboarding-note', { sourceId: 'default' })).toBeNull();
       expect(existsSync(join(root, PHYSICAL_ROOT_MARKER))).toBe(false);
     }
-    await runPersistenceAdministration(engine, 'writer_claim', { source_id: 'default', path: root, ...await reviewedWriterIntent(engine, 'writer_claim') });
+    // #5198: the claim states what it fences, in the dry run and in the result.
+    const claimPreview = await runPersistenceAdministration(engine, 'writer_claim', { source_id: 'default', path: root, dry_run: true }) as any;
+    expect(claimPreview.activation_required).toBe(CLAIM_BEFORE_ACTIVATION_NOTICE);
+    const claim = await runPersistenceAdministration(engine, 'writer_claim', { source_id: 'default', path: root, ...await reviewedWriterIntent(engine, 'writer_claim') }) as any;
+    expect(claim).toMatchObject({ claimed: true, activation_required: CLAIM_BEFORE_ACTIVATION_NOTICE });
     const claimed = await runPersistenceAdministration(engine, 'writer_status', {}) as any;
     expect(claimed.onboarding.sources).toContainEqual(expect.objectContaining({ source_id: 'default', state: 'activation_required' }));
     await expect(performSync(engine, { sourceId: 'default', noEmbed: true, noPull: true })).rejects.toThrow();
@@ -69,6 +73,7 @@ for (const kind of testBackends()) describe(`deliberate onboarding (${kind})`, (
     await engine.executeRaw('UPDATE gbrain_cycle_locks SET acquisition_token=$1::uuid', [randomUUID()]);
     await expect(runPersistenceAdministration(engine, 'writer_activate', { confirm_quiesced: true, cleanup_dead_local_locks: true, ...stale })).rejects.toMatchObject({ code: 'writer_admin_state_changed' });
     expect(await activate({ cleanup_dead_local_locks: true })).toMatchObject({ activated: true });
+    expect(await runPersistenceAdministration(engine, 'writer_claim', { source_id: 'default', path: root, dry_run: true })).not.toHaveProperty('activation_required');
     expect(await engine.executeRaw('SELECT id FROM gbrain_cycle_locks')).toEqual([]);
     const ready = await runPersistenceAdministration(engine, 'writer_status', {}) as any;
     expect(ready.onboarding.sources).toContainEqual(expect.objectContaining({ source_id: 'default', state: 'ready' }));
