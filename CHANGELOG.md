@@ -46,7 +46,7 @@ Run `gbrain upgrade`. There is no migration. The check applies to the next dream
 - Verification covers every page a child wrote. A page created during the run is checked whole; an older page is checked on the sentences missing from its revision before the run (`page_versions`), against every transcript that wrote it. Epochs come from the child jobs' creation time, so resumed children still count their own pages.
 - The unmanaged write-back re-projects timeline entries, facts, takes and links from the verified body in the same transaction. The managed path already re-projected timeline entries, facts and takes through its page publication.
 - New telemetry in `details.synthesis.quote_verify`: `quarantined_claims`, `pages_with_quarantine`, `preexisting_diffed`, `skipped_unchanged` and one counter per failure reason. `stripped`, `skipped_preexisting` and `numeric_claim_warns` are gone.
-- `gbrain eval compare`: `--baseline`, `--candidate`, `--draws`, `--seed`; JSON gains `paired` and `paired_unavailable`; Markdown gains a "Paired comparisons" table with a significant / not significant verdict. The statistics module (`src/core/eval/paired-bootstrap.ts`) is a port of the gbrain-evals situation-recall comparator with a two-sided p-value.
+- `gbrain eval compare`: `--baseline`, `--candidate`, `--draws`, `--seed`; JSON gains `paired` and `paired_unavailable`; Markdown gains a "Paired comparisons" table with a significant / not significant verdict. A per-question file path in the ledger must resolve inside the repository root; paths that escape it are refused and never read. The statistics module (`src/core/eval/paired-bootstrap.ts`) is a port of the gbrain-evals situation-recall comparator with a two-sided p-value.
 
 ### For contributors
 

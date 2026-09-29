@@ -5,10 +5,10 @@
  * say so and compute nothing).
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { runEvalCompare } from '../src/commands/eval-compare.ts';
+import { pathWithinRoot, runEvalCompare } from '../src/commands/eval-compare.ts';
 
 let tmp: string;
 
@@ -162,6 +162,12 @@ function perQueryFile(name: string, hits: (i: number) => boolean): string {
 }
 
 describe('runEvalCompare — paired statistics from per-query rows', () => {
+  // Per-query files must live under the repository root; outside a git
+  // checkout the root is the working directory, so run from the tmp dir.
+  let cwd: string;
+  beforeAll(() => { cwd = process.cwd(); process.chdir(tmp); });
+  afterAll(() => { process.chdir(cwd); });
+
   const baseHit = (i: number) => i < 20;                         // 20/40
   const candHit = (i: number) => (i < 20 && i !== 0 && i !== 1) || (i >= 20 && i < 32); // 18 kept + 12 fixed = 30/40
   const records = () => [
@@ -218,6 +224,53 @@ describe('runEvalCompare — paired statistics from per-query rows', () => {
     expect(report.paired).toEqual([]);
     expect(report.paired_unavailable).toEqual([{ run_id: 'cand-run', reason: expect.stringContaining('not found') }]);
     expect(report._meta.methodology).toStartWith('Aggregate-only');
+  });
+});
+
+describe('per-query paths stay inside the repository root', () => {
+  test('pathWithinRoot refuses .., outside absolute paths and escaping symlinks', () => {
+    const root = mkdtempSync(join(tmpdir(), 'gbrain-eval-root-'));
+    const outside = mkdtempSync(join(tmpdir(), 'gbrain-eval-outside-'));
+    try {
+      mkdirSync(join(root, 'runs'));
+      writeFileSync(join(root, 'runs', 'a.jsonl'), '{}\n');
+      writeFileSync(join(outside, 'secret.jsonl'), '{}\n');
+      symlinkSync(join(outside, 'secret.jsonl'), join(root, 'runs', 'link.jsonl'));
+      expect(pathWithinRoot(root, 'runs/a.jsonl')).toEndWith(join('runs', 'a.jsonl'));
+      expect(pathWithinRoot(root, join(root, 'runs', 'a.jsonl'))).toEndWith(join('runs', 'a.jsonl'));
+      expect(pathWithinRoot(root, 'runs/../runs/missing.jsonl')).toEndWith(join('runs', 'missing.jsonl'));
+      expect(pathWithinRoot(root, '../outside.jsonl')).toBeNull();
+      expect(pathWithinRoot(root, 'runs/../../x.jsonl')).toBeNull();
+      expect(pathWithinRoot(root, join(outside, 'secret.jsonl'))).toBeNull();
+      expect(pathWithinRoot(root, 'runs/link.jsonl')).toBeNull();
+      expect(pathWithinRoot(root, '.')).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  test('a ledger record pointing outside the root is refused with a clear reason and never read', async () => {
+    const outside = mkdtempSync(join(tmpdir(), 'gbrain-eval-outside-'));
+    const cwd = process.cwd();
+    process.chdir(tmp);
+    try {
+      const escaping = join(outside, 'rows.jsonl');
+      writeFileSync(escaping, JSON.stringify({ question_id: 'q1', recall_all_hit: true }) + '\n');
+      const path = writeJsonl([
+        { ...SAMPLE_RECORDS[0], run_id: 'b', params: { output: escaping } },
+        { ...SAMPLE_RECORDS[1], run_id: 'c', params: { output: '../../etc/passwd' } },
+      ]);
+      const report = JSON.parse(await captureRun(() => runEvalCompare(['--json', '--input', path, '--baseline', 'b', '--candidate', 'c'])));
+      expect(report.paired).toEqual([]);
+      expect(report.paired_unavailable).toEqual([
+        { run_id: 'b', reason: expect.stringContaining('refused per-query file outside the repository root') },
+        { run_id: 'c', reason: expect.stringContaining('refused per-query file outside the repository root') },
+      ]);
+    } finally {
+      process.chdir(cwd);
+      rmSync(outside, { recursive: true, force: true });
+    }
   });
 });
 

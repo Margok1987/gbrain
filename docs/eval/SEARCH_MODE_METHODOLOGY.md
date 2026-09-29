@@ -120,7 +120,9 @@ Additions to the watch-list require a CHANGELOG line.
 `gbrain eval compare` computes statistics only from per-query rows. A run
 contributes rows when its ledger record names its per-question output in
 `params.output` (`gbrain eval longmemeval --record --output <file>` writes
-both). For each pair of runs (every mode pair in a suite, or exactly
+both). The per-question file must sit inside the repository root; a path
+that escapes it (`..`, an outside absolute path, or a symlink) is refused and
+listed in `paired_unavailable`. For each pair of runs (every mode pair in a suite, or exactly
 `--baseline RUN_ID --candidate RUN_ID`), rows are joined on `question_id` and
 each per-query metric both rows carry (`recall_all@k`, `recall_any@k`,
 `qa_accuracy` from `judge_correct`) is compared with:

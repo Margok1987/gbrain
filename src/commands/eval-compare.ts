@@ -19,8 +19,8 @@
  * _meta.metric_glossary block per response, NOT sibling _gloss fields.
  */
 
-import { readFileSync, existsSync } from 'fs';
-import { isAbsolute, join } from 'path';
+import { readFileSync, existsSync, realpathSync } from 'fs';
+import { isAbsolute, join, relative, sep } from 'path';
 import { buildMetricGlossaryMeta } from '../core/eval/metric-glossary.ts';
 import { holmAdjusted, pairedClusterStatistics } from '../core/eval/paired-bootstrap.ts';
 import { SEARCH_MODES, type SearchMode } from '../core/search/mode.ts';
@@ -152,12 +152,25 @@ export interface PairedComparison {
   significant: boolean;
 }
 
+/**
+ * `candidate` resolved against `root`, following symlinks, or null when it
+ * lands outside the root (through `..`, an absolute path, or a symlink).
+ */
+export function pathWithinRoot(root: string, candidate: string): string | null {
+  const base = realpathSync(root);
+  const target = isAbsolute(candidate) ? candidate : `${base}${sep}${candidate}`;
+  const real = existsSync(target) ? realpathSync(target) : target;
+  // relative() normalizes `..` segments of a path that does not exist yet.
+  const rel = relative(base, real);
+  return rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel) ? null : real;
+}
+
 /** Per-question rows of a run (last row per question_id), or why there are none. */
 function readPerQueryRows(record: ParsedRecord, repoRoot: string): { rows: Map<string, QueryRow> } | { reason: string } {
   const output = record.params?.output;
   if (typeof output !== 'string' || !output) return { reason: 'record has no params.output per-query file' };
-  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal, javascript.express.security.audit.express-path-join-resolve-traversal.express-path-join-resolve-traversal -- trusted local CLI reading the operator's own run ledger; the path is only read and parsed into per-question numbers, never written or echoed.
-  const path = isAbsolute(output) ? output : join(repoRoot, output);
+  const path = pathWithinRoot(repoRoot, output);
+  if (!path) return { reason: `refused per-query file outside the repository root (${repoRoot}): ${output}` };
   if (!existsSync(path)) return { reason: `per-query file not found: ${output}` };
   const rows = new Map<string, QueryRow>();
   for (const line of readFileSync(path, 'utf-8').split('\n')) {
