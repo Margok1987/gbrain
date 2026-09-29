@@ -33,7 +33,7 @@ export const MANAGED_PHASE_TABLE: Readonly<Record<CyclePhase, ManagedPhaseEntry>
   recompute_emotional_weight: { class: 'no_coordinated_write', reason: 'Writes the derived emotional_weight column, which the canonical writer guard does not cover.' },
   consolidate: { class: 'writes', reason: 'Consolidated takes, facts and pages commit through the maintenance coordinator.' },
   propose_takes: { class: 'no_coordinated_write', reason: 'Writes the take_proposals review queue; managed brains skip the legacy receipt page.' },
-  grade_takes: { class: 'writes', reason: 'Auto-applied resolutions go through the coordinated takes_resolve mutation.' },
+  grade_takes: { class: 'no_coordinated_write', reason: 'The cycle runs it with auto-resolve off, so it only caches verdicts in take_grade_cache; opt-in auto-applied resolutions go through the coordinated takes_resolve mutation.' },
   calibration_profile: { class: 'no_coordinated_write', reason: 'Writes the calibration_profiles side table only.' },
   drift: { class: 'writes', reason: 'The drift report page publishes through the maintenance coordinator.' },
   conversation_facts_backfill: { class: 'writes', reason: 'Backfilled conversation facts publish through coordinated writes.' },
