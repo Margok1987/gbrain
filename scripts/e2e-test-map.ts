@@ -224,6 +224,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/managed-atom-compaction.test.ts",
     "test/e2e/managed-maintenance.test.ts",
     "test/e2e/managed-writers-w3.test.ts",
+    "test/e2e/managed-facts-writers.test.ts",
     "test/e2e/managed-synthesis-postprocess.test.ts",
     "test/e2e/persistence-embedding-effects.test.ts",
     "test/e2e/withdrawal-bounded-safety-postgres.test.ts",
