@@ -1308,6 +1308,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // Per-brain source-boost map (`prefix:factor,...`; `none` drops the
   // defaults), read by search/mode.ts loadSearchModeConfig and ops/search.ts.
   'search.source_boosts',
+  // #5428 opt-in single-token alias hop (`true` enables), read by
+  // search/mode.ts loadSearchModeConfig.
+  'search.alias_token_hop',
   // 2026-08 fix wave (E5a): the adaptive-return / autocut / CRAG knobs were
   // read by the search path but never registered — `gbrain config set`
   // rejected them, making the documented config plane a no-op. Read sites:

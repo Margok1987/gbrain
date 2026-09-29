@@ -34,6 +34,7 @@ import { registerBackgroundWorkDrainer } from '../background-work.ts';
 import { isDbAccessFailure } from '../pg-access-classify.ts';
 import { resolveEmbeddingColumn, isCacheSafe } from './embedding-column.ts';
 import { resolveBoostMap, resolveHardExcludes } from './source-boost.ts';
+import { isIdentityEntity } from '../entities/resolve.ts';
 import {
   resolveAdaptiveReturn,
   applyAdaptiveReturn,
@@ -945,20 +946,25 @@ export async function applyAliasHop(
   engine: import('../engine.ts').BrainEngine,
   results: SearchResult[],
   query: string,
-  opts: IdentityTierOpts,
+  opts: IdentityTierOpts & { tokenHop?: boolean },
 ): Promise<SearchResult[]> {
   if (!query) return results;
   const qNorm = normalizeAlias(query);
   if (!qNorm || qNorm.split(' ').length > MAX_ALIAS_QUERY_TOKENS) return results;
+  const tokens = opts.tokenHop
+    ? [...new Set(qNorm.split(' '))].filter((t) => t.length >= 2 && t !== qNorm)
+    : [];
 
   let aliasMap: Map<string, Array<{ slug: string; source_id: string }>>;
   try {
-    aliasMap = await engine.resolveAliases([qNorm], opts);
+    aliasMap = await engine.resolveAliases([qNorm, ...tokens], opts);
   } catch {
     return results; // pre-v110 table-missing OR transient error -> fail-open
   }
   const refs = aliasMap.get(qNorm);
-  if (!refs || refs.length === 0) return results;
+  if (!refs || refs.length === 0) {
+    return tokens.length > 0 ? applyAliasTokenHop(engine, results, tokens, aliasMap, opts) : results;
+  }
 
   // Deterministic + capped. Source-scoped: each canonical is a (source_id, slug)
   // pair so a federated caller boosts/injects the RIGHT source's page, never
@@ -968,8 +974,7 @@ export async function applyAliasHop(
     .sort((a, b) => (a.source_id === b.source_id ? a.slug.localeCompare(b.slug) : a.source_id.localeCompare(b.source_id)))
     .slice(0, MAX_ALIAS_INJECT);
   const out = [...results];
-  const topScore = out.reduce((m, r) => (Number.isFinite(r.score) && r.score > m ? r.score : m), 0);
-  let injectScore = topScore > 0 ? topScore : 1.0;
+  let injectScore = topOrganicScore(out);
 
   for (const ref of ordered) {
     let idx = out.findIndex(r => r.slug === ref.slug && (r.source_id ?? 'default') === ref.source_id);
@@ -987,45 +992,114 @@ export async function applyAliasHop(
       out[idx] = hit;
       continue;
     }
-    // Absent canonical: fetch (in its OWN source) + inject at top-of-organic + epsilon.
-    let page;
-    try {
-      page = await engine.getPage(ref.slug, { sourceId: ref.source_id, excludePrivate: opts.excludePrivate });
-    } catch {
-      continue;
-    }
+    const page = await fetchAliasCanonical(engine, ref, opts);
     if (!page) continue;
-    // #4352 — the alias inject path bypasses the engines' SQL visibility
-    // clause (getPage, not search); re-apply the private predicate here so
-    // an untrusted caller can't hop into a `visibility: private` page.
-    if (
-      opts.excludePrivate &&
-      ((page.frontmatter as Record<string, unknown> | null | undefined)?.visibility === 'private')
-    ) continue;
     injectScore += 1e-6;
-    out.unshift({
-      // #2339-sibling: include page_id. The `as SearchResult` cast hid its
-      // absence, so any consumer reading page_id off an alias-injected result got
-      // undefined — e.g. listActiveTakesForPages bound undefined/NaN into
-      // ANY($1::int[]) and crashed the contradiction probe on real Postgres.
-      page_id: page.id,
-      slug: page.slug,
-      title: page.title,
-      type: page.type,
-      source_id: page.source_id ?? ref.source_id,
-      chunk_text: sanitizeRemoteBody(page.compiled_truth ?? '').slice(0, 200),
-      chunk_index: 0,
-      chunk_id: 0,
-      score: injectScore,
-      base_score: injectScore,
-      alias_hit: true,
-    } as SearchResult);
+    out.unshift(aliasInjectedRow(page, ref, injectScore));
   }
   return out;
 }
 
+/** Cap on pages the single-token alias hop moves or injects per query. */
+const MAX_ALIAS_TOKEN_HOP = 2;
+
+/**
+ * #5428 — opt-in single-token alias hop (`tokenHop`). A query token that is
+ * the alias of exactly ONE page, and that page is a person/company identity
+ * page (`isIdentityEntity`), moves that page to the front — or injects it
+ * when absent. Ambiguous tokens and excluded pages are skipped; at most
+ * MAX_ALIAS_TOKEN_HOP pages; every other row keeps its input order.
+ */
+async function applyAliasTokenHop(
+  engine: import('../engine.ts').BrainEngine,
+  results: SearchResult[],
+  tokens: string[],
+  aliasMap: Map<string, Array<{ slug: string; source_id: string }>>,
+  opts: IdentityTierOpts,
+): Promise<SearchResult[]> {
+  const out = [...results];
+  let injectScore = topOrganicScore(out);
+  const hopped = new Set<string>();
+  for (const token of tokens) {
+    if (hopped.size >= MAX_ALIAS_TOKEN_HOP) break;
+    const refs = (aliasMap.get(token) ?? []).filter((ref) => !isExcludedIdentity(ref.slug, opts));
+    if (refs.length !== 1) continue;
+    const ref = refs[0];
+    const key = `${ref.source_id}:${ref.slug}`;
+    if (hopped.has(key)) continue;
+    injectScore += 1e-6;
+    const idx = out.findIndex((r) => r.slug === ref.slug && (r.source_id ?? 'default') === ref.source_id);
+    if (idx >= 0) {
+      const hit = out[idx];
+      if (!isIdentityEntity(hit.slug, hit.type)) continue;
+      out.splice(idx, 1);
+      out.unshift({ ...hit, score: injectScore, alias_hit: true });
+      hopped.add(key);
+      continue;
+    }
+    const page = await fetchAliasCanonical(engine, ref, opts);
+    if (!page || !isIdentityEntity(page.slug, page.type)) continue;
+    out.unshift(aliasInjectedRow(page, ref, injectScore));
+    hopped.add(key);
+  }
+  return out;
+}
+
+function topOrganicScore(results: SearchResult[]): number {
+  const top = results.reduce((m, r) => (Number.isFinite(r.score) && r.score > m ? r.score : m), 0);
+  return top > 0 ? top : 1.0;
+}
+
+/** Fetch an alias canonical in its OWN source, re-applying the private predicate. */
+async function fetchAliasCanonical(
+  engine: import('../engine.ts').BrainEngine,
+  ref: { slug: string; source_id: string },
+  opts: IdentityTierOpts,
+): Promise<import('../types.ts').Page | null> {
+  let page;
+  try {
+    page = await engine.getPage(ref.slug, { sourceId: ref.source_id, excludePrivate: opts.excludePrivate });
+  } catch {
+    return null;
+  }
+  if (!page) return null;
+  // #4352 — the alias inject path bypasses the engines' SQL visibility
+  // clause (getPage, not search); re-apply the private predicate here so
+  // an untrusted caller can't hop into a `visibility: private` page.
+  if (
+    opts.excludePrivate &&
+    ((page.frontmatter as Record<string, unknown> | null | undefined)?.visibility === 'private')
+  ) return null;
+  return page;
+}
+
+function aliasInjectedRow(page: import('../types.ts').Page, ref: { source_id: string }, score: number): SearchResult {
+  return {
+    // #2339-sibling: include page_id. The `as SearchResult` cast hid its
+    // absence, so any consumer reading page_id off an alias-injected result got
+    // undefined — e.g. listActiveTakesForPages bound undefined/NaN into
+    // ANY($1::int[]) and crashed the contradiction probe on real Postgres.
+    page_id: page.id,
+    slug: page.slug,
+    title: page.title,
+    type: page.type,
+    source_id: page.source_id ?? ref.source_id,
+    chunk_text: sanitizeRemoteBody(page.compiled_truth ?? '').slice(0, 200),
+    chunk_index: 0,
+    chunk_id: 0,
+    score,
+    base_score: score,
+    alias_hit: true,
+  } as SearchResult;
+}
+
 export interface HybridSearchOpts extends SearchOpts {
   expansion?: boolean;
+  /**
+   * #5428 — opt-in single-token alias hop (see applyAliasTokenHop). Per-call
+   * wins; otherwise brain config `search.alias_token_hop=true`. Default off.
+   */
+  aliasTokenHop?: boolean;
   /** v0.43 — observability sink for the relational recall arm (fired/no-op,
    *  kind, seeds resolved, candidates, errored). Best-effort. */
   onRelationalMeta?: (meta: import('./relational-recall.ts').RelationalArmMeta) => void;
@@ -1432,6 +1506,10 @@ export async function hybridSearch(
     excludeSlugs: opts?.exclude_slugs,
     excludeSlugPrefixes: resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes),
   };
+  const aliasHopOpts = {
+    ...identityTierOpts,
+    tokenHop: opts?.aliasTokenHop ?? modeInput.aliasTokenHop === 'true',
+  };
   // Intent identity boosts (exact/mentioned title or slug, mentioned alias),
   // shared by the fused path and both keyword-only paths. Caller re-sorts.
   const applyIdentityBoosts = async (list: SearchResult[]): Promise<void> => {
@@ -1679,7 +1757,7 @@ export async function hybridSearch(
     }
     // T3/T4 — alias hop + evidence stamp even without an embedding provider
     // (the named-thing fix is most valuable exactly when vector is unavailable).
-    const noEmbedPreExact = await applyAliasHop(engine, dedupResults(noEmbedResults), query, identityTierOpts);
+    const noEmbedPreExact = await applyAliasHop(engine, dedupResults(noEmbedResults), query, aliasHopOpts);
     // #1663 — structural exact-lookup tier (slug / exact-title identity).
     const noEmbedHopped = await applyExactLookupTier(engine, noEmbedPreExact, query, exactLookupOpts);
     stampEvidence(noEmbedHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
@@ -2061,7 +2139,7 @@ export async function hybridSearch(
       await applyIdentityBoosts(fallbackResults);
       fallbackResults.sort((a, b) => b.score - a.score);
     }
-    const kwPreExact = await applyAliasHop(engine, dedupResults(fallbackResults), query, identityTierOpts);
+    const kwPreExact = await applyAliasHop(engine, dedupResults(fallbackResults), query, aliasHopOpts);
     // #1663 — structural exact-lookup tier (slug / exact-title identity).
     const kwHopped = await applyExactLookupTier(engine, kwPreExact, query, exactLookupOpts);
     stampEvidence(kwHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
@@ -2344,7 +2422,7 @@ export async function hybridSearch(
   // T3 — free-text alias hop. Runs AFTER rerank so a query that is a page's
   // declared chosen name reliably surfaces that page regardless of how the
   // reranker scored body chunks. Fail-open on pre-v110 brains.
-  const preExact = await applyAliasHop(engine, rerankPinned, query, identityTierOpts);
+  const preExact = await applyAliasHop(engine, rerankPinned, query, aliasHopOpts);
 
   // #1663 — structural exact-lookup tier: a query that IS a page identity
   // (slug / exact normalized title) gets that page at rank-1 regardless of
