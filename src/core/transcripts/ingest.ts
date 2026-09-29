@@ -89,6 +89,8 @@ export interface IngestSessionOutcome {
   redactions: number;
   imperatives: number;
   error?: string;
+  /** C-19: a session with no timestamps is skipped (never fabricated), not errored. */
+  skipped?: 'no_timestamp';
 }
 
 export interface IngestFileOutcome {
@@ -109,6 +111,8 @@ export interface TranscriptsIngestResult {
   sessionsImported: number;
   sessionsFiltered: number;
   sessionsErrored: number;
+  /** Sessions with no timestamps at all: reported, not imported, not an error (C-19). */
+  sessionsSkippedNoTimestamp: number;
   redactions: number;
   imperatives: number;
   partsDeleted: number;
@@ -163,6 +167,7 @@ export async function runTranscriptsIngest(
     sessionsImported: 0,
     sessionsFiltered: 0,
     sessionsErrored: 0,
+    sessionsSkippedNoTimestamp: 0,
     redactions: 0,
     imperatives: 0,
     partsDeleted: 0,
@@ -257,6 +262,16 @@ export async function runTranscriptsIngest(
           imperatives: 0,
         };
         fileOutcome.sessions.push(outcome);
+
+        // C-19: a session with no timestamps can never render (provenance is
+        // never fabricated), so retrying it is pointless; report the skip and
+        // keep the scan clean instead of freezing the --since checkpoint.
+        if (!session.meta.startedAt && !session.messages.some(m => m.timestamp)) {
+          outcome.skipped = 'no_timestamp';
+          result.sessionsSkippedNoTimestamp++;
+          step = await gen.next();
+          continue;
+        }
 
         try {
           const redacted = redactSession(session, {
