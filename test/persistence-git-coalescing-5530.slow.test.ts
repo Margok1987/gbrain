@@ -265,4 +265,18 @@ for (const kind of testBackends()) describe(`#5530 Git effect coalescing (${kind
     expect(git(repo.root, 'show', '--name-only', '--format=', 'HEAD').trim().split('\n').sort())
       .toEqual(['nested/notes/page-0700.md', 'nested/notes/page-0701.md', 'notes/page-0000.md', 'notes/page-0001.md', 'notes/page-0002.md']);
   }), 300_000);
+  test('without the durability hook, coalesced siblings of a shared worktree record their own outcome', () => withBrain(kind, async ({ engine, home, ctx }) => {
+    const repo = makeRepo(home, 'content');
+    mkdirSync(join(repo.root, 'nested'));
+    await bindSource(engine, 'default', repo);
+    await engine.executeRaw("INSERT INTO sources (id, name, local_path) VALUES ('nested', 'nested', $1)", [join(repo.root, 'nested')]);
+    await claimWorktree(engine, 'nested', join(repo.root, 'nested'), localHostId());
+    await activateSharedSkillPersistence(engine, { confirmQuiesced: true });
+    await pauseGitEffects(engine, async () => { await seed(ctx('nested'), 2, 700); await seed(ctx('default'), 3); });
+    await release(engine);
+    await pass(engine);
+    expect(await gitStates(engine)).toEqual({ committed: 5 });
+    expect(new Set((await engine.executeRaw<{ reason: string }>("SELECT outcome->>'reason' AS reason FROM persistence_effects WHERE kind='git'")).map(r => r.reason)))
+      .toEqual(new Set(['durability_not_enabled']));
+  }), 300_000);
 });

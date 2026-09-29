@@ -423,9 +423,12 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
         return;
       }
     }
-    const lock = await acquireWorktree(binding, 0, undefined, engine);
-    if (!lock) {
-      for (const effect of effects) await recordFailure(engine, effect, new OperationError('writer_busy', 'The canonical worktree is busy.'), opts.signal);
+    let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
+    try {
+      lock = await acquireWorktree(binding, 0, undefined, engine);
+      if (!lock) throw new OperationError('writer_busy', 'The canonical worktree is busy.');
+    } catch (error) {
+      for (const effect of effects) await recordFailure(engine, effect, error, opts.signal);
       return;
     }
     const targets: { effect: PersistenceEffect; path: string; attempt: EffectAttempt }[] = [];
@@ -481,14 +484,21 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     for (const { effects, binding, hardened } of deferred.splice(0)) {
       const durable = await hardened;
       if (durable && singleFileGitEffect(effects[0]!)) await commitGroup(effects, { ...binding, local_path: binding.local_path! });
-      else for (const effect of effects) await run(effect, binding, durable);
+      // Coalesced siblings run with their own source's binding (sources can share a worktree).
+      else for (const effect of effects) {
+        let own: WorktreeBinding | null;
+        try { own = effect === effects[0] ? binding : await getWorktreeBinding(engine, effect.source_id, opts.hostId); }
+        catch (error) { await recordFailure(engine, effect, error, opts.signal); continue; }
+        await run(effect, own, durable);
+      }
     }
   }
   for (const [root, { binding, items }] of unpushed) {
     let pushed: Awaited<ReturnType<typeof pushGitRoot>> | undefined;
     let failure: unknown;
-    const lock = await acquireWorktree(binding, 0, undefined, engine);
+    let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
     try {
+      lock = await acquireWorktree(binding, 0, undefined, engine);
       if (!lock) throw new OperationError('writer_busy', 'The canonical worktree is busy.');
       pushed = await pushGitRoot(root, opts.signal);
     } catch (error) { failure = error; } finally { await lock?.release(); }
