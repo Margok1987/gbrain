@@ -26,15 +26,22 @@ import { withEnv } from './helpers/with-env.ts';
 
 const home = mkdtempSync(join(tmpdir(), 'gbrain-noop-kernel-'));
 const engines: BrainEngine[] = [];
+// Company admission needs an empty brain, so that case gets its own stores.
+const companyStores: Array<{ engine: BrainEngine; close: () => Promise<void> }> = [];
 let closePostgres: (() => Promise<void>) | undefined;
 const env = { GBRAIN_HOME: home, GBRAIN_SYNC_FAILURES_DIR: home, GBRAIN_SOURCE: undefined, OPENAI_API_KEY: undefined, VOYAGE_API_KEY: undefined, ANTHROPIC_API_KEY: undefined };
 const git = (root: string, ...args: string[]) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 beforeAll(async () => {
   const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema(); engines.push(lite);
   if (process.env.DATABASE_URL) { const pg = await isolatedPersistencePostgres(process.env.DATABASE_URL); engines.push(pg.engine); closePostgres = pg.close; }
+  const company = new PGLiteEngine(); await company.connect({}); await company.initSchema(); companyStores.push({ engine: company, close: () => company.disconnect() });
+  if (process.env.DATABASE_URL) companyStores.push(await isolatedPersistencePostgres(process.env.DATABASE_URL));
 }, 120_000);
 afterAll(async () => {
-  await withEnv(env, async () => { for (const engine of engines) { await disposePersistenceConsumer(engine); await engine.disconnect(); } });
+  await withEnv(env, async () => {
+    for (const engine of engines) { await disposePersistenceConsumer(engine); await engine.disconnect(); }
+    for (const store of companyStores) { await disposePersistenceConsumer(store.engine); await store.close(); }
+  });
   await closePostgres?.(); rmSync(home, { recursive: true, force: true });
 });
 const each = (fn: (engine: BrainEngine) => Promise<void>) => withEnv(env, async () => { for (const engine of engines) await fn(engine); });
@@ -104,12 +111,8 @@ test('#5470 working-tree sync: a dirty file re-queued on the next run takes no s
 }), 180_000);
 
 test('#5470 company profile: rediscovering an interrupted approved revision re-imports no committed entry', async () => withEnv(env, async () => {
-  // Company admission needs an empty brain, so this case gets its own stores.
-  const stores: Array<{ engine: BrainEngine; close: () => Promise<void> }> = [];
-  const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema(); stores.push({ engine: lite, close: () => lite.disconnect() });
-  if (process.env.DATABASE_URL) stores.push(await isolatedPersistencePostgres(process.env.DATABASE_URL));
-  try {
-    for (const { engine } of stores) {
+  {
+    for (const { engine } of companyStores) {
       await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
       const root = mkdtempSync(join(home, 'company-')), repo = await makeGitFixture(root);
       for (const [path, content] of Object.entries({
@@ -141,5 +144,5 @@ test('#5470 company profile: rediscovering an interrupted approved revision re-i
       expect((await engine.getPage('customers/account', { sourceId }))?.compiled_truth).toContain('synthetic account');
       expect((await engine.getPage('people/operator', { sourceId }))?.compiled_truth).toContain('Owns the account');
     }
-  } finally { for (const store of stores) { await disposePersistenceConsumer(store.engine); await store.close(); } }
+  }
 }), 180_000);

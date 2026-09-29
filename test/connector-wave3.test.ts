@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID, generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { parseGoogleSourceConfig, runGoogleSync } from '../src/core/google/google-source.ts';
@@ -18,6 +18,8 @@ import { connectorCheckpointsRepair } from '../src/core/repair/connector-checkpo
 import { resolveRepairScope, runRepair } from '../src/core/repair/core.ts';
 import { performSync } from '../src/commands/sync.ts';
 import { handleToolCall } from '../src/mcp/server.ts';
+import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
+import { inspectUnchanged } from '../src/core/persistence/noop-kernel.ts';
 import { ALL_SOURCES } from '../src/core/source-id.ts';
 import type { WriteRequest } from '../src/core/persistence/model.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
@@ -387,5 +389,82 @@ test('doctor counts a checkpoint orphaned by a content change once it is 7 days 
     expect((await checkConnectorCheckpoints(engine)).status).toBe('ok');
     const liveKey = connectorCheckpointKey(f.id, await incarnation(engine, f.id), connectorIdentity('google', widened, f.dir));
     expect(await engine.executeRaw("SELECT fingerprint FROM op_checkpoints WHERE op='managed-connector' AND fingerprint=$1", [liveKey])).toHaveLength(1);
+  }
+}), 180_000);
+
+test('#5470 connector kernel: a safe-chunk reseal, projection lag, a pending contextual-mode page, a deleted page and a changed page admit; a carried-forward timeline row does not defeat the skip', async () => withEnv(env, async () => {
+  for (const engine of engines) {
+    const f = await boundSource(engine, googleConfig);
+    let org = 'Example Org', tombstone = false;
+    const rewalk = async (url: string) => url.includes('/settings/sendAs') ? json({ sendAs: [] })
+      : json({ connections: [tombstone ? { resourceName: 'people/first', metadata: { deleted: true } } : { ...contact('first', 'First Example'), organizations: [{ name: org }] }], nextSyncToken: 'contacts-stable' });
+    const slug = 'people/first-example';
+    const admitted = async (change: () => Promise<unknown>) => {
+      await change();
+      await disposePersistenceConsumer(engine);
+      const before = await mark(engine, f.id);
+      await google(engine, f, rewalk);
+      return (await since(engine, f.id, before)).filter(row => row.slug === slug && String(row.intent?.kind).endsWith('_import')).length;
+    };
+    await google(engine, f, rewalk);
+    // A database-only timeline row (as extract --stale records one) is carried forward into the connector
+    // render (#5567): the first re-walk may materialize it into the page once; it survives, and later re-walks skip.
+    const summaries = () => engine.executeRaw<{ summary: string }>('SELECT t.summary FROM timeline_entries t JOIN pages p ON p.id=t.page_id WHERE p.source_id=$1 AND p.slug=$2', [f.id, slug]);
+    expect(await admitted(() => engine.transaction(tx => withCoordinatedWrite(tx, [f.id], () =>
+      tx.addTimelineEntry(slug, { date: '2026-01-02', summary: 'Met to review the example plan', source: 'meetings/2026-01-02' }, { sourceId: f.id }))))).toBeLessThanOrEqual(1);
+    expect(await admitted(async () => {})).toBe(0);
+    expect(await summaries()).toEqual([{ summary: 'Met to review the example plan' }]);
+    expect(await admitted(() => engine.executeRaw('UPDATE pages SET text_projection_revision=gen_random_uuid() WHERE source_id=$1 AND slug=$2', [f.id, slug]))).toBe(1);
+    await engine.executeRaw('UPDATE pages SET text_projection_revision=knowledge_revision WHERE source_id=$1 AND slug=$2', [f.id, slug]);
+    expect(await admitted(async () => {})).toBe(0);
+    // Below the safe-chunk fence: asked of the kernel directly, since the owner's projection worker may re-seal it before a re-walk.
+    await engine.executeRaw('UPDATE pages SET chunker_version=1 WHERE source_id=$1 AND slug=$2', [f.id, slug]);
+    const snapshot = await engine.readPageSnapshot(slug, { sourceId: f.id, includeDeleted: true });
+    const file = { root: f.dir, path: join(f.dir, `${slug}.md`), content: existsSync(join(f.dir, `${slug}.md`)) ? readFileSync(join(f.dir, `${slug}.md`), 'utf8') : '' };
+    const prepared = { noop: true, observedRevision: snapshot!.revision, apply: async () => ({}), file };
+    expect(await inspectUnchanged(engine, { prepared, snapshot, sourcePath: `${slug}.md`, databaseOnly: false })).toMatchObject({ admitReason: 'projection_work', projectionWorkRequired: true });
+    await engine.executeRaw('UPDATE pages SET chunker_version=4 WHERE source_id=$1 AND slug=$2', [f.id, slug]);
+    expect((await inspectUnchanged(engine, { prepared, snapshot, sourcePath: `${slug}.md`, databaseOnly: false })).admitReason).toBeUndefined();
+    // An embedded page without a contextual mode awaits the contextual-mode repair: never skipped.
+    const vector = `[${Array(1536).fill(0.01).join(',')}]`;
+    await engine.executeRaw('UPDATE content_chunks SET embedding=$2::text::vector WHERE page_id=(SELECT id FROM pages WHERE source_id=$1 AND slug=$3)', [f.id, vector, slug]);
+    await engine.executeRaw('UPDATE pages SET contextual_retrieval_mode=NULL WHERE source_id=$1 AND slug=$2', [f.id, slug]);
+    expect(await inspectUnchanged(engine, { prepared, snapshot, sourcePath: `${slug}.md`, databaseOnly: false })).toMatchObject({ admitReason: 'projection_work' });
+    await engine.executeRaw('UPDATE content_chunks SET embedding=NULL WHERE page_id=(SELECT id FROM pages WHERE source_id=$1 AND slug=$2)', [f.id, slug]);
+    // The provider tombstones the contact, then lists it again: resurrecting a deleted page is always admitted.
+    tombstone = true;
+    await disposePersistenceConsumer(engine);
+    await google(engine, f, rewalk);
+    expect(await engine.getPage(slug, { sourceId: f.id })).toBeNull();
+    tombstone = false;
+    expect(await admitted(async () => {})).toBe(1);
+    expect(await engine.getPage(slug, { sourceId: f.id })).not.toBeNull();
+    org = 'Renamed Example Org';
+    expect(await admitted(async () => {})).toBe(1);
+  }
+}), 240_000);
+
+test('connector state row: a lost lease writes nothing; a new source incarnation starts empty', async () => withEnv(env, async () => {
+  for (const engine of engines) {
+    const f = await source(engine, googleConfig);
+    const cfg = parseGoogleSourceConfig(googleConfig, f.dir);
+    const { beginConnectorSync } = await import('../src/core/persistence/connector-sync.ts');
+    const lost = { handle: { id: `gbrain-sync:${f.id}`, acquisitionToken: randomUUID(), acquiredAt: '1' }, signal: new AbortController().signal };
+    await expect(beginConnectorSync(engine, f.id, 'google', cfg, options, lost as never)).rejects.toMatchObject({ name: 'LockStolenError' });
+    expect(await engine.executeRaw("SELECT fingerprint FROM op_checkpoints WHERE op='managed-connector-state' AND completed_keys->0->'last_run' IS NOT NULL AND completed_keys::text LIKE '%' || $1 || '%'", [f.id])).toHaveLength(0);
+    expect((await readManagedConnectorState(engine, f.id, await incarnation(engine, f.id))).account).toBeNull();
+    const { fetcher } = people(() => [contact('first', 'First Example')]);
+    await google(engine, f, fetcher);
+    const first = await incarnation(engine, f.id);
+    expect((await readManagedConnectorState(engine, f.id, first)).account).not.toBeNull();
+    await disposePersistenceConsumer(engine);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+    await engine.executeRaw('DELETE FROM sources WHERE id=$1', [f.id]);
+    await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,$3::text::jsonb)', [f.id, f.dir, JSON.stringify(googleConfig)]);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+    const second = await incarnation(engine, f.id);
+    expect(second).not.toBe(first);
+    const fresh = await readManagedConnectorState(engine, f.id, second);
+    expect(fresh).toMatchObject({ account: null, pending: [], upgrade_recovery: 'none', last_run: null });
   }
 }), 180_000);

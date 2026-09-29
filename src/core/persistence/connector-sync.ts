@@ -44,8 +44,8 @@ const CHECKPOINT_SLUG = '__managed_connector_checkpoint__';
 /**
  * #5600: one connector run waits at most this long in total for accepted
  * writes. A write that commits within the grace costs no budget, so a healthy
- * owner never exhausts it; the reserve keeps the last second before the
- * caller's run deadline free for the state write.
+ * owner never exhausts it; the reserve keeps the last second of the budget
+ * for the checkpoint and state writes.
  */
 export const CONNECTOR_WAIT_BUDGET_MS = 30_000;
 /** Test seam: fixtures that pause the owner shorten the budget instead of waiting 30 s per run. */
@@ -252,7 +252,7 @@ export class ManagedConnectorSync {
   constructor(private engine: BrainEngine, readonly sourceId: string, private identity: ConnectorIdentity,
     private source: ConnectorSource, private authority: SyncAuthority, private binding: WorktreeBinding | null,
     private canonicalRoot: string | null, private noEmbed: boolean, private noSchemaPack: boolean, private retryFailed = false,
-    private lease?: ConnectorLease, private resetRequested = false, private deadlineAt?: number) {
+    private lease?: ConnectorLease, private resetRequested = false) {
     this.connector = identity.kind;
     this.checkpointKey = connectorCheckpointKey(sourceId, source.incarnation, identity);
   }
@@ -491,9 +491,9 @@ export class ManagedConnectorSync {
         [this.sourceId, this.source.incarnation, newestContentAt ?? null]));
     });
   }
+  /** The run's remaining wait allowance; the caller's own deadline arrives through the lease signal. */
   private remainingWait(): number {
-    const lease = this.deadlineAt === undefined ? Infinity : this.deadlineAt - Date.now() - WAIT_RESERVE_MS;
-    return Math.max(0, Math.min(connectorWaitBudget.ms - this.waitCharged, lease));
+    return Math.max(0, connectorWaitBudget.ms - WAIT_RESERVE_MS - this.waitCharged);
   }
   private async budgetedWait(row: WriteRequest, cap = ITEM_WAIT_MS): Promise<WriteRequest> {
     if (isTerminal(row)) return row;
