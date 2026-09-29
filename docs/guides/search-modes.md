@@ -89,8 +89,11 @@ Seven of the knobs deserve a sentence:
   `gbrain config set search.expansion_variant_budget legacy` restores the
   default).
 - **`relationalRetrieval`** adds a graph-walk recall arm for relational
-  questions ("who invested in X", "what connects A and B"); it's a pure
-  no-op for non-relational queries. The `query` op's `relational` flag
+  questions ("who invested in X", "what connects A and B"). Common rewordings
+  count too: "X's investors", "people who funded X", "who is the founder of
+  X", "which companies has X backed", "relationship between A and B", "who
+  can introduce me to X". It's a pure no-op for non-relational queries, and
+  it only fires when the named entity resolves to a page in your brain. The `query` op's `relational` flag
   forces it on/off per call.
 - **`relational_rerank_pin`** (config key `search.relational_rerank_pin`;
   3 in every bundle) keeps those graph-walk answers from being buried by the
