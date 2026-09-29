@@ -336,6 +336,12 @@ async function parkEffectTarget(engine: BrainEngine, effect: PersistenceEffect, 
     ...(remaining.length ? { retry_slugs: remaining, target_failures: PARK_AFTER_FAILURES - 1 } : {}) }, code, 0);
 }
 
+/** #5530: at most this many single-file Git effects share one commit. */
+const GIT_GROUP_SIZE = 100;
+/** A short Git group yields to queued publications at most this many claims, GIT_YIELD_MS apart. */
+const GIT_YIELD_ATTEMPTS = 20;
+const GIT_YIELD_MS = 250;
+
 /**
  * Bounded, idempotent work. Recovery obtains kernel exclusion before a DB claim.
  * Resolves with the number of effects attempted, so a caller can keep draining.
@@ -406,6 +412,17 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
   const deferred: { effects: PersistenceEffect[]; binding: WorktreeBinding; hardened: Promise<boolean> }[] = [];
   const unpushed = new Map<string, { binding: WorktreeBinding; items: { effect: PersistenceEffect; git: string; target?: string }[] }>();
   const commitGroup = async (effects: PersistenceEffect[], binding: WorktreeBinding & { local_path: string }) => {
+    // A short group yields to publications still queued for its worktree, so a
+    // serial producer (the grandfather step) publishes ahead and its Git work
+    // arrives as one group. Each yield is a claim, so attempts bound the delay.
+    if (effects.length < GIT_GROUP_SIZE && effects.every(effect => effect.attempts <= GIT_YIELD_ATTEMPTS)) {
+      const [pending] = await engine.executeRaw<{ pending: boolean }>(`SELECT EXISTS(SELECT 1 FROM persistence_requests
+        WHERE worktree_id=$1::uuid AND state IN ('queued','running')) AS pending`, [effects[0]!.worktree_id]);
+      if (pending?.pending) {
+        for (const effect of effects) await retryEffect(engine, effect, 'publication_pending', GIT_YIELD_MS);
+        return;
+      }
+    }
     const lock = await acquireWorktree(binding, 0, undefined, engine);
     if (!lock) {
       for (const effect of effects) await recordFailure(engine, effect, new OperationError('writer_busy', 'The canonical worktree is busy.'), opts.signal);
@@ -453,7 +470,7 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
         const root = binding.local_path;
         if (!probes.has(root)) probes.set(root, isDurabilityHardenedAsync(root));
         const group = singleFileGitEffect(effect) && effect.worktree_id
-          ? [effect, ...await claimCoalescedGitEffects(engine, opts.hostId, effect.worktree_id, 99)] : [effect];
+          ? [effect, ...await claimCoalescedGitEffects(engine, opts.hostId, effect.worktree_id, GIT_GROUP_SIZE - 1)] : [effect];
         deferred.push({ effects: group, binding, hardened: probes.get(root)! });
       } else await run(effect, binding);
     }

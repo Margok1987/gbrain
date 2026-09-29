@@ -25,6 +25,7 @@ import type { BrainEngine } from '../src/core/engine.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { phaseCGrandfather } from '../src/commands/migrations/v0_13_1.ts';
+import { admitCanonicalGrandfather } from '../src/core/persistence/grandfather.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { activateSharedSkillPersistence } from '../src/core/persistence/skill-activation.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
@@ -219,5 +220,32 @@ for (const kind of testBackends()) describe(`#5530 Git effect coalescing (${kind
     await pass(engine);
     expect(await gitStates(engine)).toEqual({ committed: 3, queued: 1 });
     expect(await engine.executeRaw("SELECT state FROM persistence_effects WHERE kind='git' AND request_id=$1::uuid", [held.request_id])).toEqual([{ state: 'queued' }]);
+  }), 300_000);
+  test('a short group yields to a queued publication on its worktree, within a bounded number of claims', () => withBrain(kind, async ({ engine, home, ctx }) => {
+    const repo = makeRepo(home, 'content');
+    await bindSource(engine, 'default', repo);
+    await activateSharedSkillPersistence(engine, { confirmQuiesced: true });
+    await seed(ctx('default'), 1, 500);
+    await disposePersistenceConsumer(engine);
+    harden(repo);
+    await pauseGitEffects(engine, () => seed(ctx('default'), 3));
+    const commitsBefore = repo.commits();
+    const [target] = await engine.executeRaw<{ id: number; slug: string; source_id: string; source_incarnation: string }>(
+      "SELECT p.id,p.slug,p.source_id,s.incarnation AS source_incarnation FROM pages p JOIN sources s ON s.id=p.source_id WHERE p.slug='notes/page-0500'");
+    // Admitted and not yet published: the publication is queued for the same worktree.
+    const admitted = await admitCanonicalGrandfather(engine, target!, () => {});
+    expect(admitted.status).toBe('admitted');
+    await release(engine);
+    await pass(engine);
+    expect(repo.commits()).toBe(commitsBefore);
+    expect(await engine.executeRaw("SELECT DISTINCT state, error_code FROM persistence_effects WHERE kind='git' AND state<>'committed'"))
+      .toEqual([{ state: 'queued', error_code: 'publication_pending' }]);
+    // The yield is bounded: past the claim budget the group commits even with the publication still queued.
+    await effectSql(engine, "UPDATE persistence_effects SET attempts=21 WHERE kind='git' AND state='queued'");
+    await release(engine);
+    await pass(engine);
+    expect(repo.commits() - commitsBefore).toBe(1);
+    expect(await gitStates(engine)).toEqual({ committed: 4 });
+    if (admitted.status === 'admitted') expect((await admitted.complete()).revision).toBeTruthy();
   }), 300_000);
 });

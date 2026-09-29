@@ -5,7 +5,11 @@
  * bare remote. Every page is its own admitted put_page; the measurement
  * covers admission, publication and the page's Git commit and push.
  *
- *   bun scripts/bench-grandfather-5530.ts [--pages 250] [--postgres <url>] [--json]
+ *   bun scripts/bench-grandfather-5530.ts [--pages 250] [--postgres <url>] [--no-harden] [--no-push] [--json]
+ *
+ * --no-harden skips the durability hook, so Git effects record without running
+ * git: the difference between the two runs is the Git share of the step.
+ * --no-push unsets the branch upstream, so effects commit but never push.
  *
  * Isolated: a temporary GBRAIN_HOME, an in-memory PGLite brain (or a fresh
  * database on the given test Postgres server) and a local bare remote. It
@@ -23,6 +27,8 @@ function arg(name: string): string | undefined {
 const pages = Number(arg('--pages') ?? 250);
 const databaseUrl = arg('--postgres');
 const json = process.argv.includes('--json');
+const harden = !process.argv.includes('--no-harden');
+const push = !process.argv.includes('--no-push');
 
 function git(root: string, ...args: string[]): string {
   const result = Bun.spawnSync(['git', '-C', root, ...args]);
@@ -41,6 +47,8 @@ const { activateSharedSkillPersistence } = await import('../src/core/persistence
 const { submitPageMutation } = await import('../src/core/persistence/page-mutations.ts');
 const { disposePersistenceConsumer } = await import('../src/core/persistence/service.ts');
 const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
+const { runPersistenceEffects } = await import('../src/core/persistence/effects.ts');
+const { localHostId } = await import('../src/core/persistence/identity.ts');
 
 const root = join(home, 'content'), remote = join(home, 'remote.git');
 mkdirSync(root); mkdirSync(remote);
@@ -73,18 +81,25 @@ try {
   }
   await disposePersistenceConsumer(engine);
   git(root, 'add', '-A'); git(root, 'commit', '-q', '-m', 'Seed'); git(root, 'push', '-q');
-  const hook = join(root, '.git', 'hooks', 'post-commit');
-  writeFileSync(hook, '#!/bin/sh\n# gbrain brain-durability post-commit hook (v0.42.44+)\n');
-  chmodSync(hook, 0o755);
+  if (harden) {
+    const hook = join(root, '.git', 'hooks', 'post-commit');
+    writeFileSync(hook, '#!/bin/sh\n# gbrain brain-durability post-commit hook (v0.42.44+)\n');
+    chmodSync(hook, 0o755);
+  }
+  if (!push) git(root, 'branch', '--unset-upstream');
   const commitsBefore = Number(git(root, 'rev-list', '--count', 'HEAD').trim());
   const started = performance.now();
   const result = await phaseCGrandfather(engine, { yes: true, dryRun: false, noAutopilotInstall: true } as never);
-  const seconds = (performance.now() - started) / 1000;
+  const stepSeconds = (performance.now() - started) / 1000;
   await disposePersistenceConsumer(engine);
+  // Git work the step left queued still has to run before the pages are backed up.
+  await engine.executeRaw("UPDATE persistence_effects SET next_attempt_at=now() WHERE state='queued'").catch(() => undefined);
+  while (await runPersistenceEffects(engine, ctx.config as never, { hostId: localHostId(), limit: 20 }) > 0);
+  const seconds = (performance.now() - started) / 1000;
   const commits = Number(git(root, 'rev-list', '--count', 'HEAD').trim()) - commitsBefore;
   const remoteHead = git(remote, 'rev-parse', 'main').trim() === git(root, 'rev-parse', 'HEAD').trim();
-  const report = { engine: engine.kind, pages, touched: result.detail.touched, failed: result.detail.failed,
-    seconds: Number(seconds.toFixed(2)), seconds_per_page: Number((seconds / pages).toFixed(3)), commits, remote_matches_head: remoteHead,
+  const report = { engine: engine.kind, pages, hardened: harden, push, touched: result.detail.touched, failed: result.detail.failed, failures: result.detail.failures.slice(0, 3),
+    step_seconds: Number(stepSeconds.toFixed(2)), seconds: Number(seconds.toFixed(2)), seconds_per_page: Number((seconds / pages).toFixed(3)), commits, remote_matches_head: push ? remoteHead : null,
     platform: `${process.platform}-${process.arch}`, bun: Bun.version };
   console.log(json ? JSON.stringify(report) : Object.entries(report).map(([k, v]) => `${k}: ${v}`).join('\n'));
 } finally {

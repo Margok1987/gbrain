@@ -83,23 +83,53 @@ function withHooks<T>(run: (hooks: string) => Promise<T>): Promise<T> {
 export async function commitGitTargets(root: string, relativePaths: string[], signal?: AbortSignal): Promise<Map<string, GitOutcome | OperationError>> {
   const results = new Map<string, GitOutcome | OperationError>();
   await withHooks(async hooks => {
-    const changed: { requested: string; path: string }[] = [];
+    // One ls-files, one status, one add and one diff for the group; targets
+    // that are neither tracked nor present take the per-target path, which
+    // owns the absent-target and native-spelling refusals.
+    const normalized = new Map<string, string>();
     for (const requested of new Set(relativePaths)) {
-      try {
-        const staged = await stageTarget(root, hooks, requested, signal);
-        if ('skip' in staged) results.set(requested, staged.skip);
-        else if (staged.state === 'changed') changed.push({ requested, path: staged.path });
+      try { normalized.set(requested, relative(root, nativeFileTarget(root, resolvePath(root, requested), 'git_target_unsafe')).split(sep).join('/')); }
+      catch (error) { if (!(error instanceof OperationError)) throw error; results.set(requested, error); }
+    }
+    const paths = [...new Set(normalized.values())];
+    const list = async (args: string[]) => {
+      const out = paths.length ? await git(root, hooks, [...args, '--', ...paths], signal) : { stdout: '', code: 0 };
+      if (out.code !== 0) throw new OperationError('git_unavailable', 'Cannot inspect the canonical Git target.');
+      return out.stdout;
+    };
+    const tracked = new Set((await list(['ls-files', '-z'])).split('\0').filter(Boolean));
+    const dirty = new Set((await list(['status', '--porcelain', '-z', '--no-renames', '--untracked-files=all'])).split('\0').filter(Boolean).map(entry => entry.slice(3)));
+    const changed: { requested: string; path: string }[] = [];
+    const staged: string[] = [];
+    for (const [requested, path] of normalized) {
+      if (!tracked.has(path) && !(existsSync(join(root, path)) && dirty.has(path))) {
+        try {
+          const target = await stageTarget(root, hooks, requested, signal);
+          if ('skip' in target) results.set(requested, target.skip);
+          else if (target.state === 'changed') changed.push({ requested, path: target.path });
+          else results.set(requested, { git: 'unchanged' });
+        } catch (error) { if (!(error instanceof OperationError)) throw error; results.set(requested, error); }
+      } else if (dirty.has(path)) staged.push(path);
+      else results.set(requested, { git: 'unchanged' });
+    }
+    if (staged.length) {
+      const add = await git(root, hooks, ['add', '-A', '--', ...new Set(staged)], signal);
+      if (add.code !== 0) throw new OperationError('git_unavailable', 'Cannot stage the canonical Git target.');
+      const diff = await git(root, hooks, ['diff', '--cached', '--name-only', '-z', '--no-renames', '--', ...new Set(staged)], signal);
+      if (diff.code !== 0) throw new OperationError('git_unavailable', 'Cannot compare the canonical Git target.');
+      const indexed = new Set(diff.stdout.split('\0').filter(Boolean));
+      for (const [requested, path] of normalized) {
+        if (!staged.includes(path) || results.has(requested)) continue;
+        if (indexed.has(path)) changed.push({ requested, path });
         else results.set(requested, { git: 'unchanged' });
-      } catch (error) {
-        if (!(error instanceof OperationError)) throw error;
-        results.set(requested, error);
       }
     }
     if (!changed.length) return;
     // --only keeps unrelated staged paths out of this commit. After a lost
     // database acknowledgment the same HEAD/file state is an exact no-op.
-    const message = changed.length === 1 ? 'gbrain: persist canonical memory update' : `gbrain: persist ${changed.length} canonical memory updates`;
-    const result = await git(root, hooks, ['commit', '--only', '-m', message, '--', ...changed.map(c => c.path)], signal);
+    const commitPaths = [...new Set(changed.map(c => c.path))];
+    const message = commitPaths.length === 1 ? 'gbrain: persist canonical memory update' : `gbrain: persist ${commitPaths.length} canonical memory updates`;
+    const result = await git(root, hooks, ['commit', '--only', '-m', message, '--', ...commitPaths], signal);
     const outcome = result.code === 0 ? { git: 'committed' } : new OperationError('git_unavailable', 'Cannot commit the canonical Git target.');
     for (const c of changed) results.set(c.requested, outcome);
   });
