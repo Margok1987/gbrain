@@ -884,14 +884,7 @@ export async function runExtract(engine: BrainEngine, args: string[], authority?
     }
     const sidIdx = args.indexOf('--source-id');
     const staleSourceId = (sidIdx >= 0 && sidIdx + 1 < args.length) ? args[sidIdx + 1] : undefined;
-    if (await (await import('../core/persistence/ownership.ts')).managedPersistenceEnabled(engine)) {
-      // Managed brains guard canonical rows; links and the watermark take the coordinator-safe path.
-      const dryRun = args.includes('--dry-run');
-      const { runManagedStaleExtraction, formatManagedStaleExtraction } = await import('../core/persistence/links-maintenance.ts');
-      const result = await runManagedStaleExtraction(engine, { sourceId: staleSourceId, dryRun });
-      console.log(args.includes('--json') ? JSON.stringify({ action: dryRun ? 'extract_stale_dry_run' : 'extract_stale', ...result }) : formatManagedStaleExtraction(result, dryRun));
-      return;
-    }
+    if (await (await import('./extract-stale-delegate.ts')).runManagedExtractStale(engine, args, staleSourceId)) return;
     await extractStaleFromDB(engine, {
       dryRun: args.includes('--dry-run'),
       jsonMode: args.includes('--json'),
