@@ -1,7 +1,7 @@
 import { assertUnmanagedCanonicalWriter } from './persistence/maintenance.ts';
 import { assertImportBase, sameCanonicalImport } from './page-state/import-guard.ts';
 import { stabilizeSafetyAssessments } from './persistence/reconcile-safety.ts';
-import { decideImportIdentity, collidingSlugOwner } from './import-identity.ts';
+import { decideImportIdentity, collidingSlugOwner, fileOriginUri } from './import-identity.ts';
 import { readSourceFileSync } from './minions/source-filesystem.ts';
 import { readFileSync, statSync, lstatSync } from 'fs';
 import { basename, extname, resolve } from 'path';
@@ -26,7 +26,7 @@ import { embedMultimodal, currentEmbeddingSignature } from './embedding.ts';
 // precedent as embed-stale.ts.
 import { embedBatchWithBackoff } from './embed-retry.ts';
 import { slugifyPath, slugifyCodePath, isCodeFilePath, hasMalformedPathSegment } from './sync.ts';
-import type { ChunkInput, PageInput, PageType } from './types.ts';
+import type { ChunkInput, Page, PageInput, PageType } from './types.ts';
 import { computeEffectiveDate, fallbackCreatedAt } from './effective-date.ts';
 import { MARKDOWN_CHUNKER_VERSION } from './chunkers/recursive.ts';
 import { logSlugFallback } from './audit-slug-fallback.ts';
@@ -183,16 +183,19 @@ function invalidYamlFrontmatterError(parsed: ReturnType<typeof parseMarkdown>): 
  * zero-row UPDATEs, each firing the generation-clock trigger); undefined
  * (projection-less engine) falls through and `IS DISTINCT FROM` keeps the
  * UPDATE zero-row. brainstorm passes `${slug}.md`, the value putPage writes on
- * its own path. Bookkeeping only — never fails the import.
+ * its own path. It also records the file origin move inference binds to
+ * (#5675). Bookkeeping only — never fails the import.
  */
-async function refreshSourcePath(engine: BrainEngine, slug: string, sourceId: string | undefined, sourcePath: string | undefined, current: string | null | undefined): Promise<void> {
-  if (!sourcePath || current === sourcePath) return;
+async function refreshSourcePath(engine: BrainEngine, slug: string, sourceId: string | undefined, sourcePath: string | undefined,
+  current: Pick<Page, 'source_path' | 'source_uri'> | null, originUri: string | null): Promise<void> {
+  if (!sourcePath || (current?.source_path === sourcePath && (originUri === null || current.source_uri === originUri))) return;
   try {
     // Keep this optional legacy repair inside a savepoint: a rejected SQL
     // statement must not poison the surrounding canonical transaction.
     await engine.transaction(tx => tx.executeRaw(
-      'UPDATE pages SET source_path = $1 WHERE source_id = $2 AND slug = $3 AND deleted_at IS NULL AND source_path IS DISTINCT FROM $1',
-      [sourcePath, sourceId ?? 'default', slug],
+      `UPDATE pages SET source_path = $1, source_uri = COALESCE($4::text, source_uri) WHERE source_id = $2 AND slug = $3
+        AND deleted_at IS NULL AND (source_path IS DISTINCT FROM $1 OR source_uri IS DISTINCT FROM COALESCE($4::text, source_uri))`,
+      [sourcePath, sourceId ?? 'default', slug, originUri],
     ));
   } catch { /* bookkeeping only — never fail the import over it */ }
 }
@@ -673,11 +676,12 @@ export async function importFromContent(
     tags: parsed.tags,
   };
 
+  const originUri = fileOriginUri(existing?.source_uri, opts.sourceRoot, opts.sourcePath);
   const persistUnchanged = async (refreshBody = false) => {
     await engine.transaction(async tx => {
       await assertImportBase(tx, slug, sourceId ?? 'default', existing);
       if (refreshBody) await tx.refreshPageBody(slug, sourceId ?? 'default', parsed.compiled_truth, parsed.timeline || '', hash);
-      await refreshSourcePath(tx, slug, sourceId, opts.sourcePath, existing?.source_path);
+      await refreshSourcePath(tx, slug, sourceId, opts.sourcePath, existing, originUri);
       if (opts.beforeCommit) await verifyPageReadable(tx, slug, hash, sourceId, 'importFromContent');
       await opts.beforeCommit?.(tx, slug);
     });
@@ -919,7 +923,7 @@ export async function importFromContent(
       // COALESCE-preserve UPDATE so omitting these on a later put_page
       // doesn't erase the original ingestion's audit trail.
       source_kind: opts.source_kind ?? null,
-      source_uri: opts.source_uri ?? null,
+      source_uri: opts.source_uri ?? originUri,
       ingested_via: opts.ingested_via ?? null,
       // ingested_at is server-stamped at the engine layer when any
       // provenance write fires; never client-controlled.
