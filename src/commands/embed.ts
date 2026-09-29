@@ -8,7 +8,7 @@ import type { BrainEngine } from '../core/engine.ts';
 import { currentEmbeddingSignature } from '../core/embedding.ts';
 import type { ChunkInput } from '../core/types.ts';
 import { carryChunkMetadata, probeEmbedder, resolveProvenanceStamp, stampIfPageProvenanceComplete } from '../core/embed-stale.ts';
-import { runEmbedStaleImagesCli, type StaleImageSweepResult } from '../core/embed-stale-images.ts';
+import type { StaleImageSweepResult } from '../core/embed-stale-images.ts';
 import { chunkText } from '../core/chunkers/recursive.ts';
 import { resolveMaxChunkTokens } from '../core/embedding-input-limit.ts';
 import { healOversizedPageChunks, healedChunksToStaleRows } from '../core/embed-oversize-heal.ts';
@@ -859,7 +859,7 @@ export async function runEmbed(engine: BrainEngine, args: string[], selectedConf
     };
   }
 
-  if (args.includes('--images')) return runEmbedStaleImagesCli(engine, args); // `--stale --images`: rebuild incomplete image pages
+  if (args.includes('--images')) return (await import('../core/embed-stale-images.ts')).runEmbedStaleImagesCli(engine, args); // lazy: keeps import-file out of embed's graph
   // v0.36+ T7: --background submits via Minion queue, returns job_id to
   // stdout, exits. Same semantics in TTY and cron (D9).
   if (args.includes('--background')) {
