@@ -126,13 +126,13 @@ export async function writeSingleFact(
   }
 
   if (managed) {
-    // The coordinator's fact intent owns dedup, the fence row and the file on
-    // a managed brain; the legacy supersession and DB-only writes stay unmanaged.
+    // The coordinator's fact intent owns dedup, supersession, the fence row and
+    // the file on a managed brain; the legacy direct writes stay unmanaged.
     const { publishManagedEntityFacts } = await import('./managed-fact-write.ts');
     const written = await publishManagedEntityFacts(engine, sourceId, resolvedSlug, [{ fact: factText, kind, notability: 'medium',
       source: input.provenance, visibility, confidence: input.confidence ?? 1.0, validFrom: new Date(), validUntil,
-      embedding, embedding_model: embeddingModel, sessionId: input.sessionId ?? null }]);
-    return { id: written.ids[0], status: written.inserted ? 'inserted' : 'duplicate', entity_slug: resolvedSlug,
+      embedding, embedding_model: embeddingModel, sessionId: input.sessionId ?? null }], { supersede: true });
+    return { id: written.ids[0], status: written.superseded ? 'superseded' : written.inserted ? 'inserted' : 'duplicate', entity_slug: resolvedSlug,
       valid_until: validUntil, degraded_dedup: degradedDedup };
   }
 

@@ -27,7 +27,7 @@ import { MOVE_WITHDRAWAL_SUBJECT_SQL } from '../facts/withdrawal-schema.ts';
 import { recordRenameAlias } from '../page-state/rename-alias.ts';
 import { preparePageMutation } from '../persistence/page-prepare.ts';
 import { maintenancePreflight, submitMaintenanceIntent } from '../persistence/prepared-maintenance.ts';
-import { mergePhantomFenceRows, mergePhantomLinks, movePhantomFacts, type RedirectResult } from './phantom-redirect.ts';
+import { mergePhantomFenceRows, mergePhantomLinks, movePhantomFacts, phantomHasResidue, type RedirectResult } from './phantom-redirect.ts';
 
 export async function redirectManagedPhantom(engine: BrainEngine, page: Page, canonical: string, sourceId: string): Promise<RedirectResult> {
   const authority = (await maintenancePreflight(engine, sourceId))!;
@@ -38,7 +38,9 @@ export async function redirectManagedPhantom(engine: BrainEngine, page: Page, ca
   const target = await engine.readPageSnapshot(canonical, { sourceId });
   if (!target) return drift('canonical page unavailable on a managed brain');
   const phantom = await engine.readPageSnapshot(page.slug, { sourceId });
-  if (!phantom || phantom.page.id !== page.id || phantom.page.compiled_truth !== page.compiled_truth) return drift('phantom page changed');
+  // Eligibility, merge and delete all bind to this one snapshot revision.
+  if (!phantom || phantom.page.id !== page.id || phantom.page.compiled_truth !== page.compiled_truth
+    || await phantomHasResidue(engine, phantom.page)) return drift('phantom page changed');
 
   const [dbMax] = await engine.executeRaw<{ n: number | string | null }>(
     'SELECT MAX(row_num) AS n FROM facts WHERE source_id = $1 AND source_markdown_slug = $2', [sourceId, canonical]);
@@ -70,7 +72,7 @@ export async function preparePhantomMerge(engine: BrainEngine, row: WriteRequest
   const rowMap = new Map((p.row_map as Array<[number, number]>).map(([from, to]) => [Number(from), Number(to)]));
   const phantomUnchanged = async (db: BrainEngine) => {
     const phantom = await db.readPageSnapshot(phantomSlug, { sourceId: row.source_id });
-    if (!phantom || phantom.page.id !== phantomId || phantom.revision !== p.phantom_revision) {
+    if (!phantom || phantom.page.id !== phantomId || phantom.revision !== p.phantom_revision || await phantomHasResidue(db, phantom.page)) {
       throw new OperationError('revision_conflict', 'The phantom page changed before its redirect.');
     }
   };

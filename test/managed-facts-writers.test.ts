@@ -34,6 +34,7 @@ import { runExtractFacts } from '../src/core/cycle/extract-facts.ts';
 import { runExtractConversationFactsCore, runExtractConversationFacts } from '../src/commands/extract-conversation-facts.ts';
 import { runPhaseConversationFactsBackfill } from '../src/core/cycle/conversation-facts-backfill.ts';
 import { writeFactsToFence } from '../src/core/facts/fence-write.ts';
+import { writeSingleFact } from '../src/core/facts/write-single.ts';
 import { runLoopsExtract } from '../src/core/google/loops-extract.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { withEnv } from './helpers/with-env.ts';
@@ -178,6 +179,40 @@ test('managed phantom redirect merges the phantom fence into the canonical page 
   });
 }, 120_000);
 
+test('managed phantom redirect rechecks eligibility against the snapshot it merges', async () => {
+  await managed(async ({ engine, sourceId, root, put }) => {
+    await put('people/alice-example', PERSON('Alice Example'));
+    await engine.putPage('alice', { type: 'person', title: 'alice', compiled_truth: `# alice\n\n${FENCE('| 1 | Founded Acme | fact | 1.0 | world | high | 2017-01-01 |  | chat |  |')}`.trim(),
+      timeline: '', frontmatter: {} }, { sourceId });
+    const phantom = (await engine.readPageSnapshot('alice', { sourceId }))!;
+    writeFileSync(join(root, 'alice.md'), serializePageToMarkdown(phantom.page, phantom.tags));
+    await runExtractFacts(engine, { sourceId, slugs: ['alice'] });
+  }, async ({ engine, sourceId, root, put }) => {
+    // After the pass judged the phantom residue-free, an edit adds timeline
+    // text and metadata but leaves compiled_truth unchanged.
+    const read = engine.readPageSnapshot;
+    let edited = false;
+    engine.readPageSnapshot = (async function (this: BrainEngine, slug: string, opts?: Parameters<BrainEngine['readPageSnapshot']>[1]) {
+      if (this === engine && slug === 'alice' && !edited && new Error().stack?.includes('redirectManagedPhantom')) {
+        edited = true;
+        const current = (await read.call(this, slug, opts))!;
+        await put('alice', serializePageToMarkdown({ ...current.page, frontmatter: { owner_note: 'keep me' },
+          timeline: '- **2026-01-01** | Met at the offsite' }, current.tags));
+      }
+      return read.call(this, slug, opts);
+    }) as BrainEngine['readPageSnapshot'];
+    let result: Awaited<ReturnType<typeof runExtractFacts>>;
+    try { result = await runExtractFacts(engine, { sourceId, brainDir: root }); }
+    finally { delete (engine as { readPageSnapshot?: unknown }).readPageSnapshot; }
+    expect(edited).toBe(true);
+    const alive = await engine.readPageSnapshot('alice', { sourceId, includeDeleted: true });
+    expect(alive?.page.deleted_at ?? null).toBeNull();
+    expect(alive?.page.timeline).toContain('Met at the offsite');
+    expect([result.phantomsRedirected, result.phantomsSkippedDrift]).toEqual([0, 1]);
+    expect((await committed(engine, sourceId, 'people/alice-example')).map(r => r.kind)).not.toContain('managed_maintenance_phantom_merge');
+  });
+}, 120_000);
+
 test('managed direct fence writes publish the fence row and index through the coordinator', async () => {
   await managed(async ({ put }) => { await put('people/alice-example', PERSON('Alice Example')); }, async ({ engine, sourceId, root }) => {
     const result = await writeFactsToFence(engine, { sourceId, localPath: root, slug: 'people/alice-example', resolutionSource: 'exact_page' }, [
@@ -187,6 +222,41 @@ test('managed direct fence writes publish the fence row and index through the co
     expect(rows.map(f => [f.id, f.fact, f.row_num])).toEqual([[result.ids[0], 'Prefers weekly status reports.', 1]]);
     expect(readFileSync(join(root, 'people/alice-example.md'), 'utf8')).toContain('Prefers weekly status reports.');
     expect((await committed(engine, sourceId, 'people/alice-example')).map(r => r.kind)).toContain('managed_facts_entity');
+  });
+}, 120_000);
+
+test('managed fence writes keep a fact\'s explicit context in the fence and the index', async () => {
+  await managed(async ({ put }) => { await put('people/alice-example', PERSON('Alice Example')); }, async ({ engine, sourceId, root }) => {
+    const write = (context: string) => writeFactsToFence(engine, { sourceId, localPath: root, slug: 'people/alice-example', resolutionSource: 'exact_page' }, [
+      { fact: 'Prefers weekly status reports.', kind: 'preference', source: 'fixture', context, visibility: 'private', notability: 'medium', embedding: null, sessionId: null }]);
+    const first = await write('meetings/review');
+    const [row] = await engine.executeRaw<{ context: string | null }>('SELECT context FROM facts WHERE id=$1', [first.ids[0]]);
+    expect(row.context).toBe('meetings/review');
+    expect(readFileSync(join(root, 'people/alice-example.md'), 'utf8')).toContain('meetings/review');
+    // Context is part of the write's identity: a different context is a new write, not a replay.
+    expect((await committed(engine, sourceId, '__managed_facts_complete__')).length).toBe(1);
+    await write('meetings/other');
+    expect((await committed(engine, sourceId, '__managed_facts_complete__')).length).toBe(2);
+  });
+}, 120_000);
+
+test('managed writeSingleFact supersedes a near-duplicate of the same kind like the unmanaged path', async () => {
+  await managed(async ({ engine, put }) => {
+    await engine.setConfig('embedding_model', 'openai:text-embedding-3-large');
+    await engine.setConfig('embedding_dimensions', '1536');
+    await put('people/alice-example', PERSON('Alice Example'));
+  }, async ({ engine, sourceId, root }) => {
+    const remember = (fact: string) => writeSingleFact(engine, sourceId, { fact, provenance: 'fixture', entity: 'people/alice-example', visibility: 'world' });
+    const first = await remember('Alice Example works at Acme.');
+    expect(first.status).toBe('inserted');
+    const second = await remember('Alice Example works at Beta.');
+    expect(second.status).toBe('superseded');
+    expect(second.id).not.toBe(first.id);
+    const [old] = await engine.executeRaw<{ expired_at: unknown; superseded_by: number | null }>('SELECT expired_at,superseded_by FROM facts WHERE id=$1', [first.id]);
+    expect(old.expired_at).not.toBeNull();
+    expect(Number(old.superseded_by)).toBe(second.id);
+    expect((await facts(engine, sourceId, 'people/alice-example')).filter(f => f.expired_at === null).map(f => f.fact)).toEqual(['Alice Example works at Beta.']);
+    expect(readFileSync(join(root, 'people/alice-example.md'), 'utf8')).toMatch(/~~Alice Example works at Acme\.~~/);
   });
 }, 120_000);
 

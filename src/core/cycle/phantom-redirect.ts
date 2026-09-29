@@ -454,6 +454,15 @@ async function materializeCanonicalToDisk(
 /** Frontmatter a bare phantom stub may carry; any other key is residue. */
 const PHANTOM_STUB_FRONTMATTER = new Set(['title', 'type', 'tags']);
 
+/** Anything a redirect would lose: body beyond the fence, timeline text or rows, custom frontmatter. */
+export async function phantomHasResidue(engine: BrainEngine, page: Page): Promise<boolean> {
+  const residue = stripFenceAndFrontmatterAndLeadingH1(page.compiled_truth ?? '')
+    + (page.timeline ?? '').trim()
+    + Object.keys(page.frontmatter ?? {}).filter(key => !PHANTOM_STUB_FRONTMATTER.has(key)).join(',');
+  if (residue.length > 0) return true;
+  return (await engine.executeRaw('SELECT 1 FROM timeline_entries WHERE page_id=$1 LIMIT 1', [page.id])).length > 0;
+}
+
 /**
  * Single-phantom redirect. Caller (the pass) is responsible for the
  * outer lock + the audit-log cap.
@@ -473,12 +482,7 @@ export async function tryRedirectPhantom(
   // a facts fence. Only fence rows migrate, so anything else the page holds
   // (timeline text or rows, custom frontmatter) is residue that a redirect
   // would delete.
-  const residue = stripFenceAndFrontmatterAndLeadingH1(page.compiled_truth ?? '')
-    + (page.timeline ?? '').trim()
-    + Object.keys(page.frontmatter ?? {}).filter(key => !PHANTOM_STUB_FRONTMATTER.has(key)).join(',');
-  const timelineRows = residue.length > 0 ? [] : await engine.executeRaw(
-    'SELECT 1 FROM timeline_entries WHERE page_id=$1 LIMIT 1', [page.id]);
-  if (residue.length > 0 || timelineRows.length > 0) {
+  if (await phantomHasResidue(engine, page)) {
     logPhantomEvent({
       phantom_slug: page.slug,
       outcome: 'not_phantom_has_residue',

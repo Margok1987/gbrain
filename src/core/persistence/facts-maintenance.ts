@@ -30,6 +30,8 @@ export interface ManagedFactIntent extends Record<string, unknown> {
   kind: 'managed_facts_entity' | 'managed_facts_complete';
   batchKey: string; inputDigest: string; origin: ManagedFactOrigin | null; originalRequestId: string | null;
   expected_revision?: string; facts?: FrozenExtractedFact[]; children?: string[];
+  /** Direct single-fact writes keep writeSingleFact's supersession rule. */
+  supersede?: true;
   embedding?: FactEmbeddingSignature | null;
 }
 export interface ManagedFactsSession {
@@ -184,6 +186,7 @@ async function collectManagedFacts(engine: BrainEngine, session: ManagedFactsSes
       const out = finished.outcome!;
       result.inserted += Number(out.inserted ?? 0);
       result.duplicate += Number(out.duplicate ?? 0);
+      result.superseded += Number(out.superseded ?? 0);
       result.fact_ids.push(...(out.fact_ids as number[] ?? []));
       if (out.inserted && out.fenced) result.entity_slugs.push(row.slug);
     }
@@ -204,7 +207,8 @@ export async function resumeManagedFacts(engine: BrainEngine, session: ManagedFa
 }
 
 export async function publishManagedFacts(engine: BrainEngine, session: ManagedFactsSession, ctx: FactsBackstopCtx,
-  facts: ExtractedFact[], visibility: 'private' | 'world', pageSlug?: string): Promise<ManagedFactsResult> {
+  facts: ExtractedFact[], visibility: 'private' | 'world', pageSlug?: string,
+  options: { supersede?: boolean; explicitContext?: boolean } = {}): Promise<ManagedFactsResult> {
   const embedded = facts.some(fact => fact.embedding !== null && fact.embedding !== undefined);
   if (embedded) await assertManagedFactsEmbedding(engine, session.config, session.embedding);
   const sourceId = session.authority.sourceId;
@@ -218,7 +222,7 @@ export async function publishManagedFacts(engine: BrainEngine, session: ManagedF
     await authorizeWrite(engine, session.authority, 'extract_facts', slug);
     await authorizePageVisibility(engine, session.authority, slug);
     const group = groups.get(slug) ?? [];
-    group.push({ ...fact, entity_slug: entitySlug, visibility, context: ctx.sourceSlug ?? pageSlug ?? null,
+    group.push({ ...fact, entity_slug: entitySlug, visibility, context: options.explicitContext ? fact.context ?? null : ctx.sourceSlug ?? pageSlug ?? null,
       embedding: fact.embedding ? Array.from(fact.embedding) : null,
       valid_from: (fact.valid_from ?? ctx.validFrom ?? new Date()).toISOString(), valid_until: fact.valid_until?.toISOString() ?? null });
     groups.set(slug, group);
@@ -229,7 +233,7 @@ export async function publishManagedFacts(engine: BrainEngine, session: ManagedF
     if (snapshot?.page.deleted_at || group.some(fact => fact.entity_slug !== null) && !snapshot) throw new OperationError('page_identity_changed', 'The resolved fact entity was removed.');
     inputs.push({ slug, pageId: snapshot?.page.id ?? null, intent: { kind: 'managed_facts_entity', batchKey: session.batchKey,
       inputDigest: session.inputDigest, origin: session.origin, originalRequestId: session.originalRequestId,
-      embedding: session.embedding ?? null,
+      embedding: session.embedding ?? null, ...(options.supersede ? { supersede: true as const } : {}),
       ...(snapshot ? { expected_revision: snapshot.revision } : {}), facts: group } });
   }
   const rows = await engine.transaction(async tx => {
