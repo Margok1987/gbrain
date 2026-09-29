@@ -2660,6 +2660,15 @@ export async function buildChecks(
     staleMentionsHb();
   }
 
+  // 9d. Wave 2 residual-state signals (#5567, #5525): database-only timeline
+  // rows and derived pages without explicit visibility. Bounded, never throw.
+  progress.heartbeat('timeline_history');
+  {
+    const { timelineHistoryCheck } = await import('./doctor/checks/timeline-history.ts');
+    const { derivedVisibilityCheck } = await import('./doctor/checks/derived-visibility.ts');
+    checks.push(await timelineHistoryCheck(engine, orphanRatioSourceId), await derivedVisibilityCheck(engine, orphanRatioSourceId));
+  }
+
   // 10. Integrity sample scan (v0.13 knowledge runtime).
   // Read-only — no network, no writes, no resolver calls. Samples the first
   // 500 pages by slug order and surfaces bare-tweet + dead-link counts as a

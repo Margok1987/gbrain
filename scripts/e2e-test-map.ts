@@ -80,7 +80,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/whoknows.ts": ["test/e2e/read-enrichment-privacy.test.ts"],
   "src/commands/orphans.ts": ["test/e2e/engine-content-privacy.test.ts", "test/e2e/remote-privacy-journeys.test.ts"],
   // Source-aware ranking, hybrid search, intent classification.
-  "src/core/search/private-visibility.ts": ["test/e2e/derived-page-visibility.test.ts"],
+  "src/core/search/private-visibility.ts": ["test/e2e/derived-page-visibility.test.ts", "test/e2e/derived-visibility-repair.test.ts"],
   "src/core/search/**": [
     "test/e2e/unsupported-embedding-identity-postgres.test.ts",
     "test/e2e/projection-statistics-postgres.test.ts",
@@ -234,7 +234,13 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/shared-skills-transports.test.ts",
     "test/e2e/canonical-projection-history.test.ts",
     "test/e2e/derived-page-visibility.test.ts",
+    "test/e2e/timeline-materialize.test.ts",
+    "test/e2e/derived-visibility-repair.test.ts",
+    "test/e2e/repair-command.test.ts",
   ],
+  "src/core/repair/**": ["test/e2e/repair-command.test.ts", "test/e2e/derived-visibility-repair.test.ts"],
+  "src/commands/repair.ts": ["test/e2e/repair-command.test.ts"],
+  "src/core/timeline-marker.ts": ["test/e2e/timeline-materialize.test.ts"],
   "src/commands/source-reconcile.ts": ["test/e2e/reconcile-crash.test.ts", "test/e2e/reconcile-crash-unactivated.test.ts", "test/e2e/reconcile-pgbouncer.test.ts"],
   "src/core/cycle/extract-atoms.ts": ["test/e2e/extract-atoms-page-state.test.ts", "test/e2e/cycle.test.ts", "test/e2e/dream.test.ts", "test/e2e/multi-source-bug-class.test.ts", "test/e2e/managed-extract-atoms.test.ts", "test/e2e/managed-atom-regressions.test.ts", "test/e2e/managed-atom-compaction.test.ts"],
   "src/core/cycle/synthesize*.ts": ["test/e2e/managed-maintenance.test.ts", "test/e2e/managed-synthesis-postprocess.test.ts"],

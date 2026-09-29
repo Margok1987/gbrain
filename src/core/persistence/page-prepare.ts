@@ -21,7 +21,7 @@ import type { PreparedMutation } from './coordinator.ts';
 import type { WriteRequest } from './model.ts';
 import { sealPageTextProjection } from '../page-state/projections.ts';
 import { overlayCanonicalBodies } from '../page-state/snapshot.ts';
-import { prepareCanonicalProjections } from './canonical-projections.ts';
+import { materializeTimeline, prepareCanonicalProjections } from './canonical-projections.ts';
 import { preserveProtectedTakes } from './protected-takes.ts';
 import { isAutoLinkEnabled } from '../link-extraction.ts';
 import { prepareAutomaticLinks } from './links-preparation.ts';
@@ -163,6 +163,16 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     if (compiled_truth!==parsed.compiled_truth || timeline!==(parsed.timeline??'')) content=serializePageToMarkdown({
       ...(snapshot?.page??{id:0,source_id:row.source_id,created_at:new Date(),updated_at:new Date()}),...parsed,compiled_truth,timeline},parsed.tags);
   }
+  const projected = !(row.operation === 'remember' || row.operation.startsWith('takes_') || (row.operation === 'extract_facts' && p.kind === 'managed_facts_entity'));
+  const writer = row.operation === 'put_page' && p.kind !== 'managed_maintenance_page'
+    && (preparedIntent !== undefined || typeof p.expected_revision === 'string') ? 'editing' : 'preserving';
+  // #5567: database-only timeline rows are written back into the page before
+  // the no-op check, digest, rendering and chunking see the body.
+  if (projected && snapshot && typeof content === 'string') {
+    const parsed = parseMarkdown(content,row.slug);
+    const { timeline, materialized } = await materializeTimeline(engine,parsed,row.slug,snapshot,writer);
+    if (materialized) content = serializePageToMarkdown({...snapshot.page,...parsed,timeline,type:parsed.typeExplicit ? parsed.type : snapshot.page.type},parsed.tags);
+  }
   // Detect an exact canonical no-op before ingestion can invoke any provider.
   // Revision/identity checks above still apply to stale identical replacements.
   if (snapshot && (snapshot.page.deleted_at != null) === targetDeleted && typeof content === 'string') {
@@ -211,10 +221,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   const rendered = serializePageToMarkdown(renderedPage, tags);
   const logicalNoop = snapshot !== null && digest(canonical(snapshot.page, snapshot.tags)) === digest(canonical(ready.parsedPage, tags));
   const noop = logicalNoop && (snapshot?.page.deleted_at != null) === targetDeleted;
-  const revisionBound = row.operation === 'put_page' && p.kind !== 'managed_maintenance_page'
-    && (preparedIntent !== undefined || typeof p.expected_revision === 'string');
-  const project = row.operation === 'remember' || row.operation.startsWith('takes_') || (row.operation === 'extract_facts' && p.kind === 'managed_facts_entity') ? undefined
-    : await prepareCanonicalProjections(engine,ready.parsedPage,row.slug,row.source_id,snapshot,revisionBound ? 'editing' : 'preserving');
+  const project = projected ? await prepareCanonicalProjections(engine,ready.parsedPage,row.slug,row.source_id,snapshot,writer) : undefined;
   const ordinaryPage = ['put_page','capture','restore_page','revert_version'].includes(row.operation);
   const advisories = noop || targetDeleted ? pageNoopAdvisories(row) : !ordinaryPage ? remoteLinkHint(row) : await preparePageAdvisories(engine,row,ready.parsedPage);
   const links = !noop && !targetDeleted && ordinaryPage && (row.authority.autoLinkTrusted ?? !row.authority.remote) && await isAutoLinkEnabled(engine)

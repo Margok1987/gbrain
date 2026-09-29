@@ -10,6 +10,92 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.59.15.0] - 2026-09-28
+
+**Database-only timeline history is now written back into its page, derived pages record who may read them, and two repair commands fix what was left behind.**
+
+v0.59.14.0 stopped page writes from deleting timeline entries that existed only
+in the database. This release puts those entries where they belong: the next
+time a page is saved from the database (a `put_page`, a reconcile, a connector
+refresh), each entry is written into the page's timeline as an ordinary bullet,
+preceded by a small marker comment. A later save without a revision, or a
+connector refresh that does not produce the bullet, keeps it; deleting the
+bullet with the current revision deletes the entry. Managed sync of your own
+file edits never rewrites your file to add them.
+
+Extracted atoms and synthesized concepts now carry an explicit `visibility`
+taken from where they came from. Atoms from private pages and from transcripts
+are private, atoms from public pages are public, and a concept is private when
+any atom it was built from is. If you later make an origin page private, remote
+readers stop seeing its atoms and concepts right away.
+
+For pages that are never saved again, `gbrain repair timeline` and
+`gbrain repair visibility` preview the fix, and `--apply` performs it through
+the normal write path. Two new doctor signals count what is left. Health scores
+may drop by those warnings after upgrading; `gbrain repair timeline --apply`
+and `gbrain repair visibility --apply` clear them.
+
+| Situation | Before | After |
+| --- | --- | --- |
+| Page with database-only timeline entries is saved | Entries kept, page unchanged | Entries written back as marked bullets |
+| Stale save or connector refresh drops a marked bullet | Entry kept, bullet gone | Bullet written back |
+| You delete a marked bullet with the current revision | Entry kept | Entry deleted |
+| Atom extracted from a public page (either mode) | No visibility (hidden remotely), or private | `world` |
+| Atom from a private page or transcript, non-managed extraction | No visibility | `private` |
+| Concept built from one private and one public atom | No visibility | `private` |
+| Origin page made private after extraction | Its atoms stayed readable | Hidden remotely at once |
+
+### To take advantage of v0.59.15.0
+
+1. Run `gbrain upgrade` on every machine that writes to the brain and restart
+   `gbrain serve`, autopilot, job supervisors and session hooks.
+2. Your agent reads `skills/migrations/v0.59.15.0.md`, runs one full
+   `gbrain doctor --json` and relays the `timeline_history` and
+   `derived_visibility` counts.
+3. On the brain host: `gbrain repair` to preview, then
+   `gbrain repair timeline --apply` and `gbrain repair visibility --apply`.
+   Add `--source <id>` or `--limit <n>` to work in batches; rerunning resumes.
+4. Verify: `gbrain repair --json` reports 0 items for every kind.
+
+Rows deleted before v0.59.14.0 still need a database backup to recover. The
+visibility repair never loosens a page; atoms whose origin no longer exists
+become private.
+
+### Itemized changes
+
+- #5567: the canonical projection decision table gains a `file` writer class
+  (managed sync and import) and a `removed_marked` row state; `editing` and
+  `preserving` writers materialize database-only rows during preparation, before
+  the body is digested, rendered and chunked. Materialized bullets carry
+  `<!-- gbrain:materialized v1 <tuple hash> -->`; both timeline extractors skip
+  the marker, `sanitizeRemoteBody` drops it from chunk text, and remote
+  `get_page` keeps it so edits round-trip. A row is materialized only when
+  render-then-extract returns exactly its tuple and normalized detail;
+  backlink receipts, empty and delimiter-bearing sources are kept, not rendered.
+  Connector sync carries marked bullets forward; reconcile materializes, acting
+  as an editing writer only under an approved body decision; company-brain
+  imports stay immutable.
+- #5525: one `effectiveVisibility(origin)` helper drives managed and
+  non-managed `extract_atoms`; concept synthesis stamps the strictest input
+  visibility and never loosens an existing private concept. The remote page
+  predicate hides atoms whose origin page is private and synthesized concepts
+  with a private input.
+- New `gbrain repair [timeline|visibility] [--apply] [--source] [--limit]
+  [--json]` and `gbrain repair --all`: shared scope resolver, coordinated
+  revision-bound writes with deterministic request ids, a resumable cursor per
+  kind and scope, a stop before 90% of cumulative journal caps, and a thin-client
+  refusal.
+- New doctor checks `timeline_history` (bounded scan; exact or lower bound) and
+  `derived_visibility` (exact).
+
+### For contributors
+
+- `ProjectionWriter` adds `'file'`; `TimelineRowAction` adds `'materialize'`.
+  New exports: `materializeTimeline`, `renderMaterializedBullet`,
+  `pendingTimelineRows` (canonical-projections), `src/core/timeline-marker.ts`,
+  `src/core/repair/*`, `effectiveVisibility` / `strictestVisibility` /
+  `privateSnapshotFilterFragment` (private-visibility).
+
 ## [0.59.14.0] - 2026-09-28
 
 **Saving a page no longer deletes timeline history that only lived in the database, and remote agents can no longer read extracted atoms or synthesized concepts that carry no visibility.**

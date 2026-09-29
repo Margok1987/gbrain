@@ -273,14 +273,14 @@ describe('#5567 coordinated writes keep database-only takes', () => {
 });
 
 describe('#5567 writer decision table', () => {
-  const cases: Array<[Parameters<typeof timelineRowAction>[1], ReturnType<typeof timelineRowAction>]> = [
-    ['in_body', 'refresh_detail'],
-    ['drifted', 'delete'],
-    ['removed', 'delete'],
-    ['database_only', 'keep'],
-  ];
-  for (const writer of ['editing', 'preserving', 'immutable'] as ProjectionWriter[]) {
-    for (const [state, action] of cases) {
+  const table: Record<ProjectionWriter, Record<Parameters<typeof timelineRowAction>[1], ReturnType<typeof timelineRowAction>>> = {
+    editing: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'delete', database_only: 'materialize' },
+    preserving: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'materialize', database_only: 'materialize' },
+    file: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'delete', database_only: 'keep' },
+    immutable: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'keep', database_only: 'keep' },
+  };
+  for (const [writer, rows] of Object.entries(table) as Array<[ProjectionWriter, (typeof table)[ProjectionWriter]]>) {
+    for (const [state, action] of Object.entries(rows) as Array<[Parameters<typeof timelineRowAction>[1], ReturnType<typeof timelineRowAction>]>) {
       test(`${writer} writer: ${state} row -> ${action}`, () => { expect(timelineRowAction(writer, state)).toBe(action); });
     }
   }

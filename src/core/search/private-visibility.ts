@@ -43,7 +43,55 @@ function derivedPageSql(pageAlias: string): string {
  * is a code-provided literal, never user input.
  */
 export function privatePagesFilterFragment(pageAlias: string): string {
-  return `COALESCE(${pageAlias}.frontmatter->>'visibility', CASE WHEN ${derivedPageSql(pageAlias)} THEN 'private' ELSE 'world' END) <> 'private'`;
+  return `(${privateSnapshotFilterFragment(pageAlias)}
+    AND NOT ${derivedOriginPrivateSql(pageAlias)})`;
+}
+
+/**
+ * The same rule on a row's own `type`/`frontmatter` only, for snapshots such
+ * as `page_versions` that have no page identity to follow to an origin. Callers
+ * pair it with privatePagesFilterFragment on the live page.
+ */
+export function privateSnapshotFilterFragment(alias: string): string {
+  return `COALESCE(${alias}.frontmatter->>'visibility', CASE WHEN ${derivedPageSql(alias)} THEN 'private' ELSE 'world' END) <> 'private'`;
+}
+
+/**
+ * #5525 — a later private flip of an origin page reaches its derived pages
+ * before any repair runs: an atom whose origin page is explicitly private, and
+ * a synthesized concept with a private input atom (or an input atom whose
+ * origin is private), are private whatever their own field says.
+ * `gbrain repair visibility` then stamps the stricter value on the rows.
+ */
+function derivedOriginPrivateSql(p: string): string {
+  const privateOrigin = (atom: string, alias: string) => `EXISTS (SELECT 1 FROM pages ${alias} WHERE ${alias}.source_id = ${atom}.source_id
+      AND ${alias}.slug = ${atom}.frontmatter->>'source_slug' AND ${alias}.frontmatter->>'visibility' = 'private')`;
+  return `(CASE WHEN ${p}.type = 'atom' THEN ${privateOrigin(p, 'derived_origin')}
+    WHEN ${derivedPageSql(p)} THEN EXISTS (SELECT 1 FROM links derived_input_link
+      JOIN pages derived_input ON derived_input.id = derived_input_link.to_page_id
+      WHERE derived_input_link.from_page_id = ${p}.id AND derived_input_link.link_source = 'concept-provenance'
+        AND derived_input_link.link_type = 'synthesized_from'
+        AND (COALESCE(derived_input.frontmatter->>'visibility', CASE WHEN derived_input.type = 'atom' THEN 'private' ELSE 'world' END) = 'private'
+          OR ${privateOrigin('derived_input', 'derived_input_origin')}))
+    ELSE false END)`;
+}
+
+export type Visibility = 'private' | 'world';
+
+/**
+ * #5525 — the visibility a derived page takes from its origin under the
+ * read-side rule: transcripts and missing origins are private, and a page
+ * origin is private exactly when remote readers cannot see it.
+ */
+export function effectiveVisibility(origin: { kind: 'transcript' } | { kind: 'page'; page: { type?: string | null; frontmatter?: unknown } | null }): Visibility {
+  if (origin.kind === 'transcript' || !origin.page) return 'private';
+  return isPrivatePage(origin.page) ? 'private' : 'world';
+}
+
+/** Derived outputs take the strictest visibility of their inputs. */
+export function strictestVisibility(values: Iterable<Visibility>): Visibility {
+  for (const value of values) if (value === 'private') return 'private';
+  return 'world';
 }
 
 /** Check the actual origin, independently of joins that redact its source. */

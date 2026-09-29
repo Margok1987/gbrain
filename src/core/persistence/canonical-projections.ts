@@ -9,67 +9,173 @@ import { parseTimelineEntries } from '../link-extraction.ts';
 import { extractTimelineFromContent, type ExtractedTimelineEntry } from '../timeline-extract.ts';
 import { sanitizeRemoteBody } from '../remote-body.ts';
 import { sanitizeForJsonb } from '../batch-rows.ts';
+import { materializedMarker, materializedMarkerHash, timelineKey, timelineKeyHash } from '../timeline-marker.ts';
 import { OperationError } from '../ops/contract.ts';
 
 type CanonicalBody = Pick<ParsedPage, 'compiled_truth' | 'timeline'>;
 
 /**
  * The caller's authority over the prior canonical content (#5567):
- * `editing` writers are bound to the observed revision or file preimage,
- * `preserving` writers regenerate or overwrite without that binding, and
- * `immutable` imports publish approved bytes they may never extend.
+ * `editing` writers are bound to the observed revision and render from the
+ * database, `preserving` writers regenerate or overwrite without that binding,
+ * `file` writers import file edits bound to the file preimage and never
+ * rewrite the user's file, and `immutable` imports publish approved bytes they
+ * may never extend.
  */
-export type ProjectionWriter = 'editing' | 'preserving' | 'immutable';
+export type ProjectionWriter = 'editing' | 'preserving' | 'file' | 'immutable';
 
 /**
  * How one stored timeline row relates to the write, judged at preparation:
  * `in_body` exactly matches a new bullet, `drifted` matches one only after
- * normalization, `removed` had a bullet in the prior body that the new body
- * dropped, and `database_only` has no bullet in either body.
+ * normalization, `removed` / `removed_marked` had an unmarked / materialized
+ * bullet in the prior body that the new body dropped, and `database_only`
+ * has no bullet in either body.
  */
-export type TimelineRowState = 'in_body' | 'drifted' | 'removed' | 'database_only';
-export type TimelineRowAction = 'refresh_detail' | 'delete' | 'keep';
-
-const KEEP_HISTORY: Record<TimelineRowState, TimelineRowAction> = {
-  in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', database_only: 'keep',
-};
+export type TimelineRowState = 'in_body' | 'drifted' | 'removed' | 'removed_marked' | 'database_only';
+export type TimelineRowAction = 'refresh_detail' | 'delete' | 'keep' | 'materialize';
 
 /**
- *   row state      | editing        | preserving     | immutable
- *   ---------------+----------------+----------------+---------------
- *   in_body        | refresh_detail | refresh_detail | refresh_detail
- *   drifted        | delete         | delete         | delete
- *   removed        | delete         | delete         | delete
- *   database_only  | keep           | keep           | keep
+ *   row state      | editing        | preserving     | file           | immutable
+ *   ---------------+----------------+----------------+----------------+---------------
+ *   in_body        | refresh_detail | refresh_detail | refresh_detail | refresh_detail
+ *   drifted        | delete         | delete         | delete         | delete
+ *   removed        | delete         | delete         | delete         | delete
+ *   removed_marked | delete         | materialize    | delete         | keep
+ *   database_only  | materialize    | materialize    | keep           | keep
  *
  * A coordinated write deletes only rows whose bullet the writer can see in the
- * prior or new body; a row with no bullet anywhere is history the writer is not
- * editing. Deletes and detail refreshes also require the row id and detail
- * pinned at preparation, so rows that change afterwards are left alone.
+ * prior or new body. A materialized bullet is removed only by a writer bound to
+ * a revision or file preimage that contained it; a preserving writer renders it
+ * again. Writers that render from the database write bullet-less rows back into
+ * the page (`materialize`); rows that fail the render round trip, and every
+ * `materialize` row a caller did not render, are kept. `put_page` with the
+ * current revision is the supported way to delete a materialized row. Deletes
+ * and detail refreshes also require the row id and detail pinned at
+ * preparation, so rows that change afterwards are left alone.
  */
 const TIMELINE_DECISIONS: Record<ProjectionWriter, Record<TimelineRowState, TimelineRowAction>> = {
-  editing: KEEP_HISTORY, preserving: KEEP_HISTORY, immutable: KEEP_HISTORY,
+  editing: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'delete', database_only: 'materialize' },
+  preserving: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'materialize', database_only: 'materialize' },
+  file: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'delete', database_only: 'keep' },
+  immutable: { in_body: 'refresh_detail', drifted: 'delete', removed: 'delete', removed_marked: 'keep', database_only: 'keep' },
 };
 
 export function timelineRowAction(writer: ProjectionWriter, state: TimelineRowState): TimelineRowAction {
   return TIMELINE_DECISIONS[writer][state];
 }
 
-/** One normalization for prior-set membership, dedup and stored-row matching. */
-function timelineKey(entry: { date: string; source?: string | null; summary: string }): string {
-  return JSON.stringify([entry.date.slice(0, 10), sanitizeForJsonb(entry.source ?? '').trim(),
-    sanitizeForJsonb(entry.summary).replace(/\s+/g, ' ').trim()]);
-}
-
 function exactTimelineKey(entry: { date: string; source?: string | null; summary: string }): string {
   return JSON.stringify([entry.date.slice(0, 10), sanitizeForJsonb(entry.source ?? ''), sanitizeForJsonb(entry.summary)]);
 }
 
-function canonicalTimeline(body: CanonicalBody, slug: string): Map<string, ExtractedTimelineEntry> {
-  const safe = sanitizeRemoteBody([body.compiled_truth, body.timeline ?? ''].join('\n'));
+function safeBody(body: CanonicalBody): string {
+  return sanitizeRemoteBody([body.compiled_truth, body.timeline ?? ''].join('\n'), { keepMaterializedMarkers: true });
+}
+
+function extractTimeline(safe: string, slug: string): Map<string, ExtractedTimelineEntry> {
   const timeline = new Map(extractTimelineFromContent(safe, slug).map(t => [timelineKey(t), t]));
   for (const t of parseTimelineEntries(safe)) timeline.set(timelineKey({ ...t, source: t.source ?? 'markdown' }), { ...t, source: t.source ?? 'markdown', slug });
   return timeline;
+}
+
+function canonicalTimeline(body: CanonicalBody, slug: string): Map<string, ExtractedTimelineEntry> {
+  return extractTimeline(safeBody(body), slug);
+}
+
+/** Tuples whose bullet is introduced by a marker that still matches it. */
+function markedTimeline(body: CanonicalBody, slug: string): Set<string> {
+  const lines = safeBody(body).split('\n');
+  const marked = new Set<string>();
+  lines.forEach((line, i) => {
+    const hash = materializedMarkerHash(line);
+    if (!hash || i + 1 >= lines.length) return;
+    for (const key of extractTimeline(lines[i + 1], slug).keys()) if (timelineKeyHash(key) === hash) marked.add(key);
+  });
+  return marked;
+}
+
+interface StoredTimelineRow { id: number; date: string; source: string; summary: string; detail: string }
+
+function storedTimeline(engine: BrainEngine, pageId: number): Promise<StoredTimelineRow[]> {
+  return engine.executeRaw<StoredTimelineRow>(`SELECT id,date::text AS date,source,summary,detail FROM timeline_entries
+    WHERE page_id=$1 AND event_page_id IS NULL ORDER BY date,id`, [pageId]);
+}
+
+/** Classify stored rows against a new body and the writer's prior snapshot. */
+function classifyTimeline(rows: StoredTimelineRow[], body: CanonicalBody, prior: CanonicalBody | null, slug: string, writer: ProjectionWriter) {
+  const timeline = canonicalTimeline(body, slug);
+  const exactIncoming = new Map([...timeline.values()].map(t => [exactTimelineKey(t), sanitizeForJsonb(t.detail ?? '')]));
+  const priorTimeline = prior ? new Set(canonicalTimeline(prior, slug).keys()) : new Set<string>();
+  const priorMarked = prior ? markedTimeline(prior, slug) : new Set<string>();
+  const pinned = rows.map(row => {
+    const key = timelineKey(row);
+    const state: TimelineRowState = exactIncoming.has(exactTimelineKey(row)) ? 'in_body' : timeline.has(key) ? 'drifted'
+      : priorMarked.has(key) ? 'removed_marked' : priorTimeline.has(key) ? 'removed' : 'database_only';
+    return { ...row, key, state, action: timelineRowAction(writer, state) };
+  });
+  return { timeline, exactIncoming, pinned };
+}
+
+const collapse = (text: string) => sanitizeForJsonb(text).replace(/\s+/g, ' ').trim();
+
+/**
+ * Render one row as a marked bullet, or null when render-then-extract would
+ * not return exactly this tuple and its normalized detail (delimiters in the
+ * source, `Referenced in [` backlink receipts, empty sources, ...).
+ */
+export function renderMaterializedBullet(row: { date: string; source: string; summary: string; detail?: string | null }, slug: string): string | null {
+  // Same normalization as timelineKey: sources are trimmed, summaries and details collapsed.
+  const tuple = { date: row.date.slice(0, 10), source: sanitizeForJsonb(row.source).trim(), summary: collapse(row.summary) };
+  const detail = collapse(row.detail ?? '');
+  // Pre-#4277 backlink receipts are graph noise the extractors deliberately skip.
+  if (/^Referenced in\s+\[/i.test(tuple.summary)) return null;
+  const block = [materializedMarker(tuple), `- **${tuple.date}** | ${tuple.source} — ${tuple.summary}`, ...(detail ? [`  ${detail}`] : [])].join('\n');
+  const extracted = [...canonicalTimeline({ compiled_truth: block, timeline: '' }, slug).values()];
+  if (extracted.length !== 1) return null;
+  const [entry] = extracted;
+  const same = entry.date === tuple.date && entry.source === tuple.source && entry.summary === tuple.summary && (entry.detail ?? '') === detail;
+  return same && markedTimeline({ compiled_truth: block, timeline: '' }, slug).size === 1 ? block : null;
+}
+
+export interface TimelineMaterialization { timeline: string; materialized: number; unrenderable: number }
+
+/**
+ * Write the writer's `materialize` rows back into the page's timeline section,
+ * after existing bullets in date-then-row-id order, one bullet per normalized
+ * tuple. Called during preparation, before the body is imported, rendered and
+ * digested, by writers that render the canonical file from the database.
+ */
+export async function materializeTimeline(engine: BrainEngine, body: CanonicalBody, slug: string,
+  prior: PageSnapshot | null, writer: ProjectionWriter): Promise<TimelineMaterialization> {
+  const timelineText = body.timeline ?? '';
+  if (!prior) return { timeline: timelineText, materialized: 0, unrenderable: 0 };
+  const { pinned } = classifyTimeline(await storedTimeline(engine, prior.page.id), body, prior.page, slug, writer);
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  let unrenderable = 0;
+  for (const row of pinned) {
+    if (row.action !== 'materialize' || seen.has(row.key)) continue;
+    const block = renderMaterializedBullet(row, slug);
+    if (!block) { unrenderable++; continue; }
+    seen.add(row.key);
+    blocks.push(block);
+  }
+  if (!blocks.length) return { timeline: timelineText, materialized: 0, unrenderable };
+  const existing = timelineText.replace(/\s+$/, '');
+  return { timeline: [...(existing ? [existing] : []), ...blocks].join('\n'), materialized: blocks.length, unrenderable };
+}
+
+/** Database-only timeline rows on one page, split by whether they can be materialized. */
+export async function pendingTimelineRows(engine: BrainEngine, page: { id: number; slug: string } & CanonicalBody) {
+  const { pinned } = classifyTimeline(await storedTimeline(engine, page.id), page, page, page.slug, 'editing');
+  const renderable = new Set<string>();
+  let unrenderable = 0;
+  for (const row of pinned) {
+    if (row.action !== 'materialize') continue;
+    if (renderMaterializedBullet(row, page.slug)) renderable.add(row.key);
+    else unrenderable++;
+  }
+  return { materializable: renderable.size, unrenderable };
 }
 
 function canonicalTakeRows(body: CanonicalBody): Set<number> {
@@ -88,7 +194,7 @@ export function compileCanonicalProjections(page: ParsedPage, slug: string, sour
   for(const rows of [facts,takes]) if(new Set(rows.map(row=>row.rowNum)).size!==rows.length) {
     throw new OperationError('invalid_params','Canonical row numbers must be unique across the entire page.');
   }
-  return { factRows: extractFactsFromFenceText(facts,slug,sourceId), takes, timeline: canonicalTimeline(page,slug) };
+  return { factRows: extractFactsFromFenceText(facts,slug,sourceId), takes };
 }
 
 function takeCollision(): OperationError {
@@ -104,17 +210,9 @@ function takeCollision(): OperationError {
  */
 export async function prepareCanonicalProjections(engine: BrainEngine, page: ParsedPage, slug: string, sourceId: string,
   prior: PageSnapshot | null, writer: ProjectionWriter): Promise<(tx: BrainEngine) => Promise<void>> {
-  const { factRows, takes, timeline } = compileCanonicalProjections(page, slug, sourceId);
-  const priorTimeline = prior ? new Set(canonicalTimeline(prior.page, slug).keys()) : new Set<string>();
-  const exactIncoming = new Map([...timeline.values()].map(t => [exactTimelineKey(t), sanitizeForJsonb(t.detail ?? '')]));
-  const stored = prior ? await engine.executeRaw<{ id: number; date: string; source: string; summary: string; detail: string }>(
-    `SELECT id,date::text AS date,source,summary,detail FROM timeline_entries WHERE page_id=$1 AND event_page_id IS NULL`, [prior.page.id]) : [];
-  const pinned = stored.map(row => {
-    const key = timelineKey(row);
-    const state: TimelineRowState = exactIncoming.has(exactTimelineKey(row)) ? 'in_body' : timeline.has(key) ? 'drifted'
-      : priorTimeline.has(key) ? 'removed' : 'database_only';
-    return { ...row, action: timelineRowAction(writer, state) };
-  });
+  const { factRows, takes } = compileCanonicalProjections(page, slug, sourceId);
+  const { timeline, exactIncoming, pinned } = classifyTimeline(prior ? await storedTimeline(engine, prior.page.id) : [],
+    page, prior?.page ?? null, slug, writer);
   const deletions = JSON.stringify(pinned.filter(row => row.action === 'delete')
     .map(({ id, date, source, summary, detail }) => ({ id, date, source, summary, detail })));
   const refreshes = JSON.stringify(pinned.filter(row => row.action === 'refresh_detail')
