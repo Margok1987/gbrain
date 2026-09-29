@@ -180,6 +180,7 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'canonical_content_writes',
   'brainstorm_health',
   'connectors',
+  'dream_paid_loop',
   'chat_fallback_chain_inert',
   'connection',
   'db_only_collector_collision',

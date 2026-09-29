@@ -133,6 +133,7 @@ import { hasCJK } from './cjk.ts';
 import * as factsImpl from './pglite-engine/facts.ts';
 import type { PgliteFactsDeps } from './pglite-engine/facts.ts';
 import * as takesImpl from './pglite-engine/takes.ts';
+import { PgliteCheckpointGuard } from './pglite-engine/checkpoint-guard.ts';
 import type { PgliteTakesDeps } from './pglite-engine/takes.ts';
 import * as codeEdgesImpl from './pglite-engine/code-edges.ts';
 import type { PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
@@ -699,6 +700,7 @@ export class PGLiteEngine implements BrainEngine {
   private vectorIterativeScan?: Promise<boolean>;
   /** Transaction clones keep chunk invalidation and replacement atomic. */
   private _chunkWritesInTransaction = false;
+  private _checkpointGuard: PgliteCheckpointGuard | undefined;
   readonly kind = 'pglite' as const;
   private _db: PGLiteDB | null = null;
   private _lock: LockHandle | null = null;
@@ -718,6 +720,7 @@ export class PGLiteEngine implements BrainEngine {
 
   private _attachDatabase(database: PGLiteDB): PGLiteDB {
     this._dbWork = trackPgliteDatabase(database);
+    this._checkpointGuard = undefined;
     return this._dbWork.database;
   }
   // #2034: captured at connect() so reconnect() can restore the same data dir
@@ -1706,7 +1709,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async transaction<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
-    return this.db.transaction(async handle => {
+    const run = (db = this.db) => db.transaction(async handle => {
       const tx = composablePgliteTransaction(handle);
       const txEngine = Object.create(this) as PGLiteEngine;
       Object.defineProperty(txEngine, '_chunkWritesInTransaction', { value: true });
@@ -1714,6 +1717,9 @@ export class PGLiteEngine implements BrainEngine {
       Object.defineProperty(txEngine, 'db', { get: () => tx });
       return fn(txEngine);
     });
+    if (this._pageTransaction || !this._dbWork) return run();
+    const guard = this._checkpointGuard ??= new PgliteCheckpointGuard();
+    return this._dbWork.admit(db => guard.runOutermost(sql => db.query(sql), () => run(db)));
   }
 
   async transactionDirect<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {

@@ -45,6 +45,7 @@ import { loadAllowedSlugPrefixes, loadOutputRoot, runSubagentsInline } from './s
 import { probeChatModel } from '../ai/gateway.ts';
 import { normalizeModelId } from '../model-id.ts';
 import { throwIfAborted } from '../abort-check.ts';
+import { dreamBreakerRefusal, loadDreamBreaker } from './dream-breaker.ts';
 
 export interface PatternsPhaseOpts {
   brainDir: string;
@@ -278,6 +279,13 @@ export async function runPhasePatterns(
       private_queue_owner_token: privateQueueOwnerToken,
       private_queue_lease_ms: DEFAULT_PRIVATE_QUEUE_LEASE_MS,
     };
+    // Paid-loop breaker: only maintenance runs carry a key, so only they are covered.
+    const breaker = submitOpts.idempotency_key ? await loadDreamBreaker(engine) : null;
+    const refusal = breaker && dreamBreakerRefusal(breaker, submitOpts.idempotency_key!);
+    if (refusal) {
+      process.stderr.write(`[dream] patterns: ${refusal}\n`);
+      return skipped('dream_breaker_tripped', refusal);
+    }
     let job: Awaited<ReturnType<typeof queue.add>>;
     try {
       job = await queue.add('subagent', data as unknown as Record<string, unknown>, submitOpts, {

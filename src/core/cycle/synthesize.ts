@@ -87,6 +87,7 @@ import { safeSplitIndex } from '../text-safe.ts';
 import { PAGE_SLUG_SEG } from '../cjk.ts';
 import { withChatPhase, estimateChatCostUsd } from '../ai/chat-usage.ts';
 import { verifyAndRepairDreamPages, normForGrounding, type QuoteVerifyStats, type TranscriptForVerify } from './synthesize-verify.ts';
+import { dreamBreakerRefusal, loadDreamBreaker } from './dream-breaker.ts';
 import { passesTriageGate, rescueConfigOf, DEFAULT_RESCUE_FLOOR, DEFAULT_RESCUE_MIN_SEGMENTS, DEFAULT_RESCUE_CONTENT_TYPES, DEFAULT_RESCUE_CONFIG, type RescueConfig, type RescueVerdictLike } from './triage-rescue.ts';
 
 // Slug grammar from validatePageSlug — shared via PAGE_SLUG_SEG (#738).
@@ -676,6 +677,7 @@ async function runPhaseSynthesizeInner(
       }
     }
 
+    const breaker = await loadDreamBreaker(engine);
     // Admission-quota latch: once a submit is rejected, every later transcript
     // this run would be rejected too — record one skip per remaining file
     // without hammering the queue.
@@ -750,6 +752,9 @@ async function runPhaseSynthesizeInner(
         continue;
       }
 
+      const refusal = breaker && dreamBreakerRefusal(breaker,
+        `dream:synth-v2:${encodeURIComponent(synthesisIdentity)}:filename:${encodeURIComponent(basename(t.filePath))}:${hash16}`);
+      if (refusal) { process.stderr.write(`[dream] ${t.basename}: ${refusal}\n`); skipReports.push({ filePath: t.filePath, reason: refusal }); continue; }
       const chunks = splitTranscriptByBudget(t.content, t.contentHash, maxCharsPerChunk);
 
       // D5 cap hit: log + skip; do NOT write to dream_verdicts. Closes the
@@ -1690,14 +1695,15 @@ export async function loadSynthConfig(engine: BrainEngine): Promise<SynthConfig>
  * Count dream synth-v2 subagent submissions for a source in the last 24h —
  * the opt-in daily-cap denominator. Filters on `data->>'source_id'` (NOT a
  * LIKE on the key's encoded source segment — avoids LIKE-metachar issues);
- * cancelled rows are excluded so retriage-cancelled jobs don't eat budget.
+ * cancelled rows are excluded so retriage-cancelled jobs don't eat budget;
+ * dead rows count through the key the queue recorded when it released them.
  */
 async function countRecentSynthSubmissions(engine: BrainEngine, sourceId: string): Promise<number> {
   const rows = await engine.executeRaw<{ n: number }>(
     `SELECT COUNT(*)::int AS n
        FROM minion_jobs
       WHERE name = 'subagent'
-        AND idempotency_key LIKE 'dream:synth-v2:%'
+        AND (idempotency_key LIKE 'dream:synth-v2:%' OR idempotency_key IS NULL AND data->>'__released_idempotency_key' LIKE 'dream:synth-v2:%')
         AND COALESCE(NULLIF(data->>'source_id', ''), 'default') = $1
         AND status <> 'cancelled'
         AND created_at > NOW() - INTERVAL '24 hours'`,

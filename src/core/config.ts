@@ -1460,6 +1460,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // dream.synthesize.* pair from #1594).
   'dream.patterns.subagent_timeout_ms',
   'dream.patterns.subagent_wait_timeout_ms',
+  // Paid-loop breaker: dead submissions of one dream key within 24h before
+  // it is refused (default 3; 0 disables). `gbrain dream reset-key` clears one.
+  'dream.breaker.max_dead_submissions',
   // Emotional weight (v0.29)
   'emotional_weight.high_tags',
   'emotional_weight.user_holder',

@@ -138,7 +138,9 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   // JSONB bind parity for the cycle writers (the #2339 class PGLite hides).
   "src/core/cycle/propose-takes.ts": ["test/e2e/propose-takes-jsonb-postgres.test.ts"],
   "src/core/cycle/calibration-profile.ts": ["test/e2e/calibration-profile-write.test.ts"],
-  "src/core/cycle/patterns.ts": ["test/e2e/multi-source-bug-class.test.ts"],
+  "src/core/cycle/patterns.ts": ["test/e2e/multi-source-bug-class.test.ts", "test/e2e/dream-breaker-postgres.test.ts"],
+  // Dream paid-loop breaker: released-key JSONB shape + counter + migration 170 on Postgres.
+  "src/core/cycle/dream-breaker.ts": ["test/e2e/dream-breaker-postgres.test.ts"],
   "src/core/cycle/synthesize.ts": [
     "test/e2e/multi-source-bug-class.test.ts",
     "test/e2e/synthesize-bigint-job-id-postgres.test.ts",
@@ -202,6 +204,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/persistence/**": [
     "test/e2e/persistence-http-liveness.test.ts",
     "test/e2e/persistence-phase-liveness.test.ts",
+    "test/e2e/persistence-idle-pool.test.ts",
     "test/e2e/persistence-publication-parity.test.ts",
     "test/e2e/persistence-sync-origin-parity.test.ts",
     "test/e2e/persistence-sync-options-parity.test.ts",
