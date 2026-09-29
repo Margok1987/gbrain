@@ -33,7 +33,6 @@ import type { ChunkInput, Page, PageInput, PageType } from './types.ts';
 import { computeEffectiveDate, fallbackCreatedAt, isValidTimeZone } from './effective-date.ts';
 import { MARKDOWN_CHUNKER_VERSION } from './chunkers/recursive.ts';
 import { logSlugFallback } from './audit-slug-fallback.ts';
-import { resolveContextualRetrievalMode } from './contextual-retrieval-resolver.ts';
 import { assessContentSanity, ContentSanityBlockError } from './content-sanity.ts';
 import { loadOperatorLiterals } from './content-sanity-literals.ts';
 import { logContentSanityAssessment } from './audit/content-sanity-audit.ts';
@@ -51,12 +50,10 @@ import {
   modeRequiresWrapper,
   wrapChunkForEmbedding,
 } from './embedding-context.ts';
-import { loadSearchModeConfig, resolveSearchMode } from './search/mode.ts';
 import { normalizeAliasList } from './search/alias-normalize.ts';
-import { isUndefinedTableError, warnOncePerProcess, validateSlug, contentHash, contentHashLegacy, ATOMS_SCAN_HASH_KEY } from './utils.ts';
+import { warnOncePerProcess, validateSlug, contentHash, contentHashLegacy, ATOMS_SCAN_HASH_KEY } from './utils.ts';
 import { decorateEmbeddingDimError } from './embedding-dim-check.ts';
-import { computeCorpusGeneration, loadSourceRow, SourceRowNotFoundError } from './contextual-retrieval-service.ts';
-import { DEFAULT_SYNOPSIS_MODEL } from './page-summary.ts';
+import { resolveImportContextualMode } from './import-contextual-mode.ts';
 import { runGuardrails } from './guardrails.ts';
 import { parseFactsFence, renderFactsTable, restoreHiddenFactRows, factsGapWarning, replaceOrInsertFactsFence } from './facts-fence.ts';
 
@@ -789,66 +786,9 @@ export async function importFromContent(
   // Every markdown import records its wrapping convention with the canonical
   // write, --no-embed included (#5621): later embed passes reproduce the stored
   // mode, so an unstamped page would stay unwrapped. No provider runs here.
-  const searchInput = await loadSearchModeConfig(engine);
-  const knobs = resolveSearchMode(searchInput);
-  // #3885: load the REAL source row so a stored `gbrain sources
-  // set-cr-mode <id> <mode>` (and the mount trust flag) applies on the
-  // inline import path (capture + reindex --markdown), not just the
-  // Minion backfill. The prior hardcoded stub (contextual_retrieval_mode:
-  // null / trust_frontmatter_overrides: false) silently ignored the
-  // per-source override. Unknown source id / pre-sources-table brains
-  // keep the stub (host-trust defaults).
-  let sourceRow: {
-    id: string;
-    contextual_retrieval_mode?: string | null;
-    trust_frontmatter_overrides?: boolean;
-  } = {
-    id: sourceId ?? 'default',
-    contextual_retrieval_mode: null,
-    trust_frontmatter_overrides: false,
-  };
-  try {
-    const row = await loadSourceRow(engine, sourceId ?? 'default');
-    sourceRow = {
-      id: row.id,
-      contextual_retrieval_mode: row.contextual_retrieval_mode ?? null,
-      trust_frontmatter_overrides: row.trust_frontmatter_overrides === true,
-    };
-  } catch (error) {
-    // A failed policy read must fail the import: falling back here would
-    // stamp a different source's wrapping convention. Coordinated writes
-    // always retry; otherwise only a missing row ('default' not seeded on a
-    // fresh brain) or table keeps the stub, matching pre-#3885 behavior.
-    const missing = error instanceof SourceRowNotFoundError || isUndefinedTableError(error);
-    if (opts.prepare || !missing) throw error;
-  }
-  const resolution = resolveContextualRetrievalMode({
-    pageFrontmatter: parsed.frontmatter,
-    source: sourceRow,
-    globalMode: knobs.contextual_retrieval,
-    killSwitchDisabled: knobs.contextual_retrieval_disabled,
-  });
-  // Inline path: title-tier wrap is free. per_chunk_synopsis is too
-  // expensive for the inline import path; the page lands at the
-  // title tier on disk and the Minion-driven contextual reindex
-  // upgrades it later when the user accepts the cost prompt.
-  const effectiveCRMode = resolution.mode === 'per_chunk_synopsis' ? 'title' : resolution.mode;
-
-  // v0.40.3.0: corpus_generation hash for D27 P1-5 cache invalidation.
-  // Record the selected wrapper generation for inline or deferred embedding;
-  // 'none' writes NULL. The separate embedding signature certifies vectors.
-  const corpusGeneration =
-    effectiveCRMode === 'none'
-      ? null
-      : computeCorpusGeneration({
-          crMode: effectiveCRMode,
-          synopsisModel: DEFAULT_SYNOPSIS_MODEL,
-          // Inline import-file path never uses per_chunk_synopsis (refuses
-          // upstream); pass undefined so the doc-cap field stays out of
-          // the hash here. Per_chunk_synopsis runs through the Minion
-          // backfill handler which threads SYNOPSIS_DOC_MAX_CHARS through
-          // the service layer.
-        });
+  // #3885: the real source row applies (a stored `sources set-cr-mode`); the
+  // inline path demotes per_chunk_synopsis to the free title tier.
+  const { mode: effectiveCRMode, corpusGeneration } = await resolveImportContextualMode(engine, sourceId ?? 'default', parsed.frontmatter, opts.prepare !== undefined);
 
   // A13: an edit re-embeds only chunks whose embedding input changed. A stored
   // vector is reused for a chunk with the same source and text when its

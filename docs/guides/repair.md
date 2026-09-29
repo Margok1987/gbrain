@@ -38,7 +38,7 @@ timeline: 12 item(s) to repair
   it leaves alone (see [What each kind fixes](#what-each-kind-fixes)).
 - **Cost** is what an apply of the pending items would consume: one permanent
   request ID and 16 KiB of reserved receipt space per page for `timeline` and
-  `visibility`, and nothing for `safe-chunks`. When an embedding model is
+  `visibility`, and nothing for `safe-chunks` or `contextual-mode`. When an embedding model is
   configured and priced, the line adds an estimated embedding cost in dollars.
 - **Capacity** shows the write-journal counters the run draws on and the 90%
   line where it stops (see [Capacity stop](#capacity-stop)).
@@ -53,12 +53,13 @@ gbrain repair timeline --apply
 gbrain repair visibility --apply
 gbrain repair safe-chunks --apply
 gbrain repair safe-chunks --apply --no-embed   # re-seal text now, embed later
+gbrain repair contextual-mode --apply
 gbrain repair --all --apply                    # every kind in order
 ```
 
 `--apply` writes without a prompt, so review the preview first. With
 `--apply` you must name a kind or pass `--all`; `--yes` is refused. `--all`
-runs `timeline`, then `visibility`, then `safe-chunks`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, and stops at the
 first kind that stops.
 
 Each item is re-checked against the page's current state just before it is
@@ -71,8 +72,8 @@ left for the next run. Nothing is deleted.
 | --- | --- |
 | `--apply` | Write the repair. Without it, only preview. |
 | `--source <id>` | Limit the run to one active source. The default is every active (non-archived) source. An unknown or archived id is refused. |
-| `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each of the three kinds). Rerun the same command to continue. |
-| `--no-embed` | `safe-chunks` only: re-seal chunk text and skip embedding. Run `gbrain embed --stale` later. |
+| `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each kind). Rerun the same command to continue. |
+| `--no-embed` | `safe-chunks` and `contextual-mode`: skip the embedding provider. Run `gbrain embed --stale` later. |
 | `--all` | Run every kind in order. |
 | `--json` | Print `{ scope, mode, results[] }`, one result per kind with `affected`, `sample`, `residuals`, `cost`, `capacity`, `resumed_from`, `applied`, `skipped`, `complete`, `stopped` and `apply_command`. |
 
@@ -87,6 +88,7 @@ should also check `results[].complete`.
 | `timeline` | `timeline_history` | Re-saves each page with its current body through a revision-bound `put_page`. The save writes each database-only timeline entry back into the page as a bullet preceded by `<!-- gbrain:materialized v1 <hash> -->`. | `kept_unrenderable_rows`: entries that would change if written as a bullet (for example an empty source). They stay in the database. |
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
 | `safe-chunks` | `contextual_retrieval_coverage` (`details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
+| `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync or a connector source before this release), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. |
 
 Timeline rows that an earlier version of a page produced and its current text
 no longer has are removals, not history, so `timeline` neither counts nor
@@ -125,7 +127,7 @@ STOPPED: Stopped before crossing 90% of brain lifetime_ids (...). Run: gbrain co
 
 Raise the limit on the brain host only if you agree, then rerun. Raised limits
 are brain-wide; request IDs stay permanent replay protection. `safe-chunks`
-takes no journal admission and never hits this stop. The limits and their
+and `contextual-mode` take no journal admission and never hits this stop. The limits and their
 defaults are in [bounded admission and retention](concurrent-writes.md#bounded-admission-and-retention).
 
 ## Where it runs

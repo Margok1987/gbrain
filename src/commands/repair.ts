@@ -15,8 +15,10 @@ import { REPAIR_KINDS, resolveRepairScope, runRepair, type RepairHandler, type R
 import { timelineRepair } from '../core/repair/timeline.ts';
 import { visibilityRepair } from '../core/repair/visibility.ts';
 import { safeChunksRepair } from '../core/repair/safe-chunks.ts';
+import { contextualModeRepair } from '../core/repair/contextual-mode.ts';
 
-const HANDLERS: Record<RepairKind, RepairHandler> = { timeline: timelineRepair, visibility: visibilityRepair, 'safe-chunks': safeChunksRepair };
+const HANDLERS: Record<RepairKind, RepairHandler> = { timeline: timelineRepair, visibility: visibilityRepair, 'safe-chunks': safeChunksRepair,
+  'contextual-mode': contextualModeRepair };
 
 export const REPAIR_HELP = `Usage: gbrain repair [<kind>] [--apply] [--source <id>] [--limit <n>] [--no-embed] [--json]
        gbrain repair --all [--apply] [--source <id>] [--json]
@@ -33,12 +35,16 @@ Kinds:
                safe-chunk fence, which remote/MCP search withholds (#5050, #5247).
                Projection-only: no page write and no journal admission. Unchanged
                vectors are kept; the rest are embedded unless --no-embed.
+  contextual-mode  Stamp the contextual retrieval mode on markdown pages imported
+               without one (#5621), exactly as a fresh import would. Projection-
+               only. Vectors whose embedding input is unchanged are kept; a page
+               whose input changes is re-embedded once unless --no-embed.
 
 Options:
   --apply        Write the repair (no prompt). Without it, only preview.
   --source <id>  Limit to one source (default: every active source).
   --limit <n>    Repair at most n items; rerun the same command to continue.
-  --no-embed     safe-chunks: re-seal text only; embed later with gbrain embed --stale.
+  --no-embed     safe-chunks, contextual-mode: no provider call; embed later with gbrain embed --stale.
   --all          Run every kind in order (${REPAIR_KINDS.join(', ')}).
   --json         Machine-readable output with a stable shape.
 
@@ -93,7 +99,7 @@ export async function runRepairCommand(engine: BrainEngine, args: string[]): Pro
   const results: RepairResult[] = [];
   for (const k of kinds) {
     const result = await runRepair(ctx, HANDLERS[k], scope, { apply, limit, embeddingModel, sourceFlag: source,
-      embed: !noEmbed && embeddingModel !== undefined, applyArgs: noEmbed && k === 'safe-chunks' ? ['--no-embed'] : [] });
+      embed: !noEmbed && embeddingModel !== undefined, applyArgs: noEmbed && (k === 'safe-chunks' || k === 'contextual-mode') ? ['--no-embed'] : [] });
     results.push(result);
     if (result.stopped) break;
   }
