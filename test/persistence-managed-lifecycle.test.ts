@@ -121,6 +121,20 @@ test('a file that replaces its vanished origin at the same slug takes over the p
     expect(await pageId(engine, 'notes/foo-bar', f.id)).toBe(id);
     expect((await engine.getPage('notes/foo-bar', { sourceId: f.id }))?.source_path).toBe('notes/foo-bar.md');
     expect((await performManagedSync(engine, { sourceId: f.id, noPull: true, full: true })).slugCollisions).toBeUndefined();
+    // A case-only respelling whose old file this sync removes is the same page, not an ambiguous alias.
+    git(f.root, 'mv', 'notes/foo-bar.md', 'notes/Foo-Bar.md');
+    commit(f.root, 'case-only respelling');
+    expect(await performManagedSync(engine, { sourceId: f.id, noPull: true })).toMatchObject({ status: 'synced', renamed: 1, deleted: 0 });
+    expect(await pageId(engine, 'notes/foo-bar', f.id)).toBe(id);
+    expect((await engine.getPage('notes/foo-bar', { sourceId: f.id }))?.source_path).toBe('notes/Foo-Bar.md');
+  }
+}), 180_000);
+
+test('two new files whose paths differ only by case are refused rather than guessed', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  for (const engine of engines) {
+    const f = await fixture(engine, { 'notes/Case.md': note('Upper', 'Upper case spelling.'), 'notes/case.md': note('Lower', 'Lower case spelling.') });
+    await expect(performManagedSync(engine, { sourceId: f.id, noPull: true })).rejects.toMatchObject({ code: 'page_identity_changed' });
+    expect(await engine.getPage('notes/case', { sourceId: f.id })).toBeNull();
   }
 }), 180_000);
 

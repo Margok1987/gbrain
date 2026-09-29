@@ -177,8 +177,8 @@ export async function discoverManagedSync(engine: BrainEngine, opts: SyncOpts, c
   const discovered: SyncDiscovery = { binding: { ...binding, owner_epoch: String(binding.owner_epoch), topology_generation: String(binding.topology_generation) }, root, gitRoot, sourceId, incarnation, from: source.last_commit, target, entries: selected, slugMode, ...(company ? { companyPlan: company.plan } : {}) };
   // Freeze all logical identities in one database statement, before yielding
   // between pages. A later interactive edit must conflict with this scan.
-  const identities = await engine.executeRaw<{ id: number; slug: string; source_path: string | null; knowledge_revision: string; deleted: boolean }>(
-    'SELECT id,slug,source_path,knowledge_revision,deleted_at IS NOT NULL AS deleted FROM pages WHERE source_id=$1', [sourceId]);
+  const identities = await engine.executeRaw<{ id: number; slug: string; source_path: string | null; knowledge_revision: string }>(
+    'SELECT id,slug,source_path,knowledge_revision FROM pages WHERE source_id=$1', [sourceId]);
   const bySlug = new Map(identities.map(p => [p.slug, p]));
   const byPath = new Map<string, typeof identities>();
   assertDistinctSyncOrigins([...selected.map(entry => entry.sourcePath), ...identities.flatMap(page => page.source_path ? [page.source_path] : [])]);
@@ -204,14 +204,22 @@ export async function discoverManagedSync(engine: BrainEngine, opts: SyncOpts, c
     Object.assign(entry, { slug, pageId: page?.id ?? null, revision: page?.knowledge_revision ?? null });
   }
   const deletions = new Map(selected.filter(entry => entry.action === 'delete').map(entry => [syncOriginPath(entry.sourcePath), entry]));
+  // A soft-delete advances knowledge_revision, so the frozen revisions still guard this read.
+  const deleted = new Set(claims.size ? (await engine.executeRaw<{ id: number }>('SELECT id FROM pages WHERE source_id=$1 AND deleted_at IS NOT NULL', [sourceId])).map(row => row.id) : []);
+  // Origins that differ only by case or separator spelling may be one file on another platform; refuse rather than
+  // guess. The one exception is a case-only respelling whose old file this very sync removes.
+  const spelling = (origin: string) => origin.replaceAll('\\', '/').toLowerCase();
   const retired = new Set<SyncEntry>();
   const collisions: SyncSlugCollision[] = [];
   const gitPath = (entry: SyncEntry) => relative(nativeGitRoot, join(nativeRoot, entry.path)).split(sep).join('/');
   for (const [slug, candidates] of claims) {
     const holder = bySlug.get(slug);
     const holderOrigin = holder?.source_path == null ? null : syncOriginPath(holder.source_path);
+    const respelled = holderOrigin !== null && !holderOrigin.includes('\\') && deletions.has(holderOrigin);
+    const spellings = [...(holderOrigin === null || respelled ? [] : [holderOrigin]), ...candidates.map(entry => syncOriginPath(entry.sourcePath))].map(spelling);
+    if (new Set(spellings).size !== spellings.length) throw new OperationError('page_identity_changed', 'Sync origins for one slug differ only by case or separator spelling.');
     // A live page keeps its slug while its own file is still in the tree; the newcomer is the collision.
-    const kept = holder && !holder.deleted && holderOrigin !== null && !deletions.has(holderOrigin) ? holderOrigin : null;
+    const kept = holder && !deleted.has(holder.id) && holderOrigin !== null && !deletions.has(holderOrigin) ? holderOrigin : null;
     const winner = kept === null ? candidates.find(entry => /\.mdx?$/i.test(entry.sourcePath) && entry.sourcePath.replace(/\.mdx?$/i, '') === slug) ?? candidates[0] : null;
     const losers = candidates.filter(entry => entry !== winner);
     for (const entry of losers) retired.add(entry);
@@ -231,7 +239,7 @@ export async function discoverManagedSync(engine: BrainEngine, opts: SyncOpts, c
     const from = renamedFrom.get(gitPath(winner));
     const deletion = from === undefined ? undefined : [...deletions.values()].find(entry => gitPath(entry) === from);
     const moved = deletion?.pageId == null ? undefined : identities.find(page => page.id === deletion.pageId);
-    if (deletion && moved && !moved.deleted && moved.source_path != null) {
+    if (deletion && moved && !deleted.has(moved.id) && moved.source_path != null) {
       // A Git rename moves the page to its new slug, like the library path's updateSlug: same page id, inbound links and an alias.
       winner.renameFrom = { sourcePath: moved.source_path, slug: moved.slug, pageId: moved.id, revision: moved.knowledge_revision };
       retired.add(deletion);
