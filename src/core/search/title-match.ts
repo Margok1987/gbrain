@@ -110,14 +110,27 @@ export function isTitleMentionedInQuery(query: string, title: string): boolean {
   return containsTokenRun(qTokens, tTokens);
 }
 
+/** Share of the query's distinct content tokens a title must supply to count as the query's subject. */
+const TITLE_SUBJECT_MIN_COVERAGE = 0.5;
+
 /**
  * The strict form used under intents without an exact-match boost (#4694):
- * the title needs >= MIN_CONTENT_TOKENS content tokens, so a one-word title
- * ("Python", "Mingtang") mentioned in a general question never qualifies.
+ * returns the title's tokens when `title` (>= MIN_CONTENT_TOKENS content
+ * tokens) is mentioned in `query` AND supplies at least half of the query's
+ * distinct content tokens — the query asks for this document by name ("Which
+ * document is <title>?"). A title mentioned inside a longer question about
+ * something else ("Which amendment superseded the <title>?") does not
+ * qualify: on the #4694 benchmark boosting those sent the mentioned page
+ * above the right answer. Returns null otherwise.
  */
-export function isMultiTokenTitleMentioned(query: string, title: string): boolean {
-  return contentTokens(tokenizeTitle(title)).length >= MIN_CONTENT_TOKENS && isTitleMentionedInQuery(query, title);
+export function titleAsQuerySubject(query: string, title: string): string[] | null {
+  const tTokens = tokenizeTitle(title);
+  const tContent = contentTokens(tTokens);
+  if (tContent.length < MIN_CONTENT_TOKENS || !isTitleMentionedInQuery(query, title)) return null;
+  const qContent = new Set(contentTokens(tokenizeTitle(query)));
+  return tContent.length / qContent.size >= TITLE_SUBJECT_MIN_COVERAGE ? tTokens : null;
 }
 
 // Exported for unit tests.
 export const __test__ = { tokenizeTitle, contentTokens, containsTokenRun, STOPWORDS, MIN_CONTENT_TOKENS };
+export { containsTokenRun };

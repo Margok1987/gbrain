@@ -3,8 +3,10 @@
  * entity/event intent, and both of the reporter's shapes ("Which board
  * document is the <title> that we signed last spring?", "Which document is
  * <title>?") classify as general. Under intents without an exact-match
- * boost, a MULTI-token title or slug tail mentioned in the query now gets a
- * bounded boost; one-token titles stay excluded there (too generic).
+ * boost, a MULTI-token title or slug tail that is the query's subject
+ * (supplies at least half its content tokens) now gets a bounded boost; a
+ * title merely mentioned inside a longer question does not (measured: that
+ * variant sent the mentioned page above the right answer).
  */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import {
@@ -31,17 +33,30 @@ describe('applyTitleMentionBoost', () => {
     expect(weightsForIntent('general').exactMatchBoost).toBe(1.0);
   });
 
-  test('a multi-token title mentioned in a general question is boosted', () => {
+  test('a multi-token title that is the subject of a general question is boosted', () => {
     const results = [row('notes/harbor-lease', 'Harbor Street Lease Amendment'), row('notes/other', 'Parking Permit Renewal')];
-    applyTitleMentionBoost(results, 'Which board document is the Harbor Street Lease Amendment that we signed last spring?');
+    applyTitleMentionBoost(results, 'Which document is Harbor Street Lease Amendment?');
     expect(results[0].score).toBe(TITLE_MENTION_BOOST);
     expect(results[0].exact_match_boost).toBe(TITLE_MENTION_BOOST);
     expect(results[1].score).toBe(1);
   });
 
+  test('a title mentioned inside a longer question about something else is not boosted', () => {
+    const results = [row('notes/harbor-lease', 'Harbor Street Lease Agreement'), row('notes/harbor-amendment', 'Harbor Street Lease Amendment')];
+    applyTitleMentionBoost(results, 'Which amendment changed the rent and term originally set in the Harbor Street Lease Agreement?');
+    applyTitleMentionBoost(results, 'Which board document is the Harbor Street Lease Agreement that we signed last spring?');
+    expect(results.map(r => r.score)).toEqual([1, 1]);
+  });
+
+  test('when one mentioned title contains another, only the longer one is boosted', () => {
+    const results = [row('finance/budget-review', 'Budget Review'), row('events/offsite-budget-review', 'Offsite Budget Review')];
+    applyTitleMentionBoost(results, 'Which document is the Offsite Budget Review?');
+    expect(results.map(r => r.score)).toEqual([1, TITLE_MENTION_BOOST]);
+  });
+
   test('the slug tail counts when the title does not', () => {
     const results = [row('notes/harbor-street-lease', 'HSL-2')];
-    applyTitleMentionBoost(results, 'where is the harbor street lease draft');
+    applyTitleMentionBoost(results, 'harbor street lease draft');
     expect(results[0].score).toBe(TITLE_MENTION_BOOST);
   });
 
