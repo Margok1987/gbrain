@@ -964,27 +964,15 @@ export async function importFromContent(
       );
     }
 
-    // Tag reconciliation: ADD-ONLY (v0.41.37.0 #1621).
-    //
-    // We deliberately do NOT delete existing tags here. The `tags` table has
-    // no provenance column, and frontmatter tags are stripped from the stored
-    // `pages.frontmatter` (markdown.ts:118) — so at re-import time we cannot
-    // distinguish a frontmatter-origin tag from a DB-side enrichment tag
-    // (auto-tag / dream synthesize / signal-detector writes to the same
-    // table). The pre-v0.41.37.0 "delete every existing tag not in the current
-    // frontmatter" logic wiped ALL enrichment tags on every re-import — most
-    // visibly under `gbrain reindex --markdown` (#1621), which re-imports every
-    // page with forceRechunk. reindex is a re-chunk/re-embed op; it must not
-    // destroy tags.
-    //
-    // Trade-off (accepted): removing a tag from a page's frontmatter no longer
-    // removes it from the DB on the next sync. That staleness is minor (tags
-    // are additive metadata) and far preferable to silently losing enrichment
-    // tags. Frontmatter-tag REMOVAL would require a `tag_source` provenance
-    // column (deferred — see TODOS.md #1621-followup). addTag is idempotent
-    // (ON CONFLICT DO NOTHING), so re-adding existing tags is a no-op.
+    // Tag reconciliation (A14): frontmatter tags carry tag_source='frontmatter'.
+    // A frontmatter-owned row whose tag left the frontmatter is deleted; rows
+    // explicit adds own ('added': add_tag, enrichment, the code importer) and
+    // legacy NULL rows are never deleted here (#1621: reindex must not wipe
+    // enrichment). A legacy row still in the frontmatter is adopted.
+    await tx.executeRaw(`DELETE FROM tags t USING pages p WHERE p.id = t.page_id AND p.source_id = $1 AND p.slug = $2
+      AND t.tag_source = 'frontmatter' AND NOT (t.tag = ANY($3::text[]))`, [txOpts.sourceId, slug, parsed.tags]);
     for (const tag of parsed.tags) {
-      await tx.addTag(slug, tag, txOpts);
+      await tx.addTag(slug, tag, { ...txOpts, tagSource: 'frontmatter' });
     }
 
     // Replace every derived row atomically. Only vectors the A13 reuse gate

@@ -6708,6 +6708,16 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     idempotent: true,
     sql: FACT_WITHDRAWAL_SUBJECT_SQL,
   },
+  {
+    // Frontmatter tags were add-only because a tag row carried no provenance:
+    // removing a tag from frontmatter never removed it. The importer stamps
+    // 'frontmatter' and deletes only those rows; explicit adds stamp 'added'
+    // and legacy rows stay NULL — neither is ever deleted by an import.
+    version: 170,
+    name: 'tags_tag_source',
+    idempotent: true,
+    sql: `ALTER TABLE tags ADD COLUMN IF NOT EXISTS tag_source TEXT;`,
+  },
 ];
 
 export const LATEST_VERSION = MIGRATIONS.length > 0
