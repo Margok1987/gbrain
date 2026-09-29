@@ -205,7 +205,8 @@ export function remediationExitStatus(result: RemediationResult, findings: Remed
   if (result.resume_refused) return 2;
   if (result.budget_exhausted) return 1;
   const jobFailed = result.submitted.some(s => s.status !== 'completed' && s.status !== 'submitted' && s.status !== 'dry_run');
-  const repairFailed = (result.repairs ?? []).some(r => r.status === 'failed');
+  // A stopped step (capacity, pending write, unfinished embeddings) left work behind.
+  const repairFailed = (result.repairs ?? []).some(r => r.status === 'failed' || r.status === 'stopped');
   if (jobFailed || repairFailed) return 1;
   if (findings.some(f => f.class === 'pending' || f.class === 'consent_required')) return 1;
   if (result.target_unreachable) return 2;

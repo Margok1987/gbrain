@@ -8583,8 +8583,14 @@ fresh agreement. A checkpoint recorded for another brain is refused.
 When an embedding model is configured, every kind can spend. `timeline` and
 `visibility` publish page writes whose embeddings the persistence consumer
 computes afterwards, outside this run, so their estimate is charged against the
-cap before they start; `--no-embed` does not change that. `safe-chunks` embeds
-in the run itself and `--no-embed` makes it free.
+cap before they start; `--no-embed` does not change that. The consumer does
+not see the cap, so for those kinds the cap bounds the estimate, not each
+provider call, and the estimate counts the page as it is before the repair.
+`safe-chunks` embeds in the run itself under the remaining cap and
+`--no-embed` makes it free. When the budget runs out after pages are re-sealed,
+the checkpoint keeps their sources and `--resume` finishes their embeddings
+under the same cap; a run that leaves embeddings behind exits 1 and says to run
+`gbrain embed --stale`.
 
 With `--json`, the result adds `repairs[]` (one entry per repair step, with
 `status` `completed`, `stopped`, `failed`, `budget_refused` or

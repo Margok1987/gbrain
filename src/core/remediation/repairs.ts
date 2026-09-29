@@ -76,6 +76,8 @@ export async function runRepairSteps(engine: BrainEngine, steps: RepairPlanStep[
   charge?: (usd: number) => void;
   /** True once the run's budget tracker fired, even if a callee swallowed the throw. */
   exhausted?: () => boolean;
+  /** Runs one in-process paid step under a tracker capped at what is left after reservations. */
+  stepBudget?: <T>(run: () => Promise<T>) => Promise<T>;
   onStep?: (step: RepairPlanStep, result: RepairStepResult) => void;
 }): Promise<RepairStepResult[]> {
   if (opts.remote !== false) throw new OperationError('permission_denied', 'Repair steps are PROTECTED: only a trusted local caller on the brain host can run them.',
@@ -97,7 +99,8 @@ export async function runRepairSteps(engine: BrainEngine, steps: RepairPlanStep[
     } else {
       if (step.paid && step.embeds === 'effect' && step.est_usd_cost) opts.charge?.(step.est_usd_cost);
       try {
-        const applied = await runner.run(step.kind, scope);
+        const applied = step.paid && step.embeds === 'inline' && opts.stepBudget
+          ? await opts.stepBudget(() => runner.run(step.kind, scope)) : await runner.run(step.kind, scope);
         result = { ...base, applied: applied.applied, skipped: applied.skipped,
           status: applied.stopped ? 'stopped' : applied.complete ? 'completed' : 'stopped',
           ...(applied.stopped ? { message: applied.stopped.message } : {}) };

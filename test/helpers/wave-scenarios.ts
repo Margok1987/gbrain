@@ -8,7 +8,7 @@
 import { expect } from 'bun:test';
 import type { BrainEngine } from '../../src/core/engine.ts';
 import { doctorReportRemote } from '../../src/commands/doctor.ts';
-import { runRemediate, runRemediationPlan } from '../../src/commands/doctor/remediate.ts';
+import { remediationExitStatus, runRemediate, runRemediationPlan } from '../../src/commands/doctor/remediate.ts';
 import { REMOTE_HOST_ACTION, remoteWaveHandoff } from '../../src/commands/doctor/wave-checks.ts';
 import { currentExitCode, setCliExitVerdict } from '../../src/core/cli-force-exit.ts';
 import { configureGateway, resetGateway } from '../../src/core/ai/gateway.ts';
@@ -214,9 +214,12 @@ export async function swallowedExhaustionIsReported(databaseUrl?: string) {
       const { planRepairSteps, runRepairSteps } = await import('../../src/core/remediation/repairs.ts');
       const steps = (await planRepairSteps(engine)).filter(step => step.kind === 'safe-chunks');
       expect(steps).toEqual([expect.objectContaining({ paid: true, embeds: 'inline' })]);
-      let polls = 0;
+      let polls = 0, budgeted = 0;
       const [result, later] = await runRepairSteps(engine, [...steps, { ...steps[0]!, id: 'repair:safe-chunks-again' }], {
-        remote: false, remainingUsd: () => 10, exhausted: () => ++polls > 1 });
+        remote: false, remainingUsd: () => 10, exhausted: () => ++polls > 1,
+        stepBudget: async run => { budgeted++; return run(); } });
+      // An in-process paid step runs under its own tracker capped at what reservations left.
+      expect(budgeted).toBe(1);
       expect(result).toMatchObject({ kind: 'safe-chunks', status: 'budget_exhausted' });
       expect(result!.message).toContain('gbrain embed --stale');
       expect(later).toMatchObject({ status: 'budget_refused' });
@@ -261,6 +264,9 @@ export async function pendingEmbeddingsResume(databaseUrl?: string) {
       const ran = await runRemediation(engine, { resume: true, resumePlanHash: 'pendingembeds001', maxUsd: 5, repairs: { include: false, remote: false } });
       expect(ran.repairs).toEqual([expect.objectContaining({ id: 'repair:safe-chunks:embeddings', status: 'stopped' })]);
       expect(ran.repairs![0]!.message).toContain('gbrain embed --stale');
+      expect(remediationExitStatus(ran, [])).toBe(1);
+      // The unfinished embeddings stay resumable, with the settled spend.
+      expect(loadRemediationCheckpoint('pendingembeds001')).toMatchObject({ pending_embed_sources: ['default'], max_usd: 5 });
     }, { databaseUrl, kinds: ['safe_index'] });
   } finally { resetGateway(); }
 }

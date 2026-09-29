@@ -212,7 +212,9 @@ export async function runRemediation(
   // Effect kinds embed in the persistence consumer, outside any tracker, so their estimate is reserved up front.
   let reservedUsd = 0;
   let trackerExhausted = false;
-  const spentThisRun = () => repairTracker.totalSpent + reservedUsd + (jobTracker?.totalSpent ?? 0);
+  const stepTrackers: Array<InstanceType<typeof BudgetTracker>> = [];
+  const spentThisRun = () => repairTracker.totalSpent + reservedUsd + (jobTracker?.totalSpent ?? 0)
+    + stepTrackers.reduce((sum, tracker) => sum + tracker.totalSpent, 0);
   const settledUsd = () => spentBefore + spentThisRun();
   const remainingUsd = () => remainingCap === undefined ? undefined : Math.max(0, remainingCap - spentThisRun());
 
@@ -276,6 +278,12 @@ export async function runRemediation(
     for (const step of repairSteps) hooks.onRepairStepStart?.(step);
     const results = await runRepairSteps(engine, repairSteps, { remote: repairs.remote, noEmbed: repairs.noEmbed, remainingUsd,
       charge: (usd) => { reservedUsd += usd; }, exhausted: () => trackerExhausted,
+      stepBudget: async (run) => {
+        const tracker = new BudgetTracker({ label: 'remediation.repair-step', maxCostUsd: remainingUsd() });
+        stepTrackers.push(tracker);
+        watch(tracker);
+        return withBudgetTracker(tracker, run);
+      },
       onStep: (step, result) => hooks.onRepairStepEnd?.(step, result) });
     repairResults.push(...results);
     // A re-seal whose embeddings the budget cut short resumes as an embedding pass over the same sources.
@@ -436,8 +444,11 @@ export async function runRemediation(
   // Clear checkpoint on a clean run (no budget abort). Failed steps in the
   // submitted set don't disqualify cleanup; an uncleared health signal can
   // produce the same stable id again in a later run.
-  if (!budgetAbort) {
+  if (!budgetAbort && pendingEmbedSources.length === 0) {
     clearRemediationCheckpoint(planHash);
+  } else if (!budgetAbort) {
+    // Re-sealed pages whose embeddings did not land stay resumable.
+    saveCheckpoint();
   }
 
   const finalHealth = await engine.getHealth();
