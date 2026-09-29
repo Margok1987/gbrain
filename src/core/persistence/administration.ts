@@ -15,6 +15,7 @@ import { operationScopesAllowed } from '../scope.ts';
 import { assertWriterAdminState, requireWriterAdminIntent, writerAdminState, WRITER_INSPECTION_HINT } from './admin-intent.ts';
 import { writerOnboardingPreflight } from './onboarding.ts';
 import { assertWriterAdminUnlocked, readWriterAdminLock, setWriterAdminLock } from './admin-lock.ts';
+import { listBlockingEffects } from './blocking-effects.ts';
 
 const invalid = (message: string) => new OperationError('invalid_params', message);
 function source(value: unknown): string {
@@ -157,9 +158,11 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
     const [sharedSkills] = await engine.executeRaw<{ writer_protocol_floor: number; skill_bundles_enabled: boolean }>(
       'SELECT writer_protocol_floor,skill_bundles_enabled FROM persistence_brain WHERE singleton=1');
     const adminLock = await readWriterAdminLock(engine);
+    const blockingEffects = await listBlockingEffects(engine, { sourceId: params.source_id as string | undefined, limit: 20 });
     await assertWriterAdminState(engine, adminState, false);
     return { ...diagnostics, host_id: existingLocalHostId(), local_host_id: existingLocalHostId(), bindings, admin_state: adminState,
-      admin_lock: { locked: adminLock.locked, set_at: adminLock.set_at, host_id: adminLock.host_id }, onboarding, shared_skills: sharedSkills, ...(native ? { native_lock: native } : {}) };
+      admin_lock: { locked: adminLock.locked, set_at: adminLock.set_at, host_id: adminLock.host_id }, blocking_effects: blockingEffects,
+      onboarding, shared_skills: sharedSkills, ...(native ? { native_lock: native } : {}) };
   }
   if (operation === 'writer_claim') {
     keys(params, ['source_id', 'path', 'dry_run', 'admin_intent', 'expected_state']);

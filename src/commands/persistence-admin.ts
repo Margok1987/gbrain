@@ -55,8 +55,8 @@ writer_admin_locked for every caller; ordinary writes continue. lock refuses whi
 is prepared and not yet accepted. There is no --force: the escape hatch is the local unlock
 (operator workflow: unlock, administer, lock). The lock guards against routine or accidental
 agent administration; it is not a security boundary against a caller with the same shell.
-Binaries older than this release do not consult the lock. status shows admin_lock
-and local_host_id.`;
+Binaries older than this release do not consult the lock. status shows admin_lock,
+local_host_id and blocking effects.`;
 
 export const LOCAL_WRITER_HELP = `Usage:
   gbrain auth local-writer list [--limit <1-1000>] [--before <uuid>] [--json]

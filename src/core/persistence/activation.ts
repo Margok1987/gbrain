@@ -8,6 +8,7 @@ import { nativeLockCapability, tryAcquireNativeLock, type NativeLockHandle } fro
 import { managedFilesystemDatastorePath, refreshManagedFilesystemRoots } from './filesystem-guard.ts';
 import { assertWriterAdminState, WRITER_INSPECTION_HINT } from './admin-intent.ts';
 import { assertWriterAdminUnlocked } from './admin-lock.ts';
+import { notQuiescedError } from './blocking-effects.ts';
 import { inspectLegacyWriterLocks } from './legacy-locks.ts';
 import { deleteLockRowExact } from '../db-lock.ts';
 
@@ -118,7 +119,7 @@ export async function activatePersistence(engine: BrainEngine, opts: { confirmQu
       const legacyLocks = await inspectLegacyWriterLocks(tx);
       if (legacyLocks.some(row => !opts.cleanupDeadLocalLocks || row.liveness !== 'dead_eligible')) throw quiescence();
       if ((await tx.executeRaw(`SELECT id FROM persistence_requests WHERE state IN ('queued','running','recovering') OR recovery IS NOT NULL LIMIT 1`)).length
-        || (await tx.executeRaw('SELECT id FROM persistence_effects WHERE recovery IS NOT NULL LIMIT 1')).length) throw quiescence();
+        || (await tx.executeRaw('SELECT id FROM persistence_effects WHERE recovery IS NOT NULL LIMIT 1')).length) throw await notQuiescedError(tx, quiescence().message, { queuedEffects: false });
       if (opts.dryRun) return { enabled: false, activated: false, filesystem_sources: bindings.length, native_lock: native, legacy_locks: legacyLocks, drift_audit: driftAudit };
       for (const row of legacyLocks) {
         if (!(await deleteLockRowExact(tx, row.id, row.holder_pid, row.acquisition_token)).deleted) throw quiescence();
