@@ -133,7 +133,7 @@ export async function beginConnectorSync(engine: BrainEngine, sourceId: string, 
   const authority = await managedSyncAuthority(engine, sourceId, source.incarnation, source.local_path ?? '');
   const binding = await getWorktreeBinding(engine, sourceId);
   const canonicalRoot = connectorBindingRoot(sourceId, source, binding);
-  if (binding) await (await acquireWorktree(binding))?.release();
+  if (binding) await (await acquireWorktree(binding, 0, undefined, engine))?.release();
   else authority.writer.databaseOnlyReason = 'connector_database';
   const session = new ManagedConnectorSync(engine, sourceId, connector, source, authority, binding, canonicalRoot, opts.noEmbed === true, opts.noSchemaPack === true, opts.retryFailed === true, lease);
   await session.load();
@@ -349,7 +349,7 @@ export class ManagedConnectorSync {
     const prior = await selected(this.engine);
     let row = prior.row;
     if (mayRetry(row)) {
-      const lock = this.binding ? await acquireWorktree(this.binding, 1000) : null;
+      const lock = this.binding ? await acquireWorktree(this.binding, 1000, undefined, this.engine) : null;
       try {
         if (this.binding && !lock) {
           await this.refuseRetryBlocker(this.engine);

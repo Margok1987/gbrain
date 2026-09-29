@@ -71,7 +71,7 @@ export async function managedAtomSession(engine: BrainEngine, sourceId: string, 
     throw new OperationError('owner_unavailable', 'The canonical atom owner is unavailable; no extraction was started.');
   }
   if (writeThrough && binding) {
-    const lock = await acquireWorktree(binding);
+    const lock = await acquireWorktree(binding, 0, undefined, engine);
     if (!lock) throw new OperationError('writer_lock_unavailable', 'The canonical atom writer is busy; no extraction was started.');
     await lock.release();
   }

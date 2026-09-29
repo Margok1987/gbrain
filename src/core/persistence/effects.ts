@@ -270,7 +270,7 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     if (opts.signal?.aborted) return;
     const binding = await getWorktreeBinding(engine, recovery.source_id, opts.hostId);
     if (!binding) continue;
-    const lock = await acquireWorktree(binding);
+    const lock = await acquireWorktree(binding, 0, undefined, engine);
     if (!lock) continue;
     let claimed: PersistenceEffect | undefined;
     try {
@@ -291,7 +291,7 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
       const binding = effect.worktree_id ? await getWorktreeBinding(engine, effect.source_id, opts.hostId) : null;
       if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) {
         if (!binding) throw new OperationError('owner_unavailable', 'The canonical effect owner is unavailable.');
-        lock = await acquireWorktree(binding);
+        lock = await acquireWorktree(binding, 0, undefined, engine);
         if (!lock) throw new OperationError('writer_busy', 'The canonical worktree is busy.');
       }
       await engine.transaction(async tx => {

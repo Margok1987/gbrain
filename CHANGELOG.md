@@ -10,6 +10,94 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.1.0] - 2026-09-28
+
+**Managed brains stop getting stuck on pages and sources that could never be written or synced again.**
+
+Several ordinary situations used to leave a managed brain permanently refusing
+work, with advice that did not help. This release fixes five of them at the
+cause, so affected pages and sources recover after you upgrade, without hand
+edits to the database.
+
+- A page whose file has no `type:` line, or whose stored title had a stray
+  space at either end, was treated as a local edit forever. Updates and deletes
+  now go through, while real local edits are still refused.
+- A source that lives in a subfolder of a Git repository stopped syncing after
+  the first page was written through the brain, because the two sides recorded
+  the file location differently. New pages now record the same location sync
+  uses, and pages recorded the old way sync normally and are corrected in place
+  the next time their file changes.
+- On a Mac, a reboot can give the disk a new device number. Every managed write
+  then refused until someone ran a manual transfer. When nothing else about the
+  checkout changed, the brain now updates its ownership record by itself and
+  logs that it did.
+- An interrupted sync started by hand could not be finished by autopilot, and
+  the other way round, because each used different default processing options.
+  A sync that did not ask for specific options now finishes the saved one with
+  its saved options. If you do pass a conflicting flag, the refusal shows the
+  saved options and the exact command to resume.
+- `gbrain capture --file notes/x.md` stored the path as typed, which later made
+  the page unwritable and could block the whole source. Capture now records a
+  file inside the source by its source-relative location, records only
+  `cli-file` for anything else, and never stores your home directory path.
+  Pages captured the old way accept writes again.
+
+## To take advantage of v0.60.1.0
+
+Upgrade every gbrain process that writes to the brain (serve, autopilot, hooks
+and the global CLI) with `gbrain upgrade`. There is no schema migration and no
+repair command to run. Afterwards, confirm writes and sync work again:
+
+```bash
+gbrain sources writer status
+gbrain sync --source <id> --no-pull
+```
+
+If a sync still refuses, its message now names the reason and the command to
+run. File an issue at https://github.com/garrytan/gbrain/issues with the output
+of `gbrain doctor` if it does not.
+
+### Itemized changes
+
+- **Write guard:** the coordinated drift check keeps the stored type when the
+  file has no explicit `type:` and compares titles trimmed. Titles humanized
+  from a file name no longer keep leading or trailing spaces. A real drift
+  refuses with reason `file_database_drift` and a filled
+  `gbrain sources reconcile` command. (#5521, #5635)
+- **Subfolder sources:** write-through and managed `put_page` record
+  `source_path` in the form of the source's pinned slug-root mode, or the mode
+  its first sync would pin; the first such write pins that inferred mode. Managed
+  discovery, freeze, preparation and the page
+  origin query accept the older Git-root form under `source-root` mode (recognized
+  because the rest of the path names the page), the write target decodes paths
+  the same way, a full
+  sync no longer schedules a delete for such a page, and an import rewrites the
+  stored path. A stored path that could name two files refuses with reason
+  `ambiguous_source_path`; a real mismatch refuses with `sync_origin_mismatch`.
+  (#5610, #5398)
+- **Device renumbering:** when only the filesystem device id changed and the
+  owner token, brain, worktree, root, inode and a non-zero birth time match,
+  the write path re-stamps a recorded self-transfer and retained staging
+  identities in a transaction that verifies database ownership, then the
+  ownership stamp and the reservation, all under the checkout lock; an
+  interruption in between is finished by the next write. A clone recovery
+  interrupted across a renumbering still needs source recovery. Zero birth time
+  (some Linux mounts) or any other difference still refuses, now with reason
+  `physical_root_device_changed` and both self-transfer commands filled in. This
+  is verified with a simulated device change, not a real macOS reboot. (#5604)
+- **Sync cursor options:** `sync` jobs, the dream cycle and CLI runs pass only
+  the processing options they set explicitly; the rest come from an unfinished
+  cursor. A conflicting explicit flag refuses with reason
+  `cursor_processing_options_conflict`. (#5632)
+- **Capture file origin:** the CLI sends the file path to the owner, which maps
+  it to a source-relative origin only when the file is inside the source and its
+  path names the slug; remote callers cannot send a path. Relative or host-only
+  `file://` URIs are read as absent everywhere. An absolute file URI that cannot
+  be resolved now refuses with the new write error `invalid_source_uri` instead
+  of `skill_bundle_required`. (#5622, #5603) Error code change contributed by
+  @quqi1599 (#5554); relative and special-character file cases contributed by
+  @javieraldape (#5670).
+
 ## [0.59.13.0] - 2026-09-28
 
 **Search now credits a page when several retrieval methods agree on it, keeps the reranker's order, and stops hiding timeline evidence behind "who is" questions.**
