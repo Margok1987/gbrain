@@ -41,6 +41,19 @@ export interface RemediationCheckpoint {
     reason: string;
     model_id?: string;
   };
+  /**
+   * Resume contract (fix wave 3). Optional so checkpoints written by older
+   * binaries still load; a checkpoint that carries them binds its resume to
+   * this brain, this cap (cumulative across the run and every resume), this
+   * `--include-repairs` consent and this step manifest. New job ids or repair
+   * kinds found later never inherit the recorded consent.
+   */
+  brain_id?: string;
+  max_usd?: number | null;
+  include_repairs?: boolean;
+  /** Settled spend across the original run and its resumes. */
+  spent_usd?: number;
+  manifest?: { job_ids: string[]; repair_kinds: string[] };
 }
 
 function checkpointDir(): string {
