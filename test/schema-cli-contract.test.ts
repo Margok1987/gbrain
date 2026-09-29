@@ -8,8 +8,12 @@
 // that wants to opt OUT of the contract must do so explicitly and
 // document why.
 
-import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { describe, test, expect, spyOn } from 'bun:test';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { runSchema } from '../src/commands/schema.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 const SCHEMA_TS = readFileSync('src/commands/schema.ts', 'utf-8');
 
@@ -80,14 +84,32 @@ describe('v0.39 T6 — schema CLI contract', () => {
     }
   });
 
-  test('EXPERIMENTAL_VERBS set matches the documented D14 hybrid choice', () => {
-    expect(SCHEMA_TS).toContain('init');
-    expect(SCHEMA_TS).toContain('fork');
-    expect(SCHEMA_TS).toContain('edit');
-    expect(SCHEMA_TS).toContain('diff');
-    expect(SCHEMA_TS).toContain('graph');
-    expect(SCHEMA_TS).toContain('explain');
-    expect(SCHEMA_TS).toContain('EXPERIMENTAL_VERBS');
-    // ^ the marker constant must be present so T23 telemetry can read it.
+  test('schema usage reports and tags exactly the D14 experimental verbs', async () => {
+    const auditDir = mkdtempSync(join(tmpdir(), 'gbrain-schema-usage-'));
+    try {
+      const ts = new Date().toISOString();
+      writeFileSync(join(auditDir, 'schema-events-fixture.jsonl'), ['init', 'explain', 'lint', 'detect']
+        .map(verb => JSON.stringify({ ts, verb, outcome: 'success' })).join('\n') + '\n');
+      const lines: string[] = [];
+      const spy = spyOn(console, 'log').mockImplementation((...args: unknown[]) => { lines.push(args.map(String).join(' ')); });
+      try {
+        await withEnv({ GBRAIN_AUDIT_DIR: auditDir }, async () => {
+          await runSchema(['usage', '--json']);
+          const json = JSON.parse(lines.join('\n'));
+          expect([...json.experimental_verbs].sort()).toEqual(['diff', 'edit', 'explain', 'fork', 'graph', 'init']);
+          lines.length = 0;
+          await runSchema(['usage']);
+        });
+      } finally {
+        spy.mockRestore();
+      }
+      const row = (verb: string) => lines.find(l => l.trim().startsWith(verb + ' ')) ?? '';
+      expect(row('init')).toContain('(experimental)');
+      expect(row('explain')).toContain('(experimental)');
+      expect(row('lint')).not.toContain('(experimental)');
+      expect(row('detect')).not.toContain('(experimental)');
+    } finally {
+      rmSync(auditDir, { recursive: true, force: true });
+    }
   });
 });

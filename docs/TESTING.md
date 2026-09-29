@@ -187,6 +187,10 @@ can reduce maintenance while keeping both engine arms. Making one crash lane
 authoritative or collecting LCOV in a named owner requires a separate ownership
 change; nightly sharding alone makes neither change.
 
+The 2026-09-29 test audit's lane reports, inventories and mutation-probe logs
+are committed under [docs/test-audit/2026-09-29/](test-audit/2026-09-29/README.md);
+cite them for the surviving-owner and probe evidence behind a consolidation.
+
 Name the profile when reporting “all tests.” The local fast loop, `test:full`,
 `ci:local`, required PR checks and nightly `fullCorpus` are not interchangeable
 supersets. Native matrices, sustained persistence validation, browser tests and

@@ -134,6 +134,21 @@ describe("selectTests", () => {
     ]);
   });
 
+  test("postgres-engine.ts changes select its shared-singleton owners", () => {
+    const singletonOwners = [
+      "test/e2e/db-singleton-shared-recovery.test.ts",
+      "test/e2e/postgres-engine-disconnect-idempotency.test.ts",
+      "test/e2e/postgres-reconnect-singleton.test.ts",
+    ];
+    const selected = selectTests({
+      changedFiles: ["src/core/postgres-engine.ts"],
+      allE2ETests: [...singletonOwners, "test/e2e/graph-quality.test.ts"],
+      map: E2E_TEST_MAP,
+    });
+    for (const owner of singletonOwners) expect(selected).toContain(owner);
+    expect(selected).not.toContain("test/e2e/graph-quality.test.ts");
+  });
+
   test("case 1: empty diff -> all E2E", () => {
     expect(select([])).toEqual(ALL_E2E.slice().sort());
   });

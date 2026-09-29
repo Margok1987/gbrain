@@ -38,7 +38,6 @@ test/e2e/cross-modal-eval.test.ts
 test/e2e/cycle-consolidate-postgres.test.ts
 test/e2e/cycle-recompute-emotional-weight-pglite.test.ts
 test/e2e/db-guard.test.ts
-test/e2e/db-singleton-shared-recovery.test.ts
 test/e2e/doctor-silent-death-parity.test.ts
 test/e2e/dream-allow-list-pglite.test.ts
 test/e2e/dream-patterns-pglite.test.ts
@@ -99,8 +98,6 @@ test/e2e/openrouter-anthropic-subagent-replay.live.test.ts
 test/e2e/orphan-reduction.test.ts
 test/e2e/pglite-cli-exit.serial.test.ts
 test/e2e/phantom-redirect.test.ts
-test/e2e/postgres-engine-disconnect-idempotency.test.ts
-test/e2e/postgres-reconnect-singleton.test.ts
 test/e2e/purge-deleted-dryrun-postgres.test.ts
 test/e2e/qm-provisioning.test.ts
 test/e2e/quarantine-search-exclusion.test.ts

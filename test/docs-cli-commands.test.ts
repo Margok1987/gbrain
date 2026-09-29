@@ -15,6 +15,8 @@
  *   - docs/migrations/, skills/migrations/ — per-release migration notes,
  *     written against that release's CLI
  *   - docs/UPGRADING_DOWNSTREAM_AGENTS.md — per-release upgrade chronicle
+ *   - docs/test-audit/                — dated audit evidence that quotes the
+ *     tests and docs it examined, including the dead commands they pinned
  *
  * Heuristics keep prose out: only fenced code + inline spans are scanned,
  * comment lines and diagram lines are skipped, and the verb must sit in
@@ -35,6 +37,7 @@ const EXCLUDED = [
   'docs/plans/',
   'docs/migrations/',
   'skills/migrations/',
+  'docs/test-audit/',
 ];
 
 /** Known-intentional references to commands that deliberately don't exist. */

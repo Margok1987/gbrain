@@ -11,8 +11,9 @@
  *
  * Signal-handler installation contract is verified by:
  *   - installSignalHandlers() idempotency (this file)
- *   - E2E sync-lock-cleanup-on-sigterm.test.ts (real SIGTERM → real DELETE)
- *   - E2E sync-pipe-sigpipe.test.ts (real EPIPE → real DELETE)
+ *   - E2E test/e2e/sync-lock-recovery.test.ts: real SIGTERM mid-sync →
+ *     real lock-row DELETE, and a real closed output pipe mid-sync →
+ *     broken-pipe cleanup route → real lock-row DELETE
  *
  * NOT covered here: the SIGINT coexistence test (eng-review D9) — moved
  * to E2E because spawning a subprocess and verifying both AbortController

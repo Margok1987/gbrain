@@ -1,5 +1,28 @@
 # TODOS
 
+## Test-audit follow-ups (filed 2026-09-29)
+
+Evidence for each item is in `docs/test-audit/2026-09-29/`.
+
+- [ ] **P2 — Reusable test-audit scanners under `scripts/test-audit/`.**
+  **What:** the 2026-09-29 audit inventories (source-read pins, typeof probes, placeholder assertions, near-duplicate files, test-only exports, unreachable modules) came from one-off scanner scripts that were not committed. **Fix:** rewrite them as maintained `scripts/test-audit/*` commands with fixtures, so the next audit re-runs them instead of rebuilding them, and so their output format matches the committed inventories. **Effort:** M. **Priority:** P2.
+- [ ] **P2 — CI mutation-probe job for changed tests.**
+  **What:** the audit found many tests that pass when the behavior they name is broken. Nothing in CI checks that a new or changed test can fail. **Fix:** an opt-in (then required) job that, for each changed test file, applies a small set of targeted mutations to the production code it imports and reports tests that survive every mutation; start advisory and graduate with a budget per PR. **Effort:** L. **Priority:** P2.
+- [ ] **P3 — Per-symbol review of 136 dead-in-prod exported functions.**
+  **What:** `docs/test-audit/2026-09-29/lane-seams/seams.md` §3.4 lists 136 exported functions with no reference outside tests (beyond the test-seam names and dead modules the plan already handles). **Fix:** review each: wire it, make it module-private, or delete it with its tests, one small PR per subsystem. **Effort:** M. **Priority:** P3.
+- [ ] **P2 — Extract a testable autopilot tick function, then retire the 8 autopilot wiring greps.**
+  **What:** 8 test files (~75 tests: auto-drain, cycle-failure-classification, fanout-wiring, nightly-probe-wiring, parser-probe-wiring, shutdown-engine-close, supervisor-wiring, self-upgrade) pin the inline autopilot tick body as source text because no callable tick exists. **Fix:** extract the tick into an exported function with injected clock, engine and job submitter, cover each wiring behavior with a real call, then delete the source greps. **Effort:** M. **Priority:** P2.
+- [ ] **P3 — Speed passes on `test/helpers/reset-pglite.test.ts` (~15 s) and `test/docs-navigation.test.ts` (~3.5 s).**
+  **What:** the two most expensive files in their audit lanes. `docs-navigation` is the only Markdown link and fragment checker, so it must stay; scope or cache its parsing instead. **Fix:** profile both and cut repeated setup (shared engine or fixture reuse for the reset helper; parse each doc once for the link checker). **Effort:** S. **Priority:** P3.
+- [ ] **P3 — CONTRIBUTING.md "first green test" block.**
+  **What:** a contributor has no single keyless path from clone to one passing test. **Fix:** add a block with a keyless clone, `bun install --frozen-lockfile`, and one small representative test command with its expected output, measured once on a clean checkout. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — `gbrain features` dead-links check: remove or justify.**
+  **What:** `scanFeatures` recommends "Fix Dead Links" when `getHealth().dead_links > 0`, but `links.to_page_id` cascades on page delete on both engines, so that count cannot become non-zero and the recommendation never fires. `test/features.test.ts` covers every other check and deliberately does not stub this one. **Fix:** delete the check (and the matching `featuresTeaserForDoctor` clause), or document a third-party engine or schema state that can produce dangling links and test it there. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — Supervisor: decide whether a failed reconnect should retry on every later failing tick.**
+  **What:** after the third consecutive health failure the supervisor warns and calls `engine.reconnect()`. A failed reconnect leaves the failure counter at 3 or more, so every later failing health tick warns `db_connection_degraded` and reconnects again (pinned as current behavior in `test/supervisor-health-reconnect.test.ts`). No doc or CHANGELOG entry says whether that per-tick retry is intended. **Fix:** confirm it is intended and document it, or add a backoff between reconnect attempts and update the test. **Effort:** S. **Priority:** P3.
+- [ ] **P2 — A second signal during the cleanup pass exits before the lock is released.**
+  **What:** `installSignalHandlers` in `src/core/process-cleanup.ts` calls `runCleanupPass().finally(() => process.exit(code))` for each signal. `runCleanupPass` returns at once when a pass is already running, so a second SIGPIPE (or SIGTERM) arriving while the first pass is still deleting its lock rows exits the process before the DELETE completes, and the `gbrain-sync:*` row waits for its 30-minute TTL. Reproduced 4 of 4 times locally by closing a `gbrain sync` output pipe the moment its lock row appeared (instrumented run: two SIGPIPE deliveries, both cleanup callbacks registered, neither finished; exit 141). Once import progress has started the single-signal path releases the lock (pinned by `test/e2e/sync-lock-recovery.test.ts`); three real `| head -2` runs did not leak. Also under Bun the broken pipe arrives as SIGPIPE, so the stdout/stderr `EPIPE` listeners are not reached (removing them changes no test result). **Fix:** keep the in-flight pass promise and have later signals await it before exiting (the deadline still bounds it), with an E2E case that closes the pipe at the lock boundary; decide whether the `EPIPE` listeners stay as a portability fallback. **Effort:** S. **Priority:** P2.
+
 ## Skillopt honesty + model provenance wave follow-ups (filed 2026-09-28, #5584 / #5585 fix wave)
 
 - [ ] **P1 — TODO-D: validated Anthropic default-model migration.**
@@ -2248,6 +2271,7 @@ Each was explicitly deferred in the pass's CEO/eng/outside-voice reviews.
   the existing SHARD support (only ci-local uses it). Fold into the Postgres
   template-database entry below in this file (CREATE DATABASE … TEMPLATE, ~50ms).
   **Current status:** selected E2E is on the measured PR critical path. Four isolated weighted CI workers now address it without moving tests between lanes; PGLite-only lane moves remain deferred. **Effort:** M. **Priority:** P2.
+  **Status (2026-09-29 test audit):** the audit counted 113 PGLite-only files in `test/e2e` (`docs/test-audit/2026-09-29/lane-e2e/pglite-files.txt`). The test-reduction plan moves the 20 heaviest into the unit, serial or slow lanes as a measured pilot; whether to move the rest is decided from that pilot's matched timings.
 - [ ] **Second PGLite snapshot keyed by dims/model.** Implemented for BrainBench default-profile CLI children in the CI optimization pass; extending reuse to other deliberately reconfigured tests remains deferred. **What:** ~34 test files
   configure retired-embedding/1280 and always cold-init (the snapshot's shape gate correctly
   refuses the 1536 fixture). Bake a second snapshot per shape; the version-file
@@ -2474,6 +2498,7 @@ review-deferred, not fix-now). Grouped by component.
   hasDatabase/DATABASE_URL gate + header read; lockstep: e2e-test-map rows,
   e2e-unmapped-baseline shrink, classify-tests, seeded weights), a possible
   four-way `coverage-full-e2e` nightly matrix, and unit matrix 10→12.
+  **Status (2026-09-29 test audit):** Phase 5 is superseded by the test-reduction plan's lane-move pilot (the 20 heaviest of 113 PGLite-only `test/e2e` files, same move criterion and lockstep updates, measured on matched runs); the remaining files follow only if the pilot shows a measured gain.
   The selected-E2E matrix, timing refresh, `weights:mine` command, and refresh
   cadence are completed by the CI speed pass above. Graduated batch gates:
   5×-green first batch per class, 2×+CI
@@ -6806,6 +6831,8 @@ purpose; needs baseline-governance care per the BrainBench gate rules.
 **Priority:** P2
 
 **What:** Unit shards exclude `test/e2e/*` (`scripts/test-shard.sh`), and `.github/workflows/e2e.yml` runs only explicitly named files (a handful across its jobs — e.g. `test/e2e/mechanical.test.ts`, `test/e2e/mcp.test.ts`, the jsonb-parity pair); there is no glob. Every other `test/e2e/*.test.ts` — including PGLite-only files that need no `DATABASE_URL`, like `init-fresh-pglite.test.ts` — executes only when someone runs `bun run test:e2e` by hand. Decide per file: wire into a required workflow, re-home PGLite-only files to the serial lane (the pattern `test/init-picker-pty.serial.test.ts` uses), or explicitly document them as manual-only.
+
+**Status (2026-09-29 test audit):** partly stale. Every `test/e2e` file now runs in the nightly `coverage-full-e2e` glob, and PRs run the diff-selected set (`scripts/select-e2e.ts`, falling back to all files on unmapped changes). What remains is re-homing PGLite-only files so they run on every PR regardless of the diff; that is the test-reduction plan's lane-move pilot (see the PGLite-only lane entry above).
 
 **Why:** Tests that never run in required CI are silent coverage loss — they rot without failing. Surfaced by the TTY-harness cleanup review when the new PTY picker test almost landed in the same dead lane.
 
