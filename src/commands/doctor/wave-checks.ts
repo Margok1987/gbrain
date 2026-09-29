@@ -35,6 +35,8 @@ export interface WaveCheckSpec {
   registration: 'doctor.ts' | 'wave';
   /** Reason the check is not offered to remote callers, if any. */
   hostOnly?: string;
+  /** Items behind a finding, read from the check's details (host-side banners only). */
+  count(details: Record<string, any>): number;
   run(engine: BrainEngine, scope: WaveScope): Promise<Check>;
 }
 
@@ -49,45 +51,53 @@ async function perSource(scope: WaveScope, run: (sourceId?: string) => Promise<C
 export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
   {
     id: 'timeline_history', resolution: 'repair', registration: 'doctor.ts',
+    count: d => Number(d.materializable_rows ?? 0),
     impact: 'Some timeline rows exist only in the database and are missing from their pages',
     run: async (engine, scope) => { const { timelineHistoryCheck } = await import('./checks/timeline-history.ts'); return perSource(scope, id => timelineHistoryCheck(engine, id)); },
   },
   {
     id: 'derived_visibility', resolution: 'repair', registration: 'doctor.ts',
+    count: d => Number(d.unstamped_atoms ?? 0) + Number(d.unstamped_concepts ?? 0) + Number(d.looser_atoms ?? 0) + Number(d.looser_concepts ?? 0),
     impact: 'Some derived pages have no explicit visibility or are stored looser than their origin',
     run: async (engine, scope) => { const { derivedVisibilityCheck } = await import('./checks/derived-visibility.ts'); return perSource(scope, id => derivedVisibilityCheck(engine, id)); },
   },
   {
     id: 'safe_index_pending', resolution: 'repair', registration: 'wave',
+    count: d => Number(d.pages_pending ?? 0),
     impact: 'Some pages are below the safe-chunk index version and are withheld from remote search',
     run: async (engine, scope) => (await import('./checks/safe-index.ts')).safeIndexPendingCheck(engine, scope.sourceIds),
   },
   {
     id: 'persistence_capacity', resolution: 'operator', registration: 'doctor.ts',
+    count: d => (d.resources ?? []).length,
     impact: 'A cumulative managed-write limit is at or above 80%',
     instruction: 'Raise the named journal limit with the `gbrain config set` command doctor prints, on the brain host.',
     run: async engine => (await import('./checks/persistence-capacity.ts')).checkPersistenceCapacity(engine),
   },
   {
     id: 'parked_effects', resolution: 'operator', registration: 'doctor.ts',
+    count: d => Number(d.parked_effects ?? 0),
     impact: 'Some Git or withdrawal effects are parked after repeated failures',
     instruction: 'Fix the cause, then run the `gbrain sources writer retry-effects <source> --request-id <id>` command doctor prints (preview with --dry-run first).',
     run: async (engine, scope) => (await import('./checks/parked-effects.ts')).checkParkedEffects(engine, scope.sourceIds),
   },
   {
     id: 'dream_paid_loop', resolution: 'operator', registration: 'doctor.ts',
+    count: d => (d.keys ?? []).length,
     impact: 'A dream synthesis key keeps dying and was paid for on each attempt',
     instruction: 'Fix the cause, then reset the breaker with the command doctor prints.',
     run: async engine => (await import('./checks/dream-breaker.ts')).dreamPaidLoopCheck(engine),
   },
   {
     id: 'self_capture', resolution: 'operator', registration: 'wave',
+    count: d => Number(d.classified ?? 0),
     impact: 'The session corpus still holds files captured from gbrain\'s own model sessions',
     instruction: 'Quarantine the listed corpus files by hand with the commands in docs/guides/repair.md#quarantine-self-captured-corpus-files; nothing is deleted automatically.',
     run: async engine => (await import('./checks/self-capture.ts')).selfCaptureCheck(engine),
   },
   {
     id: 'stale_embedding_effects', resolution: 'unsupported', registration: 'wave',
+    count: d => Number(d.stale_effects ?? 0),
     impact: 'A committed write still has a queued embedding effect that no command can clear yet',
     instruction: 'Inspect it with `gbrain sources writer status <source> --json`; inspection cannot clear it (see docs/guides/repair.md#stale-queued-embedding-effects).',
     run: async (engine, scope) => (await import('./checks/stale-embedding-effects.ts')).staleEmbeddingEffectsCheck(engine, scope.sourceIds),
