@@ -38,6 +38,7 @@ import { writeSingleFact } from '../src/core/facts/write-single.ts';
 import { runLoopsExtract } from '../src/core/google/loops-extract.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { testBackends } from './helpers/test-backends.ts';
 
 const backends = testBackends();
@@ -175,7 +176,7 @@ test('managed phantom redirect merges the phantom fence into the canonical page 
     expect((await engine.readPageSnapshot('alice', { sourceId, includeDeleted: true }))?.page.deleted_at).not.toBeNull();
     expect(await engine.resolveSlugWithAlias('alice', sourceId)).toBe('people/alice-example');
     expect((await committed(engine, sourceId, 'people/alice-example')).map(r => r.kind)).toContain('managed_maintenance_phantom_merge');
-    expect((await committed(engine, sourceId, 'alice')).map(r => r.kind)).toContain('managed_maintenance_delete');
+    expect((await committed(engine, sourceId, 'alice')).map(r => r.kind)).toContain('managed_maintenance_phantom_delete');
   });
 }, 120_000);
 
@@ -346,7 +347,124 @@ test('managed phantom redirect defers the phantom delete when the phantom is edi
     expect([result.phantomsRedirected, result.phantomsSkippedDrift]).toEqual([0, 1]);
     expect(alive?.page.compiled_truth).toContain('Moved to Lisbon');
     expect(readFileSync(join(root, 'alice.md'), 'utf8')).toContain('Moved to Lisbon');
-    expect(await committed(engine, sourceId, 'alice').then(rows => rows.filter(r => r.kind === 'managed_maintenance_delete'))).toEqual([]);
+    expect(await committed(engine, sourceId, 'alice').then(rows => rows.filter(r => r.kind === 'managed_maintenance_phantom_delete'))).toEqual([]);
+  });
+}, 120_000);
+
+const localCtx = (engine: BrainEngine, sourceId: string) => ({ engine, sourceId, remote: false as const,
+  config: { engine: engine.kind, embedding_disabled: true }, dryRun: false, logger: { info() {}, warn() {}, error() {} } });
+
+test('managed conversation extraction publishes nothing for a page purged while the model runs', async () => {
+  await managed(async ({ put }) => { await put('conversations/synthetic-chat', CONVERSATION); }, async ({ engine, sourceId }) => {
+    const purging = async () => {
+      const page = (await engine.readPageSnapshot('conversations/synthetic-chat', { sourceId }))!;
+      await submitPageMutation(localCtx(engine, sourceId), { operation: 'delete_page', params: { slug: 'conversations/synthetic-chat',
+        purge: true, expected_revision: page.revision, request_id: randomUUID() } });
+      return extractor();
+    };
+    const result = await runExtractConversationFactsCore(engine, { sourceId, overrideDisabled: true, extractor: purging, types: ['conversation'] });
+    expect(await engine.readPageSnapshot('conversations/synthetic-chat', { sourceId, includeDeleted: true })).toBeNull();
+    expect(await facts(engine, sourceId, 'conversations/synthetic-chat')).toEqual([]);
+    expect(result.pages_failed).toBe(1);
+  });
+}, 120_000);
+
+test('managed conversation extraction publishes nothing into a source archived while the model runs', async () => {
+  await managed(async ({ put }) => { await put('conversations/synthetic-chat', CONVERSATION); }, async ({ engine, sourceId }) => {
+    const archiving = async () => {
+      await engine.transaction(async tx => {
+        await tx.executeRaw("SELECT set_config('gbrain.topology_change','on',true)");
+        await tx.executeRaw('UPDATE sources SET archived=true WHERE id=$1', [sourceId]);
+      });
+      return extractor();
+    };
+    try {
+      const result = await runExtractConversationFactsCore(engine, { sourceId, overrideDisabled: true, extractor: archiving, types: ['conversation'] });
+      expect(await facts(engine, sourceId, 'conversations/synthetic-chat')).toEqual([]);
+      expect(result.pages_failed).toBe(1);
+    } finally {
+      await engine.transaction(async tx => {
+        await tx.executeRaw("SELECT set_config('gbrain.topology_change','on',true)");
+        await tx.executeRaw('UPDATE sources SET archived=false WHERE id=$1', [sourceId]);
+      });
+    }
+  });
+}, 120_000);
+
+test('a Facts fence published on an extracted conversation takes its row numbers from colliding conversation rows', async () => {
+  await managed(async ({ put }) => { await put('conversations/synthetic-chat', CONVERSATION); }, async ({ engine, sourceId, put }) => {
+    await runExtractConversationFactsCore(engine, { sourceId, overrideDisabled: true, extractor, types: ['conversation'] });
+    await put('conversations/synthetic-chat', `${CONVERSATION}\n${FENCE('| 1 | Acme hired a platform team | fact | 1.0 | world | high | 2024-03-15 |  | chat |  |')}`);
+    const rows = await facts(engine, sourceId, 'conversations/synthetic-chat');
+    expect(rows.filter(f => f.expired_at === null).map(f => [f.fact, f.row_num, f.source])).toEqual([
+      ['Alice Example joined Acme Corp as a staff engineer.', 0, 'cli:extract-conversation-facts'],
+      ['Acme hired a platform team', 1, 'chat']]);
+    expect(rows.find(f => f.fact === 'EXTRACTION_COMPLETE')).toMatchObject({ row_num: null, source: 'cli:extract-conversation-facts:terminal:v2' });
+  });
+}, 120_000);
+
+test('managed phantom delete moves an edge added to the phantom after its merge', async () => {
+  await managed(async ({ engine, sourceId, root, put }) => {
+    await put('people/alice-example', PERSON('Alice Example'));
+    await put('meetings/offsite', '---\ntitle: Offsite\ntype: meeting\n---\nA planning meeting.');
+    await engine.putPage('alice', { type: 'person', title: 'alice', compiled_truth: `# alice\n\n${FENCE('| 1 | Founded Acme | fact | 1.0 | world | high | 2017-01-01 |  | chat |  |')}`.trim(),
+      timeline: '', frontmatter: {} }, { sourceId });
+    const phantom = (await engine.readPageSnapshot('alice', { sourceId }))!;
+    writeFileSync(join(root, 'alice.md'), serializePageToMarkdown(phantom.page, phantom.tags));
+    await runExtractFacts(engine, { sourceId, slugs: ['alice'] });
+  }, async ({ engine, sourceId, root }) => {
+    const read = engine.readPageSnapshot;
+    let linked = false;
+    engine.readPageSnapshot = (async function (this: BrainEngine, slug: string, opts?: Parameters<BrainEngine['readPageSnapshot']>[1]) {
+      if (this === engine && slug === 'alice' && !linked && new Error().stack?.includes('redirectManagedPhantom') && (await engine.executeRaw(
+        "SELECT 1 FROM persistence_requests WHERE source_id=$1 AND intent->>'kind'='managed_maintenance_phantom_merge' AND state='committed'", [sourceId])).length) {
+        linked = true;
+        await engine.addLink('meetings/offsite', 'alice', 'met', 'mentions', 'manual', undefined, undefined, { fromSourceId: sourceId, toSourceId: sourceId });
+      }
+      return read.call(this, slug, opts);
+    }) as BrainEngine['readPageSnapshot'];
+    let result: Awaited<ReturnType<typeof runExtractFacts>>;
+    try { result = await runExtractFacts(engine, { sourceId, brainDir: root }); }
+    finally { delete (engine as { readPageSnapshot?: unknown }).readPageSnapshot; }
+    expect(linked).toBe(true);
+    expect(result.phantomsRedirected).toBe(1);
+    const edges = await engine.executeRaw<{ slug: string }>(`SELECT t.slug FROM links l JOIN pages f ON f.id=l.from_page_id JOIN pages t ON t.id=l.to_page_id
+      WHERE f.source_id=$1 AND f.slug='meetings/offsite'`, [sourceId]);
+    expect(edges.map(e => e.slug)).toEqual(['people/alice-example']);
+  });
+}, 120_000);
+
+test('managed deleted-page expiry waits for a concurrent restore of that page (Postgres)', async () => {
+  await managed(async ({ put }) => {
+    await put('people/bob-demo', PERSON('Bob Demo', FENCE('| 1 | Plays chess | fact | 1.0 | world | low | 2019-01-01 |  | chat |  |')));
+  }, async ({ engine, sourceId }) => {
+    if (engine.kind !== 'postgres') return;
+    await engine.transaction(tx => withCoordinatedWrite(tx, [sourceId], () => tx.softDeletePage('people/bob-demo', { sourceId })));
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let locked!: () => void;
+    const holding = new Promise<void>(resolve => { locked = resolve; });
+    const restore = engine.transaction(tx => withCoordinatedWrite(tx, [sourceId], async () => {
+      await tx.lockPageKeys([{ sourceId, slug: 'people/bob-demo' }]);
+      await tx.executeRaw('UPDATE pages SET deleted_at=NULL WHERE source_id=$1 AND slug=$2', [sourceId, 'people/bob-demo']);
+      locked();
+      await gate;
+    }));
+    await holding;
+    const run = runExtractFacts(engine, { sourceId, slugs: [] });
+    await new Promise(resolve => setTimeout(resolve, 500));
+    release();
+    await restore;
+    expect((await run).factsExpiredForDeletedPages).toBe(0);
+    expect((await facts(engine, sourceId, 'people/bob-demo'))[0].expired_at).toBeNull();
+  });
+}, 120_000);
+
+test('managed writeSingleFact reports the entity it persisted for an unresolved reference', async () => {
+  await managed(async () => {}, async ({ engine, sourceId }) => {
+    const written = await writeSingleFact(engine, sourceId, { fact: 'Carol Unknown owns a sailboat.', provenance: 'fixture', entity: 'Carol Unknown' });
+    const [row] = await engine.executeRaw<{ entity_slug: string | null }>('SELECT entity_slug FROM facts WHERE id=$1', [written.id]);
+    expect(written.entity_slug).toBe(row.entity_slug);
   });
 }, 120_000);
 

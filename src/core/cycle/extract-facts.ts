@@ -614,7 +614,9 @@ export async function runExtractFacts(
         RETURNING f.id`,
       [sourceId],
     );
-    const expired = managed ? await transact([], expireDeleted) : await expireDeleted(engine);
+    // Managed: one page at a time under its key, so a concurrent restore is
+    // either seen as restored or waited for, never expired underneath it.
+    const expired = managed ? await expireDeletedPagesManaged(engine, sourceId, transact) : await expireDeleted(engine);
     result.factsExpiredForDeletedPages = expired.length;
   }
 
@@ -936,4 +938,25 @@ export async function runExtractFacts(
   }
 
   return result;
+}
+
+async function expireDeletedPagesManaged(engine: BrainEngine, sourceId: string,
+  transact: <T>(slugs: string[], fn: (tx: BrainEngine) => Promise<T>) => Promise<T>): Promise<Array<{ id: number }>> {
+  const pages = await engine.executeRaw<{ slug: string }>(
+    `SELECT DISTINCT f.source_markdown_slug AS slug FROM facts f
+      WHERE f.source_id = $1 AND f.row_num IS NOT NULL AND f.expired_at IS NULL
+        AND EXISTS (SELECT 1 FROM pages p WHERE p.source_id = f.source_id AND p.slug = f.source_markdown_slug AND p.deleted_at IS NOT NULL)`,
+    [sourceId],
+  );
+  const expired: Array<{ id: number }> = [];
+  for (const { slug } of pages) {
+    expired.push(...await transact([slug], tx => tx.executeRaw<{ id: number }>(
+      `UPDATE facts f SET expired_at = now()
+        WHERE f.source_id = $1 AND f.source_markdown_slug = $2 AND f.row_num IS NOT NULL AND f.expired_at IS NULL
+          AND EXISTS (SELECT 1 FROM pages p WHERE p.source_id = $1 AND p.slug = $2 AND p.deleted_at IS NOT NULL)
+        RETURNING f.id`,
+      [sourceId, slug],
+    )));
+  }
+  return expired;
 }

@@ -8,8 +8,8 @@
  *      the canonical body with the phantom's fence rows appended and, in the
  *      same transaction, moves withdrawals, the phantom's fact rows (by id, to
  *      the row numbers written to the fence), its links and the rename alias.
- *   2. `managed_maintenance_delete` on the phantom soft-deletes it and removes
- *      its canonical file.
+ *   2. `managed_maintenance_phantom_delete` on the phantom soft-deletes it and
+ *      removes its canonical file, moving any edge added since the merge.
  *
  * Both requests are keyed by their intents, so a retry after a crash between
  * them replays the merge and completes the delete.
@@ -57,7 +57,8 @@ export async function redirectManagedPhantom(engine: BrainEngine, page: Page, ca
   const current = await engine.readPageSnapshot(page.slug, { sourceId });
   if (current?.page.id === page.id) {
     if (current.revision !== phantom.revision) return drift('phantom page edited after its merge; delete deferred to the next run');
-    await submitMaintenanceIntent(engine, authority, page.slug, { kind: 'managed_maintenance_delete', expected_revision: phantom.revision });
+    await submitMaintenanceIntent(engine, authority, page.slug, { kind: 'managed_maintenance_phantom_delete',
+      expected_revision: phantom.revision, canonical_slug: canonical });
   }
   logPhantomEvent({ phantom_slug: page.slug, canonical_slug: canonical, outcome: 'redirected',
     fact_count: Number(outcome.facts_moved ?? 0), source_id: sourceId });
@@ -89,5 +90,30 @@ export async function preparePhantomMerge(engine: BrainEngine, row: WriteRequest
       await mergePhantomLinks(tx, phantomId, Number(row.page_id));
       await recordRenameAlias(tx, row.source_id, phantomSlug, row.slug);
       return { ...outcome, facts_moved: moved };
+    } };
+}
+
+/**
+ * Preparer for `managed_maintenance_phantom_delete`: the phantom's soft delete
+ * and file removal, holding the canonical key too. Edges added to the phantom
+ * after the merge (they advance no revision) move in the same transaction;
+ * timeline rows added since then defer the delete.
+ */
+export async function preparePhantomDelete(engine: BrainEngine, row: WriteRequest, config: GBrainConfig): Promise<PreparedMutation> {
+  const canonicalSlug = String(row.intent!.canonical_slug);
+  const noTimeline = async (db: BrainEngine) => {
+    if ((await db.executeRaw('SELECT 1 FROM timeline_entries WHERE page_id=$1 LIMIT 1', [row.page_id])).length) {
+      throw new OperationError('revision_conflict', 'The phantom gained timeline rows after its merge.');
+    }
+  };
+  await noTimeline(engine);
+  const page = await preparePageMutation(engine, { ...row, operation: 'delete_page' }, config);
+  return { ...page, additionalPageKeys: [...(page.additionalPageKeys ?? []), { sourceId: row.source_id, slug: canonicalSlug }],
+    validate: async tx => { await page.validate?.(tx); await noTimeline(tx); },
+    apply: async tx => {
+      const canonical = await tx.readPageSnapshot(canonicalSlug, { sourceId: row.source_id });
+      if (!canonical) throw new OperationError('page_not_found', 'The redirect target disappeared before the phantom delete.');
+      await mergePhantomLinks(tx, Number(row.page_id), canonical.page.id);
+      return page.apply(tx);
     } };
 }

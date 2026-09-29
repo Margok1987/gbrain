@@ -556,7 +556,7 @@ fact rows commit inside the coordinator's source capability under the page key,
 like derived links, without a persistence request per page. The phantom redirect
 publishes as two maintenance requests (`managed_maintenance_phantom_merge` on
 the canonical page, which moves the phantom's rows by id, then
-`managed_maintenance_delete` on the phantom). Direct fence writes,
+`managed_maintenance_phantom_delete` on the phantom). Direct fence writes,
 `loops_extract` commitments and other `writeSingleFact` callers publish through
 the `managed_facts_entity` intent. Each checks its local writer authority (and,
 for file publication, the canonical owner) before model calls. Receipt pages
