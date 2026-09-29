@@ -203,11 +203,10 @@ Recorded ownership changes:
   prints `excluded: <file> (owned by persistence-validation.yml)` on stderr when
   a mapped source changes. The nightly full-corpus E2E run and the local gates
   (`ci:local`, `ci:ubicloud`, their `:diff` forms) still run them. Run them
-  locally with the same command the workflow uses, against the test database
-  from "E2E test DB lifecycle":
+  locally with the same command the workflow uses, with `DATABASE_URL`
+  exported for the test database from "E2E test DB lifecycle":
 
   ```bash
-  DATABASE_URL=postgresql://postgres:postgres@localhost:5434/gbrain_test \
   GBRAIN_TEST_ALLOW_DATABASE_URL=1 \
   GBRAIN_TEST_RECONCILE_CRASH_MANIFEST_DIR=.context/reconcile-crashes \
     bun --no-env-file test --timeout=180000 \
