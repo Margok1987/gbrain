@@ -8,7 +8,7 @@
 import { describe, test } from 'bun:test';
 import {
   budgetAndResumeContract, planListsRepairStepsIndependentOfTarget, remediateWithoutConsentSkipsRepairs,
-  remoteCallerCannotRunRepairs, remoteLinesForWaveFindings, scriptedRecoveryRun,
+  remoteCallerCannotRunRepairs, remoteLinesForWaveFindings, scriptedRecoveryRun, swallowedExhaustionIsReported,
 } from './helpers/wave-scenarios.ts';
 
 describe('recovery layer (PGLite)', () => {
@@ -21,4 +21,5 @@ describe('recovery layer (PGLite)', () => {
   }, 300_000);
   test('zero budget runs free repairs, refuses the paid one, and resume keeps cap and consent', () => budgetAndResumeContract(), 180_000);
   test('a remote caller cannot run PROTECTED repair steps', () => remoteCallerCannotRunRepairs(), 180_000);
+  test('a budget exhaustion a callee swallowed still marks the paid step and refuses later paid steps', () => swallowedExhaustionIsReported(), 180_000);
 });

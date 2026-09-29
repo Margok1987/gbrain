@@ -8,6 +8,7 @@
  */
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -40,11 +41,14 @@ afterAll(async () => {
 const databaseSide = '---\ntype: note\ntitle: Example\ndb_only_field: kept\n---\nWritten while the source had no canonical owner.\n';
 const fileSide = '---\ntype: note\ntitle: Example\nfile_field: kept\n---\nWritten into the checkout on another host.\n';
 
-async function collision(engine: BrainEngine) {
+async function collision(engine: BrainEngine, opts: { file?: string; gitSubdir?: boolean } = {}) {
   await disposePersistenceConsumer(engine);
   await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
-  const id = `unbound-${randomUUID().slice(0, 12)}`, root = join(home, id), slug = 'notes/example';
+  const id = `unbound-${randomUUID().slice(0, 12)}`;
+  // In a Git subfolder source, slugs (and source paths) are Git-root-relative.
+  const repo = join(home, id), root = opts.gitSubdir ? join(repo, 'sub') : repo, slug = opts.gitSubdir ? 'sub/notes/example' : 'notes/example';
   mkdirSync(join(root, 'notes'), { recursive: true });
+  if (opts.gitSubdir) execFileSync('git', ['init', '-q', repo]);
   await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,\'{}\')', [id, root]);
   // A database-only page: no recorded source path or file origin, as an unbound-source write leaves it.
   await importFromContent(engine, slug, databaseSide, { sourceId: id, noEmbed: true });
@@ -52,7 +56,7 @@ async function collision(engine: BrainEngine) {
   expect(page).toEqual({ source_path: null, source_uri: null });
   // After binding, a canonical file appears at the page's slug-derived path.
   const file = join(root, 'notes/example.md');
-  writeFileSync(file, fileSide);
+  writeFileSync(file, opts.file ?? fileSide);
   await claimWorktree(engine, id, root);
   const registration = await registerLocalWriter(engine, 'cli');
   return { id, slug, file, registration };
@@ -85,6 +89,25 @@ test('preview accepts a database-only page colliding with a canonical file, chan
         const [page] = await engine.executeRaw<{ source_path: string | null }>('SELECT source_path FROM pages WHERE source_id=$1 AND slug=$2', [f.id, f.slug]);
         expect(page!.source_path).toBe('notes/example.md');
       });
+    }
+  });
+}, 180_000);
+
+test('an identical file still becomes the page origin, and a Git subfolder source records the Git-root-relative path', async () => {
+  await withEnv({ GBRAIN_HOME: home, OPENAI_API_KEY: undefined, ANTHROPIC_API_KEY: undefined }, async () => {
+    for (const engine of engines) {
+      for (const opts of [{ file: databaseSide }, { gitSubdir: true, file: databaseSide }]) {
+        const f = await collision(engine, opts);
+        await withVerifiedLocalRegistration(engine, f.registration, async () => {
+          const preview = await runReconcilePreview(engine, { source_id: f.id, slug: f.slug });
+          expect(preview.status).toBe('ready');
+          const receipt = await runReconcileApply(engine, { source_id: f.id, slug: f.slug, preview: preview.preview, request_id: randomUUID() });
+          expect(receipt.state).toBe('committed');
+          const [page] = await engine.executeRaw<{ source_path: string | null }>('SELECT source_path FROM pages WHERE source_id=$1 AND slug=$2', [f.id, f.slug]);
+          expect(page!.source_path).toBe(opts.gitSubdir ? 'sub/notes/example.md' : 'notes/example.md');
+          expect(parseMarkdown(readFileSync(f.file, 'utf8'), f.slug).compiled_truth).toContain('no canonical owner');
+        });
+      }
     }
   });
 }, 180_000);

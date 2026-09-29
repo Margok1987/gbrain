@@ -78,7 +78,7 @@ left for the next run. Nothing is deleted.
 | `--apply` | Write the repair. Without it, only preview. |
 | `--source <id>` | Limit the run to one active source. The default is every active (non-archived) source. An unknown or archived id is refused. |
 | `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each of the three kinds). Rerun the same command to continue. |
-| `--no-embed` | Kinds that embed (`safe-chunks`): re-seal chunk text and skip embedding. Run `gbrain embed --stale` later. |
+| `--no-embed` | `safe-chunks`: re-seal chunk text and skip embedding. Run `gbrain embed --stale` later. `timeline` and `visibility` pages are re-embedded by their publication either way. |
 | `--all` | Run every kind in order. |
 | `--json` | Print `{ scope, mode, results[], paid_kinds }`, one result per kind with `paid`, `affected`, `sample`, `residuals`, `cost`, `capacity`, `resumed_from`, `applied`, `skipped`, `complete`, `stopped` and `apply_command`. |
 
@@ -210,8 +210,13 @@ and records the brain, the cap, the `--include-repairs` agreement, the spend so
 far and the original steps. `--resume` without `--max-usd` reuses the recorded
 cap and prints it; a higher `--max-usd` raises it. A resume only continues the
 original steps: repair kinds or job steps found later need a fresh run and a
-fresh agreement. A checkpoint recorded for another brain is refused. Pass
-`--no-embed` to keep repair steps free.
+fresh agreement. A checkpoint recorded for another brain is refused.
+
+When an embedding model is configured, every kind can spend. `timeline` and
+`visibility` publish page writes whose embeddings the persistence consumer
+computes afterwards, outside this run, so their estimate is charged against the
+cap before they start; `--no-embed` does not change that. `safe-chunks` embeds
+in the run itself and `--no-embed` makes it free.
 
 With `--json`, the result adds `repairs[]` (one entry per repair step, with
 `status` `completed`, `stopped`, `failed`, `budget_refused` or

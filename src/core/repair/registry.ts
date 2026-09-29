@@ -6,8 +6,11 @@
  * in by adding its name to `REPAIR_KINDS` and one entry here.
  *
  * `checks` names the doctor checks whose findings this kind clears; the
- * remediation run uses it to classify those findings. `paid` marks kinds that
- * may queue paid embeddings unless `--no-embed` is given.
+ * remediation run uses it to classify those findings. `embeds` says how a kind
+ * can spend on embeddings when a model is configured: `effect` kinds publish a
+ * page write whose embedding effect the persistence consumer runs (outside
+ * this process, not affected by `--no-embed`); `inline` kinds embed in this
+ * process unless `--no-embed` is given.
  */
 import type { BrainEngine } from '../engine.ts';
 import type { OperationContext } from '../ops/contract.ts';
@@ -22,29 +25,34 @@ export interface RepairKindSpec {
   handler: RepairHandler;
   /** Help text for `REPAIR_HELP`, wrapped at 80 columns by the caller. */
   summary: string;
-  /** May queue paid embeddings unless --no-embed. */
-  paid: boolean;
+  /** How the kind can spend on embeddings. */
+  embeds: 'effect' | 'inline';
   /** Doctor check ids whose findings this kind clears. */
   checks: string[];
 }
 
 const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
   timeline: {
-    handler: timelineRepair, paid: false, checks: ['timeline_history'],
-    summary: 'Write database-only timeline rows back into their pages as marked bullets (#5567). Rows that cannot round-trip are kept and counted.',
+    handler: timelineRepair, embeds: 'effect', checks: ['timeline_history'],
+    summary: 'Write database-only timeline rows back into their pages as marked bullets (#5567). Rows that cannot round-trip are kept and counted. Each repaired page is re-embedded by its publication.',
   },
   visibility: {
-    handler: visibilityRepair, paid: false, checks: ['derived_visibility'],
-    summary: 'Stamp explicit visibility on extracted atoms and synthesized concepts, tighten-only (#5525). Transcript and missing origins become private; nothing is ever loosened.',
+    handler: visibilityRepair, embeds: 'effect', checks: ['derived_visibility'],
+    summary: 'Stamp explicit visibility on extracted atoms and synthesized concepts, tighten-only (#5525). Transcript and missing origins become private; nothing is ever loosened. Each repaired page is re-embedded by its publication.',
   },
   'safe-chunks': {
-    handler: safeChunksRepair, paid: true, checks: ['safe_index_pending'],
+    handler: safeChunksRepair, embeds: 'inline', checks: ['safe_index_pending'],
     summary: 'Re-seal pages of every kind (markdown and code) chunked before the safe-chunk fence, which remote/MCP search withholds (#5050, #5247). '
       + 'Projection-only: no page write and no journal admission. Unchanged vectors are kept; the rest are embedded unless --no-embed.',
   },
 };
 
 export const REPAIR_REGISTRY: readonly RepairKindSpec[] = REPAIR_KINDS.map(kind => ({ kind, ...SPECS[kind] }));
+
+/** Whether a kind may spend on embeddings under these flags (before knowing whether a model is configured). */
+export function repairMaySpend(spec: RepairKindSpec, noEmbed?: boolean): boolean {
+  return spec.embeds === 'effect' || !noEmbed;
+}
 
 export function repairSpec(kind: RepairKind): RepairKindSpec {
   return REPAIR_REGISTRY.find(spec => spec.kind === kind)!;
@@ -57,7 +65,7 @@ export function repairForCheck(checkId: string): RepairKindSpec | undefined {
 
 /** `gbrain repair <kind> --apply [--source <id>] [--no-embed]`, the exact command that applies one kind. */
 export function repairApplyCommand(kind: RepairKind, opts: { source?: string; noEmbed?: boolean } = {}): string {
-  return `gbrain repair ${kind}${opts.source ? ` --source ${opts.source}` : ''}${opts.noEmbed && repairSpec(kind).paid ? ' --no-embed' : ''} --apply`;
+  return `gbrain repair ${kind}${opts.source ? ` --source ${opts.source}` : ''}${opts.noEmbed && repairSpec(kind).embeds === 'inline' ? ' --no-embed' : ''} --apply`;
 }
 
 /**
@@ -76,7 +84,7 @@ export async function repairRunner(engine: BrainEngine, opts: { apply: boolean; 
       const ctx = { engine, config, logger, dryRun: !opts.apply, remote: false, sourceId: scope.source_ids[0] } as OperationContext;
       const spec = repairSpec(kind);
       return runRepair(ctx, spec.handler, scope, { apply: opts.apply, limit: run.limit, embeddingModel, sourceFlag: run.sourceFlag,
-        embed: !opts.noEmbed && embeddingModel !== undefined, applyArgs: opts.noEmbed && spec.paid ? ['--no-embed'] : [] });
+        embed: !opts.noEmbed && embeddingModel !== undefined, applyArgs: opts.noEmbed && spec.embeds === 'inline' ? ['--no-embed'] : [] });
     },
   };
 }

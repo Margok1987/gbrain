@@ -11,7 +11,7 @@ import type { BrainEngine } from '../core/engine.ts';
 import { setCliExitVerdict } from '../core/cli-force-exit.ts';
 import { OperationError } from '../core/ops/contract.ts';
 import { REPAIR_KINDS, resolveRepairScope, runRepair, type RepairKind, type RepairResult } from '../core/repair/core.ts';
-import { REPAIR_REGISTRY, repairRunner, repairSpec } from '../core/repair/registry.ts';
+import { REPAIR_REGISTRY, repairMaySpend, repairRunner, repairSpec } from '../core/repair/registry.ts';
 
 function wrap(text: string, indent: number, width = 80): string {
   const lines: string[] = [];
@@ -36,7 +36,7 @@ Options:
   --apply        Write the repair (no prompt). Without it, only preview.
   --source <id>  Limit to one source (default: every active source).
   --limit <n>    Repair at most n items; rerun the same command to continue.
-  --no-embed     Kinds that embed: re-seal or stamp text only; embed later with gbrain embed --stale.
+  --no-embed     safe-chunks: re-seal text only; embed later with gbrain embed --stale.
   --all          Run every kind in order (${REPAIR_KINDS.join(', ')}).
   --json         Machine-readable output with a stable shape.
 
@@ -115,7 +115,7 @@ export async function runRepairCommand(engine: BrainEngine, args: string[]): Pro
   const results: Array<RepairResult & { paid: boolean }> = [];
   for (const k of kinds) {
     const result = await runner.run(k, scope, { limit, sourceFlag: source });
-    results.push({ ...result, paid: repairSpec(k).paid && !noEmbed });
+    results.push({ ...result, paid: repairMaySpend(repairSpec(k), noEmbed) });
     if (result.stopped) break;
   }
   const paidKinds = results.filter(r => r.paid).map(r => r.kind);
@@ -125,7 +125,7 @@ export async function runRepairCommand(engine: BrainEngine, args: string[]): Pro
     console.log(`Scope: brain ${scope.brain_id}; sources ${scope.source_ids.join(', ') || '(none)'}`);
     for (const result of results) console.log(human(result));
     if (!apply && paidKinds.length) console.log(`Kinds that may queue paid embeddings: ${paidKinds.join(', ')} (pass --no-embed to skip; `
-      + 'cap spend with gbrain doctor --remediate --yes --include-repairs --max-usd <n>).');
+      + 'page-write kinds are re-embedded by their publication either way; cap spend with gbrain doctor --remediate --yes --include-repairs --max-usd <n>).');
   }
   if (results.some(r => r.stopped)) setCliExitVerdict(1);
 }

@@ -12,7 +12,7 @@ import { runRemediate, runRemediationPlan } from '../../src/commands/doctor/reme
 import { REMOTE_HOST_ACTION, remoteWaveHandoff } from '../../src/commands/doctor/wave-checks.ts';
 import { currentExitCode, setCliExitVerdict } from '../../src/core/cli-force-exit.ts';
 import { configureGateway, resetGateway } from '../../src/core/ai/gateway.ts';
-import { listRemediationCheckpoints, loadRemediationCheckpoint, saveRemediationCheckpoint } from '../../src/core/remediation-checkpoint.ts';
+import { computePlanHash, listRemediationCheckpoints, loadRemediationCheckpoint, saveRemediationCheckpoint } from '../../src/core/remediation-checkpoint.ts';
 import { runRemediation } from '../../src/core/remediation/run.ts';
 import { managedBrain } from './managed-brain.ts';
 import { put, waveBrain } from './wave-fixture.ts';
@@ -112,8 +112,8 @@ export async function scriptedRecoveryRun(databaseUrl?: string): Promise<{ wall_
     const plan = await json(engine, ['--remediation-plan', '--json'], runRemediationPlan);
     commands.push('gbrain doctor --remediation-plan');
     expect(plan.body.repair_steps.length).toBe(3);
-    const run = await json(engine, ['--remediate', '--yes', '--include-repairs', '--no-embed', '--max-usd', '0', '--json']);
-    commands.push('gbrain doctor --remediate --yes --include-repairs --no-embed --max-usd 0');
+    const run = await json(engine, ['--remediate', '--yes', '--include-repairs', '--no-embed', '--max-usd', '1', '--json']);
+    commands.push('gbrain doctor --remediate --yes --include-repairs --no-embed --max-usd 1');
     const byId = Object.fromEntries(run.body.findings.map((f: { check_id: string }) => [f.check_id, f]));
     for (const id of ['timeline_history', 'derived_visibility', 'safe_index_pending']) expect(byId[id]).toMatchObject({ class: 'cleared' });
     expect(byId.persistence_capacity).toMatchObject({ class: 'operator_required' });
@@ -149,33 +149,39 @@ export async function budgetAndResumeContract(databaseUrl?: string) {
   configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: 1536, env: {} });
   try {
     await waveBrain(async ({ engine }) => {
-      const first = await json(engine, ['--remediate', '--yes', '--include-repairs', '--max-usd', '0', '--json']);
+      // With a priced model, the page-write kinds are paid (their publication re-embeds each page, outside
+      // this process, so the estimate is reserved up front); --no-embed makes only safe-chunks free.
+      const plan = await json(engine, ['--remediation-plan', '--json', '--no-embed'], runRemediationPlan);
+      const planned = Object.fromEntries(plan.body.repair_steps.map((s: { kind: string }) => [s.kind, s]));
+      expect(planned.timeline).toMatchObject({ paid: true, embeds: 'effect' });
+      expect(planned['safe-chunks']).toMatchObject({ paid: false, est_usd_cost: 0 });
+      const first = await json(engine, ['--remediate', '--yes', '--include-repairs', '--no-embed', '--max-usd', '0', '--json']);
       const byKind = Object.fromEntries(first.body.repairs.map((r: { kind: string }) => [r.kind, r]));
-      expect(byKind.timeline).toMatchObject({ status: 'completed', applied: 1 });
-      expect(byKind.visibility).toMatchObject({ status: 'completed', applied: 1 });
-      expect(byKind['safe-chunks']).toMatchObject({ status: 'budget_refused' });
+      expect(byKind.timeline).toMatchObject({ status: 'budget_refused' });
+      expect(byKind.visibility).toMatchObject({ status: 'budget_refused' });
+      expect(byKind['safe-chunks']).toMatchObject({ status: 'completed', applied: 1 });
       expect(first.body.budget_exhausted).toMatchObject({ cap: 0, reason: 'max_usd' });
       expect(first.exit).toBe(1);
       expect(first.err).toContain(`gbrain doctor --remediate --yes --include-repairs --max-usd 0 --resume ${first.body.budget_exhausted.plan_hash}`);
-      const unsealed = await engine.executeRaw<{ chunker_version: number }>("SELECT chunker_version FROM pages WHERE slug='notes/unsealed'");
-      expect(unsealed[0]!.chunker_version).toBe(3);
+      const history = await engine.executeRaw<{ timeline: string }>("SELECT timeline FROM pages WHERE slug='notes/history'");
+      expect(history[0]!.timeline).not.toContain('gbrain:materialized');
 
       const cp = loadRemediationCheckpoint(first.body.budget_exhausted.plan_hash)!;
       expect(cp).toMatchObject({ max_usd: 0, include_repairs: true, manifest: { repair_kinds: ['timeline', 'visibility', 'safe-chunks'] } });
-      expect(cp.completed.map(c => c.id).sort()).toEqual(['repair:timeline', 'repair:visibility']);
+      expect(cp.completed.map(c => c.id)).toEqual(['repair:safe-chunks']);
 
       // Resume without --max-usd reuses the recorded cap and consent (no --include-repairs given).
-      const again = await json(engine, ['--remediate', '--yes', '--resume', '--json']);
+      const again = await json(engine, ['--remediate', '--yes', '--no-embed', '--resume', '--json']);
       expect(again.err).toContain('cumulative cap $0.00');
       expect(again.body.budget).toMatchObject({ max_usd: 0, include_repairs: true });
-      expect(again.body.repairs).toEqual([expect.objectContaining({ kind: 'safe-chunks', status: 'budget_refused' })]);
+      expect(again.body.repairs.map((r: { kind: string; status: string }) => [r.kind, r.status])).toEqual([['timeline', 'budget_refused'], ['visibility', 'budget_refused']]);
 
-      // The copied resume command with a raised cap finishes the paid step.
-      const raised = await json(engine, ['--remediate', '--yes', '--include-repairs', '--max-usd', '5', '--resume', first.body.budget_exhausted.plan_hash, '--json']);
-      expect(raised.body.repairs).toEqual([expect.objectContaining({ kind: 'safe-chunks', status: 'completed' })]);
+      // The copied resume command with a raised cap finishes the paid steps and reserves their estimate.
+      const raised = await json(engine, ['--remediate', '--yes', '--include-repairs', '--no-embed', '--max-usd', '5', '--resume', first.body.budget_exhausted.plan_hash, '--json']);
+      expect(raised.body.repairs.map((r: { kind: string; status: string }) => [r.kind, r.status])).toEqual([['timeline', 'completed'], ['visibility', 'completed']]);
       expect(raised.body.budget_exhausted).toBeUndefined();
-      const resealed = await engine.executeRaw<{ chunker_version: number }>("SELECT chunker_version FROM pages WHERE slug='notes/unsealed'");
-      expect(resealed[0]!.chunker_version).toBeGreaterThanOrEqual(4);
+      expect(raised.body.budget.spent_usd).toBeGreaterThan(0);
+      expect((await engine.executeRaw<{ timeline: string }>("SELECT timeline FROM pages WHERE slug='notes/history'"))[0]!.timeline).toContain('gbrain:materialized');
       expect(listRemediationCheckpoints().map(e => e.plan_hash)).not.toContain(first.body.budget_exhausted.plan_hash);
 
       // A checkpoint recorded for another brain is refused, never silently resumed.
@@ -184,6 +190,8 @@ export async function budgetAndResumeContract(databaseUrl?: string) {
       expect(foreign.body.resume_refused).toMatchObject({ reason: 'brain_mismatch', plan_hash: 'otherbrain000001' });
       expect(foreign.exit).toBe(2);
       expect(foreign.err).toContain('belongs to brain 00000000-0000-4000-8000-000000000000');
+      // Two brains that need the same steps never share a checkpoint file.
+      expect(first.body.budget_exhausted.plan_hash).not.toBe(computePlanHash(['repair:timeline', 'repair:visibility', 'repair:safe-chunks']));
     }, { databaseUrl, kinds: ['timeline', 'visibility', 'safe_index'] });
   } finally { resetGateway(); }
 }
@@ -196,4 +204,22 @@ export async function remoteCallerCannotRunRepairs(databaseUrl?: string) {
     await expect(runRepairSteps(engine, steps, { remote: true, remainingUsd: () => undefined })).rejects.toMatchObject({ code: 'permission_denied' });
     expect((await engine.executeRaw<{ timeline: string }>("SELECT timeline FROM pages WHERE slug='notes/history'"))[0]!.timeline).not.toContain('gbrain:materialized');
   }, { databaseUrl, kinds: ['timeline'] });
+}
+
+/** A budget exhaustion a callee swallowed (the stale-embedding pass) still marks the paid step and refuses later paid steps. */
+export async function swallowedExhaustionIsReported(databaseUrl?: string) {
+  configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: 1536, env: {} });
+  try {
+    await waveBrain(async ({ engine }) => {
+      const { planRepairSteps, runRepairSteps } = await import('../../src/core/remediation/repairs.ts');
+      const steps = (await planRepairSteps(engine)).filter(step => step.kind === 'safe-chunks');
+      expect(steps).toEqual([expect.objectContaining({ paid: true, embeds: 'inline' })]);
+      let polls = 0;
+      const [result, later] = await runRepairSteps(engine, [...steps, { ...steps[0]!, id: 'repair:safe-chunks-again' }], {
+        remote: false, remainingUsd: () => 10, exhausted: () => ++polls > 1 });
+      expect(result).toMatchObject({ kind: 'safe-chunks', status: 'budget_exhausted' });
+      expect(result!.message).toContain('gbrain embed --stale');
+      expect(later).toMatchObject({ status: 'budget_refused' });
+    }, { databaseUrl, kinds: ['safe_index'] });
+  } finally { resetGateway(); }
 }

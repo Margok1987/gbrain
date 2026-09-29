@@ -84,6 +84,8 @@ describe('gbrain repair flags', () => {
     }
     expect(parsed.paid_kinds).toContain('safe-chunks');
     const human = await captured(['--all']);
-    expect(human).toContain("may queue paid embeddings: safe-chunks");
+    expect(human).toContain("may queue paid embeddings: timeline, visibility, safe-chunks");
+    const free = JSON.parse(await captured(["--all", "--json", "--no-embed"])) as { paid_kinds: string[] };
+    expect(free.paid_kinds).toEqual(["timeline", "visibility"]);
   });
 });

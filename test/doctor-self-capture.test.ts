@@ -34,6 +34,9 @@ beforeAll(async () => {
   writeFileSync(join(corpus, 'self-b.txt'), 'self capture b');
   writeFileSync(join(corpus, 'human-1.txt'), 'a real session');
   writeFileSync(join(corpus, 'pruned-9.txt'), 'harness transcript gone');
+  mkdirSync(join(corpus, 'nested'), { recursive: true });
+  writeFileSync(join(self, 'self-c.jsonl'), '{}\n');
+  writeFileSync(join(corpus, 'nested', 'self-c.txt'), 'nested self capture');
 }, 60_000);
 
 afterAll(async () => {
@@ -52,8 +55,8 @@ describe('self_capture doctor check', () => {
     const before = readdirSync(corpus).sort();
     const check = await selfCaptureCheck(engine, { projectsRoot: projects });
     expect(check.status).toBe('warn');
-    expect(check.details).toMatchObject({ classified: 2, unclassifiable: 1, corpus_files: 4, count: 'exact' });
-    expect(check.details!.classified_sample).toEqual(['self-a.txt', 'self-b.txt']);
+    expect(check.details).toMatchObject({ classified: 3, unclassifiable: 1, corpus_files: 5, count: 'exact' });
+    expect([...check.details!.classified_sample as string[]].sort()).toEqual(['nested/self-c.txt', 'self-a.txt', 'self-b.txt']);
     expect(check.message).toContain('Nothing was moved or deleted');
     expect(check.message).toContain('mkdir -p');
     expect(readdirSync(corpus).sort()).toEqual(before);
@@ -62,12 +65,19 @@ describe('self_capture doctor check', () => {
     const commands = check.details!.quarantine_commands as string[];
     execFileSync('sh', ['-c', commands.join(' && ')]);
     const quarantine = check.details!.quarantine_dir as string;
-    expect(readdirSync(quarantine).sort()).toEqual(['self-a.txt', 'self-a.txt.ingested', 'self-b.txt']);
-    expect(readdirSync(corpus).sort()).toEqual(['human-1.txt', 'pruned-9.txt']);
+    expect(readdirSync(quarantine).sort()).toEqual(['nested', 'self-a.txt', 'self-a.txt.ingested', 'self-b.txt']);
+    expect(readdirSync(join(quarantine, 'nested'))).toEqual(['self-c.txt']);
+    expect(readdirSync(corpus).sort()).toEqual(['human-1.txt', 'nested', 'pruned-9.txt']);
     expect(existsSync(join(corpus, 'human-1.txt'))).toBe(true);
 
     const after = await selfCaptureCheck(engine, { projectsRoot: projects });
     expect(after).toMatchObject({ status: 'ok', details: { classified: 0, unclassifiable: 1 } });
     expect(after.message).toContain('cannot be decided');
+  });
+
+  test('an unreadable or missing corpus directory reports unknown health, never an exact zero', async () => {
+    await engine.setConfig('dream.synthesize.session_corpus_dir', join(root, 'missing-corpus'));
+    const check = await selfCaptureCheck(engine, { projectsRoot: projects });
+    expect(check).toMatchObject({ status: 'warn', details: { health: 'unknown', count: 'unknown' } });
   });
 });

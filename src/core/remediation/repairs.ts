@@ -13,7 +13,7 @@
 import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { resolveRepairScope, type RepairKind } from '../repair/core.ts';
-import { REPAIR_REGISTRY, repairApplyCommand, repairRunner } from '../repair/registry.ts';
+import { REPAIR_REGISTRY, repairApplyCommand, repairMaySpend, repairRunner } from '../repair/registry.ts';
 
 export interface RepairPlanStep {
   step: number;
@@ -24,8 +24,10 @@ export interface RepairPlanStep {
   command: string;
   requires_user_agreement: true;
   protected: true;
-  /** May queue paid embeddings. */
+  /** May spend on embeddings (a model is configured and the kind embeds under these flags). */
   paid: boolean;
+  /** `effect`: the persistence consumer embeds after publication, so the estimate is charged against the cap up front. */
+  embeds: 'effect' | 'inline';
   /** USD estimate; null when the step is paid and the model price is unknown. */
   est_usd_cost: number | null;
   lifetime_ids: number;
@@ -53,9 +55,9 @@ export async function planRepairSteps(engine: BrainEngine, opts: { noEmbed?: boo
     if (opts.kinds && !opts.kinds.includes(spec.kind)) continue;
     const preview = await runner.run(spec.kind, scope);
     if (!preview.affected) continue;
-    const paid = spec.paid && !opts.noEmbed && runner.embeddingModel !== undefined;
+    const paid = repairMaySpend(spec, opts.noEmbed) && runner.embeddingModel !== undefined;
     steps.push({ step: steps.length + 1, id: `repair:${spec.kind}`, kind: spec.kind, affected: preview.affected,
-      command: repairApplyCommand(spec.kind, { noEmbed: opts.noEmbed }), requires_user_agreement: true, protected: true, paid,
+      command: repairApplyCommand(spec.kind, { noEmbed: opts.noEmbed }), requires_user_agreement: true, protected: true, paid, embeds: spec.embeds,
       est_usd_cost: paid ? preview.cost.embedding_usd : 0, lifetime_ids: preview.cost.lifetime_ids, checks: spec.checks,
       rationale: `${preview.affected} item(s) pending for gbrain repair ${spec.kind}` });
   }
@@ -70,6 +72,10 @@ export async function planRepairSteps(engine: BrainEngine, opts: { noEmbed?: boo
  */
 export async function runRepairSteps(engine: BrainEngine, steps: RepairPlanStep[], opts: {
   remote: boolean; noEmbed?: boolean; remainingUsd: () => number | undefined;
+  /** Reserve spend the consumer will make after publication (effect kinds). */
+  charge?: (usd: number) => void;
+  /** True once the run's budget tracker fired, even if a callee swallowed the throw. */
+  exhausted?: () => boolean;
   onStep?: (step: RepairPlanStep, result: RepairStepResult) => void;
 }): Promise<RepairStepResult[]> {
   if (opts.remote !== false) throw new OperationError('permission_denied', 'Repair steps are PROTECTED: only a trusted local caller on the brain host can run them.',
@@ -86,12 +92,18 @@ export async function runRepairSteps(engine: BrainEngine, steps: RepairPlanStep[
       result = { ...base, status: 'budget_refused', message: step.est_usd_cost === null
         ? `Not started: its embedding cost cannot be estimated and a --max-usd cap is set ($${remaining.toFixed(2)} remaining).`
         : `Not started: estimated $${step.est_usd_cost.toFixed(4)} exceeds the $${remaining.toFixed(4)} remaining under --max-usd.` };
+    } else if (step.paid && opts.exhausted?.()) {
+      result = { ...base, status: 'budget_refused', message: 'Not started: the --max-usd budget ran out earlier in this run.' };
     } else {
+      if (step.paid && step.embeds === 'effect' && step.est_usd_cost) opts.charge?.(step.est_usd_cost);
       try {
         const applied = await runner.run(step.kind, scope);
         result = { ...base, applied: applied.applied, skipped: applied.skipped,
           status: applied.stopped ? 'stopped' : applied.complete ? 'completed' : 'stopped',
           ...(applied.stopped ? { message: applied.stopped.message } : {}) };
+        // A callee (for example the stale-embedding pass) may swallow BudgetExhausted; the tracker still knows.
+        if (step.paid && step.embeds === 'inline' && opts.exhausted?.()) result = { ...result, status: 'budget_exhausted',
+          message: 'The --max-usd budget ran out during the step; re-sealed pages keep their text, and the rest of their embeddings resume with the printed resume command or gbrain embed --stale.' };
       } catch (error) {
         if (error instanceof BudgetExhausted) result = { ...base, status: 'budget_exhausted', message: `Budget exhausted during the step: ${error.message}` };
         else result = { ...base, status: 'failed', message: error instanceof Error ? error.message.slice(0, 300) : String(error) };

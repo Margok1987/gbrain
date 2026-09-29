@@ -139,7 +139,8 @@ export async function runRemediation(
 
   // A4 amended: compute plan_hash off the active step ids so the checkpoint
   // binds to THIS plan. A checkpoint with a manifest keeps its original hash.
-  const planHash = cp?.manifest ? cp.plan_hash : computePlanHash([...recs.map((r) => r.id), ...repairSteps.map((r) => r.id)]);
+  // The brain id is part of the hash so two brains on one host never share a checkpoint file.
+  const planHash = cp?.manifest ? cp.plan_hash : computePlanHash([...recs.map((r) => r.id), ...repairSteps.map((r) => r.id), ...(brainId ? [`brain:${brainId}`] : [])]);
   const originalManifest = manifest ?? { job_ids: recs.map((r) => r.id), repair_kinds: repairSteps.map((r) => r.kind) };
   let completedFromCheckpoint = new Set<string>();
   if (resumeMode) {
@@ -206,7 +207,12 @@ export async function runRemediation(
     label: 'remediation.run',
     maxCostUsd: remainingCap,
   });
-  const remainingUsd = () => remainingCap === undefined ? undefined : Math.max(0, remainingCap - remediateTracker.totalSpent);
+  // Effect kinds embed in the persistence consumer, outside this tracker, so their estimate is reserved up front.
+  let reservedUsd = 0;
+  let trackerExhausted = false;
+  remediateTracker.onExhausted(() => { trackerExhausted = true; });
+  const settledUsd = () => spentBefore + remediateTracker.totalSpent + reservedUsd;
+  const remainingUsd = () => remainingCap === undefined ? undefined : Math.max(0, remainingCap - remediateTracker.totalSpent - reservedUsd);
 
   let exhaustionSnapshot: NonNullable<RemediationResult['budget_exhausted']> | undefined;
   const saveCheckpoint = () => {
@@ -230,7 +236,7 @@ export async function runRemediation(
         : undefined,
       ...(repairs ? {
         brain_id: brainId, max_usd: maxUsd ?? null, include_repairs: includeRepairs,
-        spent_usd: spentBefore + remediateTracker.totalSpent, manifest: originalManifest,
+        spent_usd: settledUsd(), manifest: originalManifest,
       } : {}),
     });
   };
@@ -240,6 +246,7 @@ export async function runRemediation(
     if (!repairs || repairSteps.length === 0) return;
     for (const step of repairSteps) hooks.onRepairStepStart?.(step);
     const results = await runRepairSteps(engine, repairSteps, { remote: repairs.remote, noEmbed: repairs.noEmbed, remainingUsd,
+      charge: (usd) => { reservedUsd += usd; }, exhausted: () => trackerExhausted,
       onStep: (step, result) => hooks.onRepairStepEnd?.(step, result) });
     repairResults.push(...results);
   };
@@ -375,7 +382,7 @@ export async function runRemediation(
   // run as budget-exhausted even though the free steps completed.
   const refusedRepair = repairResults.find((r) => r.status === 'budget_refused' || r.status === 'budget_exhausted');
   if (!budgetAbort && (refusedRepair || jobsBudgetRefused)) {
-    budgetAbort = { spent: spentBefore + remediateTracker.totalSpent, cap: maxUsd ?? 0, reason: 'max_usd', plan_hash: planHash };
+    budgetAbort = { spent: settledUsd(), cap: maxUsd ?? 0, reason: 'max_usd', plan_hash: planHash };
     exhaustionSnapshot = budgetAbort;
     saveCheckpoint();
   }
@@ -401,7 +408,7 @@ export async function runRemediation(
     ...(jobStepsSkipped ? { job_steps_skipped: jobStepsSkipped } : {}),
     ...(repairs ? {
       repairs: repairResults, repairs_skipped: skippedRepairs,
-      budget: { max_usd: maxUsd ?? null, spent_usd: spentBefore + remediateTracker.totalSpent, include_repairs: includeRepairs, plan_hash: planHash },
+      budget: { max_usd: maxUsd ?? null, spent_usd: settledUsd(), include_repairs: includeRepairs, plan_hash: planHash },
     } : {}),
   };
 }

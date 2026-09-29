@@ -42,6 +42,8 @@ export async function selfCaptureCheck(engine: BrainEngine, opts: { projectsRoot
   try {
     const corpusDir = opts.corpusDir ?? await engine.getConfig(CORPUS_KEY);
     if (!corpusDir) return { name, status: 'ok', message: 'No session corpus is configured; nothing to classify.', details: { classified: 0, unclassifiable: 0, count: 'exact', truncated: false } };
+    // listTextFiles skips unreadable directories; an unreadable corpus root is unknown, never an exact zero.
+    readdirSync(corpusDir);
     const projectsRoot = opts.projectsRoot ?? claudeProjectsDir();
     const selfIds = claudeCliSelfSessionIds(projectsRoot);
     const known = harnessSessionIds(projectsRoot);
@@ -53,8 +55,9 @@ export async function selfCaptureCheck(engine: BrainEngine, opts: { projectsRoot
       else if (!known.has(session)) unclassifiable.push(file);
     }
     const quarantineDir = join(dirname(corpusDir), `${basename(corpusDir)}.quarantine`);
-    const commands = [`mkdir -p ${quote(quarantineDir)}`, ...classified.slice(0, SAMPLE).map(file =>
-      `for f in ${quote(file)}*; do mv -n -- "$f" ${quote(join(quarantineDir, dirname(relative(corpusDir, file))))}/; done`)];
+    const destinations = classified.slice(0, SAMPLE).map(file => ({ file, dir: join(quarantineDir, dirname(relative(corpusDir, file))) }));
+    const commands = [`mkdir -p ${[...new Set([quarantineDir, ...destinations.map(d => d.dir)])].map(quote).join(' ')}`,
+      ...destinations.map(({ file, dir }) => `for f in ${quote(file)}*; do mv -n -- "$f" ${quote(dir)}/; done`)];
     const details = { classified: classified.length, unclassifiable: unclassifiable.length, corpus_files: files.length, count: 'exact', truncated: classified.length > SAMPLE,
       corpus_dir: corpusDir, quarantine_dir: quarantineDir, classified_sample: classified.slice(0, SAMPLE).map(file => relative(corpusDir, file)),
       quarantine_commands: commands, docs: 'docs/guides/repair.md#quarantine-self-captured-corpus-files' };
