@@ -23,7 +23,6 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { BrainEngine } from '../src/core/engine.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
-import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { phaseCGrandfather } from '../src/commands/migrations/v0_13_1.ts';
 import { admitCanonicalGrandfather } from '../src/core/persistence/grandfather.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
@@ -33,7 +32,7 @@ import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { runPersistenceEffects } from '../src/core/persistence/effects.ts';
 import { localHostId } from '../src/core/persistence/identity.ts';
 import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts';
-import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
+import { isolatedSharedSkillsEngine } from './helpers/shared-skills-engine.ts';
 import { testBackends } from './helpers/test-backends.ts';
 import { withEnv } from './helpers/with-env.ts';
 
@@ -81,9 +80,7 @@ async function withBrain(kind: 'pglite' | 'postgres', run: (b: { engine: BrainEn
   const home = realpathSync.native(mkdtempSync(join(tmpdir(), 'gbrain-coalesce-5530-')));
   try {
     await withEnv({ GBRAIN_HOME: home, DATABASE_URL: undefined, GBRAIN_DATABASE_URL: undefined }, async () => {
-      let engine: BrainEngine, close: () => Promise<void>;
-      if (kind === 'postgres') ({ engine, close } = await isolatedPersistencePostgres(process.env.GBRAIN_TEST_COALESCE_PG!));
-      else { const pglite = new PGLiteEngine(); await pglite.connect({}); await pglite.initSchema(); engine = pglite; close = () => pglite.disconnect(); }
+      const { engine, close } = await isolatedSharedSkillsEngine(kind === 'postgres' ? process.env.GBRAIN_TEST_COALESCE_PG! : undefined);
       try {
         const ctx = (source: string) => ({ engine, config: { engine: engine.kind, embedding_disabled: true }, sourceId: source,
           remote: false, dryRun: false, logger: { info() {}, warn() {}, error() {} } }) as OperationContext;
