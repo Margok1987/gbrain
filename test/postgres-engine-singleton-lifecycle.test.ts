@@ -36,7 +36,7 @@ async function openEndpoint() {
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   return {
-    url: `postgres://user:GSTACK_EXAMPLE_NONCE@127.0.0.1:${(server.address() as AddressInfo).port}/gbrain`,
+    url: `postgres://user@127.0.0.1:${(server.address() as AddressInfo).port}/gbrain`,
     dials: () => dials,
     refuse() { refusing = true; for (const socket of held.splice(0)) socket.end(fatal()); },
     hold() { refusing = false; },
