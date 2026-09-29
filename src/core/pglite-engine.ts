@@ -4,7 +4,7 @@ import { trackPgliteDatabase, PgliteClosingError, notifyPgliteOpened } from './p
 import { mutatePageTag } from './page-state/tags.ts';
 import type { PageKey, PageSnapshot, PageSnapshotOptions, PageWriteOptions } from './page-state/types.ts';
 import { assertPageRevision } from './page-state/types.ts';
-import { lockPageKeys as acquirePageKeys, pageGuardKey, type HeldPageKeys } from './page-state/guards.ts';
+import { lockUnheldPageKeys, withHeldPageKeys, type HeldPageKeys } from './page-state/guards.ts';
 import { readPageSnapshot as readCanonicalPageSnapshot } from './page-state/snapshot.ts';
 import { createPageVersion } from './page-state/versions.ts';
 import { recordRenameAlias } from './page-state/rename-alias.ts';
@@ -1712,9 +1712,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async transaction<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
-    const parent = this._pageTransaction ? this._heldPageKeys : null;
-    const held: HeldPageKeys = { keys: new Set(), parent };
-    const result = await this.db.transaction(async handle => {
+    return withHeldPageKeys(this._pageTransaction ? this._heldPageKeys : null, held => this.db.transaction(async handle => {
       const tx = composablePgliteTransaction(this._statements?.attach(handle, true) ?? handle);
       const txEngine = Object.create(this) as PGLiteEngine;
       Object.defineProperty(txEngine, '_chunkWritesInTransaction', { value: true });
@@ -1722,10 +1720,7 @@ export class PGLiteEngine implements BrainEngine {
       Object.defineProperty(txEngine, '_heldPageKeys', { value: held });
       Object.defineProperty(txEngine, 'db', { get: () => tx });
       return fn(txEngine);
-    });
-    // A released savepoint's guards stay held by its parent; a rolled-back one's do not.
-    for (const key of held.keys) parent?.keys.add(key);
-    return result;
+    }));
   }
 
   async transactionDirect<T>(fn: (engine: BrainEngine) => Promise<T>): Promise<T> {
@@ -1741,24 +1736,11 @@ export class PGLiteEngine implements BrainEngine {
     return readCanonicalPageSnapshot(this.executeRaw.bind(this), slug, opts);
   }
 
-  /**
-   * The single PGLite session already owns guards taken earlier in this
-   * transaction (or an enclosing, still-open savepoint), so they are not
-   * re-acquired; each new key runs the full guard sequence once.
-   */
   async lockPageKeys(keys: readonly PageKey[]): Promise<void> {
     if (!this._pageTransaction) throw new Error('lockPageKeys requires engine.transaction()');
-    const pending = keys.filter(key => { const id = pageGuardKey(key); return id === null || !this._holdsPageKey(id); });
-    if (!pending.length) return;
-    await acquirePageKeys(this, pending);
-    for (const key of pending) this._heldPageKeys!.keys.add(pageGuardKey(key)!);
+    await lockUnheldPageKeys(this, this._heldPageKeys!, keys);
   }
-
   private _heldPageKeys: HeldPageKeys | null = null;
-  private _holdsPageKey(id: string): boolean {
-    for (let held = this._heldPageKeys; held; held = held.parent) if (held.keys.has(id)) return true;
-    return false;
-  }
 
   /**
    * v0.41.13 (#1309) — identity-based dedup pre-check.

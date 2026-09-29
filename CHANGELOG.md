@@ -10,6 +10,34 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.59.17.0] - 2026-09-29
+
+**Local PGLite brains now commit writes about 3.7× faster, with the same durability.**
+
+A local brain's resident writer spent most of each write on overhead. It parsed and planned every SQL statement from scratch, reopened hundreds of database files per write, blocked on two `git` subprocesses, and ran work that grew with the size of the brain. PGLite never runs autovacuum, so receipt lookups ended up scanning every request a writer had ever made. Every write still takes the same path, with the same staged files, fsyncs, recovery records and crash boundaries.
+
+| On a Ubicloud standard-30, same VM, matched runs | Before | After |
+| --- | --- | --- |
+| PGLite, 1,000-write soak (median of 3) | 8.97 writes/s | 33.14 writes/s |
+| PGLite, time for a caller's write to commit (p50) | 1.71 s | 0.42 s |
+| PGLite, 10,000-write validation soak | 1,417 s | 296 s |
+| Postgres, 1,000-write soak (median of 3) | 11.35 writes/s | 13.86 writes/s |
+| Postgres, 10,000-write validation soak | 886 s | 581 s |
+
+All eight SIGKILL crash boundaries and the full default validation gate pass on both engines.
+
+### To take advantage of v0.59.17.0
+
+Run `gbrain upgrade`. There is no migration. The resident writer picks up the changes when it restarts.
+
+### Itemized changes
+
+- **PGLite reuses prepared statements.** A statement seen twice is prepared once on the server and later runs as a single protocol batch, like postgres.js already does for Postgres. Results are parsed with parsers resolved once per statement. A changed result shape or schema change drops the cached statement.
+- **PGLite keeps its planner statistics current.** The resident writer vacuums and analyzes its queue tables, since PGLite has no autovacuum. Projection statistics refresh after 50 rows plus 10% of the page table have changed, not after every write. The projection queue is read job-first, so an empty queue costs the same at any brain size.
+- **Git effects no longer block the writer.** The durability-hook check runs its `git` probes asynchronously, once per worktree root per effect batch, and never while holding the worktree lock. Effects drain in batches of 20 and keep pace with publication.
+- **Fewer statements per write.** Page guards already held in a transaction are not taken again. Counter updates use one statement per step. The publication's final page read is reused when queuing effects and sealing projections. Exact-slug page reads keep alias resolution out of the parameters. Idle-time scans run at most once per poll interval while writes are flowing.
+- **Research record.** `docs/research/pglite-persistence-throughput-2026-09-29.md` has the owner profile before and after, the matched numbers, and the approaches that were tried and rejected.
+
 ## [0.59.11.0] - 2026-09-28
 
 **Your brain stops losing notes, stops linking people to the wrong person, and forgets links and dates you deleted.**
