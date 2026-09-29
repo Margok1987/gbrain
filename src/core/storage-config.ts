@@ -377,6 +377,7 @@ export function isDeclaredDbOnlySlug(slug: string, config: StorageConfig | null)
  */
 export function hasUnresolvedDbOnlyDeclaration(repoPath: string, config: StorageConfig | null): boolean {
   if (config && config.db_only.length > 0) return false;
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- repoPath is the registered local source root and the file name is a constant; this only reads its gbrain.yml
   const yamlPath = join(repoPath, 'gbrain.yml');
   const yamlContent = existsSync(yamlPath) ? readFileSync(yamlPath, 'utf-8') : '';
   return yamlContent.split('\n').some((line) => {
