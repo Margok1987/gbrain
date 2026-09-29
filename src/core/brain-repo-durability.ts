@@ -33,7 +33,7 @@ import {
   existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync, rmSync, statSync, renameSync,
 } from 'fs';
 import { join, dirname, relative, isAbsolute } from 'path';
-import { execFileSync, execSync } from 'child_process';
+import { execFile, execFileSync, execSync } from 'child_process';
 import {
   GIT_ENV, GIT_ENV_AUTH, divergenceSafePull, detectDefaultBranch, pushProbe,
   type PullOutcome, type PushProbeResult,
@@ -356,12 +356,22 @@ function patchResolverFile(repoPath: string, dryRun: boolean): { status: StepSta
  * with the git-path query), never string-joined onto `<repo>/.git/`. */
 function gitDirPath(repoPath: string, rel: string): string {
   try {
-    const p = execFileSync('git', ['-C', repoPath, 'rev-parse', '--git-path', rel], {
+    return gitPathOrClassic(repoPath, rel, execFileSync('git', ['-C', repoPath, 'rev-parse', '--git-path', rel], {
       stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000, env: { ...process.env, ...GIT_ENV },
-    }).toString().trim();
-    if (p) return isAbsolute(p) ? p : join(repoPath, p);
-  } catch { /* fall through to the classic layout */ }
+    }).toString().trim());
+  } catch { return gitPathOrClassic(repoPath, rel, ''); }
+}
+
+function gitPathOrClassic(repoPath: string, rel: string, reported: string): string {
+  if (reported) return isAbsolute(reported) ? reported : join(repoPath, reported);
   return join(repoPath, '.git', rel);
+}
+
+function hooksDirFromConfig(repoPath: string, hooksPath: string): { dir: string; tracked: boolean } {
+  const dir = isAbsolute(hooksPath) ? hooksPath : join(repoPath, hooksPath);
+  // A hooksPath outside .git/ (e.g. .githooks) is a TRACKED location.
+  const tracked = !dir.includes(`${join('.git', '')}`) && !dir.endsWith('.git/hooks');
+  return { dir, tracked };
 }
 
 function resolveHooksDir(repoPath: string): { dir: string; tracked: boolean } {
@@ -371,13 +381,24 @@ function resolveHooksDir(repoPath: string): { dir: string; tracked: boolean } {
       stdio: ['ignore', 'pipe', 'ignore'], timeout: 10_000, env: { ...process.env, ...GIT_ENV },
     }).toString().trim();
   } catch { /* unset — normal */ }
-  if (hooksPath) {
-    const dir = isAbsolute(hooksPath) ? hooksPath : join(repoPath, hooksPath);
-    // A hooksPath outside .git/ (e.g. .githooks) is a TRACKED location.
-    const tracked = !dir.includes(`${join('.git', '')}`) && !dir.endsWith('.git/hooks');
-    return { dir, tracked };
-  }
+  if (hooksPath) return hooksDirFromConfig(repoPath, hooksPath);
   return { dir: gitDirPath(repoPath, 'hooks'), tracked: false };
+}
+
+/** Same probe as resolveHooksDir without blocking the event loop; failures read as ''. */
+function gitOutput(repoPath: string, args: string[]): Promise<string> {
+  return new Promise(resolve => {
+    execFile('git', ['-C', repoPath, ...args], { encoding: 'utf8', timeout: 10_000, env: { ...process.env, ...GIT_ENV } },
+      (error, stdout) => resolve(error ? '' : stdout.trim()));
+  });
+}
+
+async function resolveHooksDirAsync(repoPath: string): Promise<string> {
+  // Both probes run at once; the git-path answer is used only when hooksPath is unset.
+  const [hooksPath, gitHooks] = await Promise.all([gitOutput(repoPath, ['config', '--get', 'core.hooksPath']),
+    gitOutput(repoPath, ['rev-parse', '--git-path', 'hooks'])]);
+  if (hooksPath) return hooksDirFromConfig(repoPath, hooksPath).dir;
+  return gitPathOrClassic(repoPath, 'hooks', gitHooks);
 }
 
 /** Ensure a repo-relative path is in the git exclude file so our hook stays untracked. */
@@ -437,12 +458,27 @@ function uninstallLocalHook(repoPath: string): boolean {
  */
 export function isDurabilityHardened(repoPath: string): boolean {
   try {
-    const { dir } = resolveHooksDir(repoPath);
-    const hookPath = join(dir, 'post-commit');
-    return existsSync(hookPath) && readFileSync(hookPath, 'utf-8').includes(HOOK_BANNER);
+    return hasDurabilityHook(resolveHooksDir(repoPath).dir);
   } catch {
     return false;
   }
+}
+
+/**
+ * Event-loop-friendly {@link isDurabilityHardened} for long-running owners:
+ * the same two git probes run as child processes the loop does not wait on.
+ */
+export async function isDurabilityHardenedAsync(repoPath: string): Promise<boolean> {
+  try {
+    return hasDurabilityHook(await resolveHooksDirAsync(repoPath));
+  } catch {
+    return false;
+  }
+}
+
+function hasDurabilityHook(hooksDir: string): boolean {
+  const hookPath = join(hooksDir, 'post-commit');
+  return existsSync(hookPath) && readFileSync(hookPath, 'utf-8').includes(HOOK_BANNER);
 }
 
 /**

@@ -25,7 +25,7 @@ import { prepareFileTarget } from './page-prepare.ts';
 import { advanceEffectCursor, claimPersistenceEffect, completeEffect, failEffect, renewPersistenceEffectClaim, retryEffect } from './effect-journal.ts';
 import { guardEffectSource, recoverEffectPublication, reserveEffectRecovery } from './effect-recovery.ts';
 import { publishGitEffect } from './effect-git.ts';
-import { isDurabilityHardened } from '../brain-repo-durability.ts';
+import { isDurabilityHardenedAsync } from '../brain-repo-durability.ts';
 import { dispatchFactsBackstopEffect } from './effect-facts.ts';
 import type { EffectRecovery, PersistenceEffect } from './effect-model.ts';
 import { recoveryStagingFile } from './staging.ts';
@@ -259,12 +259,6 @@ async function recordFailure(engine: BrainEngine, effect: PersistenceEffect, err
  */
 export async function runPersistenceEffects(engine: BrainEngine, config: GBrainConfig, opts: EffectWorkerOptions): Promise<number> {
   const limit = Math.max(1, Math.min(opts.limit ?? 2, 20));
-  // One durability probe (two git processes) per worktree root per bounded run.
-  const durability = new Map<string, boolean>();
-  const hardenedRoot = (root: string) => {
-    if (!durability.has(root)) durability.set(root, isDurabilityHardened(root));
-    return durability.get(root)!;
-  };
   const recoveries = await selectEffectRecoveries(engine, opts.hostId, limit);
   let attempted = 0;
   for (const recovery of recoveries) {
@@ -283,16 +277,10 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
     } catch (error) { if (claimed) await recordFailure(engine, claimed, error); }
     finally { await lock.release(); }
   }
-  while (attempted < limit && !opts.signal?.aborted) {
-    const effect = await claimPersistenceEffect(engine, opts.hostId);
-    if (!effect) return attempted;
-    attempted++;
+  const run = async (effect: PersistenceEffect, binding: WorktreeBinding | null, hardened?: boolean) => {
     let lock: Awaited<ReturnType<typeof acquireWorktree>> = null;
     try {
-      const unlocked = ['embedding', 'facts-backstop'].includes(effect.kind);
-      const binding = effect.worktree_id && !unlocked ? await getWorktreeBinding(engine, effect.source_id, opts.hostId) : null;
-      const hardened = effect.kind === 'git' && binding?.local_path ? hardenedRoot(binding.local_path) : undefined;
-      if (effect.worktree_id && !unlocked) {
+      if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) {
         if (!binding) throw new OperationError('owner_unavailable', 'The canonical effect owner is unavailable.');
         lock = await acquireWorktree(binding);
         if (!lock) throw new OperationError('writer_busy', 'The canonical worktree is busy.');
@@ -310,6 +298,27 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
       else await embedPage(engine, config, effect, opts);
     } catch (error) { await recordFailure(engine, effect, error, opts.signal); }
     finally { await lock?.release(); }
+  };
+  // A git effect first needs its durability probe (git child processes, one
+  // probe per root per run). The probe runs while the rest of the batch
+  // proceeds; git effects then run in claim order, never holding a worktree
+  // lock while they wait for it.
+  const probes = new Map<string, Promise<boolean>>();
+  const deferred: { effect: PersistenceEffect; binding: WorktreeBinding; hardened: Promise<boolean> }[] = [];
+  while (attempted < limit && !opts.signal?.aborted) {
+    const effect = await claimPersistenceEffect(engine, opts.hostId);
+    if (!effect) break;
+    attempted++;
+    let binding: WorktreeBinding | null = null;
+    try {
+      if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) binding = await getWorktreeBinding(engine, effect.source_id, opts.hostId);
+    } catch (error) { await recordFailure(engine, effect, error, opts.signal); continue; }
+    if (effect.kind === 'git' && binding?.local_path) {
+      const root = binding.local_path;
+      if (!probes.has(root)) probes.set(root, isDurabilityHardenedAsync(root));
+      deferred.push({ effect, binding, hardened: probes.get(root)! });
+    } else await run(effect, binding);
   }
+  for (const { effect, binding, hardened } of deferred) await run(effect, binding, await hardened);
   return attempted;
 }
