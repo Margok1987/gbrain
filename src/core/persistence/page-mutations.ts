@@ -19,7 +19,7 @@ import { assertPurgeParams } from './purge-params.ts';
 import type { Principal } from './model.ts';
 import { normalizeSubagentPageInput } from './page-input.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
-import { WRITER_INSPECTION_HINT } from './admin-intent.ts';
+import { readUnboundWritePolicy, unboundSourceError } from './unbound-source.ts';
 
 export async function requestPrincipalForContext(ctx: OperationContext): Promise<Principal> {
   if (ctx.auth?.principal) return { ...ctx.auth.principal };
@@ -163,8 +163,14 @@ export async function submitPageMutation(ctx: OperationContext,
       'Register the source canonical path, then omit --dir or use that same path.');
   }
   if (writeThrough && root && !binding) {
-    if (ctx.engine.kind !== 'pglite') throw new OperationError('owner_unavailable', 'This source has no designated canonical owner.', WRITER_INSPECTION_HINT);
-    binding = await claimWorktree(ctx.engine, sourceId, root);
+    if (ctx.engine.kind === 'pglite') binding = await claimWorktree(ctx.engine, sourceId, root);
+    else {
+      const scope = input.operation !== 'put_page' ? 'other' : snapshot?.page.source_path ? 'file_backed' : 'put_page';
+      if (scope !== 'put_page' || await readUnboundWritePolicy(ctx.engine) !== 'database_only') {
+        throw unboundSourceError(sourceId, ctx.remote === false ? root : null, scope);
+      }
+      authority.databaseOnlyReason = 'unbound_source';
+    }
   }
   const row = await admitWrite(ctx.engine, { principal, operation: input.operation, sourceId, sourceIncarnation: source.incarnation,
     slug, pageId: snapshot?.page.id ?? null, requestId, callerIntent, intent, authority,

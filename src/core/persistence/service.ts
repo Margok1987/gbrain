@@ -10,6 +10,7 @@ import { isWriteErrorCode, type WriteReceipt } from './types.ts';
 import { registerPgliteReopen } from '../pglite-lifecycle.ts';
 import { assertMutationProtocol } from './protocol.ts';
 import { pendingWriteHint } from './health.ts';
+import { applyUnboundReceiptHint } from './unbound-source.ts';
 
 interface Service { consumer: PersistenceConsumer; stopping: boolean; unregisterStop?: () => void; unregisterReopen?: () => void; }
 const services = new WeakMap<BrainEngine, Service>();
@@ -138,5 +139,6 @@ export function writeResponse(row: WriteRequest): Record<string, unknown> {
       : 'Inspect this receipt before submitting a new request_id.');
   error.writeRequest = receipt as WriteReceipt;
   error.writeError = isWriteErrorCode(reason) ? reason : reason === 'page_identity_changed' ? 'source_changed' : 'storage_error';
+  applyUnboundReceiptHint(error, row);
   throw error;
 }
