@@ -220,7 +220,8 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
   // the pages stale for `gbrain extract --stale` instead of failing the sync.
   const withLinks = async (done: Cursor, synced: SyncResult): Promise<SyncResult> => {
     if (company || (done.processingOptions ?? processingOptions).noExtract) return synced;
-    try { return { ...synced, links: await extractManagedStaleLinks(engine, { sourceId: done.sourceId, maxPages: 1000, signal }) }; }
+    try { return { ...synced, links: await extractManagedStaleLinks(engine, { sourceId: done.sourceId, maxPages: 1000, signal,
+      slugs: done.entries.flatMap(entry => entry.action === 'import' && entry.slug ? [entry.slug] : []) }) }; }
     catch { return synced; }
   };
   try {

@@ -210,6 +210,26 @@ test('managed sync derives links for its pages, including forward references, an
   }
 }), 180_000);
 
+test('a sweep that stamps pages mid-sync cannot strand the links of pages this sync imported', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  for (const engine of engines) {
+    const f = await fixture(engine, {
+      'notes/a.md': note('Note A', 'Met [[people/zed-example]].'),
+      'people/zed-example.md': person('Zed Example'),
+    });
+    // Like a serve's idle sweep: stamp whatever exists after the first page lands, before its link target is imported.
+    const stampEarly = async () => {
+      const pages = await engine.executeRaw<{ slug: string }>('SELECT slug FROM pages WHERE source_id=$1', [f.id]);
+      await engine.markPagesExtractedBatch(pages.map(page => ({ slug: page.slug, source_id: f.id })), new Date(Date.now() + 60_000).toISOString());
+    };
+    let stamped: Promise<void> | undefined;
+    const result = await performManagedSync(engine, { sourceId: f.id, noPull: true,
+      onProgress: progress => { if (progress.bankedFiles === 1) stamped = stampEarly(); } });
+    await stamped;
+    expect(result.status).toBe('first_sync');
+    expect((await engine.getLinks('notes/a', { sourceId: f.id })).map(link => link.to_slug)).toEqual(['people/zed-example']);
+  }
+}), 180_000);
+
 test('extract --stale on a managed brain derives links after a --no-extract sync without touching guarded rows', async () => withEnv({ GBRAIN_HOME: home }, async () => {
   for (const engine of engines) {
     const f = await fixture(engine, {
