@@ -48,7 +48,7 @@ import { assertSourceFilesystemActive, hasSourceFilesystemLock, withSourceFilesy
 import { gbrainPath } from '../config.ts';
 import { isWriteThroughDisabled, resolvePageWriteTarget } from '../write-through.ts';
 import { isDurabilityHardened, commitWriteThroughFile } from '../brain-repo-durability.ts';
-import { upsertFactRow, parseFactsFence } from '../facts-fence.ts';
+import { upsertFactRow, parseFactsFence, formatFenceDate } from '../facts-fence.ts';
 import { contentHash } from '../utils.ts';
 import { extractFactsFromFenceText } from './extract-from-fence.ts';
 import { logStubGuardEvent } from './stub-guard-audit.ts';
@@ -86,8 +86,9 @@ export interface FenceInputFact {
   confidence?: number;
   validFrom?: Date;
   /**
-   * MEMORY_VERBS v1 (c5): remember's ttl → valid_until. Date-only in the
-   * fence cell; the DB column derives from it on the stamp step.
+   * MEMORY_VERBS v1 (c5): remember's ttl → valid_until. Written to the
+   * fence cell losslessly (formatFenceDate); the DB column derives from it on
+   * the stamp step.
    * Undefined/null = never expires (pre-v1 behavior unchanged).
    */
   validUntil?: Date | null;
@@ -428,7 +429,6 @@ export async function writeFactsToFence(
 
       const assignedRowNums: number[] = [];
       for (const f of facts) {
-        const validFromStr = (f.validFrom ?? new Date()).toISOString().slice(0, 10);
         const { body: updated, rowNum } = upsertFactRow(body, {
           rowNum:      nextRowNum++,
           claim:       f.fact,
@@ -436,11 +436,11 @@ export async function writeFactsToFence(
           confidence:  f.confidence ?? 1.0,
           visibility:  f.visibility,
           notability:  f.notability ?? 'medium',
-          validFrom:   validFromStr,
+          validFrom:   formatFenceDate(f.validFrom ?? new Date()),
           // MEMORY_VERBS v1 (c5): remember's ttl threads through to the fence
           // cell — was hard-coded undefined, which silently dropped expiry on
           // this path. extractFactsFromFenceText derives the DB column from it.
-          validUntil:  f.validUntil ? f.validUntil.toISOString().slice(0, 10) : undefined,
+          validUntil:  f.validUntil ? formatFenceDate(f.validUntil) : undefined,
           source:      f.source,
           context:     f.context ?? undefined,
         });
