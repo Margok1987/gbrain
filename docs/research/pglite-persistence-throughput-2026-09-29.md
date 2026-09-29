@@ -71,7 +71,8 @@ per write on this VM. It is required and unchanged.
 - Git effects start their durability probe asynchronously, once per worktree
   root per effect batch, and wait for it after the rest of the batch without
   holding a worktree lock. A single-file git effect in a repository without the
-  durability hook runs no git command and no longer takes the worktree lock. Effects drain in batches of 20 without waiting for
+  durability hook runs no git command; it acquires the worktree lock only to
+  prove the root and records its outcome after releasing it. Effects drain in batches of 20 without waiting for
   the next consumer tick, so they keep pace with publication: at the end of
   every soak, all effects are committed and none are queued.
 - The projection-job queue is read job-first. Planner statistics refresh on an
