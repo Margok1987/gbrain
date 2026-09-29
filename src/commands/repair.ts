@@ -15,8 +15,10 @@ import { REPAIR_KINDS, resolveRepairScope, runRepair, type RepairHandler, type R
 import { timelineRepair } from '../core/repair/timeline.ts';
 import { visibilityRepair } from '../core/repair/visibility.ts';
 import { safeChunksRepair } from '../core/repair/safe-chunks.ts';
+import { connectorCheckpointsRepair } from '../core/repair/connector-checkpoints.ts';
 
-const HANDLERS: Record<RepairKind, RepairHandler> = { timeline: timelineRepair, visibility: visibilityRepair, 'safe-chunks': safeChunksRepair };
+const HANDLERS: Record<RepairKind, RepairHandler> = { timeline: timelineRepair, visibility: visibilityRepair, 'safe-chunks': safeChunksRepair,
+  'connector-checkpoints': connectorCheckpointsRepair };
 
 export const REPAIR_HELP = `Usage: gbrain repair [<kind>] [--apply] [--source <id>] [--limit <n>] [--no-embed] [--json]
        gbrain repair --all [--apply] [--source <id>] [--json]
@@ -33,6 +35,11 @@ Kinds:
                safe-chunk fence, which remote/MCP search withholds (#5050, #5247).
                Projection-only: no page write and no journal admission. Unchanged
                vectors are kept; the rest are embedded unless --no-embed.
+  connector-checkpoints
+               Delete connector checkpoint rows and retry pointers that no
+               registered connector source can load and that are older than
+               7 days (#5686). Cleanup only; no journal admission. Rows a
+               pending write still references are kept. Brain-wide.
 
 Options:
   --apply        Write the repair (no prompt). Without it, only preview.
