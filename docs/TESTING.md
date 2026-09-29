@@ -521,8 +521,11 @@ the CI runner image supplies `setpriv`.
 `test/managed-maintenance.test.ts` and
 `test/helpers/maintenance-restart.ts` cover local synthesize/patterns/
 consolidation, restart replay, retired takes and semantic snapshots;
-`test/managed-unsupported-preflight.serial.test.ts` checks unsupported bulk
-lanes refuse before spend. These use synthetic provider/API transports, not
+`test/managed-unsupported-preflight.serial.test.ts` checks that the managed
+facts-family bulk lanes refuse an unaccepted writer before spend, and
+`test/managed-facts-writers.test.ts` proves each of them (fence reconcile,
+phantom redirect, fence writes, loops extraction, bulk conversation facts)
+publishes through the coordinator on PGLite and Postgres. These use synthetic provider/API transports, not
 paid model calls or production connectors. PGLite dream/job CLI with an active
 owner is **not** proven delegated by the live fact-backfill IPC test.
 
