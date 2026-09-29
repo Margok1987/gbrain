@@ -191,6 +191,35 @@ The 2026-09-29 test audit's lane reports, inventories and mutation-probe logs
 are committed under [docs/test-audit/2026-09-29/](test-audit/2026-09-29/README.md);
 cite them for the surviving-owner and probe evidence behind a consolidation.
 
+Recorded ownership changes:
+
+- `test/e2e/reconcile-crash.test.ts` and `test/e2e/reconcile-crash-unactivated.test.ts`:
+  the PR owner is `persistence-validation.yml`, called from `test.yml` on every
+  PR on both supported Bun versions against pg16. Its "Require all
+  reconciliation crash boundaries" step runs both files by name and uploads the
+  crash manifests, unchanged. Both files are in `E2E_EXCLUSIONS`
+  (`PERSISTENCE_VALIDATION_OWNED` in `scripts/e2e-matrix.ts`), so PR
+  `selected-e2e` no longer runs them a second time; `scripts/select-e2e.ts`
+  prints `excluded: <file> (owned by persistence-validation.yml)` on stderr when
+  a mapped source changes. The nightly full-corpus E2E run and the local gates
+  (`ci:local`, `ci:ubicloud`, their `:diff` forms) still run them. Run them
+  locally with the same command the workflow uses, against the test database
+  from "E2E test DB lifecycle":
+
+  ```bash
+  DATABASE_URL=postgresql://postgres:postgres@localhost:5434/gbrain_test \
+  GBRAIN_TEST_ALLOW_DATABASE_URL=1 \
+  GBRAIN_TEST_RECONCILE_CRASH_MANIFEST_DIR=.context/reconcile-crashes \
+    bun --no-env-file test --timeout=180000 \
+    test/e2e/reconcile-crash.test.ts test/e2e/reconcile-crash-unactivated.test.ts
+  ```
+
+- Attendance parity (`test/attendance-retrieval.test.ts`,
+  `test/attendance-repair.test.ts`, `test/extract-timeline-attendance.test.ts`):
+  the unit lane owns the PGLite arm; the `test/e2e/*-postgres.test.ts` wrappers
+  load the scenarios through `registerPostgresTests`, so E2E runs only the
+  PostgreSQL arm.
+
 Name the profile when reporting “all tests.” The local fast loop, `test:full`,
 `ci:local`, required PR checks and nightly `fullCorpus` are not interchangeable
 supersets. Native matrices, sustained persistence validation, browser tests and
@@ -1406,6 +1435,18 @@ When asked to "run all E2E tests" or "run tests", that means ALL tiers:
 - Tier 1: `bun run test:e2e` (mechanical, sync, upgrade — no API keys needed)
 - Tier 2: `test/e2e/skills.test.ts` (requires OpenAI + Anthropic + openclaw CLI)
 - Always spin up the test DB, source zshrc, run everything, tear down.
+
+Key-gated live files that no CI job has keys for are left out of the
+`scripts/run-e2e.sh` default glob, so the nightly full corpus and the local
+gates stop counting their skips as discovered coverage. Naming a file on the
+command line still runs it (the runner keeps provider keys):
+
+| File | Required key | Command |
+|---|---|---|
+| `test/e2e/openrouter-anthropic-subagent-replay.live.test.ts` | `OPENROUTER_API_KEY` | `OPENROUTER_API_KEY=... bash scripts/run-e2e.sh test/e2e/openrouter-anthropic-subagent-replay.live.test.ts` |
+| `test/e2e/openrouter-deepseek-subagent-replay.live.test.ts` | `OPENROUTER_API_KEY` | `OPENROUTER_API_KEY=... bash scripts/run-e2e.sh test/e2e/openrouter-deepseek-subagent-replay.live.test.ts` |
+| `test/e2e/voyage-rerank-live.test.ts` | `VOYAGE_API_KEY` | `VOYAGE_API_KEY=... bash scripts/run-e2e.sh test/e2e/voyage-rerank-live.test.ts` |
+| `test/e2e/voyage-multimodal.test.ts` | `VOYAGE_API_KEY` | `VOYAGE_API_KEY=... bash scripts/run-e2e.sh test/e2e/voyage-multimodal.test.ts` |
 
 ### E2E test DB lifecycle (ALWAYS follow this)
 

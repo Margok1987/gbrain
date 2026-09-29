@@ -5,6 +5,10 @@
 // unmapped src/) are explicitly named.
 
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   E2E_TEST_MAP,
@@ -12,6 +16,7 @@ import {
 import {
   classify,
   matchGlob,
+  persistenceOwnedNotices,
   selectTests,
 } from "../scripts/select-e2e.ts";
 
@@ -29,7 +34,6 @@ const ALL_E2E = [
   "test/e2e/http-transport.test.ts",
   "test/e2e/integrity-batch.test.ts",
   "test/e2e/jsonb-roundtrip.test.ts",
-  "test/e2e/mcp.test.ts",
   "test/e2e/mechanical.test.ts",
   "test/e2e/migrate-chain.test.ts",
   "test/e2e/migration-flow.test.ts",
@@ -297,5 +301,42 @@ describe("selectTests", () => {
     expect(select(["src/schema.sql", "src/core/search/intent.ts"])).toEqual(
       ALL_E2E.slice().sort()
     );
+  });
+});
+
+describe("persistenceOwnedNotices", () => {
+  test("a mapped reconcile source names both crash suites and their owner", () => {
+    expect(persistenceOwnedNotices(["src/commands/source-reconcile.ts"], E2E_TEST_MAP)).toEqual([
+      "excluded: test/e2e/reconcile-crash-unactivated.test.ts (owned by persistence-validation.yml)",
+      "excluded: test/e2e/reconcile-crash.test.ts (owned by persistence-validation.yml)",
+    ]);
+  });
+
+  test("editing a crash suite directly names it", () => {
+    expect(persistenceOwnedNotices(["test/e2e/reconcile-crash.test.ts"], E2E_TEST_MAP)).toEqual([
+      "excluded: test/e2e/reconcile-crash.test.ts (owned by persistence-validation.yml)",
+    ]);
+  });
+
+  test("the CLI prints the notice on stderr and still lists the files on stdout", () => {
+    const root = mkdtempSync(join(tmpdir(), "gbrain-select-e2e-"));
+    try {
+      const git = (...args: string[]) => spawnSync("git", args, { cwd: root, encoding: "utf8" });
+      git("init", "-q");
+      git("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "base");
+      git("update-ref", "refs/remotes/origin/master", "HEAD");
+      mkdirSync(join(root, "src/commands"), { recursive: true });
+      writeFileSync(join(root, "src/commands/source-reconcile.ts"), "// changed\n");
+      const r = spawnSync(process.execPath, [join(import.meta.dir, "../scripts/select-e2e.ts")], { cwd: root, encoding: "utf8" });
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).toContain("excluded: test/e2e/reconcile-crash.test.ts (owned by persistence-validation.yml)");
+      expect(r.stdout.split("\n")).toContain("test/e2e/reconcile-crash.test.ts");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("unrelated sources print nothing", () => {
+    expect(persistenceOwnedNotices(["src/core/derived-links.ts", "README.md"], E2E_TEST_MAP)).toEqual([]);
   });
 });

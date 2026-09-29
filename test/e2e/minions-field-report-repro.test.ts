@@ -20,6 +20,7 @@ import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { MinionQueue } from '../../src/core/minions/queue.ts';
 import { MinionWorker } from '../../src/core/minions/worker.ts';
 import { RateLeaseUnavailableError } from '../../src/core/minions/handlers/subagent.ts';
+import { waitFor } from '../helpers/wait-for.ts';
 let engine: PGLiteEngine;
 let queue: MinionQueue;
 
@@ -72,11 +73,16 @@ describe('v0.41 field-report repro (Bug 2 IRON-RULE regression)', () => {
     });
 
     const workerPromise = worker.start();
-    // Give the worker enough wall-clock for 12 jobs × 2 bounces × ~2s
-    // jitter avg + 1 success per job. Pad generously.
-    await new Promise(r => setTimeout(r, 25_000));
-    worker.stop();
-    await workerPromise;
+    const settled = new Set(['completed', 'dead', 'failed', 'cancelled']);
+    try {
+      await waitFor(async () => {
+        const jobs = await Promise.all(ids.map(id => queue.getJob(id)));
+        return jobs.every(j => settled.has(j!.status));
+      }, { timeoutMs: 30_000, intervalMs: 100, label: 'all repro jobs settled' });
+    } finally {
+      worker.stop();
+      await workerPromise;
+    }
 
     // Every job should be completed.
     const final = await Promise.all(ids.map(id => queue.getJob(id)));

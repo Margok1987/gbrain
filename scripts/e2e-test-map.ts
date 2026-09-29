@@ -349,7 +349,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/link-source-check-repair.ts": ["test/e2e/link-source-check-repair-postgres.test.ts"],
   "src/core/vector-index.ts": ["test/e2e/migration-vector-replay-postgres.test.ts"],
   // MCP stdio + HTTP transports share dispatch.
-  "src/mcp/**": ["test/e2e/mcp.test.ts", "test/e2e/http-transport.test.ts", "test/e2e/mcp-search-transport-matrix.test.ts"],
+  "src/mcp/**": ["test/e2e/http-transport.test.ts", "test/e2e/mcp-search-transport-matrix.test.ts"],
   // G6: the --surface verbs CEILING journey over a real `serve --http` boot
   // (hermetic PGLite): 7-verb tools/list for full-preset + bare clients,
   // fail-closed dispatch on hidden ops, the narrow-only

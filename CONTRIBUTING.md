@@ -85,9 +85,8 @@ skills/                   Fat markdown skills for AI agents
 test/                     Unit tests (bun test, no DB required)
 test/e2e/                 E2E tests (requires DATABASE_URL, real Postgres+pgvector)
   fixtures/               Miniature realistic brain corpus (16 files)
-  helpers.ts              DB lifecycle, fixture import, timing
+  helpers.ts              DB lifecycle, fixture import, diagnostics
   mechanical.test.ts      All operations against real DB
-  mcp.test.ts             MCP tool generation verification
   skills.test.ts          Tier 2 skill tests (requires OpenClaw + API keys)
 docs/                     Architecture docs
 ```

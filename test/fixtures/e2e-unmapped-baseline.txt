@@ -136,10 +136,8 @@ test/e2e/transcripts-ingest-pglite.test.ts
 test/e2e/transcripts-writeback-fidelity.test.ts
 test/e2e/type-unification-full-flow.test.ts
 test/e2e/upsert-chunks-registry-column.test.ts
-test/e2e/v030_1-integration-pglite.test.ts
 test/e2e/v0_28_5-fix-wave.test.ts
 test/e2e/v0_29-mcp-dispatch-pglite.test.ts
-test/e2e/v0_30_3-fix-wave.test.ts
 test/e2e/vector-ef-search-postgres.test.ts
 test/e2e/volunteer-context-postgres.test.ts
 test/e2e/whoknows.test.ts
