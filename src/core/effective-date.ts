@@ -65,19 +65,20 @@ const CREATED_KEYS = ['created', 'created_at', 'date_created', 'date created'];
 
 /**
  * The fallback anchor for an undated page: a page that already fell back
- * keeps its stored date, a new file-backed page takes its file's timestamp
- * (the earlier of birth and modification time), and anything else takes the
- * row's creation time. Never the time of the latest write.
+ * keeps its stored date, a new file-backed page takes the earliest of its
+ * file's birth time, modification time and (when opted in) git first-commit
+ * date, and anything else takes the row's creation time. Never the time of
+ * the latest write.
  */
 export function fallbackCreatedAt(opts: {
   existing?: { effective_date?: Date | string | null; effective_date_source?: string | null; created_at?: Date | string | null } | null;
-  fileTimes?: { birthtime?: Date; mtime?: Date } | null;
+  fileTimes?: { birthtime?: Date; mtime?: Date; firstCommit?: Date } | null;
   now: Date;
 }): Date {
   const { existing, fileTimes, now } = opts;
   if (existing?.effective_date_source === 'fallback' && existing.effective_date) return new Date(existing.effective_date);
   if (existing?.created_at) return new Date(existing.created_at);
-  const times = [fileTimes?.birthtime, fileTimes?.mtime]
+  const times = [fileTimes?.birthtime, fileTimes?.mtime, fileTimes?.firstCommit]
     .filter((d): d is Date => d instanceof Date && d.getTime() > 0)
     .map(d => d.getTime());
   return times.length ? new Date(Math.min(...times)) : now;

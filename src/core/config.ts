@@ -1470,6 +1470,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // A11: IANA timezone for offset-less frontmatter datetimes in effective_date.
   // Unset → UTC (date-only values are always UTC calendar dates). Validated at set time.
   'brain.timezone',
+  // A12 (opt-in, default off): undated new pages in git-backed sources take the
+  // file's git first-commit date as their effective-date fallback on full import.
+  'sync.git_first_commit_dates',
   'cycle.grade_takes.write_gstack_learnings',
   // #4102: off switch for the propose_takes LLM phase (default ON; the
   // phase ships in the default list). Read by src/core/cycle/propose-takes.ts.

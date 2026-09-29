@@ -242,7 +242,7 @@ export async function importFromContent(
      */
     sourceRoot?: string;
     /** The source file's timestamps: the date of a new page that carries no date of its own. */
-    fileTimes?: { birthtime?: Date; mtime?: Date };
+    fileTimes?: { birthtime?: Date; mtime?: Date; firstCommit?: Date };
     /**
      * v0.32.7 CJK wave (codex post-merge F1): bypass the
      * `existing.content_hash === hash` short-circuit and ALWAYS re-chunk +
@@ -1188,6 +1188,8 @@ export async function importFromFile(
      * never per file (codex perf finding #7).
      */
     activePack?: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; aliases?: ReadonlyArray<string> }> };
+    /** Git first-commit date of the file (opt-in, see git-first-commit.ts); an undated page's fallback anchor. */
+    firstCommitAt?: Date;
   } = {},
 ): Promise<ImportResult> {
   // Defense-in-depth: reject symlinks before reading content.
@@ -1354,7 +1356,7 @@ export async function importFromFile(
     sourcePath: relativePath,
     // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- walks up from the caller's own file path by the depth of its own relative path to recover the import root; import-identity confines every probe under that root
     sourceRoot: resolve(filePath, ...relativePath.split(/[\\/]/).map(() => '..')),
-    fileTimes: { birthtime: stat.birthtime, mtime: stat.mtime },
+    fileTimes: { birthtime: stat.birthtime, mtime: stat.mtime, firstCommit: opts.firstCommitAt },
     // The disk file IS the source of truth: a file the user emptied is a
     // deliberate clear, so it passes putPage's empty-overwrite guard.
     allowEmptyOverwrite: true,
