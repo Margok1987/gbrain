@@ -12,7 +12,7 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.59.20.0] - 2026-09-29
 
-**Two commands could print a source's webhook secret, and hundreds of checks in gbrain's own test suite could not actually fail. Both are fixed.**
+**Two commands could print a source's webhook secret, and hundreds of tests in gbrain's own suite guarded nothing: they stayed green with the code broken, or tested code the product never runs. Both are fixed.**
 
 Security first. If you attached a folder to an existing source that already had a GitHub webhook secret, `gbrain call sources_add` and `gbrain sources add --path` printed the whole source record, secret included, and the second one also kept that record in the database's change history. Both now hide the secret. Setting or rotating a webhook still shows the new secret exactly once, because you need to paste it into GitHub.
 
