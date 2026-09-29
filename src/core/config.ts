@@ -1545,6 +1545,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // consent reads this key, and enabling it is the documented path to
   // `gbrain takes extract --from-pages` — same unregistered-key class.
   'takes.bootstrap_enabled',
+  // B-14: USD cap for one takes-bootstrap run's classifier calls (default 5.0;
+  // 0 disables). Read by src/core/extract-takes-from-pages.ts.
+  'takes.bootstrap_budget_usd',
   // Orphan reporting scope. These are consumed by core/orphan-policy.ts and
   // documented there as the per-brain override path.
   'orphans.exclude_prefixes',
