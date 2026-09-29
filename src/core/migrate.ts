@@ -20,7 +20,7 @@ import { repairTimelineDedupIndex, repairLegacyTimelineSourceRows } from './time
 import { repairPagesUpsertArbiter } from './pages-upsert-arbiter.ts';
 import { repairLinkSourceCheck, LINK_SOURCE_GATE_MIGRATION_VERSION } from './link-source-check-repair.ts';
 import { GRANT_COLUMNS_SQL, GRANT_AUDIT_SCHEMA_SQL, GRANT_SPEND_COLUMNS_SQL } from './grants/schema.ts';
-import { FACT_WITHDRAWAL_SCHEMA_SQL, FACT_WITHDRAWAL_BACKFILL_SQL, FACT_WITHDRAWAL_SUBJECT_SQL } from './facts/withdrawal-schema.ts';
+import { FACT_WITHDRAWAL_SCHEMA_SQL, FACT_WITHDRAWAL_BACKFILL_SQL, FACT_WITHDRAWAL_SUBJECT_SQL, FACT_WITHDRAWAL_NORMALIZED_SQL } from './facts/withdrawal-schema.ts';
 import { repairLegacyClientGrants } from './grants/migration.ts';
 import { PROJECTION_STATISTICS_SQL, verifyProjectionStatistics } from './search/projection-statistics.ts';
 import { SHARED_SKILLS_SCHEMA_SQL } from './shared-skills/schema-all.ts';
@@ -6707,6 +6707,15 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     name: 'fact_withdrawal_subject',
     idempotent: true,
     sql: FACT_WITHDRAWAL_SUBJECT_SQL,
+  },
+  {
+    // Exact-text fingerprints let a punctuation or casing variant of a
+    // forgotten claim come back on re-extraction (write-path audit B-9).
+    // Fingerprints now fold punctuation; legacy exact rows keep matching.
+    version: 170,
+    name: 'fact_withdrawal_normalized_fingerprint',
+    idempotent: true,
+    sql: FACT_WITHDRAWAL_NORMALIZED_SQL,
   },
 ];
 
