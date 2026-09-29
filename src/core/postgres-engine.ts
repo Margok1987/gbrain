@@ -6,7 +6,7 @@ import { assertPageRevision } from './page-state/types.ts';
 import { lockPageKeys as acquirePageKeys } from './page-state/guards.ts';
 import { readPageSnapshot as readCanonicalPageSnapshot } from './page-state/snapshot.ts';
 import { createPageVersion } from './page-state/versions.ts';
-import { recordRenameAlias } from './page-state/rename-alias.ts';
+import { moveSlugBindings, recordRenameAlias } from './page-state/rename-alias.ts';
 import { composablePostgresTransaction } from './page-state/transactions.ts';
 import type { PageReadScope } from './types.ts';
 import type { PageReadPolicy } from './types.ts';
@@ -127,7 +127,6 @@ import type { PgSalienceDeps } from './postgres-engine/salience.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './postgres-engine/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
-import { MOVE_WITHDRAWAL_SUBJECT_SQL } from './facts/withdrawal-schema.ts';
 
 function escapeSqlStringLiteral(value: string): string {
   return value.replace(/'/g, "''");
@@ -5034,8 +5033,7 @@ export class PostgresEngine implements BrainEngine {
       );
       if (moved.length > 0) {
         await recordRenameAlias(tx, sourceId, oldSlug, newSlug);
-        // A forgotten claim stays forgotten for the renamed entity.
-        await tx.executeRaw(MOVE_WITHDRAWAL_SUBJECT_SQL, [sourceId, oldSlug, newSlug]);
+        await moveSlugBindings(tx, sourceId, oldSlug, newSlug);
       }
       // #3056: rows moved — a zero-row UPDATE does not throw, so the count is
       // the only way callers can see the no-op.

@@ -7,7 +7,7 @@ import { assertPageRevision } from './page-state/types.ts';
 import { lockPageKeys as acquirePageKeys } from './page-state/guards.ts';
 import { readPageSnapshot as readCanonicalPageSnapshot } from './page-state/snapshot.ts';
 import { createPageVersion } from './page-state/versions.ts';
-import { recordRenameAlias } from './page-state/rename-alias.ts';
+import { moveSlugBindings, recordRenameAlias } from './page-state/rename-alias.ts';
 import { composablePgliteTransaction } from './page-state/transactions.ts';
 import { GRANT_COLUMNS_SQL } from './grants/schema.ts';
 import type { PageReadScope } from './types.ts';
@@ -139,7 +139,6 @@ import type { PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
 import * as salienceImpl from './pglite-engine/salience.ts';
 import type { PgliteSalienceDeps } from './pglite-engine/salience.ts';
 import { searchKeywordCJK } from './pglite-engine/cjk-search.ts';
-import { MOVE_WITHDRAWAL_SUBJECT_SQL } from './facts/withdrawal-schema.ts';
 
 /**
  * #4284 — opt-in out-of-band watchdog for a PGLite disconnect with a live
@@ -5808,8 +5807,7 @@ export class PGLiteEngine implements BrainEngine {
       );
       if (moved.length > 0) {
         await recordRenameAlias(tx, sourceId, oldSlug, newSlug);
-        // A forgotten claim stays forgotten for the renamed entity.
-        await tx.executeRaw(MOVE_WITHDRAWAL_SUBJECT_SQL, [sourceId, oldSlug, newSlug]);
+        await moveSlugBindings(tx, sourceId, oldSlug, newSlug);
       }
       // #3056: rows moved — a zero-row UPDATE does not throw, so the count is
       // the only way callers can see the no-op.
