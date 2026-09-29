@@ -2662,6 +2662,9 @@ export async function buildChecks(
   progress.heartbeat('timeline_orphans');
   const { timelineOrphansCheck } = await import('./doctor/checks/timeline-orphans.ts');
   checks.push(await timelineOrphansCheck(engine));
+  progress.heartbeat('slug_collisions');
+  const { slugCollisionsCheck } = await import('./doctor/checks/slug-collisions.ts');
+  checks.push(await slugCollisionsCheck(engine));
 
   // 10. Integrity sample scan (v0.13 knowledge runtime).
   // Read-only — no network, no writes, no resolver calls. Samples the first

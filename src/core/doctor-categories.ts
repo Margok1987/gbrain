@@ -117,6 +117,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'flagged_pages',
   'salience_health',
   'scraper_junk_pages',
+  'slug_collisions',
   'source_config_shape',
   'source_routing_health',
   'stale_mentions',
