@@ -990,6 +990,10 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   // reference to trip on, and every reader treats NULL as an unclaimed legacy
   // row (never import-deleted).
   'tags.tag_source',
+  // #5254 (migration v182) — unbound-source page classification. Column-only
+  // and nullable; no index in either schema blob references it, and every
+  // reader treats NULL as an ordinary page.
+  'pages.database_only_reason',
 ]);
 
 test('every ALTER TABLE ADD COLUMN in MIGRATIONS is covered by applyForwardReferenceBootstrap (column-only class)', async () => {
