@@ -27,7 +27,7 @@ import { embedMultimodal, currentEmbeddingSignature } from './embedding.ts';
 import { embedBatchWithBackoff } from './embed-retry.ts';
 import { slugifyPath, slugifyCodePath, isCodeFilePath, hasMalformedPathSegment } from './sync.ts';
 import type { ChunkInput, PageInput, PageType } from './types.ts';
-import { computeEffectiveDate, fallbackCreatedAt } from './effective-date.ts';
+import { computeEffectiveDate, fallbackCreatedAt, isValidTimeZone } from './effective-date.ts';
 import { MARKDOWN_CHUNKER_VERSION } from './chunkers/recursive.ts';
 import { logSlugFallback } from './audit-slug-fallback.ts';
 import { resolveContextualRetrievalMode } from './contextual-retrieval-resolver.ts';
@@ -903,6 +903,7 @@ export async function importFromContent(
   // for single-source callers.
   const txOpts = { sourceId: sourceId ?? 'default' };
   let persistedProjection: ProjectionSnapshot | null = null;
+  const timeZone = await loadBrainTimeZone(engine);
   const applyPrepared = async (tx: BrainEngine) => {
     await assertImportBase(tx, slug, txOpts.sourceId, existing);
     await assertPreparedFactWithdrawals(tx, txOpts.sourceId, parsed.compiled_truth, parsed.timeline || '', slug);
@@ -921,6 +922,7 @@ export async function importFromContent(
       slug,
       frontmatter: parsed.frontmatter,
       filename: filenameForChain,
+      timeZone,
       updatedAt: existing?.updated_at ?? nowDate,
       createdAt: fallbackCreatedAt({ existing, fileTimes: opts.fileTimes, now: nowDate }),
     });
@@ -2235,6 +2237,16 @@ export async function importImageFile(
   await withImportTransaction(engine, spec);
 
   return { slug: imageSlug, status: 'imported', chunks: 1 };
+}
+
+let warnedBrainTimeZone = false;
+/** `brain.timezone` (IANA) for offset-less frontmatter datetimes; unset or invalid reads them as UTC. */
+async function loadBrainTimeZone(engine: BrainEngine): Promise<string | undefined> {
+  const configured = (await engine.getConfig('brain.timezone').catch(() => null))?.trim();
+  if (!configured || isValidTimeZone(configured)) return configured || undefined;
+  if (!warnedBrainTimeZone) process.stderr.write(`[import] invalid brain.timezone "${configured}"; reading naive datetimes as UTC\n`);
+  warnedBrainTimeZone = true;
+  return undefined;
 }
 
 /** Used by sync.isSyncable + import.ts walker. */

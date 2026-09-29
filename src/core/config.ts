@@ -1467,6 +1467,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // #4348: IANA timezone that owns the dream-cycle calendar day (summary
   // bucketing). Unset → host timezone → UTC. Validated at set time.
   'cycle.timezone',
+  // A11: IANA timezone for offset-less frontmatter datetimes in effective_date.
+  // Unset → UTC (date-only values are always UTC calendar dates). Validated at set time.
+  'brain.timezone',
   'cycle.grade_takes.write_gstack_learnings',
   // #4102: off switch for the propose_takes LLM phase (default ON; the
   // phase ships in the default list). Read by src/core/cycle/propose-takes.ts.
