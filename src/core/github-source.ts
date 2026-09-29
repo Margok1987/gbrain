@@ -217,8 +217,9 @@ export class AppTokenProvider implements GitHubTokenProvider {
     return this.refresh();
   }
 
+  // A refresh re-mints for the installation first resolved (and pinned), never a newly discovered one.
   async refresh(): Promise<string> {
-    this.cached = await mintAppInstallationToken(this.app, this.fetchImpl);
+    this.cached = await mintAppInstallationToken({ ...this.app, installId: this.app.installId ?? this.cached?.installationId }, this.fetchImpl);
     return this.cached.token;
   }
 }

@@ -368,7 +368,10 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       if (!prior && await unchangedSyncImport(engine, cursor, pending, config)) {
         const skipped: Cursor = { ...cursor, index: cursor.index + 1, counts: { ...cursor.counts } }; delete skipped.pending;
         cursor = await saveCursor(engine, key, cursor, skipped);
+        opts.onProgress?.({ phase: 'managed_sync.page_committed', bankedFiles: cursor.index });
         assertActive();
+        // A skipped entry still counts toward the caller's slice, so a sliced run yields at the same positions.
+        if (slice && (cursor.index - sliceFirstIndex >= slice.maxPages || performance.now() - sliceStarted >= slice.maxMs)) return result(cursor, 'partial', 'writer_yield');
         continue;
       }
       const admitting = cursor;
@@ -470,7 +473,8 @@ async function unchangedSyncImport(engine: BrainEngine, cursor: Cursor, pending:
     const prepared = await prepareManagedSyncMutation(engine, row, config);
     if (prepared.file || prepared.target === 'skill_bundle') return false;
     const file = { root: cursor.root, path: join(cursor.root, intent.path), content: intent.content };
-    if ((await inspectUnchanged(engine, { prepared: { ...prepared, target: 'page', file }, snapshot, sourcePath: intent.sourcePath, databaseOnly: false })).admitReason) return false;
+    if ((await inspectUnchanged(engine, { prepared: { ...prepared, target: 'page', file }, snapshot, sourcePath: intent.sourcePath, databaseOnly: false,
+      embeddingRequested: !prepared.deferEmbedding && !config.embedding_disabled && !!config.embedding_model?.trim() })).admitReason) return false;
     await prepared.validate?.(engine);
     return true;
   } catch {

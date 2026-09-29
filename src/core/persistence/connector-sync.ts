@@ -34,7 +34,7 @@ import { connectorAccountChanged, CONNECTOR_INTENT_OUTDATED_OLD_HOST, CONNECTOR_
 import { inspectUnchanged, screeningRequest } from './noop-kernel.ts';
 import { readJournalLimits } from './limits.ts';
 import { withCoordinatedWrite } from './context.ts';
-import { CONNECTOR_V2_CUTOFF_CONFIG_KEY } from './connector-checkpoint-migration.ts';
+import { readConnectorV2Cutoff } from './connector-checkpoint-migration.ts';
 import type { GoogleSourceConfig } from '../google/types.ts';
 
 interface ConnectorLease { handle: DbLockHandle; signal: AbortSignal; }
@@ -172,7 +172,7 @@ export async function beginConnectorSync(engine: BrainEngine, sourceId: string, 
   else authority.writer.databaseOnlyReason = 'connector_database';
   const canonicalRoot = connectorBindingRoot(sourceId, source, binding);
   const session = new ManagedConnectorSync(engine, sourceId, identity, source, authority, binding, canonicalRoot, opts.noEmbed === true, opts.noSchemaPack === true,
-    opts.retryFailed === true, lease, opts.resetCheckpoint === true);
+    opts.retryFailed === true, lease, opts.resetCheckpoint === true, opts.githubItem !== undefined);
   await session.load();
   return session;
 }
@@ -236,6 +236,7 @@ export class ManagedConnectorSync {
   private pendingRows = new Map<string, PendingWrite>();
   private failedPending: ConnectorPendingEntry[] = [];
   private reseen = new Set<string>();
+  private reseenItems = new Set<string>();
   private connectorState!: ConnectorState;
   private waitCharged = 0;
   private outstandingCap = 90;
@@ -252,7 +253,7 @@ export class ManagedConnectorSync {
   constructor(private engine: BrainEngine, readonly sourceId: string, private identity: ConnectorIdentity,
     private source: ConnectorSource, private authority: SyncAuthority, private binding: WorktreeBinding | null,
     private canonicalRoot: string | null, private noEmbed: boolean, private noSchemaPack: boolean, private retryFailed = false,
-    private lease?: ConnectorLease, private resetRequested = false) {
+    private lease?: ConnectorLease, private resetRequested = false, private targeted = false) {
     this.connector = identity.kind;
     this.checkpointKey = connectorCheckpointKey(sourceId, source.incarnation, identity);
   }
@@ -305,10 +306,7 @@ export class ManagedConnectorSync {
       let row = await getWriteRequest(this.engine, principal, entry.requestId);
       if (row && entry.itemRef === CHECKPOINT_SLUG && !isTerminal(row)) row = await this.budgetedWait(row, connectorWaitBudget.ms);
       if (!row || row.state === 'committed') continue;
-      if (entry.itemRef === CHECKPOINT_SLUG) {
-        if (!isTerminal(row)) { this.carried.push(entry); this.blockedByCheckpoint = true; }
-        continue;
-      }
+      if (entry.itemRef === CHECKPOINT_SLUG && !isTerminal(row)) { this.carried.push(entry); this.blockedByCheckpoint = true; continue; }
       if (!isTerminal(row)) { this.pendingRows.set(row.id, { entry, row, bytes: 0 }); continue; }
       this.autoRetry.add(entry.baseRequestId);
       this.carried.push(entry);
@@ -468,7 +466,9 @@ export class ManagedConnectorSync {
    */
   async saveState(state: unknown, fresh = false, newestContentAt?: string): Promise<void> {
     await this.drainPending();
-    if (this.pendingRows.size || this.failedPending.length) { this.deferred = true; this.lastSaveCommitted = false; return; }
+    // A targeted refresh must not move the cursor past a carried failure it did not revisit.
+    const blocked = this.targeted && this.unreachedCarried().some(entry => entry.itemRef !== CHECKPOINT_SLUG);
+    if (this.pendingRows.size || this.failedPending.length || blocked) { this.deferred = true; this.lastSaveCommitted = false; return; }
     if (this.checkpoint.length && digest((this.checkpoint[0] as { state?: unknown }).state ?? null) === digest(state ?? null)) {
       if (fresh) await this.stampFreshness(newestContentAt);
       this.receipts = [];
@@ -481,6 +481,10 @@ export class ManagedConnectorSync {
     this.checkpoint = next;
     this.receipts = [];
     this.lastSaveCommitted = true;
+  }
+  /** Carried pending entries this run has not re-submitted, by request identity or by item. */
+  private unreachedCarried(): ConnectorPendingEntry[] {
+    return this.carried.filter(entry => !this.reseen.has(entry.baseRequestId) && !this.reseenItems.has(entry.itemRef));
   }
   /** E-D4: the freshness a skipped checkpoint save would have stamped, guarded by the lease and the source incarnation. */
   private async stampFreshness(newestContentAt?: string): Promise<void> {
@@ -561,9 +565,12 @@ export class ManagedConnectorSync {
     const now = new Date().toISOString();
     const outstanding = [...this.pendingRows.values()].map(pending => pending.entry);
     const complete = this.lastSaveCommitted && !outstanding.length && !this.failedPending.length && !this.stopped;
-    // After a complete sweep, a failed item the re-walk never reached was deleted upstream.
-    const unresolved = complete ? [] : this.carried.filter(entry => !this.reseen.has(entry.baseRequestId));
-    if (complete) this.counts.dropped_upstream += this.carried.filter(entry => !this.reseen.has(entry.baseRequestId)).length;
+    // After a complete, fully enumerated sweep, a failed item the re-walk never reached was deleted upstream.
+    // A targeted refresh (one GitHub item) enumerates nothing else, so it keeps every carried entry.
+    const unreached = this.unreachedCarried();
+    const dropUnreached = complete && !this.targeted;
+    const unresolved = dropUnreached ? [] : unreached;
+    if (dropUnreached) this.counts.dropped_upstream += unreached.filter(entry => entry.itemRef !== CHECKPOINT_SLUG).length;
     const pending = [...new Map([...unresolved, ...this.failedPending, ...outstanding].map(entry => [entry.requestId, entry])).values()];
     if (pending.length || this.stopped) this.deferred = true;
     const recovery = this.connectorState.upgrade_recovery === 'rewalking_once' && complete ? 'none' : this.connectorState.upgrade_recovery;
@@ -631,7 +638,8 @@ export class ManagedConnectorSync {
     const principal = this.authority.writer.principal;
     const baseRequestId = stableId({ principal, sourceId: this.sourceId, incarnation: this.source.incarnation, callerIntent });
     const page = kind === 'connector_v2_import' || kind === 'connector_v2_delete';
-    if (page) this.reseen.add(baseRequestId);
+    this.reseen.add(baseRequestId);
+    this.reseenItems.add(slug);
     const admission = (retry?: ConnectorRetry) => {
       const link = retry ? { retryBase: baseRequestId, retryOf: retry.retryOf, retryAttempt: retry.attempt } : {};
       return { principal, requestId: retry?.requestId ?? baseRequestId, operation: 'submit_job', sourceId: this.sourceId,
@@ -853,8 +861,8 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
  * admitted after it names the connector host that still needs upgrading.
  */
 export async function prepareOutdatedConnectorMutation(engine: BrainEngine, row: WriteRequest): Promise<PreparedMutation> {
-  const [cutoff] = await engine.executeRaw<{ value: string }>('SELECT value FROM config WHERE key=$1', [CONNECTOR_V2_CUTOFF_CONFIG_KEY]);
-  const preUpgrade = cutoff !== undefined && new Date(row.created_at).getTime() < new Date(cutoff.value).getTime();
+  const cutoff = await readConnectorV2Cutoff(engine);
+  const preUpgrade = cutoff !== null && new Date(row.created_at).getTime() < new Date(cutoff).getTime();
   throw new OperationError('connector_intent_outdated', preUpgrade ? CONNECTOR_INTENT_OUTDATED_PRE_UPGRADE : CONNECTOR_INTENT_OUTDATED_OLD_HOST);
 }
 

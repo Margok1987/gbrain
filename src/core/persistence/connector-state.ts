@@ -71,9 +71,11 @@ export async function readManagedConnectorState(engine: Pick<BrainEngine, 'execu
  */
 export async function writeManagedConnectorState(engine: Pick<BrainEngine, 'executeRaw'>, sourceId: string, incarnation: string, state: ConnectorState,
   lease?: { id: string; token: string; acquiredAt: string }): Promise<boolean> {
-  const rows = await engine.executeRaw<{ op: string }>(`INSERT INTO op_checkpoints(op,fingerprint,completed_keys)
-    SELECT $1,$2,$3::text::jsonb WHERE $4::text IS NULL OR EXISTS (SELECT 1 FROM gbrain_cycle_locks
-      WHERE id=$4 AND acquisition_token=$5::uuid AND extract(epoch from acquired_at)::text=$6 AND ttl_expires_at>now())
+  // FOR SHARE holds the lease row for this statement: a concurrent takeover waits, and one already made fails the match.
+  const rows = await engine.executeRaw<{ op: string }>(`WITH lease AS (SELECT id FROM gbrain_cycle_locks
+      WHERE id=$4 AND acquisition_token=$5::uuid AND extract(epoch from acquired_at)::text=$6 AND ttl_expires_at>now() FOR SHARE)
+    INSERT INTO op_checkpoints(op,fingerprint,completed_keys)
+    SELECT $1,$2,$3::text::jsonb WHERE $4::text IS NULL OR EXISTS (SELECT 1 FROM lease)
     ON CONFLICT(op,fingerprint) DO UPDATE SET completed_keys=EXCLUDED.completed_keys,updated_at=now() RETURNING op`,
   [CONNECTOR_STATE_OP, connectorStateKey(sourceId, incarnation), JSON.stringify([state]), lease?.id ?? null, lease?.token ?? null, lease?.acquiredAt ?? null]);
   return rows.length > 0;

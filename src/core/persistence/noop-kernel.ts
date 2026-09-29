@@ -9,7 +9,8 @@
  * skipped only when:
  *   - the prepared mutation is a no-op and observed the snapshot revision,
  *   - no projection work is pending (safe-chunk re-seal, text projection behind
- *     the knowledge revision, or an embedded page with no contextual mode),
+ *     the knowledge revision, an embedded page with no contextual mode, or
+ *     unembedded chunks when the publication would queue embedding),
  *   - no metadata work is pending (the stored source path differs),
  *   - the page exists and is not deleted, and
  *   - the page has no canonical file by design (database-only), or the local
@@ -45,23 +46,28 @@ export function screeningRequest(fields: Pick<WriteRequest, 'source_id' | 'sourc
 
 export async function inspectUnchanged(engine: Pick<BrainEngine, 'executeRaw'>, input: {
   prepared: PreparedMutation; snapshot: PageSnapshot | null; sourcePath: string | null; databaseOnly: boolean;
+  /** The publication would queue an embedding effect: a page with unembedded chunks is then not skipped. */
+  embeddingRequested?: boolean;
 }): Promise<NoopKernelResult> {
   const { prepared, snapshot } = input;
   const observedRevision = prepared.observedRevision ?? null;
+  const unchanged = prepared.noop === true || prepared.contentUnchanged === true;
   const result = (reason?: NoopKernelResult['admitReason'], flags: Partial<NoopKernelResult> = {}): NoopKernelResult => ({
-    contentUnchanged: prepared.noop === true, projectionWorkRequired: false, metadataWorkRequired: false, observedRevision, ...flags,
+    contentUnchanged: unchanged, projectionWorkRequired: false, metadataWorkRequired: false, observedRevision, ...flags,
     ...(reason ? { admitReason: reason } : {}) });
   if (!snapshot) return result('page_missing');
   if (snapshot.page.deleted_at != null) return result('page_deleted');
-  if (prepared.noop !== true) return result('content_changed');
+  if (!unchanged) return result('content_changed');
   if (observedRevision !== snapshot.revision) return result('revision_moved');
   const [page] = await engine.executeRaw<{ chunker_version: number | null; text_projection_revision: string | null; knowledge_revision: string;
-    mode_pending: boolean; source_path: string | null }>(`SELECT p.chunker_version,p.text_projection_revision::text,p.knowledge_revision::text,p.source_path,
-      (p.contextual_retrieval_mode IS NULL AND EXISTS (SELECT 1 FROM content_chunks c WHERE c.page_id=p.id AND c.embedding IS NOT NULL)) AS mode_pending
+    mode_pending: boolean; unembedded: boolean; source_path: string | null }>(`SELECT p.chunker_version,p.text_projection_revision::text,p.knowledge_revision::text,p.source_path,
+      (p.contextual_retrieval_mode IS NULL AND EXISTS (SELECT 1 FROM content_chunks c WHERE c.page_id=p.id AND c.embedding IS NOT NULL)) AS mode_pending,
+      EXISTS (SELECT 1 FROM content_chunks c WHERE c.page_id=p.id AND c.embedding IS NULL) AS unembedded
     FROM pages p WHERE p.id=$1 AND p.deleted_at IS NULL`, [snapshot.page.id]);
   if (!page) return result('page_missing');
   const projectionWorkRequired = belowSafeChunkFence(page.chunker_version === null ? null : Number(page.chunker_version))
-    || page.text_projection_revision !== page.knowledge_revision || page.mode_pending === true;
+    || page.text_projection_revision !== page.knowledge_revision || page.mode_pending === true
+    || input.embeddingRequested === true && page.unembedded === true;
   if (projectionWorkRequired) return result('projection_work', { projectionWorkRequired });
   const metadataWorkRequired = input.sourcePath !== null && page.source_path !== input.sourcePath;
   if (metadataWorkRequired) return result('metadata_work', { metadataWorkRequired });

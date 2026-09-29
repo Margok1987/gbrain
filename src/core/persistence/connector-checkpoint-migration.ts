@@ -24,7 +24,12 @@ import { connectorCheckpointKey, connectorIdentity, type ConnectorKind } from '.
 import { CONNECTOR_STATE_OP, connectorStateKey, emptyConnectorState, type ConnectorState } from './connector-state.ts';
 
 type Sql = Pick<BrainEngine, 'executeRaw' | 'transaction' | 'kind'>;
-export const CONNECTOR_V2_CUTOFF_CONFIG_KEY = 'persistence.connector_v2_cutoff';
+/** The database time migration 176 first ran; classifies retired-format connector intents. */
+export const CONNECTOR_MIGRATION_OP = 'managed-connector-migration';
+export async function readConnectorV2Cutoff(engine: Pick<BrainEngine, 'executeRaw'>): Promise<string | null> {
+  const [row] = await engine.executeRaw<{ cutoff: string | null }>("SELECT completed_keys->0->>'cutoff' AS cutoff FROM op_checkpoints WHERE op=$1 AND fingerprint='v2-cutoff'", [CONNECTOR_MIGRATION_OP]);
+  return row?.cutoff ?? null;
+}
 
 interface SourceRow { id: string; incarnation: string; local_path: string | null; config: Record<string, unknown> | string | null; archived: boolean }
 
@@ -42,42 +47,48 @@ export async function loadableConnectorKeys(engine: Pick<BrainEngine, 'executeRa
 
 export interface OrphanCheckpointRow { op: 'managed-connector' | 'managed-connector-retry'; fingerprint: string; updated_at: string }
 
+/** The orphan test for op_checkpoints row `c`; binds loadable keys, before, min age days and the state op from parameter `$first` on. */
+const orphanPredicate = (first: number) => {
+  const [k, b, d, o] = [first, first + 1, first + 2, first + 3].map(n => `$${n}`);
+  return `(
+      ((c.op='managed-connector' AND NOT (c.fingerprint = ANY(${k}::text[])))
+        OR (c.op='managed-connector-retry' AND NOT (COALESCE(c.completed_keys->0->>'checkpointKey','') = ANY(${k}::text[]))))
+      AND NOT EXISTS (SELECT 1 FROM persistence_requests r
+        WHERE (r.state IN ('queued','running','recovering') OR r.recovery IS NOT NULL)
+          AND (r.intent->>'kind' LIKE 'connector\\_v2\\_%' OR r.intent->>'kind' LIKE 'managed\\_connector\\_%')
+          AND (r.intent->>'checkpointKey' = c.fingerprint OR r.intent->>'checkpointKey' = c.completed_keys->0->>'checkpointKey'
+            OR r.request_id::text = c.completed_keys->0->>'requestId'))
+      AND NOT EXISTS (SELECT 1 FROM op_checkpoints s
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.completed_keys->0->'pending','[]'::jsonb)) p
+        JOIN persistence_requests r ON r.request_id::text = p->>'requestId'
+        WHERE s.op=${o} AND (r.intent->>'checkpointKey' = c.fingerprint OR r.intent->>'checkpointKey' = c.completed_keys->0->>'checkpointKey'
+          OR r.request_id::text = c.completed_keys->0->>'requestId'))
+      AND (${b}::text IS NULL OR c.updated_at <= ${b}::text::timestamptz)
+      AND (${d}::integer IS NULL OR c.updated_at < now() - make_interval(days => ${d}::integer)))`;
+};
+
 /**
  * Checkpoint and retry rows no source can load. `before` bounds `updated_at`
  * (the migration start); `minAgeDays` adds the doctor/repair age floor.
  */
 export async function orphanConnectorCheckpoints(engine: Pick<BrainEngine, 'executeRaw'>, opts: { before?: string; minAgeDays?: number; limit?: number } = {}): Promise<OrphanCheckpointRow[]> {
   const loadable = [...(await loadableConnectorKeys(engine)).keys()];
-  return engine.executeRaw<OrphanCheckpointRow>(`
-    WITH referenced AS (
-      SELECT r.intent->>'checkpointKey' AS key, r.request_id::text AS request_id FROM persistence_requests r
-       WHERE (r.state IN ('queued','running','recovering') OR r.recovery IS NOT NULL)
-         AND (r.intent->>'kind' LIKE 'connector\\_v2\\_%' OR r.intent->>'kind' LIKE 'managed\\_connector\\_%')
-      UNION
-      SELECT r.intent->>'checkpointKey', r.request_id::text FROM op_checkpoints s
-        CROSS JOIN LATERAL jsonb_array_elements(COALESCE(s.completed_keys->0->'pending','[]'::jsonb)) p
-        JOIN persistence_requests r ON r.request_id::text = p->>'requestId'
-       WHERE s.op=$4
-    )
-    SELECT c.op, c.fingerprint, c.updated_at::text AS updated_at FROM op_checkpoints c
-     WHERE ((c.op='managed-connector' AND NOT (c.fingerprint = ANY($1::text[]))
-             AND NOT EXISTS (SELECT 1 FROM referenced x WHERE x.key=c.fingerprint))
-         OR (c.op='managed-connector-retry' AND NOT (COALESCE(c.completed_keys->0->>'checkpointKey','') = ANY($1::text[]))
-             AND NOT EXISTS (SELECT 1 FROM referenced x WHERE x.request_id = c.completed_keys->0->>'requestId' OR x.key = c.completed_keys->0->>'checkpointKey')))
-       AND ($2::text IS NULL OR c.updated_at <= $2::text::timestamptz)
-       AND ($3::integer IS NULL OR c.updated_at < now() - make_interval(days => $3::integer))
-     ORDER BY c.op, c.fingerprint
-     LIMIT $5`, [loadable, opts.before ?? null, opts.minAgeDays ?? null, CONNECTOR_STATE_OP, opts.limit ?? 100_000]);
+  return engine.executeRaw<OrphanCheckpointRow>(`SELECT c.op, c.fingerprint, c.updated_at::text AS updated_at FROM op_checkpoints c
+    WHERE c.op IN ('managed-connector','managed-connector-retry') AND ${orphanPredicate(2)}
+    ORDER BY c.op, c.fingerprint LIMIT $1`, [opts.limit ?? 100_000, loadable, opts.before ?? null, opts.minAgeDays ?? null, CONNECTOR_STATE_OP]);
 }
 
-/** Deletes the given orphans, rechecking the predicate per row so a row loaded or touched since planning survives. */
+/**
+ * Deletes the given orphans. Each DELETE re-applies the whole orphan predicate
+ * in the same statement, so a row loaded, touched or newly referenced since
+ * planning survives.
+ */
 export async function deleteOrphanConnectorCheckpoints(engine: Pick<BrainEngine, 'executeRaw'>, rows: OrphanCheckpointRow[], opts: { before?: string; minAgeDays?: number } = {}): Promise<{ checkpoints: number; retries: number }> {
-  const still = new Set((await orphanConnectorCheckpoints(engine, opts)).map(row => `${row.op}\u0000${row.fingerprint}`));
+  const loadable = [...(await loadableConnectorKeys(engine)).keys()];
   const removed = { checkpoints: 0, retries: 0 };
   for (const row of rows) {
-    if (!still.has(`${row.op}\u0000${row.fingerprint}`)) continue;
-    const deleted = await engine.executeRaw<{ op: string }>('DELETE FROM op_checkpoints WHERE op=$1 AND fingerprint=$2 AND updated_at=$3::text::timestamptz RETURNING op',
-      [row.op, row.fingerprint, row.updated_at]);
+    const deleted = await engine.executeRaw<{ op: string }>(`DELETE FROM op_checkpoints c WHERE c.op=$1 AND c.fingerprint=$2 AND c.updated_at=$3::text::timestamptz
+      AND ${orphanPredicate(4)} RETURNING c.op`, [row.op, row.fingerprint, row.updated_at, loadable, opts.before ?? null, opts.minAgeDays ?? null, CONNECTOR_STATE_OP]);
     if (!deleted.length) continue;
     if (row.op === 'managed-connector') removed.checkpoints++; else removed.retries++;
   }
@@ -93,7 +104,8 @@ export interface ConnectorMigrationReport {
 export async function migrateConnectorCheckpoints(engine: Sql, log: (line: string) => void = line => process.stderr.write(`${line}\n`)): Promise<ConnectorMigrationReport> {
   const [clock] = await engine.executeRaw<{ now: string }>('SELECT now()::text AS now');
   const start = clock.now;
-  await engine.executeRaw('INSERT INTO config(key,value) VALUES($1,$2) ON CONFLICT (key) DO NOTHING', [CONNECTOR_V2_CUTOFF_CONFIG_KEY, start]);
+  await engine.executeRaw("INSERT INTO op_checkpoints(op,fingerprint,completed_keys) VALUES($1,'v2-cutoff',$2::text::jsonb) ON CONFLICT (op,fingerprint) DO NOTHING",
+    [CONNECTOR_MIGRATION_OP, JSON.stringify([{ cutoff: start }])]);
   // One statement, bounded by its own timeout; no long transaction around the scan.
   const receipts = await engine.transaction(async tx => {
     await tx.executeRaw("SELECT set_config('statement_timeout','120s',true)");
@@ -107,8 +119,8 @@ export async function migrateConnectorCheckpoints(engine: Sql, log: (line: strin
   });
   const newest = new Map(receipts.map(row => [`${row.source_id}\u0000${row.source_incarnation}`, row]));
   const report: ConnectorMigrationReport = { rekeyed: [], rewalking: [], removed: { checkpoints: 0, retries: 0 } };
+  // Archived sources are migrated too: archive and restore keep the incarnation, so a restore resumes its cursor.
   for (const [key, source] of await loadableConnectorKeys(engine)) {
-    if (source.archived) continue;
     const receipt = newest.get(`${source.id}\u0000${source.incarnation}`);
     // No managed checkpoint yet, or already saved by this release under its stable key.
     if (!receipt || receipt.kind === 'connector_v2_checkpoint') continue;

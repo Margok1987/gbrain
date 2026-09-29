@@ -10,7 +10,7 @@ import { admitWrite, compactWriteReceipts } from '../src/core/persistence/journa
 import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts';
 import { readManagedConnectorState } from '../src/core/persistence/connector-state.ts';
 import { readConnectorSourceStatuses } from '../src/core/persistence/connector-status.ts';
-import { migrateConnectorCheckpoints, CONNECTOR_V2_CUTOFF_CONFIG_KEY } from '../src/core/persistence/connector-checkpoint-migration.ts';
+import { migrateConnectorCheckpoints, CONNECTOR_MIGRATION_OP } from '../src/core/persistence/connector-checkpoint-migration.ts';
 import { connectorCheckpointKey, connectorIdentity } from '../src/core/persistence/connector-identity.ts';
 import { preparePersistedMutation } from '../src/core/persistence/service.ts';
 import { checkConnectorCheckpoints } from '../src/commands/doctor/checks/connector-checkpoints.ts';
@@ -105,6 +105,16 @@ test('account pin: a GitHub App without an install id that resolves a different 
     expect(refused.suggestion).toContain('--app-install 200');
     expect(refused.suggestion).toContain(`gbrain sources archive ${f.id}`);
     expect(await since(engine, f.id, before)).toHaveLength(0);
+    // A token refresh re-mints for the installation first resolved, never a newly discovered one.
+    const { AppTokenProvider } = await import('../src/core/github-source.ts');
+    installation = 100;
+    const minted: string[] = [];
+    const provider = new AppTokenProvider(parseGitHubSourceConfig(config, f.dir).app!, async (url: string, init?: RequestInit) => { minted.push(new URL(url).pathname); return fetcher(url); });
+    await provider.getToken();
+    installation = 200;
+    await provider.refresh().catch(() => {});
+    expect(provider.installationId).toBe(100);
+    expect(minted.filter(path => path.endsWith('/access_tokens'))).toEqual(['/app/installations/100/access_tokens', '/app/installations/100/access_tokens']);
     // Moving the PEM keeps the identity; the pin still decides.
     installation = 100;
     const moved = join(home, `moved-${randomUUID().slice(0, 8)}.pem`);
@@ -207,7 +217,13 @@ test('pending set: a pending write that later fails is re-fetched under a new re
     await engine.executeRaw("UPDATE persistence_worktrees SET state='active' WHERE id=$1::uuid", [f.binding.worktree_id]);
     startPersistenceConsumer(engine, { engine: engine.kind });
     expect((await waitForWrite(engine, accepted, { engine: engine.kind }, 20_000)).state).toBe(outcome === 'fails' ? 'conflict' : 'committed');
-    if (outcome === 'fails') rmSync(path);
+    if (outcome === 'fails') {
+      rmSync(path);
+      // A targeted refresh of a different item enumerates nothing else, so it keeps the failed entry for its own retry.
+      await disposePersistenceConsumer(engine);
+      await runGitHubSync(engine, f.id, parseGitHubSourceConfig(githubConfig, f.dir), { ...options, githubItem: { repo: 'acme-example/app', number: 2, kind: 'issue', deleted: true } }, githubFetch());
+      expect((await connectorPendingSet(engine, f.id)).map(pending => pending.requestId)).toEqual([accepted.request_id]);
+    }
     await disposePersistenceConsumer(engine);
     const before = await mark(engine, f.id);
     expect((await run()).status).not.toBe('partial');
@@ -271,9 +287,9 @@ test('mixed versions: a retired managed_connector_* intent fails connector_inten
     await google(engine, f, fetcher);
     const [template] = await engine.executeRaw<WriteRequest>("SELECT * FROM persistence_requests WHERE source_id=$1 AND intent->>'kind'='connector_v2_import' LIMIT 1", [f.id]);
     await disposePersistenceConsumer(engine);
-    await engine.executeRaw('DELETE FROM config WHERE key=$1', [CONNECTOR_V2_CUTOFF_CONFIG_KEY]);
+    await engine.executeRaw("DELETE FROM op_checkpoints WHERE op=$1 AND fingerprint='v2-cutoff'", [CONNECTOR_MIGRATION_OP]);
     const cutoff = phase === 'pre_upgrade' ? "now()+interval '1 hour'" : "now()-interval '1 hour'";
-    await engine.executeRaw(`INSERT INTO config(key,value) VALUES($1,(${cutoff})::text)`, [CONNECTOR_V2_CUTOFF_CONFIG_KEY]);
+    await engine.executeRaw(`INSERT INTO op_checkpoints(op,fingerprint,completed_keys) VALUES($1,'v2-cutoff',jsonb_build_array(jsonb_build_object('cutoff',(${cutoff})::text)))`, [CONNECTOR_MIGRATION_OP]);
     const intent = { ...template.intent, kind: 'managed_connector_import', checkpointKey: 'legacy-raw-config-key' };
     const row = await admitWrite(engine, { requestId: randomUUID(), operation: 'submit_job', sourceId: f.id, sourceIncarnation: template.source_incarnation,
       slug: template.slug, pageId: template.page_id, worktreeId: template.worktree_id ?? undefined, principal: { kind: template.principal_kind, id: template.principal_id },
@@ -309,12 +325,12 @@ async function legacyCheckpoint(engine: BrainEngine, f: { id: string }, key: str
 
 test('migration 176: re-keys the newest committed checkpoint, re-walks a compacted one once, removes orphans, keeps referenced and newer rows, and a rerun changes nothing', async () => withEnv(env, async () => {
   for (const engine of engines) {
-    const live = await source(engine, googleConfig), compacted = await source(engine, googleConfig);
+    const live = await source(engine, googleConfig), compacted = await source(engine, googleConfig), archived = await source(engine, googleConfig);
     const { fetcher, calls } = people(() => [contact('first', 'First Example')]);
-    await google(engine, live, fetcher); await google(engine, compacted, fetcher);
+    await google(engine, live, fetcher); await google(engine, compacted, fetcher); await google(engine, archived, fetcher);
     await disposePersistenceConsumer(engine);
-    // Pretend both sources were last checkpointed by a pre-upgrade binary under raw-config keys.
-    for (const f of [live, compacted]) {
+    // Pretend the sources were last checkpointed by a pre-upgrade binary under raw-config keys.
+    for (const f of [live, compacted, archived]) {
       await engine.executeRaw("DELETE FROM op_checkpoints WHERE op IN ('managed-connector','managed-connector-state') AND fingerprint IN ($1,$2)",
         [connectorCheckpointKey(f.id, await incarnation(engine, f.id), connectorIdentity('google', googleConfig, f.dir)), '']);
       await engine.executeRaw("DELETE FROM op_checkpoints WHERE op='managed-connector-state'");
@@ -323,6 +339,10 @@ test('migration 176: re-keys the newest committed checkpoint, re-walks a compact
     await legacyCheckpoint(engine, live, `legacy-older-${randomUUID()}`, { contacts_sync_token: 'older-token' });
     await legacyCheckpoint(engine, live, liveKey, { contacts_sync_token: 'legacy-token' });
     await legacyCheckpoint(engine, compacted, `legacy-compacted-${randomUUID()}`, { contacts_sync_token: 'lost-token' }, true);
+    await legacyCheckpoint(engine, archived, `legacy-archived-${randomUUID()}`, { contacts_sync_token: 'archived-token' });
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+    await engine.executeRaw('UPDATE sources SET archived=true WHERE id=$1', [archived.id]);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
     const orphan = `legacy-orphan-${randomUUID()}`, newer = `legacy-newer-${randomUUID()}`, referenced = `legacy-referenced-${randomUUID()}`;
     await engine.executeRaw("INSERT INTO op_checkpoints(op,fingerprint,completed_keys,updated_at) VALUES('managed-connector',$1,'[]'::jsonb,now()-interval '9 days'),('managed-connector',$2,'[]'::jsonb,now()+interval '1 hour'),('managed-connector',$3,'[]'::jsonb,now()-interval '9 days')", [orphan, newer, referenced]);
     await engine.executeRaw("INSERT INTO op_checkpoints(op,fingerprint,completed_keys,updated_at) VALUES('managed-connector-retry',$1,$2::text::jsonb,now()-interval '9 days')",
@@ -333,7 +353,10 @@ test('migration 176: re-keys the newest committed checkpoint, re-walks a compact
       callerIntent: { ...template.intent, kind: 'managed_connector_import', checkpointKey: referenced }, intent: { ...template.intent, kind: 'managed_connector_import', checkpointKey: referenced } } as never);
     const lines: string[] = [];
     const report = await migrateConnectorCheckpoints(engine, line => lines.push(line));
-    expect(report.rekeyed.map(row => row.source_id)).toEqual([live.id]);
+    expect(report.rekeyed.map(row => row.source_id).sort()).toEqual([live.id, archived.id].sort());
+    // An archived source keeps its cursor under the stable key, so a restore resumes it.
+    const archivedKey = connectorCheckpointKey(archived.id, await incarnation(engine, archived.id), connectorIdentity('google', googleConfig, archived.dir));
+    expect(await engine.executeRaw("SELECT fingerprint FROM op_checkpoints WHERE op='managed-connector' AND fingerprint=$1", [archivedKey])).toHaveLength(1);
     expect(report.rewalking).toEqual([compacted.id]);
     expect(lines.join('\n')).toContain(`${live.id}: resumed from pre-upgrade checkpoint of`);
     expect(lines.join('\n')).toContain(`to re-walk: gbrain sync --source ${live.id} --reset-checkpoint`);
@@ -425,6 +448,8 @@ test('#5470 connector kernel: a safe-chunk reseal, projection lag, a pending con
     expect(await inspectUnchanged(engine, { prepared, snapshot, sourcePath: `${slug}.md`, databaseOnly: false })).toMatchObject({ admitReason: 'projection_work', projectionWorkRequired: true });
     await engine.executeRaw('UPDATE pages SET chunker_version=4 WHERE source_id=$1 AND slug=$2', [f.id, slug]);
     expect((await inspectUnchanged(engine, { prepared, snapshot, sourcePath: `${slug}.md`, databaseOnly: false })).admitReason).toBeUndefined();
+    // A publication that would queue embedding is not skipped while chunks lack vectors.
+    expect(await inspectUnchanged(engine, { prepared, snapshot, sourcePath: `${slug}.md`, databaseOnly: false, embeddingRequested: true })).toMatchObject({ admitReason: 'projection_work' });
     // An embedded page without a contextual mode awaits the contextual-mode repair: never skipped.
     const vector = `[${Array(1536).fill(0.01).join(',')}]`;
     await engine.executeRaw('UPDATE content_chunks SET embedding=$2::text::vector WHERE page_id=(SELECT id FROM pages WHERE source_id=$1 AND slug=$3)', [f.id, vector, slug]);

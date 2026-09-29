@@ -28,6 +28,8 @@ interface PreparedMutationBase {
   observedRevision: string | null;
   additionalPageKeys?: readonly {sourceId:string;slug:string}[];
   noop?: boolean;
+  /** #5470 screening only: the content is unchanged, but publication still runs (and queues effects). */
+  contentUnchanged?: boolean;
   deferEmbedding?: boolean;
   /** Why a page write bound to a worktree publishes no file (receipt `write_through.skipped`). */
   databaseOnlyReason?: 'db_only';
