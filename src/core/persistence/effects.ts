@@ -380,20 +380,24 @@ export async function runPersistenceEffects(engine: BrainEngine, config: GBrainC
   // lock while they wait for it.
   const probes = new Map<string, Promise<boolean>>();
   const deferred: { effect: PersistenceEffect; binding: WorktreeBinding; hardened: Promise<boolean> }[] = [];
-  while (attempted < limit && !opts.signal?.aborted) {
-    const effect = await claimPersistenceEffect(engine, opts.hostId);
-    if (!effect) break;
-    attempted++;
-    let binding: WorktreeBinding | null = null;
-    try {
-      if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) binding = await getWorktreeBinding(engine, effect.source_id, opts.hostId);
-    } catch (error) { await recordFailure(engine, effect, error, opts.signal); continue; }
-    if (effect.kind === 'git' && binding?.local_path) {
-      const root = binding.local_path;
-      if (!probes.has(root)) probes.set(root, isDurabilityHardenedAsync(root));
-      deferred.push({ effect, binding, hardened: probes.get(root)! });
-    } else await run(effect, binding);
+  // A deferred effect that requeues itself (a page walk advancing its cursor,
+  // or work unblocked by an earlier effect) is claimable again after the flush.
+  for (;;) {
+    while (attempted < limit && !opts.signal?.aborted) {
+      const effect = await claimPersistenceEffect(engine, opts.hostId);
+      if (!effect) break;
+      attempted++;
+      let binding: WorktreeBinding | null = null;
+      try {
+        if (effect.worktree_id && !['embedding', 'facts-backstop'].includes(effect.kind)) binding = await getWorktreeBinding(engine, effect.source_id, opts.hostId);
+      } catch (error) { await recordFailure(engine, effect, error, opts.signal); continue; }
+      if (effect.kind === 'git' && binding?.local_path) {
+        const root = binding.local_path;
+        if (!probes.has(root)) probes.set(root, isDurabilityHardenedAsync(root));
+        deferred.push({ effect, binding, hardened: probes.get(root)! });
+      } else await run(effect, binding);
+    }
+    if (!deferred.length) return attempted;
+    for (const { effect, binding, hardened } of deferred.splice(0)) await run(effect, binding, await hardened);
   }
-  for (const { effect, binding, hardened } of deferred) await run(effect, binding, await hardened);
-  return attempted;
 }
