@@ -2590,89 +2590,94 @@ export async function hybridSearchCached(
       metadata_boost_gate: normalizeMetadataBoostGate(opts?.metadataBoostGate),
     },
   });
-  const mergedCfgCached = await loadConfigWithEngine(engine).catch(() => null);
-  const cfgCached = mergedCfgCached ?? ((await import('../config.ts')).loadConfig()) ?? { engine: 'pglite' as const };
-  const resolvedColCached = resolveEmbeddingColumn(opts, cfgCached);
-  const isNonDefaultColumn = !isCacheSafe(resolvedColCached, cfgCached);
+  // Result caching is off (semanticResultCacheAvailable() === false): skip the
+  // key/config setup entirely so the wrapper costs no round-trips of its own.
+  const semanticCache = semanticResultCacheAvailable() ? await (async () => {
+    const mergedCfgCached = await loadConfigWithEngine(engine).catch(() => null);
+    const cfgCached = mergedCfgCached ?? ((await import('../config.ts')).loadConfig()) ?? { engine: 'pglite' as const };
+    const resolvedColCached = resolveEmbeddingColumn(opts, cfgCached);
+    const isNonDefaultColumn = !isCacheSafe(resolvedColCached, cfgCached);
 
-  // wave-g (#4415): classify ONCE with the brain's `search.intent_patterns`
-  // applied (loadEngineIntentPatterns is per-engine + TTL-cached) so the
-  // det=/sal=/rec= key parts reflect the SAME classification bare
-  // hybridSearch resolves. Pre-fix, det= was computed via the pattern-less
-  // global classifier, so a fresh process keyed its first cache row under a
-  // pattern-less detail while the stored results used the pattern-aware one.
-  const intentStateForCache = await loadEngineIntentPatterns(engine);
-  const cacheSuggestions = classifyQuery(query, intentStateForCache.banks);
+    // wave-g (#4415): classify ONCE with the brain's `search.intent_patterns`
+    // applied (loadEngineIntentPatterns is per-engine + TTL-cached) so the
+    // det=/sal=/rec= key parts reflect the SAME classification bare
+    // hybridSearch resolves. Pre-fix, det= was computed via the pattern-less
+    // global classifier, so a fresh process keyed its first cache row under a
+    // pattern-less detail while the stored results used the pattern-aware one.
+    const intentStateForCache = await loadEngineIntentPatterns(engine);
+    const cacheSuggestions = classifyQuery(query, intentStateForCache.banks);
 
-  // 2026-08 fix wave (E5b): resolve the adaptive-return gate ONCE for both
-  // the cache key and the (former) skip decision. Adaptive-on calls now
-  // cache — the gate params + the query's resolved intent class fold into
-  // knobsHash (v=27) so gate-off/-on and cross-intent rows never cross-serve.
-  // Known-narrow residual (adversarial review, 2026-09): bare hybridSearch
-  // re-classifies intent for the applied trim, so a `search.intent_patterns`
-  // write (or bank-TTL expiry) landing BETWEEN the two loads can store a set
-  // trimmed under intent X beneath a key claiming intent Y for up to
-  // ttl_seconds — same class as the documented #4356 double-resolution
-  // caveat: cache-only, self-healing, accepted.
-  const adaptiveResolvedForCache = resolveAdaptiveReturn(
-    opts?.adaptiveReturn,
-    adaptiveReturnFromConfig(cfgCached as unknown as Record<string, unknown> | null),
-  );
+    // 2026-08 fix wave (E5b): resolve the adaptive-return gate ONCE for both
+    // the cache key and the (former) skip decision. Adaptive-on calls now
+    // cache — the gate params + the query's resolved intent class fold into
+    // knobsHash (v=27) so gate-off/-on and cross-intent rows never cross-serve.
+    // Known-narrow residual (adversarial review, 2026-09): bare hybridSearch
+    // re-classifies intent for the applied trim, so a `search.intent_patterns`
+    // write (or bank-TTL expiry) landing BETWEEN the two loads can store a set
+    // trimmed under intent X beneath a key claiming intent Y for up to
+    // ttl_seconds — same class as the documented #4356 double-resolution
+    // caveat: cache-only, self-healing, accepted.
+    const adaptiveResolvedForCache = resolveAdaptiveReturn(
+      opts?.adaptiveReturn,
+      adaptiveReturnFromConfig(cfgCached as unknown as Record<string, unknown> | null),
+    );
 
-  // Cache key carries the column + provider so different embedding spaces
-  // never collide on the same `(source_id, query_text)` row.
-  const cacheKnobsHash = knobsHash(resolvedForCache, {
-    embeddingColumn: resolvedColCached.name,
-    embeddingModel: resolvedColCached.embeddingModel,
-    // #2825 — fold the resolved hard-exclude prefix list (defaults ∪
-    // GBRAIN_SEARCH_EXCLUDE ∪ per-call exclude_slug_prefixes, minus
-    // include_slug_prefixes — exactly what the engines' query-build path
-    // resolves) into the cache key so a row written under one exclude
-    // policy can't be served to a lookup under another.
-    hardExcludes: resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes),
-    // #3515 — fold the EFFECTIVE detail level into the cache key. detail
-    // gates dedup, chunk-source filtering, and the compiled_truth boost, so
-    // a `--detail low` write (compiled-truth-only result set) must never be
-    // served to a default `medium` lookup. Resolve auto-detect the same way
-    // bare hybridSearch does (opts.detail ?? pattern-aware suggestion) so an
-    // auto-detected `high` query keys like an explicit `high` one.
-    detail: opts?.detail ?? cacheSuggestions.suggestedDetail,
-    // #4415 (wave-g, v=24) — fold the EFFECTIVE salience/recency modes.
-    // Both reorder the post-fusion result set, and #4415 put the per-call
-    // overrides on the default MCP `search` surface, so a salience:'strong'
-    // write must never serve a salience:'off' lookup of the same query.
-    // Resolved by the SAME chain bare hybridSearch uses (helpers above).
-    salience: resolveEffectiveSalience(opts, cacheSuggestions),
-    recency: resolveEffectiveRecency(opts, cacheSuggestions, resolvedForCache.intentWeighting),
-    // #4415 (wave-g, v=24) — fold the applied intent-pattern config
-    // fingerprint: a `search.intent_patterns` edit changes classification
-    // (and thus results), so it must change the key immediately instead of
-    // serving old-classification rows for the rest of the cache TTL.
-    intentPatterns: intentStateForCache.fingerprint,
-    // Retained storage-key shape; semantic response reuse is disabled below.
-    excludePrivate: opts?.excludePrivate === true,
-    // v=27 (E5b) — the resolved gate + this query's intent class, classified
-    // by the SAME pattern-aware banks bare hybridSearch resolves (above).
-    adaptiveReturn: {
-      enabled: adaptiveResolvedForCache.enabled,
-      entityMax: adaptiveResolvedForCache.entityMax,
-      otherMax: adaptiveResolvedForCache.otherMax,
-      minKeep: adaptiveResolvedForCache.minKeep,
-      intent: cacheSuggestions.intent,
-    },
-  });
+    // Cache key carries the column + provider so different embedding spaces
+    // never collide on the same `(source_id, query_text)` row.
+    const cacheKnobsHash = knobsHash(resolvedForCache, {
+      embeddingColumn: resolvedColCached.name,
+      embeddingModel: resolvedColCached.embeddingModel,
+      // #2825 — fold the resolved hard-exclude prefix list (defaults ∪
+      // GBRAIN_SEARCH_EXCLUDE ∪ per-call exclude_slug_prefixes, minus
+      // include_slug_prefixes — exactly what the engines' query-build path
+      // resolves) into the cache key so a row written under one exclude
+      // policy can't be served to a lookup under another.
+      hardExcludes: resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes),
+      // #3515 — fold the EFFECTIVE detail level into the cache key. detail
+      // gates dedup, chunk-source filtering, and the compiled_truth boost, so
+      // a `--detail low` write (compiled-truth-only result set) must never be
+      // served to a default `medium` lookup. Resolve auto-detect the same way
+      // bare hybridSearch does (opts.detail ?? pattern-aware suggestion) so an
+      // auto-detected `high` query keys like an explicit `high` one.
+      detail: opts?.detail ?? cacheSuggestions.suggestedDetail,
+      // #4415 (wave-g, v=24) — fold the EFFECTIVE salience/recency modes.
+      // Both reorder the post-fusion result set, and #4415 put the per-call
+      // overrides on the default MCP `search` surface, so a salience:'strong'
+      // write must never serve a salience:'off' lookup of the same query.
+      // Resolved by the SAME chain bare hybridSearch uses (helpers above).
+      salience: resolveEffectiveSalience(opts, cacheSuggestions),
+      recency: resolveEffectiveRecency(opts, cacheSuggestions, resolvedForCache.intentWeighting),
+      // #4415 (wave-g, v=24) — fold the applied intent-pattern config
+      // fingerprint: a `search.intent_patterns` edit changes classification
+      // (and thus results), so it must change the key immediately instead of
+      // serving old-classification rows for the rest of the cache TTL.
+      intentPatterns: intentStateForCache.fingerprint,
+      // Retained storage-key shape; semantic response reuse is disabled below.
+      excludePrivate: opts?.excludePrivate === true,
+      // v=27 (E5b) — the resolved gate + this query's intent class, classified
+      // by the SAME pattern-aware banks bare hybridSearch resolves (above).
+      adaptiveReturn: {
+        enabled: adaptiveResolvedForCache.enabled,
+        entityMax: adaptiveResolvedForCache.entityMax,
+        otherMax: adaptiveResolvedForCache.otherMax,
+        minKeep: adaptiveResolvedForCache.minKeep,
+        intent: cacheSuggestions.intent,
+      },
+    });
 
-  // Cache decision: opts.useCache (explicit) wins over global config; global
-  // config wins over mode bundle default. Mode bundle is on for all 3 modes
-  // today; the resolver already folded everything through.
-  const cacheCfg = await loadCacheConfig(engine);
-  const cacheEnabled = resolvedForCache.cache_enabled;
-  const cache = new SemanticQueryCache(engine, {
-    ...cacheCfg,
-    enabled: cacheEnabled,
-    similarityThreshold: resolvedForCache.cache_similarity_threshold,
-    ttlSeconds: resolvedForCache.cache_ttl_seconds,
-  });
+    // Cache decision: opts.useCache (explicit) wins over global config; global
+    // config wins over mode bundle default. Mode bundle is on for all 3 modes
+    // today; the resolver already folded everything through.
+    const cacheCfg = await loadCacheConfig(engine);
+    const cacheEnabled = resolvedForCache.cache_enabled;
+    const cache = new SemanticQueryCache(engine, {
+      ...cacheCfg,
+      enabled: cacheEnabled,
+      similarityThreshold: resolvedForCache.cache_similarity_threshold,
+      ttlSeconds: resolvedForCache.cache_ttl_seconds,
+    });
+    return { cache, cacheKnobsHash, isNonDefaultColumn, providerProbe: resolvedColCached.embeddingModel || undefined };
+  })() : null;
 
   // Skip cache entirely when the request asks for two-pass walks, has
   // a non-default embedding column (per-call or via config default —
@@ -2719,11 +2724,11 @@ export async function hybridSearchCached(
   // Hard availability gate: no persisted result is read or written until
   // every response dependency can be authorized at reuse time.
   const skipCache =
-    !semanticResultCacheAvailable() ||
-    !cache.isEnabled() ||
+    !semanticCache ||
+    !semanticCache.cache.isEnabled() ||
     (opts?.walkDepth ?? 0) > 0 ||
     Boolean(opts?.nearSymbol) ||
-    isNonDefaultColumn ||
+    semanticCache.isNonDefaultColumn ||
     opts?.dedupOpts !== undefined ||
     dateFiltered ||
     typeFiltered ||
@@ -2746,7 +2751,7 @@ export async function hybridSearchCached(
   // sees the already-elapsed budget and fails fast → keyword fallback. Worst
   // case ~one timeout (~6s), comfortably under the CLI 10s force-exit.
   const queryEmbedDl = makeQueryEmbedDeadline();
-  if (!skipCache) {
+  if (semanticCache && !skipCache) {
     try {
       const { isAvailable } = await import('../ai/gateway.ts');
       // v0.36 (D10): for the cache-lookup embedding, also use the resolved
@@ -2754,8 +2759,7 @@ export async function hybridSearchCached(
       // 'embedding' column (skipCache short-circuits non-default above),
       // so this is the default embeddingModel — but threading it keeps
       // the provider probe consistent with the bare hybridSearch path.
-      const providerProbeCached = resolvedColCached.embeddingModel || undefined;
-      if (isAvailable('embedding', providerProbeCached)) {
+      if (isAvailable('embedding', semanticCache.providerProbe)) {
         // v0.35.0.0+: query-side embedding (cache lookup path).
         // v0.42.20.0 (Fix 3) — bounded by the shared deadline; on timeout this
         // throws → caught below → cacheStatus 'disabled' → falls through to the
@@ -2770,8 +2774,8 @@ export async function hybridSearchCached(
     }
   }
 
-  if (!skipCache && queryEmbedding && cacheStatus !== 'disabled') {
-    const hit = await cache.lookup(queryEmbedding, { sourceId: cacheScopeKey(opts), knobsHash: cacheKnobsHash, queryText: query }); // queryText → #1469 text guard
+  if (semanticCache && !skipCache && queryEmbedding && cacheStatus !== 'disabled') {
+    const hit = await semanticCache.cache.lookup(queryEmbedding, { sourceId: cacheScopeKey(opts), knobsHash: semanticCache.cacheKnobsHash, queryText: query }); // queryText → #1469 text guard
     if (hit.hit && hit.results) {
       cacheStatus = 'hit';
       cacheSimilarity = hit.similarity;
@@ -2939,6 +2943,7 @@ export async function hybridSearchCached(
   // queryEmbedding (store() no-ops on null) and vector_enabled=false, so it
   // is uncacheable by construction.
   if (
+    semanticCache &&
     cacheStatus === 'miss' &&
     queryEmbedding &&
     results.length > 0 &&
@@ -2952,10 +2957,10 @@ export async function hybridSearchCached(
     // Stale unreranked rows after a key appears expire within one TTL.
     const isDegraded = (finalMeta.degraded ?? []).some(affectsRecall);
     trackCacheWrite(
-      cache
+      semanticCache.cache
         .store(query, queryEmbedding, results, finalMeta, {
           sourceId: cacheScopeKey(opts),
-          knobsHash: cacheKnobsHash,
+          knobsHash: semanticCache.cacheKnobsHash,
           ...(isDegraded ? { ttlSeconds: DEGRADED_CACHE_TTL_SECONDS } : {}),
         })
         .catch(() => { /* swallow */ }),
