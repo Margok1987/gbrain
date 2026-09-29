@@ -17,6 +17,7 @@ import { testBackends } from './helpers/test-backends.ts';
 import { reviewedWriterIntent } from './helpers/writer-admin-intent.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { makeGitFixture } from './helpers/git-fixture.ts';
+import { loadActivationPendingSourceIds } from '../src/core/sync-policy.ts';
 
 for (const kind of testBackends()) describe(`deliberate onboarding (${kind})`, () => {
   let engine: BrainEngine, close: (() => Promise<void>) | undefined;
@@ -34,6 +35,8 @@ for (const kind of testBackends()) describe(`deliberate onboarding (${kind})`, (
     expect(status.onboarding.sources).toContainEqual(expect.objectContaining({ source_id: 'default', state: 'claim_required' }));
     expect(existsSync(join(persistenceHome(), 'host.json'))).toBe(false);
     expect(existsSync(join(root, PHYSICAL_ROOT_MARKER))).toBe(false);
+    // #5198: autopilot's skip set tracks exactly the window in which sync refuses.
+    expect(await loadActivationPendingSourceIds(engine)).toEqual(new Set());
     const write = () => dispatchToolCall(engine, 'put_page', { slug: 'onboarding-note', content: '---\ntitle: Onboarding example\ntype: note\n---\nA durable example.\n', request_id: randomUUID() }, { remote: false, sourceId: 'default', config: { engine: kind, embedding_disabled: true } });
     if (kind === 'postgres') {
       const refused = await write(); expect(refused.isError).toBe(true);
@@ -49,6 +52,7 @@ for (const kind of testBackends()) describe(`deliberate onboarding (${kind})`, (
     const claimed = await runPersistenceAdministration(engine, 'writer_status', {}) as any;
     expect(claimed.onboarding.sources).toContainEqual(expect.objectContaining({ source_id: 'default', state: 'activation_required' }));
     await expect(performSync(engine, { sourceId: 'default', noEmbed: true, noPull: true })).rejects.toThrow();
+    expect(await loadActivationPendingSourceIds(engine)).toEqual(new Set(['default']));
     const activate = async (params: Record<string, unknown> = {}) => runPersistenceAdministration(engine, 'writer_activate', {
       confirm_quiesced: true, ...params, ...await reviewedWriterIntent(engine, 'writer_activate'),
     });
@@ -74,6 +78,7 @@ for (const kind of testBackends()) describe(`deliberate onboarding (${kind})`, (
     await expect(runPersistenceAdministration(engine, 'writer_activate', { confirm_quiesced: true, cleanup_dead_local_locks: true, ...stale })).rejects.toMatchObject({ code: 'writer_admin_state_changed' });
     expect(await activate({ cleanup_dead_local_locks: true })).toMatchObject({ activated: true });
     expect(await runPersistenceAdministration(engine, 'writer_claim', { source_id: 'default', path: root, dry_run: true })).not.toHaveProperty('activation_required');
+    expect(await loadActivationPendingSourceIds(engine)).toEqual(new Set());
     expect(await engine.executeRaw('SELECT id FROM gbrain_cycle_locks')).toEqual([]);
     const ready = await runPersistenceAdministration(engine, 'writer_status', {}) as any;
     expect(ready.onboarding.sources).toContainEqual(expect.objectContaining({ source_id: 'default', state: 'ready' }));

@@ -49,6 +49,7 @@ import { inspectLock } from '../core/db-lock.ts';
 import { registerCleanup } from '../core/process-cleanup.ts';
 import { loadAllSources, sourceConfigHasRemoteUrl, sourceLocalPathSkipWarning, relativeSourceLocalPathSkipWarning } from '../core/sources-load.ts';
 import { isSyncDisabledConfig } from '../core/sync-policy.ts';
+import { loadActivationPendingSourceIds, skipActivationPendingSync } from '../core/sync-policy.ts';
 import { resolveAutopilotDispatchTimeoutMs } from './autopilot-timeout.ts';
 import {
   autopilotRemediationIdempotencyKey,
@@ -1128,6 +1129,7 @@ export async function runAutopilot(engine: BrainEngine, args: string[]) {
           const { isFederatedV2Enabled } = await import('../core/feature-flags.ts');
           if (await isFederatedV2Enabled(engine)) {
             const sources = await loadAllSources(engine);
+            const activationPending = await loadActivationPendingSourceIds(engine);
             const intervalMs = baseInterval * 1000;
             const now = Date.now();
             for (const src of sources) {
@@ -1136,6 +1138,7 @@ export async function runAutopilot(engine: BrainEngine, args: string[]) {
               // sync (this loop, the full-cycle fan-out, `sync --all`); an
               // explicit `gbrain sync --source <id>` is unaffected.
               if (isSyncDisabledConfig(src.config)) continue;
+              if (skipActivationPendingSync(activationPending, src.id, 'freshness_sync_skipped', jsonMode, (l) => process.stderr.write(l + '\n'))) continue; // #5198
               // A local_path this machine cannot use — relative (#3696: cwd is
               // launchd's, not the registering shell's) or absent on disk and
               // not a managed clone sync can re-create — would sync a phantom
