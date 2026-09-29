@@ -7,7 +7,7 @@ import { assertPageRevision } from './page-state/types.ts';
 import { lockUnheldPageKeys, withHeldPageKeys, type HeldPageKeys } from './page-state/guards.ts';
 import { readPageSnapshot as readCanonicalPageSnapshot } from './page-state/snapshot.ts';
 import { createPageVersion } from './page-state/versions.ts';
-import { recordRenameAlias } from './page-state/rename-alias.ts';
+import { moveSlugBindings, recordRenameAlias } from './page-state/rename-alias.ts';
 import { composablePgliteTransaction } from './page-state/transactions.ts';
 import { dropRowTypeArrayParsers, PgliteStatementCache } from './pglite-statements.ts';
 import { GRANT_COLUMNS_SQL } from './grants/schema.ts';
@@ -76,7 +76,7 @@ import { withVectorSettings } from './search/vector-settings.ts';
 import { PGLITE_SCHEMA_SQL, getPGLiteSchema } from './pglite-schema.ts';
 import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defaults.ts';
 import { readStoredEmbeddingIdentity } from './stored-embedding-identity.ts';
-import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP } from './engine-constants.ts';
+import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP, TRAVERSE_WALK_ROW_CAP } from './engine-constants.ts';
 import { PageMissingError } from './engine-errors.ts';
 import { SOURCE_CONFIG_OBJECT_SQL } from './source-config-sql.ts';
 import { SAFE_FENCE_CHUNKER_VERSION, bodyWriteChunkVersion, chunkWriteInvalidation, currentTextProjectionFilter, requiresSafeChunks, safeChunksFilter } from './search/safe-chunks.ts';
@@ -141,7 +141,6 @@ import type { PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
 import * as salienceImpl from './pglite-engine/salience.ts';
 import type { PgliteSalienceDeps } from './pglite-engine/salience.ts';
 import { searchKeywordCJK } from './pglite-engine/cjk-search.ts';
-import { MOVE_WITHDRAWAL_SUBJECT_SQL } from './facts/withdrawal-schema.ts';
 
 /**
  * #4284 — opt-in out-of-band watchdog for a PGLite disconnect with a live
@@ -2467,7 +2466,7 @@ export class PGLiteEngine implements BrainEngine {
     const innerLimit = Math.min(limit * 3, MAX_SEARCH_LIMIT * 3);
 
     // Source-aware ranking (v0.22): see postgres-engine.ts for rationale.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -2618,7 +2617,7 @@ export class PGLiteEngine implements BrainEngine {
       console.warn(`[gbrain] Warning: search limit clamped from ${opts.limit} to ${MAX_SEARCH_LIMIT}`);
     }
 
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -2778,7 +2777,7 @@ export class PGLiteEngine implements BrainEngine {
 
     // Source-aware ranking applied here too — searchKeywordChunks is the
     // chunk-grain anchor primitive that two-pass retrieval (Layer 7) uses.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     const sourceFactorCase = buildSourceFactorCase('p.slug', boostMap, opts?.detail);
     const hardExcludePrefixes = resolveHardExcludes(opts?.exclude_slug_prefixes, opts?.include_slug_prefixes);
     const hardExcludeClause = buildHardExcludeClause('p.slug', hardExcludePrefixes);
@@ -2869,7 +2868,7 @@ export class PGLiteEngine implements BrainEngine {
     // HNSW; outer SELECT re-ranks by raw_score * source_factor over the
     // narrow candidate pool. innerLimit scales with offset to preserve the
     // pagination contract. See postgres-engine.ts searchVector for rationale.
-    const boostMap = resolveBoostMap();
+    const boostMap = opts?.source_boosts ?? resolveBoostMap();
     // Outer SELECT references the aliased CTE column. Aliasing the CTE as `hc`
     // disambiguates the correlated subquery (`te.page_id = hc.page_id`) from
     // the inner column. Without the alias, an unqualified `page_id` in the
@@ -4291,7 +4290,8 @@ export class PGLiteEngine implements BrainEngine {
            WHERE l2.from_page_id = g.id AND p3.deleted_at IS NULL ${privacy('p3', 'l2')} ${aggScope}),
           '[]'::jsonb
         ) as links
-      FROM graph g
+      FROM (SELECT DISTINCT id, slug, title, type, depth
+            FROM (SELECT id, slug, title, type, depth FROM graph LIMIT ${TRAVERSE_WALK_ROW_CAP}) capped) g
       ORDER BY g.depth, g.slug`,
       params
     );
@@ -4366,15 +4366,18 @@ export class PGLiteEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON l.from_page_id = w.id
           JOIN pages p2 ON p2.id = l.to_page_id
-          WHERE w.depth < $2
+          WHERE w.depth + 1 < $2
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             ${linkTypeWhere}
             ${stepScope}
-        )
-        SELECT w.slug AS from_slug, p2.slug AS to_slug,
+        ),
+        capped AS (SELECT id, slug, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, slug, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               w.slug AS from_slug, p2.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON l.from_page_id = w.id
         JOIN pages p2 ON p2.id = l.to_page_id
         WHERE w.depth < $2
@@ -4394,15 +4397,18 @@ export class PGLiteEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON l.to_page_id = w.id
           JOIN pages p2 ON p2.id = l.from_page_id
-          WHERE w.depth < $2
+          WHERE w.depth + 1 < $2
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             ${linkTypeWhere}
             ${stepScope}
-        )
-        SELECT p2.slug AS from_slug, w.slug AS to_slug,
+        ),
+        capped AS (SELECT id, slug, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, slug, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               p2.slug AS from_slug, w.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON l.to_page_id = w.id
         JOIN pages p2 ON p2.id = l.from_page_id
         WHERE w.depth < $2
@@ -4424,15 +4430,18 @@ export class PGLiteEngine implements BrainEngine {
           FROM walk w
           JOIN links l ON (l.from_page_id = w.id OR l.to_page_id = w.id)
           JOIN pages p2 ON p2.id = CASE WHEN l.from_page_id = w.id THEN l.to_page_id ELSE l.from_page_id END
-          WHERE w.depth < $2
+          WHERE w.depth + 1 < $2
             AND NOT (p2.id = ANY(w.visited))
             AND p2.deleted_at IS NULL ${privacy('p2', 'l')}
             ${linkTypeWhere}
             ${stepScope}
-        )
-        SELECT pf.slug AS from_slug, pt.slug AS to_slug,
+        ),
+        capped AS (SELECT id, depth FROM walk LIMIT ${TRAVERSE_WALK_ROW_CAP + 1}),
+        nodes AS (SELECT DISTINCT id, depth FROM capped)
+        SELECT (SELECT count(*) FROM capped) > ${TRAVERSE_WALK_ROW_CAP} AS walk_truncated,
+               pf.slug AS from_slug, pt.slug AS to_slug,
                l.link_type, l.context, w.depth + 1 AS depth
-        FROM walk w
+        FROM nodes w
         JOIN links l ON (l.from_page_id = w.id OR l.to_page_id = w.id)
         JOIN pages pf ON pf.id = l.from_page_id
         JOIN pages pt ON pt.id = l.to_page_id
@@ -4450,7 +4459,7 @@ export class PGLiteEngine implements BrainEngine {
     const { rows } = await this.db.query(sql, params);
     // Row cap: the LIMIT above fetched CAP + 1 rows; the probe row only tells
     // us the walk overflowed and is dropped with everything past the cap.
-    const truncated = rows.length > TRAVERSE_PATH_ROW_CAP;
+    const truncated = rows.length > TRAVERSE_PATH_ROW_CAP || (rows as Array<{ walk_truncated?: boolean }>).some((r) => r.walk_truncated === true);
     const bounded = (truncated ? rows.slice(0, TRAVERSE_PATH_ROW_CAP) : rows) as Record<string, unknown>[];
     // Dedup edges (same from/to/type/depth can appear via multiple visited paths).
     const seen = new Set<string>();
@@ -4576,8 +4585,8 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   // Tags
-  async addTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
-    return mutatePageTag(this, { sourceId: opts?.sourceId ?? 'default', slug }, tag, true);
+  async addTag(slug: string, tag: string, opts?: { sourceId?: string; tagSource?: 'frontmatter' }): Promise<void> {
+    return mutatePageTag(this, { sourceId: opts?.sourceId ?? 'default', slug }, tag, true, opts?.tagSource);
   }
 
   async removeTag(slug: string, tag: string, opts?: { sourceId?: string }): Promise<void> {
@@ -5835,8 +5844,7 @@ export class PGLiteEngine implements BrainEngine {
       );
       if (moved.length > 0) {
         await recordRenameAlias(tx, sourceId, oldSlug, newSlug);
-        // A forgotten claim stays forgotten for the renamed entity.
-        await tx.executeRaw(MOVE_WITHDRAWAL_SUBJECT_SQL, [sourceId, oldSlug, newSlug]);
+        await moveSlugBindings(tx, sourceId, oldSlug, newSlug);
       }
       // #3056: rows moved — a zero-row UPDATE does not throw, so the count is
       // the only way callers can see the no-op.
