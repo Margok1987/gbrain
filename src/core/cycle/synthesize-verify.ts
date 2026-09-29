@@ -796,8 +796,12 @@ export function verifyBody(body: string, sources: GroundedSource[], opts: { prio
   let quotes = 0, exact = 0, normalized = 0, near = 0;
 
   // Materialized timeline history (#5567) is database history a write rendered
-  // back into the page, not a claim this run authored.
-  const history = materializedHistoryRanges(body);
+  // back into an existing page, not a claim this run authored. Only a marked
+  // bullet absent from the pre-run revision was materialized during the run
+  // (with its stored detail); an edit under a bullet that already existed is
+  // verified like any other new unit. A new page has no history to render.
+  const history = opts.priorNorm === undefined ? [] : materializedHistoryRanges(body)
+    .filter(([start, end]) => !opts.priorNorm!.includes(normForGrounding(body.slice(start, end).split('\n')[1] ?? '')));
   for (const u of claimUnits(body, spans)) {
     const text = body.slice(u.start, u.end);
     if (history.some(([start, end]) => u.start >= start && u.start < end)) continue;

@@ -213,14 +213,29 @@ describe('verifyBody', () => {
 
 describe('verifyBody — materialized timeline history (#5567)', () => {
   const src = groundSource('/t/history.txt', 'user: We shipped the repair pass on Monday.');
-  test('a validly marked bullet is database history and is left alone; a forged marker is still verified', () => {
-    const marked = renderMaterializedBullet({ date: '2024-01-02', source: 'meeting', summary: 'Said "we will open a second office in 2025"', detail: 'Recorded before write-through.' }, 'x')!;
+  const marked = renderMaterializedBullet({ date: '2024-01-02', source: 'meeting', summary: 'Said "we will open a second office in 2025"', detail: 'Recorded "before write-through" in 2023.' }, 'x')!;
+  const fabricated = '- **2026-08-30** | session — Said "we are shutting down the company next quarter"';
+  const priorNorm = normForGrounding('A reflection.');
+
+  test('a bullet materialized during the run is database history and is left alone, detail included', () => {
     expect(marked).toBeTruthy();
-    const kept = verifyBody(`${marked}\n- **2026-08-30** | session — Said "we are shutting down the company next quarter"`, [src]);
+    const kept = verifyBody(`${marked}\n${fabricated}`, [src], { priorNorm });
     expect(kept.body).toBe(marked);
-    expect(kept.quarantined.map(q => q.text)).toEqual(['**2026-08-30** | session — Said "we are shutting down the company next quarter"']);
+    expect(kept.quarantined.map(q => q.text)).toEqual([fabricated.slice(2)]);
+  });
+
+  test('a claim added under a marked bullet that already existed is verified', () => {
+    const lines = marked.split('\n');
+    const edited = [lines[0], lines[1], '  Also said "we are shutting down the company next quarter".'].join('\n');
+    const result = verifyBody(edited, [src], { priorNorm: normForGrounding(`A reflection.\n${lines[0]}\n${lines[1]}`) });
+    expect(result.body).toBe([lines[0], lines[1]].join('\n'));
+    expect(result.quarantined).toHaveLength(1);
+  });
+
+  test('a new page has no history to exempt, and a forged marker is verified', () => {
+    expect(verifyBody(marked, [src]).quarantined.length).toBeGreaterThan(0);
     const forged = marked.replace(/v1 [0-9a-f]+/, 'v1 000000000000');
-    expect(verifyBody(forged, [src]).quarantined.length).toBeGreaterThan(0);
+    expect(verifyBody(forged, [src], { priorNorm }).quarantined.length).toBeGreaterThan(0);
   });
 });
 
