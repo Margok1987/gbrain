@@ -82,6 +82,7 @@ import {
   effectiveRrfK,
   applyExactMatchBoost,
   applyAliasMentionBoost,
+  applyTitleMentionBoost,
 } from './intent-weights.ts';
 import {
   SemanticQueryCache,
@@ -1434,7 +1435,12 @@ export async function hybridSearch(
   // Intent identity boosts (exact/mentioned title or slug, mentioned alias),
   // shared by the fused path and both keyword-only paths. Caller re-sorts.
   const applyIdentityBoosts = async (list: SearchResult[]): Promise<void> => {
-    if (intentWeights.exactMatchBoost === 1.0) return;
+    if (intentWeights.exactMatchBoost === 1.0) {
+      // #4694: intents without an exact-match boost still honor a
+      // multi-token title mentioned in the query.
+      if (intentWeightingOn) applyTitleMentionBoost(list, query);
+      return;
+    }
     applyExactMatchBoost(list, query, intentWeights);
     await applyAliasMentionBoost(list, query, intentWeights, (aliases) => engine.resolveAliases(aliases, {
       sourceId: opts?.sourceId, sourceIds: opts?.sourceIds, excludePrivate: opts?.excludePrivate,

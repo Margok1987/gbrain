@@ -110,5 +110,14 @@ export function isTitleMentionedInQuery(query: string, title: string): boolean {
   return containsTokenRun(qTokens, tTokens);
 }
 
+/**
+ * The strict form used under intents without an exact-match boost (#4694):
+ * the title needs >= MIN_CONTENT_TOKENS content tokens, so a one-word title
+ * ("Python", "Mingtang") mentioned in a general question never qualifies.
+ */
+export function isMultiTokenTitleMentioned(query: string, title: string): boolean {
+  return contentTokens(tokenizeTitle(title)).length >= MIN_CONTENT_TOKENS && isTitleMentionedInQuery(query, title);
+}
+
 // Exported for unit tests.
 export const __test__ = { tokenizeTitle, contentTokens, containsTokenRun, STOPWORDS, MIN_CONTENT_TOKENS };

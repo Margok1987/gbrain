@@ -32,7 +32,7 @@
 
 import type { QueryIntent } from './query-intent.ts';
 import type { SearchResult } from '../types.ts';
-import { isTitleMentionedInQuery, tokenizeTitle } from './title-match.ts';
+import { isMultiTokenTitleMentioned, isTitleMentionedInQuery, tokenizeTitle } from './title-match.ts';
 
 /**
  * Weight adjustments to apply for a classified intent. All factors are
@@ -158,6 +158,31 @@ export function applyExactMatchBoost(
       // --explain output. Only stamped when boost actually fires.
       r.exact_match_boost = weights.exactMatchBoost;
     }
+  }
+}
+
+/**
+ * #4694 — score multiplier for a multi-token title or slug tail mentioned in
+ * the query under intents WITHOUT an exact-match boost (general, temporal,
+ * concept). Natural questions that contain a document's full title ("Which
+ * document is <title>?") classify as general, so the entity-intent boost
+ * never reached them.
+ */
+export const TITLE_MENTION_BOOST = 1.18;
+
+/**
+ * Apply TITLE_MENTION_BOOST in place to results whose title or slug tail
+ * (>= 2 content tokens) appears in the query as a contiguous token run.
+ * Stamps `exact_match_boost` for --explain. Caller re-sorts.
+ */
+export function applyTitleMentionBoost(results: SearchResult[], query: string): void {
+  for (const r of results) {
+    const slug = r.slug ?? '';
+    const mentioned = isMultiTokenTitleMentioned(query, r.title ?? '')
+      || isMultiTokenTitleMentioned(query, slug.slice(slug.lastIndexOf('/') + 1));
+    if (!mentioned) continue;
+    r.score *= TITLE_MENTION_BOOST;
+    r.exact_match_boost = TITLE_MENTION_BOOST;
   }
 }
 
