@@ -48,7 +48,11 @@
  * child runs. The real repo is never touched.
  *
  * Serial: test 1 mutates process.argv[1] file-wide (restored in afterEach);
- * run-e2e.sh runs each e2e file in its own bun process regardless.
+ * the serial lane runs each file in its own bun process.
+ *
+ * Lane: serial. Run: `bash scripts/run-serial-tests.sh test/upgrade-bun-link-arc.serial.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, afterEach, afterAll } from 'bun:test';
@@ -57,11 +61,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { detectInstallMethod } from '../../src/commands/upgrade.ts';
-import { migrations } from '../../src/commands/migrations/index.ts';
-import { VERSION } from '../../src/version.ts';
+import { detectInstallMethod } from '../src/commands/upgrade.ts';
+import { migrations } from '../src/commands/migrations/index.ts';
+import { VERSION } from '../src/version.ts';
 
-const REPO_ROOT = join(import.meta.dir, '..', '..');
+const REPO_ROOT = join(import.meta.dir, '..');
 const CLI_PATH = join(REPO_ROOT, 'src', 'cli.ts');
 const REAL_UPGRADE_TS = join(REPO_ROOT, 'src', 'commands', 'upgrade.ts');
 

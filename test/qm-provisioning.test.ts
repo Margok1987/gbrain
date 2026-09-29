@@ -15,21 +15,25 @@
  *     them (v0.42.70.0 enforceClientSlugFence, over the real transport);
  *   - reads stay source-granular (a bob-example client CAN read
  *     chan-eng/ — the documented shared-source tradeoff).
+ *
+ * Lane: unit. Run: `bun test test/qm-provisioning.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test as testRaw, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { keylessBrainEnv } from '../helpers/provider-env.ts';
-import { cliDiagnostic, fixtureDiagnostic } from '../helpers/fixture-diagnostics.ts';
+import { keylessBrainEnv } from './helpers/provider-env.ts';
+import { cliDiagnostic, fixtureDiagnostic } from './helpers/fixture-diagnostics.ts';
 
 function test(name: string, fn: () => void | Promise<unknown>): void {
   testRaw(name, fn, 120000);
 }
 
-const CLI = join(__dirname, '..', '..', 'src', 'cli.ts');
-const SCRIPT = join(__dirname, '..', '..', 'docs', 'integrations', 'qm-harness-snippets', 'provision-scopes.sh');
+const CLI = join(__dirname, '..', 'src', 'cli.ts');
+const SCRIPT = join(__dirname, '..', 'docs', 'integrations', 'qm-harness-snippets', 'provision-scopes.sh');
 
 interface RunResult { exitCode: number; stdout: string; stderr: string; }
 

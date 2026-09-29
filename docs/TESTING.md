@@ -119,7 +119,7 @@ Search reliability has real-planner and transport regressions in
 `test/e2e/vector-candidate-safety-postgres.test.ts`,
 `test/e2e/search-query-contract-postgres.test.ts`,
 `test/e2e/projection-statistics-postgres.test.ts`, and
-`test/e2e/search-readiness-http.test.ts`. The statistics tests include owner,
+`test/search-readiness-http.test.ts`. The statistics tests include owner,
 restricted-reader and FORCE-RLS roles; the candidate tests distinguish natural
 plans from forced-HNSW controls and prove server cancellation of exact fallback.
 `test/e2e/projection-recovery-parity.test.ts` runs the shared Markdown/code
@@ -458,7 +458,7 @@ covers PGLite/Postgres page/fact/config parity. Output redaction uses
 Managed writer fixtures use isolated PGLite and guarded disposable Postgres:
 `test/e2e/fact-vector-repair-parity.test.ts`,
 `test/e2e/fact-embedding-backfill-parity.test.ts`, and
-`test/e2e/fact-backfill-resident.test.ts` cover preserved vectors, bounded
+`test/fact-backfill-resident.test.ts` cover preserved vectors, bounded
 NULL-only fact backfill, selected-config refusal and owner-held PGLite IPC;
 `test/ai/google-embed-batch-items.test.ts` pins 100-item provider batches.
 `test/persistence-embedding-effects.test.ts`,
@@ -1081,7 +1081,7 @@ Four escalating tools; reach for the cheapest one that answers the question:
 | Question | Tool | Example |
 |---|---|---|
 | Does the TTY/non-TTY branch logic pick right? | Inject `isTTY` into the pure function — no subprocess | `test/init-provider-picker.test.ts`, `test/jobs-watch-mode.test.ts` |
-| Does the real CLI behave right when stdin is NOT a terminal? | Spawn the CLI with piped/ignored stdio | `test/cli-stdin-hang.test.ts` (fast loop); `test/e2e/init-fresh-pglite.test.ts` (manual `test:e2e` lane — see the TODOS e2e CI-lane entry) |
+| Does the real CLI behave right when stdin is NOT a terminal? | Spawn the CLI with piped/ignored stdio | `test/cli-stdin-hang.test.ts` (fast loop); `test/init-fresh-pglite.slow.test.ts` (slow lane) |
 | Does the real CLI render menus and read typed input under a REAL terminal? | `launchTty` from `test/helpers/tty-harness.ts` in a `*.serial.test.ts` file | `test/init-picker-pty.serial.test.ts` |
 | How does the install FEEL (stalls, copy, silence windows)? | `scripts/dx-explore.ts` — instrument, not a test; nothing asserts | transcripts under `.context/dx-runs/` (see `docs/guides/bootstrap.md`) |
 
@@ -1271,7 +1271,7 @@ deliberate (live embed/parity tests skip-gate on them). The routing-only
 `thin-client` fixtures still strip provider state in every child, set both
 `HOME` and `GBRAIN_HOME` to their temporary brain, and pass Bun
 `--no-env-file` (including provisioned shell commands). They exercise routing
-without spending provider tokens even inside the keyed nightly lane.
+without spending provider tokens even when a lane carries keys.
 Fixture-specific environment overrides apply last; unrelated credentials are
 preserved rather than removed with a broad key-name pattern.
 
@@ -1487,6 +1487,48 @@ Unit tests and what they cover:
 - `test/conversation-facts-pricing-wiring.test.ts` — `pricing.overrides` reaches every conversation-facts entry point: the strict config registry accepts the key, and direct extraction, the cycle backfill, and `transcripts --facts` all price through the operator override.
 - `test/cycle/extract-atoms-model-config-fail-soft.test.ts` — a throwing `getConfig` during extract_atoms model resolution falls back to the tier default instead of rejecting the phase.
 
+### Lane-move pilot (2026-09)
+
+The 20 heaviest PGLite-only files in `test/e2e/` (by `scripts/e2e-weights.json`)
+moved out of the sequential Postgres runner into the lanes that run on every PR.
+Each met the move criterion: it constructs PGLite (or spawns a PGLite CLI)
+directly, imports nothing from `test/e2e/helpers.ts`, has no
+`DATABASE_URL`/`hasDatabase` gate, and its header confirmed no Postgres use.
+`sync-delegation-under-serve.serial` and `dream-synthesize-pglite` stayed in
+`test/e2e/` because named `e2e.yml` jobs run them. Assertions are unchanged;
+executed-test counts match the E2E runs. A file becomes serial when it mutates
+process-global state and slow when it takes about 30 s or more. The remaining
+PGLite-only E2E files are a TODOS.md item decided from the pilot measurement.
+
+Source files whose only E2E owner moved (`src/commands/claw-test.ts`,
+`src/core/claw-test/**`, `src/core/brain-resolver.ts`, `src/commands/mounts.ts`,
+`src/commands/connect.ts`, `src/core/connect-probe.ts`,
+`src/commands/embed-facts-delegate.ts`) no longer have an `E2E_TEST_MAP` row,
+so a change to them selects all E2E (fail-closed); their owners run in every PR.
+
+| Former path | New path | Lane | Command | Lane reason |
+|---|---|---|---|---|
+| `test/e2e/claw-test.test.ts` | `test/claw-test.slow.test.ts` | slow | `bash scripts/run-slow-tests.sh test/claw-test.slow.test.ts` | over 30 s (harness subprocess runs) |
+| `test/e2e/init-fresh-pglite.test.ts` | `test/init-fresh-pglite.slow.test.ts` | slow | `bash scripts/run-slow-tests.sh test/init-fresh-pglite.slow.test.ts` | over 30 s (CLI subprocesses) |
+| `test/e2e/mounts-routing-pglite.test.ts` | `test/mounts-routing-pglite.slow.test.ts` | slow | `bash scripts/run-slow-tests.sh test/mounts-routing-pglite.slow.test.ts` | about 30 s (two persistent PGLite brains, CLI spawns) |
+| `test/e2e/qm-provisioning.test.ts` | `test/qm-provisioning.test.ts` | unit | `bun test test/qm-provisioning.test.ts` | no process-global state, under 30 s |
+| `test/e2e/minions-field-report-repro.test.ts` | `test/minions-field-report-repro.test.ts` | unit | `bun test test/minions-field-report-repro.test.ts` | no process-global state, under 30 s |
+| `test/e2e/fresh-install-pglite.test.ts` | `test/fresh-install-pglite.serial.test.ts` | serial | `bash scripts/run-serial-tests.sh test/fresh-install-pglite.serial.test.ts` | mutates `process.env` and `console` |
+| `test/e2e/remote-privacy-journeys.test.ts` | `test/remote-privacy-journeys.serial.test.ts` | serial | `bash scripts/run-serial-tests.sh test/remote-privacy-journeys.serial.test.ts` | constructs PGLite outside `beforeAll` (isolation rule R3) |
+| `test/e2e/serve-stdio-roundtrip.test.ts` | `test/serve-stdio-roundtrip.test.ts` | unit | `bun test test/serve-stdio-roundtrip.test.ts` | no process-global state, under 30 s |
+| `test/e2e/serve-http-surface-ceiling.test.ts` | `test/serve-http-surface-ceiling.test.ts` | unit | `bun test test/serve-http-surface-ceiling.test.ts` | no process-global state, under 30 s |
+| `test/e2e/skillpack-flow.test.ts` | `test/skillpack-flow.test.ts` | unit | `bun test test/skillpack-flow.test.ts` | no process-global state, under 30 s |
+| `test/e2e/v0_28_5-fix-wave.test.ts` | `test/v0_28_5-fix-wave.serial.test.ts` | serial | `bash scripts/run-serial-tests.sh test/v0_28_5-fix-wave.serial.test.ts` | mutates `process.env` |
+| `test/e2e/backfill-perf-pglite.test.ts` | `test/backfill-perf-pglite.test.ts` | unit | `bun test test/backfill-perf-pglite.test.ts` | no process-global state, under 30 s |
+| `test/e2e/connect-bearer.test.ts` | `test/connect-bearer.test.ts` | unit | `bun test test/connect-bearer.test.ts` | no process-global state, under 30 s |
+| `test/e2e/bootstrap-hook-under-serve.serial.test.ts` | `test/bootstrap-hook-under-serve.serial.test.ts` | serial | `bash scripts/run-serial-tests.sh test/bootstrap-hook-under-serve.serial.test.ts` | mutates `process.env`; already a serial file |
+| `test/e2e/upgrade-bun-link-arc.serial.test.ts` | `test/upgrade-bun-link-arc.serial.test.ts` | serial | `bash scripts/run-serial-tests.sh test/upgrade-bun-link-arc.serial.test.ts` | mutates `process.argv`; already a serial file |
+| `test/e2e/dream-synthesize-chunking.test.ts` | `test/dream-synthesize-chunking.serial.test.ts` | serial | `bash scripts/run-serial-tests.sh test/dream-synthesize-chunking.serial.test.ts` | mutates `process.env` |
+| `test/e2e/search-readiness-http.test.ts` | `test/search-readiness-http.test.ts` | unit | `bun test test/search-readiness-http.test.ts` | no process-global state, under 30 s |
+| `test/e2e/transcripts-ingest-pglite.test.ts` | `test/transcripts-ingest-pglite.test.ts` | unit | `bun test test/transcripts-ingest-pglite.test.ts` | no process-global state, under 30 s |
+| `test/e2e/bootstrap-harness-lifecycle.serial.test.ts` | `test/bootstrap-harness-lifecycle.serial.test.ts` | serial | `bash scripts/run-serial-tests.sh test/bootstrap-harness-lifecycle.serial.test.ts` | mutates `console`; already a serial file |
+| `test/e2e/fact-backfill-resident.test.ts` | `test/fact-backfill-resident.test.ts` | unit | `bun test test/fact-backfill-resident.test.ts` | no process-global state, under 30 s |
+
 ### E2E test inventory
 
 E2E tests live in `test/e2e/` and run against real Postgres+pgvector (require `DATABASE_URL`), except where noted as PGLite in-memory (no `DATABASE_URL` needed). One file outside the directory also rides the e2e lane: `test/phantom-redirect-engine-parity.test.ts` (Postgres arm; see the file taxonomy above).
@@ -1529,9 +1571,9 @@ E2E tests live in `test/e2e/` and run against real Postgres+pgvector (require `D
 - `test/e2e/source-isolation-pglite.test.ts` — PGLite in-memory regression suite pinning the source-isolation seal at two layers. Engine layer: `searchKeyword` / `searchVector` / `searchKeywordChunks` / `listPages` / `getPage` / `traverseGraph` / `traversePaths` apply `sourceId` (scalar fast path) and `sourceIds` (array path) correctly across both engines. Op-handler layer: routes through `sourceScopeOpts(ctx)` so a `read+write`-scoped OAuth client bound to `--source dept-x` cannot see rows from neighboring sources via `search`, `query`, `list_pages`, `get_page`, or `find_experts`. Covers both `ctx.sourceId` (single-source clients) and `ctx.auth.allowedSources` (federated_read clients) precedence; federated array wins over scalar wins over nothing. No `DATABASE_URL` needed.
 - `test/e2e/think-source-isolation-pglite.test.ts` — PGLite in-memory suite pinning the `think` gather stage's source scope: seeds three sources with cross-source links and embedded takes, then asserts `runGather` under a federated `sourceIds` grant (and under a scalar `sourceId`) keeps every stream — hybrid retrieval, takes keyword + vector (`searchTakes`/`searchTakesVector`), and the `traversePaths` graph walk — inside the grant while still reaching authorized neighboring sources. No `DATABASE_URL` needed.
 - `test/e2e/skill-brain-first.test.ts` — doctor reports `skill_brain_first` check with structured issues; `--fix --dry-run` previews insertion without writing; `--fix` applies the canonical Convention callout idempotently; `brain_first: exempt` frontmatter resolves the warn; `brain_first_typo` surfaces a paste-ready hint; audit JSONL records `detected` / `resolved` / `fixed` transitions; stable brain emits 0 audit lines/run.
-- Journey suites (each claimed by an `scripts/e2e-test-map.ts` row; DATABASE_URL-gated unless noted): `migrate-engine-pglite-to-postgres.test.ts` (whole-brain `runMigrateEngine` transfer incl. the child-process failure arm — config not flipped), `takes-write-ops-postgres.test.ts` (takes op layer + `withPageLock` serialization), `propose-takes-jsonb-postgres.test.ts` + `calibration-profile-write.test.ts` (JSONB bind shape on real Postgres), `engine-parity-cjk.test.ts` (cross-engine CJK keyword parity on an identical corpus — both engines route `hasCJK()` queries through the shared ILIKE builder in `src/core/search/cjk-keyword-sql.ts`; top-slug agreement, chunk-grain parity, mixed-query AND semantics, nonexistent-term strictness), `code-edges-read-parity.test.ts` / `ontology-merge-parity.test.ts` / `chronicle-event-projection-parity.test.ts` / `health-parity-postgres.test.ts` (read-path + getHealth parity), `sync-sigkill-resume-postgres.test.ts` (real SIGKILL mid-sync; DB-polled checkpoint, stranded-lock reclaim, exactly-once resume), `serve-http-source-grant.test.ts` (legacy no-grant federated widening vs granted confinement over real `/mcp`), `mounts-routing-pglite.test.ts` (hermetic mount-routing tiers, no DATABASE_URL), `serve-http-surface-ceiling.test.ts` (hermetic 7-verb `--surface verbs` ceiling; the FORCE_SURFACE env is narrow-only), `autopilot-linux-lifecycle.serial.test.ts` + `upgrade-bun-link-arc.serial.test.ts` (PATH-shimmed crontab/systemctl and bun-link upgrade arcs, hermetic), and the thin-client daily-driver verb extension inside `thin-client.test.ts`.
+- Journey suites (each claimed by an `scripts/e2e-test-map.ts` row; DATABASE_URL-gated unless noted): `migrate-engine-pglite-to-postgres.test.ts` (whole-brain `runMigrateEngine` transfer incl. the child-process failure arm — config not flipped), `takes-write-ops-postgres.test.ts` (takes op layer + `withPageLock` serialization), `propose-takes-jsonb-postgres.test.ts` + `calibration-profile-write.test.ts` (JSONB bind shape on real Postgres), `engine-parity-cjk.test.ts` (cross-engine CJK keyword parity on an identical corpus — both engines route `hasCJK()` queries through the shared ILIKE builder in `src/core/search/cjk-keyword-sql.ts`; top-slug agreement, chunk-grain parity, mixed-query AND semantics, nonexistent-term strictness), `code-edges-read-parity.test.ts` / `ontology-merge-parity.test.ts` / `chronicle-event-projection-parity.test.ts` / `health-parity-postgres.test.ts` (read-path + getHealth parity), `sync-sigkill-resume-postgres.test.ts` (real SIGKILL mid-sync; DB-polled checkpoint, stranded-lock reclaim, exactly-once resume), `serve-http-source-grant.test.ts` (legacy no-grant federated widening vs granted confinement over real `/mcp`), `autopilot-linux-lifecycle.serial.test.ts` (PATH-shimmed crontab/systemctl arc, hermetic), and the thin-client daily-driver verb extension inside `thin-client.test.ts`.
 - Tier 2 (`test/e2e/skills.test.ts`) requires OpenClaw + API keys, runs nightly in CI.
-- `test/e2e/claw-test.test.ts` also covers live mode token-free via shim agents (`OPENCLAW_BIN=<sh script>`): the success-oracle break path (a do-nothing agent FAILS), the E0 child-friction merge surviving tempdir cleanup, and the upgrade staging + schema-version probe.
+- `test/claw-test.slow.test.ts` (slow lane since the lane-move pilot) also covers live mode token-free via shim agents (`OPENCLAW_BIN=<sh script>`): the success-oracle break path (a do-nothing agent FAILS), the E0 child-friction merge surviving tempdir cleanup, and the upgrade staging + schema-version probe.
 - If `.env.testing` doesn't exist in this directory, check sibling worktrees: `find ../ -maxdepth 2 -name .env.testing -print -quit` and copy it here if found.
 - **Run E2E tests without asking permission.** When you want to verify behavior, there's a relevant E2E test, or you're shipping anything covered by an E2E suite — spin up the test DB, run the tests, tear down. Don't ask, don't propose it, don't defer. The lifecycle is short (~2-30s startup, sub-minute tests, instant teardown) and the gate value is high. Skipping with "DATABASE_URL unset" is silent regression, not caution.
 

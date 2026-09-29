@@ -27,6 +27,10 @@
  *
  * Serial: spawns a subprocess + cold PGLite init; explicit timeouts
  * everywhere; the serve child is killed in afterAll no matter what.
+ *
+ * Lane: serial. Run: `bash scripts/run-serial-tests.sh test/bootstrap-hook-under-serve.serial.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import {
@@ -42,17 +46,17 @@ import {
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
-import { runHook, readHeartbeatTail } from '../../src/commands/hook.ts';
-import { resolveSocketPath, ipcSecretPath } from '../../src/core/context/resolve-ipc.ts';
-import { LiveServeLockError } from '../../src/core/pglite-lock.ts';
-import { createEngine } from '../../src/core/engine-factory.ts';
-import { addSource } from '../../src/core/sources-ops.ts';
+import { runHook, readHeartbeatTail } from '../src/commands/hook.ts';
+import { resolveSocketPath, ipcSecretPath } from '../src/core/context/resolve-ipc.ts';
+import { LiveServeLockError } from '../src/core/pglite-lock.ts';
+import { createEngine } from '../src/core/engine-factory.ts';
+import { addSource } from '../src/core/sources-ops.ts';
 import {
   loadCorpusPages,
   loadCorpusBeliefs,
   loadCorpusBeliefData,
   loadCorpusQueries,
-} from '../helpers/bootstrap-corpus.ts';
+} from './helpers/bootstrap-corpus.ts';
 
 // The serve appends its own checkpoint-harvest/writeback heartbeats to the same
 // JSONL asynchronously, so the hook's entry is the newest non-serve line.
@@ -63,7 +67,7 @@ async function lastHookHeartbeat() {
   return entry;
 }
 
-const REPO_ROOT = resolve(import.meta.dir, '..', '..');
+const REPO_ROOT = resolve(import.meta.dir, '..');
 const TRANSCRIPT_FIXTURE = join(REPO_ROOT, 'test', 'fixtures', 'conversation-formats', 'claude-code.jsonl');
 
 /**

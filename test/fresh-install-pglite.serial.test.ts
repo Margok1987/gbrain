@@ -9,23 +9,27 @@
  * tmpdir, embed transport stubbed via `__setEmbedTransportForTests` so we
  * don't need real provider credentials. CDX2-12 from the plan explicitly
  * called this design out.
+ *
+ * Lane: serial. Run: `bash scripts/run-serial-tests.sh test/fresh-install-pglite.serial.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { installFixtureChunks } from '../helpers/page-projection.ts';
-import { withManagedFixtureWrite } from '../helpers/managed-e2e-fixture-write.ts';
+import { installFixtureChunks } from './helpers/page-projection.ts';
+import { withManagedFixtureWrite } from './helpers/managed-e2e-fixture-write.ts';
 import {
   configureGateway,
   resetGateway,
   __setEmbedTransportForTests,
-} from '../../src/core/ai/gateway.ts';
+} from '../src/core/ai/gateway.ts';
 import {
   NEW_INSTALL_DEFAULT_EMBEDDING_MODEL,
   NEW_INSTALL_DEFAULT_EMBEDDING_DIMENSIONS,
-} from '../../src/core/ai/defaults.ts';
+} from '../src/core/ai/defaults.ts';
 
 describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end', () => {
   let tmpHome: string;
@@ -95,7 +99,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
       embeddings: args.values.map(() => synthVec),
     }) as any);
 
-    const { runInit } = await import('../../src/commands/init.ts');
+    const { runInit } = await import('../src/commands/init.ts');
 
     // Capture stderr to verify init prints the resolved choice.
     const origStderrWrite = process.stderr.write.bind(process.stderr);
@@ -132,11 +136,11 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
     expect(cfg.embedding_model).toBe(NEW_INSTALL_DEFAULT_EMBEDDING_MODEL);
     expect(cfg.embedding_dimensions).toBe(NEW_INSTALL_DEFAULT_EMBEDDING_DIMENSIONS);
 
-    const { PGLiteEngine } = await import('../../src/core/pglite-engine.ts');
+    const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
     const engine = new PGLiteEngine();
     await engine.connect({ database_path: cfg.database_path, engine: 'pglite' });
     try {
-      const { readContentChunksEmbeddingDim } = await import('../../src/core/embedding-dim-check.ts');
+      const { readContentChunksEmbeddingDim } = await import('../src/core/embedding-dim-check.ts');
       const colDim = await readContentChunksEmbeddingDim(engine);
       expect(colDim.exists).toBe(true);
       expect(colDim.dims).toBe(NEW_INSTALL_DEFAULT_EMBEDDING_DIMENSIONS);
@@ -144,7 +148,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
       // init writes NO explicit row; the RESOLVED reranker is the default.
       expect(await engine.getConfig('search.reranker.model')).toBeNull();
       {
-        const { loadSearchModeConfig, resolveSearchMode } = await import('../../src/core/search/mode.ts');
+        const { loadSearchModeConfig, resolveSearchMode } = await import('../src/core/search/mode.ts');
         const knobs = resolveSearchMode(await loadSearchModeConfig(engine));
         expect(knobs.reranker_model).toBe('voyage:rerank-2.5');
         // (reranker_enabled follows the picked mode — non-TTY init may auto-select a
@@ -167,11 +171,11 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
     console.log = () => {};
     console.warn = () => {};
     try {
-      const { runInit } = await import('../../src/commands/init.ts');
+      const { runInit } = await import('../src/commands/init.ts');
       await runInit(['--pglite', '--non-interactive']);
       const cfgPath = join(tmpHome, '.gbrain', 'config.json');
       const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
-      const { PGLiteEngine } = await import('../../src/core/pglite-engine.ts');
+      const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
       const engine = new PGLiteEngine();
       await engine.connect({ database_path: cfg.database_path, engine: 'pglite' });
       try {
@@ -204,11 +208,11 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
     console.log = () => {};
     console.error = () => {};
     try {
-      const { runInit } = await import('../../src/commands/init.ts');
+      const { runInit } = await import('../src/commands/init.ts');
       await runInit(['--pglite', '--non-interactive']);
       const cfg = JSON.parse(readFileSync(join(tmpHome, '.gbrain', 'config.json'), 'utf-8'));
       expect(cfg.embedding_model).toBe('openai:text-embedding-3-large');
-      const { PGLiteEngine } = await import('../../src/core/pglite-engine.ts');
+      const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
       const engine = new PGLiteEngine();
       await engine.connect({ database_path: cfg.database_path, engine: 'pglite' });
       try {
@@ -235,15 +239,15 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
     console.warn = () => {};
     console.error = () => {};
     try {
-      const { runInit } = await import('../../src/commands/init.ts');
+      const { runInit } = await import('../src/commands/init.ts');
       await runInit(['--pglite', '--non-interactive']);
       const cfg = JSON.parse(readFileSync(join(tmpHome, '.gbrain', 'config.json'), 'utf-8'));
       expect(cfg.embedding_disabled).toBe(true);
-      const { PGLiteEngine } = await import('../../src/core/pglite-engine.ts');
+      const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
       const engine = new PGLiteEngine();
       await engine.connect({ database_path: cfg.database_path, engine: 'pglite' });
       try {
-        const { readContentChunksEmbeddingDim } = await import('../../src/core/embedding-dim-check.ts');
+        const { readContentChunksEmbeddingDim } = await import('../src/core/embedding-dim-check.ts');
         const colDim = await readContentChunksEmbeddingDim(engine);
         expect(colDim.exists).toBe(true);
         expect(colDim.dims).toBe(NEW_INSTALL_DEFAULT_EMBEDDING_DIMENSIONS);
@@ -272,7 +276,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
     console.warn = () => {};
     console.error = () => {};
     try {
-      const { runInit } = await import('../../src/commands/init.ts');
+      const { runInit } = await import('../src/commands/init.ts');
       // Step 1: keyless install → deferred-setup sentinel persisted.
       delete process.env.VOYAGE_API_KEY;
       await runInit(['--pglite', '--non-interactive']);
@@ -287,7 +291,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
       expect(cfg.embedding_disabled).toBeUndefined();
       // Keyless init wrote NO reranker config (deliberate), so the recovery
       // re-init's voyage override lands instead of being never-clobbered.
-      const { PGLiteEngine } = await import('../../src/core/pglite-engine.ts');
+      const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
       const engine = new PGLiteEngine();
       await engine.connect({ database_path: cfg.database_path, engine: 'pglite' });
       try {
@@ -295,7 +299,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
         // init writes NO explicit row; the RESOLVED reranker is the default.
         expect(await engine.getConfig('search.reranker.model')).toBeNull();
         {
-          const { loadSearchModeConfig, resolveSearchMode } = await import('../../src/core/search/mode.ts');
+          const { loadSearchModeConfig, resolveSearchMode } = await import('../src/core/search/mode.ts');
           const knobs = resolveSearchMode(await loadSearchModeConfig(engine));
           expect(knobs.reranker_model).toBe('voyage:rerank-2.5');
           // (reranker_enabled follows the picked mode — non-TTY init may auto-select a
@@ -326,7 +330,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
     console.warn = () => {};
 
     try {
-      const { runInit } = await import('../../src/commands/init.ts');
+      const { runInit } = await import('../src/commands/init.ts');
       await runInit(['--pglite', '--non-interactive']);
     } finally {
       console.log = origLog;
@@ -336,7 +340,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
     const cfgPath = join(tmpHome, '.gbrain', 'config.json');
     const cfg = JSON.parse(readFileSync(cfgPath, 'utf-8'));
 
-    const { PGLiteEngine } = await import('../../src/core/pglite-engine.ts');
+    const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
     const engine = new PGLiteEngine();
     await engine.connect({ database_path: cfg.database_path, engine: 'pglite' });
     try {
@@ -355,7 +359,7 @@ describe('E2E: fresh gbrain init --pglite → import → embed works end-to-end'
 
       // Run embed --stale via the public CLI entry point. This goes
       // through runEmbedCore including the pre-flight dim check.
-      const { runEmbedCore } = await import('../../src/commands/embed.ts');
+      const { runEmbedCore } = await import('../src/commands/embed.ts');
       const result = await runEmbedCore(engine, { stale: true });
       expect(result.embedded).toBeGreaterThan(0);
 

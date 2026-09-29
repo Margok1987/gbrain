@@ -10,11 +10,15 @@
  * wall-clock < 5s on the same fixture pattern. Goal is to catch a regression
  * to N+1 — a fast machine on PGLite in-memory should finish in well under
  * a second; the 5s budget is generous for slow CI.
+ *
+ * Lane: unit. Run: `bun test test/backfill-perf-pglite.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { runPhaseRecomputeEmotionalWeight } from '../../src/core/cycle/recompute-emotional-weight.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { runPhaseRecomputeEmotionalWeight } from '../src/core/cycle/recompute-emotional-weight.ts';
 
 let engine: PGLiteEngine;
 

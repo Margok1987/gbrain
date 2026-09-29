@@ -15,17 +15,21 @@
  *   - Chunked path: fat transcript spawns N children with chunk-suffixed
  *     path-independent idempotency keys; single-chunk omits the suffix.
  *
- * Run: bun test test/e2e/dream-synthesize-chunking.test.ts
+ * Run: bun test test/dream-synthesize-chunking.serial.test.ts
+ *
+ * Lane: serial. Run: `bash scripts/run-serial-tests.sh test/dream-synthesize-chunking.serial.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, expect } from 'bun:test';
-import { keylessDreamTest as test } from '../helpers/keyless-dream-test.ts';
+import { keylessDreamTest as test } from './helpers/keyless-dream-test.ts';
 import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { runPhaseSynthesize, TRIAGE_VERSION } from '../../src/core/cycle/synthesize.ts';
-import { TIER_DEFAULTS } from '../../src/core/model-config.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { runPhaseSynthesize, TRIAGE_VERSION } from '../src/core/cycle/synthesize.ts';
+import { TIER_DEFAULTS } from '../src/core/model-config.ts';
 
 interface TestRig {
   engine: PGLiteEngine;

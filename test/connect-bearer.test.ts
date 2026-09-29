@@ -10,6 +10,10 @@
  *
  * This is the integration coverage the unit tests (injected deps) can't give:
  * the actual StreamableHTTP initialize handshake + tools/call over bearer auth.
+ *
+ * Lane: unit. Run: `bun test test/connect-bearer.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
@@ -17,8 +21,8 @@ import { spawn, spawnSync, execFileSync, type ChildProcess } from 'child_process
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { probeBrainIdentity } from '../../src/core/connect-probe.ts';
-import { discoverOAuth, mintClientCredentialsToken } from '../../src/core/remote-mcp-probe.ts';
+import { probeBrainIdentity } from '../src/core/connect-probe.ts';
+import { discoverOAuth, mintClientCredentialsToken } from '../src/core/remote-mcp-probe.ts';
 
 const PORT = 19735; // avoid the production 3131 + the oauth E2E's 19131
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -102,7 +106,7 @@ describe('connect bearer probe E2E (PGLite + real serve --http)', () => {
     // had no instructions coverage. A real SDK initialize against the live
     // runServeHttp process must surface GBRAIN_MCP_INSTRUCTIONS verbatim.
     expect(serverReady).toBe(true);
-    const { GBRAIN_MCP_INSTRUCTIONS } = await import('../../src/mcp/instructions.ts');
+    const { GBRAIN_MCP_INSTRUCTIONS } = await import('../src/mcp/instructions.ts');
     const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
     const { StreamableHTTPClientTransport } = await import('@modelcontextprotocol/sdk/client/streamableHttp.js');
 

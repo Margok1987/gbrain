@@ -13,14 +13,18 @@
  * 5x then succeeds exercises the same code path as the real handler.
  *
  * Runs against PGLite — no DATABASE_URL needed.
+ *
+ * Lane: unit. Run: `bun test test/minions-field-report-repro.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { MinionQueue } from '../../src/core/minions/queue.ts';
-import { MinionWorker } from '../../src/core/minions/worker.ts';
-import { RateLeaseUnavailableError } from '../../src/core/minions/handlers/subagent.ts';
-import { waitFor } from '../helpers/wait-for.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { MinionQueue } from '../src/core/minions/queue.ts';
+import { MinionWorker } from '../src/core/minions/worker.ts';
+import { RateLeaseUnavailableError } from '../src/core/minions/handlers/subagent.ts';
+import { waitFor } from './helpers/wait-for.ts';
 let engine: PGLiteEngine;
 let queue: MinionQueue;
 

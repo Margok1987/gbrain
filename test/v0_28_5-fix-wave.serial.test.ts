@@ -31,12 +31,16 @@
  * is the PGLite-side equivalent specifically for the wedge classes the
  * v0.28.5 wave fixed.
  *
- * Run: bun test test/e2e/v0_28_5-fix-wave.test.ts
+ * Run: bun test test/v0_28_5-fix-wave.serial.test.ts
+ *
+ * Lane: serial. Run: `bash scripts/run-serial-tests.sh test/v0_28_5-fix-wave.serial.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect } from 'bun:test';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { LATEST_VERSION } from '../../src/core/migrate.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { LATEST_VERSION } from '../src/core/migrate.ts';
 
 // Cold-path opt-out: asserts hasPendingMigrations === true on a FRESH brain
 // before initSchema — a restored snapshot already carries the config.version
@@ -46,7 +50,7 @@ delete process.env.GBRAIN_PGLITE_SNAPSHOT;
 import {
   readContentChunksEmbeddingDim,
   embeddingMismatchMessage,
-} from '../../src/core/embedding-dim-check.ts';
+} from '../src/core/embedding-dim-check.ts';
 
 describe('v0.28.5 cluster A — PGLite upgrade wedge regression', () => {
   test('pre-v0.20 brain (missing v0.20+v0.26.3+v0.27 columns) re-runs initSchema cleanly', async () => {
@@ -134,7 +138,7 @@ describe('v0.28.5 cluster A — PGLite upgrade wedge regression', () => {
   }, 60000);
 
   test('hasPendingMigrations correctly reports state across the upgrade lifecycle', async () => {
-    const { hasPendingMigrations } = await import('../../src/core/migrate.ts');
+    const { hasPendingMigrations } = await import('../src/core/migrate.ts');
     const engine = new PGLiteEngine();
     await engine.connect({});
     try {
@@ -163,7 +167,7 @@ describe('v0.28.5 cluster B — embedding dim corruption regression', () => {
     // The wedge: v0.27 silently created vector(1536) regardless of the
     // --embedding-dimensions flag. v0.28.5 (#641) plumbs the dim through
     // `getPGLiteSchema(dims)` so the column is templated correctly.
-    const { configureGateway } = await import('../../src/core/ai/gateway.ts');
+    const { configureGateway } = await import('../src/core/ai/gateway.ts');
     configureGateway({
       embedding_model: 'openai:text-embedding-3-small',
       embedding_dimensions: 768,
@@ -188,7 +192,7 @@ describe('v0.28.5 cluster B — embedding dim corruption regression', () => {
     // Codex finding #8: dims > 2000 cannot be HNSW-indexed in pgvector.
     // The schema templating path must skip the HNSW CREATE INDEX while
     // still creating the underlying `vector(N)` column.
-    const { configureGateway } = await import('../../src/core/ai/gateway.ts');
+    const { configureGateway } = await import('../src/core/ai/gateway.ts');
     configureGateway({
       embedding_model: 'voyage:voyage-4-large',
       embedding_dimensions: 2048,
@@ -231,7 +235,7 @@ describe('v0.28.5 A4 — existing-brain dim mismatch loud failure', () => {
       // to 1536 so the test still exercises the "existing brain at 1536d"
       // path it was designed for. This mirrors how a real v0.18-vintage brain
       // would look post-upgrade.
-      const { configureGateway, resetGateway } = await import('../../src/core/ai/gateway.ts');
+      const { configureGateway, resetGateway } = await import('../src/core/ai/gateway.ts');
       resetGateway();
       configureGateway({
         embedding_model: 'openai:text-embedding-3-large',

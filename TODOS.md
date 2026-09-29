@@ -664,7 +664,7 @@ deferred M-effort issues above are NOT repeated here.
   across the cut is lost to both. **Blocked on:** post-wave Cat 35 receipts
   showing transcripts actually chunk (`details.synthesis.jobs` >
   `transcripts_processed`) — don't pay the determinism-test churn
-  (test/e2e/dream-synthesize-chunking byte-stability) before the receipts say
+  (test/dream-synthesize-chunking.serial.test.ts byte-stability) before the receipts say
   it matters. **Where:** src/core/cycle/synthesize.ts splitTranscriptByBudget.
 - [ ] **P3 — E3: borderline-band second-pass triage call (#4152 escalation).**
   **What:** when the scalar score lands in [rescue_floor, threshold) and the
@@ -2270,7 +2270,7 @@ Each was explicitly deferred in the pass's CEO/eng/outside-voice reviews.
   the existing SHARD support (only ci-local uses it). Fold into the Postgres
   template-database entry below in this file (CREATE DATABASE … TEMPLATE, ~50ms).
   **Current status:** selected E2E is on the measured PR critical path. Four isolated weighted CI workers now address it without moving tests between lanes; PGLite-only lane moves remain deferred. **Effort:** M. **Priority:** P2.
-  **Status (2026-09-29 test audit):** the audit counted 113 PGLite-only files in `test/e2e` (`docs/test-audit/2026-09-29/lane-e2e/pglite-files.txt`). The test-reduction plan moves the 20 heaviest into the unit, serial or slow lanes as a measured pilot; whether to move the rest is decided from that pilot's matched timings.
+  **Status (2026-09-29 test audit):** the audit counted 113 PGLite-only files in `test/e2e` (`docs/test-audit/2026-09-29/lane-e2e/pglite-files.txt`). The test-reduction pilot moved the 20 heaviest into the unit (10), serial (7) and slow (3) lanes (docs/TESTING.md "Lane-move pilot"). Matched `ci:ubicloud` runs: the E2E lane dropped from 304 files/2,756 s to 284 files/2,456 s of compute; the moved files cost 330 s in E2E and 340 s in their new lanes, and wall time stayed bounded by the slow-lane long poles (317 s vs 337 s). On GitHub the gain is the sequential selected-E2E workers losing ~506 s of weighted work while every PR now runs these files. Next: move the remaining ~93 PGLite-only files with the same criterion, and add an explicit unit-owned set to `scripts/select-e2e.ts` so sources whose only E2E owner moved stop failing closed to all E2E.
 - [ ] **Second PGLite snapshot keyed by dims/model.** Implemented for BrainBench default-profile CLI children in the CI optimization pass; extending reuse to other deliberately reconfigured tests remains deferred. **What:** ~34 test files
   configure retired-embedding/1280 and always cold-init (the snapshot's shape gate correctly
   refuses the 1536 fixture). Bake a second snapshot per shape; the version-file
@@ -2497,7 +2497,7 @@ review-deferred, not fix-now). Grouped by component.
   hasDatabase/DATABASE_URL gate + header read; lockstep: e2e-test-map rows,
   e2e-unmapped-baseline shrink, classify-tests, seeded weights), a possible
   four-way `coverage-full-e2e` nightly matrix, and unit matrix 10→12.
-  **Status (2026-09-29 test audit):** Phase 5 is superseded by the test-reduction plan's lane-move pilot (the 20 heaviest of 113 PGLite-only `test/e2e` files, same move criterion and lockstep updates, measured on matched runs); the remaining files follow only if the pilot shows a measured gain.
+  **Status (2026-09-29 test audit):** Phase 5 is superseded by the test-reduction plan's lane-move pilot (the 20 heaviest of 113 PGLite-only `test/e2e` files, same move criterion and lockstep updates, measured on matched runs); the pilot landed (see the PGLite-only lane entry above for the measurement and next step).
   The selected-E2E matrix, timing refresh, `weights:mine` command, and refresh
   cadence are completed by the CI speed pass above. Graduated batch gates:
   5×-green first batch per class, 2×+CI
@@ -6576,7 +6576,7 @@ After the sweep, both should be fixable and renameable back to plain `*.test.ts`
 - `test/e2e/cycle.test.ts` (live cycle + chunks + lock cleanup).
 - `test/e2e/doctor.test.ts` (gbrain doctor exits 0 on healthy DB) — possibly related to v0.26.2 schema changes since CHANGELOG mentions extension of doctor checks.
 - `test/brain-registry.test.ts` (empty/null/undefined id routes to host) — unrelated to OAuth surface.
-- `test/e2e/claw-test.test.ts` (fresh-install scripted scenario) — needs investigation; took 3.9s and reported "produces zero error/blocker friction" failure.
+- `test/claw-test.slow.test.ts` (fresh-install scripted scenario) — needs investigation; took 3.9s and reported "produces zero error/blocker friction" failure.
 
 **Why:** These failures pre-date v0.26.2 (CHANGELOG already documents "18 pre-existing master timeouts" from v0.26.0 merge). v0.26.2 brings the count to 22, suggesting a 4-test drift on master between v0.26.0 ship and now. Fixing inside v0.26.2 would balloon scope from a 6-file OAuth fix-wave to a 30+ file test-infra repair. The fix-wave deserves its own PR with focused triage.
 

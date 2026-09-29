@@ -132,7 +132,6 @@ test/e2e/bootstrap-real-codex.serial.test.ts	bootstrap rendered protocol — amb
 test/e2e/codex-plugin-install-real.serial.test.ts	(file-level)	2	readFileSync
 test/e2e/migration-flow.test.ts	(file-level)	4	readFileSync
 test/e2e/openclaw-reference-compat.test.ts	OpenClaw reference workspace compat (W1 + W2 + W3)	8	readFileSync
-test/e2e/skillpack-flow.test.ts	skillpack flow (E2E)	17	readFileSync
 test/e2e/workspace-generic-compat.test.ts	generic agent-workspace compat (INSTALL_FOR_AGENTS.md flow)	6	readFileSync
 test/embedding-dim-check-facts.test.ts	doctor checkFactsEmbeddingWidthConsistency wiring (T6)	4	doctor-source-helper
 test/env-trust-protected-keys.test.ts	CWD_DOTENV_PROTECTED_KEYS covers every suspicious GBRAIN_* env read in src/	3	readFileSync
@@ -253,7 +252,7 @@ test/scripts/ci-local-rendering.test.ts	ci-local execution coverage	3	readFileSy
 test/scripts/ci-local-rendering.test.ts	local test configuration through run-e2e	2	readFileSync
 test/scripts/ci-local-rendering.test.ts	required PgBouncer execution through run-e2e	1	readFileSync
 test/scripts/ci-runner-routing.test.ts	CI runner routing	5	readFileSync
-test/scripts/classify-tests.test.ts	classify-tests detectors	18	bun-file,doctor-source-helper,exec-scan,readFileSync
+test/scripts/classify-tests.test.ts	classify-tests detectors	20	bun-file,doctor-source-helper,exec-scan,readFileSync
 test/scripts/coverage-diff-gate.test.ts	exemptions	3	readFileSync
 test/scripts/data-safety-native-workflow.test.ts	data-safety native CI coverage	12	readFileSync
 test/scripts/e2e-runner.test.ts	second	5	readFileSync
@@ -285,6 +284,7 @@ test/skillify-scaffold.test.ts	applyScaffold	3	readFileSync
 test/skillify-scaffold.test.ts	planScaffold	13	readFileSync
 test/skillopt/error-code-docs.test.ts	skillopt error-code table	3	readFileSync
 test/skillpack-check-report-only.test.ts	(file-level)	2	readFileSync
+test/skillpack-flow.test.ts	skillpack flow (E2E)	17	readFileSync
 test/skillpack-harness-bridge.test.ts	review-driven hardening (ship pre-landing findings)	5	readFileSync
 test/skillpack-harvest.test.ts	addToBundleManifest	1	readFileSync
 test/skillpack-harvest.test.ts	runHarvest — happy path	2	readFileSync

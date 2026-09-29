@@ -13,6 +13,10 @@
  * remapped so user-scope writes land in the sandbox.
  *
  * Serial: env remapping (HOME / CODEX_HOME / GBRAIN_HOME) + a spawned serve.
+ *
+ * Lane: serial. Run: `bash scripts/run-serial-tests.sh test/bootstrap-harness-lifecycle.serial.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
@@ -21,11 +25,11 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'os';
 import { join } from 'path';
 
-import { runBootstrap } from '../../src/commands/bootstrap.ts';
-import type { ExecRunner } from '../../src/core/bootstrap/repo.ts';
-import { readHarnessReceiptState, writeHarnessReceipt } from '../../src/core/bootstrap/format.ts';
-import { CODEX_TOML_BLOCK_BEGIN } from '../../src/core/bootstrap/host-specs.ts';
-import { withEnv } from '../helpers/with-env.ts';
+import { runBootstrap } from '../src/commands/bootstrap.ts';
+import type { ExecRunner } from '../src/core/bootstrap/repo.ts';
+import { readHarnessReceiptState, writeHarnessReceipt } from '../src/core/bootstrap/format.ts';
+import { CODEX_TOML_BLOCK_BEGIN } from '../src/core/bootstrap/host-specs.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 const PORT = 19741; // unique to this suite (19735 = connect-bearer, 19131 = oauth)
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -111,7 +115,7 @@ describe('bootstrap harness lifecycle E2E (PGLite + real serve --http)', () => {
     // carrying an executable no-op `claude` stub — the recording runner seam
     // intercepts every real exec, so the stub only ever satisfies detection.
     PATH: `${stubBin}:${process.env.PATH ?? ''}`,
-    // The e2e lane exports DATABASE_URL; the IN-PROCESS runBootstrap calls
+    // With an ambient DATABASE_URL, the IN-PROCESS runBootstrap calls
     // (unlike the spawned children scrubbed in beforeAll) would otherwise
     // resolve it via loadConfig's env>file precedence and mint tokens
     // against Postgres while the live serve is PGLite-backed — turning the

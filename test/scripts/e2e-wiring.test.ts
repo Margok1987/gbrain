@@ -120,7 +120,7 @@ describe('selected-e2e job wiring', () => {
  * baseline shrinks (a file gets mapped or deleted), lower this constant IN
  * THE SAME COMMIT (the module-size ratchet's no-stale-slack convention).
  */
-const BASELINE_SEEDED_LENGTH = 143;
+const BASELINE_SEEDED_LENGTH = 126;
 
 describe('e2e file claim ratchet', () => {
   const mapped = new Set(Object.values(E2E_TEST_MAP).flat());

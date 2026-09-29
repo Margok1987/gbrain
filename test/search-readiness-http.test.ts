@@ -2,6 +2,10 @@
  * Real legacy-bearer HTTP MCP regression for projection-readiness response
  * metadata. The fixture is disk-backed because the CLI HTTP server owns the
  * PGLite lock; all pages are seeded before it starts.
+ *
+ * Lane: unit. Run: `bun test test/search-readiness-http.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
@@ -11,11 +15,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { importFromContent } from '../../src/core/import-file.ts';
-import { keylessBrainEnv } from '../helpers/provider-env.ts';
-import { cliDiagnostic, fixtureDiagnostic, toolDiagnostic } from '../helpers/fixture-diagnostics.ts';
-import { createManagedFixtureSource, withManagedFixtureWrite } from '../helpers/managed-e2e-fixture-write.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { importFromContent } from '../src/core/import-file.ts';
+import { keylessBrainEnv } from './helpers/provider-env.ts';
+import { cliDiagnostic, fixtureDiagnostic, toolDiagnostic } from './helpers/fixture-diagnostics.ts';
+import { createManagedFixtureSource, withManagedFixtureWrite } from './helpers/managed-e2e-fixture-write.ts';
 
 const MATCH = 'http-readiness-public-match';
 const PRIVATE_PENDING = 'http-readiness-private-pending-canary';

@@ -25,17 +25,21 @@
  *
  * Two hermetic brains because PGLite is single-writer and the kill-switch env
  * must be pinned at a SECOND server process's spawn time.
+ *
+ * Lane: unit. Run: `bun test test/serve-http-surface-ceiling.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { keylessBrainEnv } from '../helpers/provider-env.ts';
-import { cliDiagnostic, fixtureDiagnostic, toolDiagnostic } from '../helpers/fixture-diagnostics.ts';
+import { keylessBrainEnv } from './helpers/provider-env.ts';
+import { cliDiagnostic, fixtureDiagnostic, toolDiagnostic } from './helpers/fixture-diagnostics.ts';
 import { join } from 'path';
-import { VERB_NAMES } from '../../src/core/verbs.ts';
-import { operations } from '../../src/core/operations.ts';
+import { VERB_NAMES } from '../src/core/verbs.ts';
+import { operations } from '../src/core/operations.ts';
 
 const PORT_A = 19833; // plain --surface verbs (unique across the e2e suite)
 const PORT_B = 19834; // --surface verbs + GBRAIN_MCP_FORCE_SURFACE=full

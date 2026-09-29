@@ -1,17 +1,22 @@
+/**
+ * Lane: unit. Run: `bun test test/fact-backfill-resident.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
+ */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { configureGateway, resetGateway, __setEmbedTransportForTests } from '../../src/core/ai/gateway.ts';
-import { saveConfig, type GBrainConfig } from '../../src/core/config.ts';
-import { createPersistenceIpcProvider } from '../../src/core/persistence/provider.ts';
-import { disposePersistenceConsumer } from '../../src/core/persistence/service.ts';
-import { readLocalWriter, registerLocalWriter, revokeLocalWriter, type LocalRegistration, type LocalGrant } from '../../src/core/persistence/identity.ts';
-import { startPersistenceIpcServer, requestPersistenceAdministration, requestPersistenceCapabilities, persistenceSocketPathForConfig, type PersistenceIpcBinding } from '../../src/core/persistence/ipc.ts';
-import { withEnv } from '../helpers/with-env.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { configureGateway, resetGateway, __setEmbedTransportForTests } from '../src/core/ai/gateway.ts';
+import { saveConfig, type GBrainConfig } from '../src/core/config.ts';
+import { createPersistenceIpcProvider } from '../src/core/persistence/provider.ts';
+import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
+import { readLocalWriter, registerLocalWriter, revokeLocalWriter, type LocalRegistration, type LocalGrant } from '../src/core/persistence/identity.ts';
+import { startPersistenceIpcServer, requestPersistenceAdministration, requestPersistenceCapabilities, persistenceSocketPathForConfig, type PersistenceIpcBinding } from '../src/core/persistence/ipc.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 const sourceId = 'resident-facts-example';
 const foreignSource = 'resident-facts-foreign';
@@ -184,7 +189,7 @@ describe('resident managed fact-vector repair', () => {
 
   test('the actual CLI delegates before opening the owner-held PGLite database', () => inHome(async () => {
     const run = async (extra: string[], expectedStatus = 0) => {
-      const child = Bun.spawn([process.execPath, join(import.meta.dir, '../../src/cli.ts'),
+      const child = Bun.spawn([process.execPath, join(import.meta.dir, '../src/cli.ts'),
         'embed', '--stale', '--facts', '--source', sourceId, '--json', ...extra], {
         cwd: root, env: { ...process.env, GBRAIN_NO_BANNER: '1', GBRAIN_BACKUP_CHECK: '0' }, stdout: 'pipe', stderr: 'pipe',
       });

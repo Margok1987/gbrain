@@ -23,20 +23,24 @@
  * exact tool list, the two ambient-recall verbs (context_pack + delta),
  * fail-closed dispatch on hidden ops, and the delta session cursor advancing
  * across two wakes.
+ *
+ * Lane: unit. Run: `bun test test/serve-stdio-roundtrip.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { spawnSync } from 'child_process';
-import { keylessBrainEnv } from '../helpers/provider-env.ts';
-import { cliDiagnostic, toolDiagnostic } from '../helpers/fixture-diagnostics.ts';
+import { keylessBrainEnv } from './helpers/provider-env.ts';
+import { cliDiagnostic, toolDiagnostic } from './helpers/fixture-diagnostics.ts';
 
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { VERB_NAMES } from '../../src/core/verbs.ts';
-import { GBRAIN_MCP_INSTRUCTIONS } from '../../src/mcp/instructions.ts';
+import { VERB_NAMES } from '../src/core/verbs.ts';
+import { GBRAIN_MCP_INSTRUCTIONS } from '../src/mcp/instructions.ts';
 
 function execFixture(args: string[], env: Record<string, string>): void {
   const result = spawnSync('bun', ['--no-env-file', ...args], { cwd: process.cwd(), env, encoding: 'utf8' });

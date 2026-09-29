@@ -1,6 +1,10 @@
 /** Real MCP transport journeys over isolated, persistent PGLite brains.
  * Data seeding uses the engine before serve starts (PGLite is single-writer).
  * No provider keys, model calls, ambient brain, or external database is used.
+ *
+ * Lane: serial. Run: `bash scripts/run-serial-tests.sh test/remote-privacy-journeys.serial.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
@@ -11,18 +15,18 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { importFromContent } from '../../src/core/import-file.ts';
-import { serializeMarkdown } from '../../src/core/markdown.ts';
-import { configureGateway, resetGateway } from '../../src/core/ai/gateway.ts';
-import { renderFactsTable } from '../../src/core/facts-fence.ts';
-import { TAKES_FENCE_BEGIN, TAKES_FENCE_END } from '../../src/core/takes-fence.ts';
-import { operationsByName, type OperationContext } from '../../src/core/operations.ts';
-import { unpackToolResult } from '../../src/core/mcp-client.ts';
-import { keylessBrainEnv } from '../helpers/provider-env.ts';
-import { cliDiagnostic, fixtureDiagnostic, toolDiagnostic } from '../helpers/fixture-diagnostics.ts';
-import { LEGACY_EMBEDDING_CONFIG } from '../helpers/legacy-embedding-config.ts';
-import { createManagedFixtureSource, withManagedFixtureWrite } from '../helpers/managed-e2e-fixture-write.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { importFromContent } from '../src/core/import-file.ts';
+import { serializeMarkdown } from '../src/core/markdown.ts';
+import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
+import { renderFactsTable } from '../src/core/facts-fence.ts';
+import { TAKES_FENCE_BEGIN, TAKES_FENCE_END } from '../src/core/takes-fence.ts';
+import { operationsByName, type OperationContext } from '../src/core/operations.ts';
+import { unpackToolResult } from '../src/core/mcp-client.ts';
+import { keylessBrainEnv } from './helpers/provider-env.ts';
+import { cliDiagnostic, fixtureDiagnostic, toolDiagnostic } from './helpers/fixture-diagnostics.ts';
+import { LEGACY_EMBEDDING_CONFIG } from './helpers/legacy-embedding-config.ts';
+import { createManagedFixtureSource, withManagedFixtureWrite } from './helpers/managed-e2e-fixture-write.ts';
 
 const PUBLIC = 'privacyjourneypublic';
 const PRIVATE = 'PRIVATE_PAGE_JOURNEY_CANARY';

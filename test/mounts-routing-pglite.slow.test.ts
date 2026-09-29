@@ -2,8 +2,8 @@
  * G4 (test-gap plan) — the mount ROUTING journey: brain-resolver → engine
  * wiring exercised over REAL CLI spawns against two REAL PGLite databases
  * (host brain + one mount). Hermetic: no DATABASE_URL, no provider keys.
- * Lives in test/e2e/ because it spawns `bun run src/cli.ts` repeatedly, not
- * because it needs a live Postgres.
+ * Runs in the slow lane because it spawns `bun run src/cli.ts` repeatedly;
+ * it needs no live Postgres.
  *
  * The REAL tier order (pinned from src/core/brain-resolver.ts:resolveBrainId):
  *   1. explicit `--brain <id>` flag
@@ -39,19 +39,23 @@
  * the in-process seed); every later spawn just reopens the data dir (~1.5s).
  * The subcommand DISPATCH surface (parseAddArgs, redactUrl, flag verbs) is
  * already covered in test/mounts-cli.test.ts — not duplicated here.
+ *
+ * Lane: slow. Run: `bash scripts/run-slow-tests.sh test/mounts-routing-pglite.slow.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test as testRaw, expect, beforeAll, afterAll } from 'bun:test';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, chmodSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 
 function test(name: string, fn: () => void | Promise<unknown>): void {
   testRaw(name, fn, 120000);
 }
 
-const CLI = join(import.meta.dir, '..', '..', 'src', 'cli.ts');
+const CLI = join(import.meta.dir, '..', 'src', 'cli.ts');
 
 const SLUG = 'routing-marker';
 const HOST_MARKER = 'HOST-MARKER-7f3a1c';

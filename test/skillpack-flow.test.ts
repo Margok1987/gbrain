@@ -15,6 +15,10 @@
  *   7. harvest privacy-lint catches Wintermute (exit non-zero)
  *   8. harvest --no-lint bypasses
  *   9. install returns unknown-subcommand error (clean break, no alias)
+ *
+ * Lane: unit. Run: `bun test test/skillpack-flow.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, afterAll } from 'bun:test';
@@ -23,7 +27,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { join } from 'path';
 import { tmpdir } from 'os';
 
-const REPO_ROOT = join(import.meta.dir, '..', '..');
+const REPO_ROOT = join(import.meta.dir, '..');
 const GBRAIN_CMD = 'bun';
 const GBRAIN_ARGS = ['run', join(REPO_ROOT, 'src', 'cli.ts')];
 

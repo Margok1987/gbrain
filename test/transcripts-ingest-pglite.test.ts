@@ -8,24 +8,28 @@
  * clean-scan semantics, and the putRawData zero-row parity fix.
  *
  * R3/R4: engine in beforeAll, disconnect in afterAll; state reset per test.
+ *
+ * Lane: unit. Run: `bun test test/transcripts-ingest-pglite.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { resetPgliteState } from '../helpers/reset-pglite.ts';
-import { runTranscriptsIngest } from '../../src/core/transcripts/ingest.ts';
-import { runIngestFacts } from '../../src/core/transcripts/ingest-facts.ts';
+import { PGLiteEngine } from '../src/core/pglite-engine.ts';
+import { resetPgliteState } from './helpers/reset-pglite.ts';
+import { runTranscriptsIngest } from '../src/core/transcripts/ingest.ts';
+import { runIngestFacts } from '../src/core/transcripts/ingest-facts.ts';
 import {
   buildStatusRows,
   discoverTranscriptFiles,
   indexImportedSessions,
-} from '../../src/core/transcripts/discover.ts';
-import type { HarnessRoot } from '../../src/core/transcripts/detect.ts';
-import { MESSAGE_CHAR_CAP } from '../../src/core/transcripts/render.ts';
-import { buildTranscriptSlug } from '../../src/core/transcripts/types.ts';
-import { buildHermesFixture } from '../fixtures/transcripts/hermes-fixture-builder.ts';
+} from '../src/core/transcripts/discover.ts';
+import type { HarnessRoot } from '../src/core/transcripts/detect.ts';
+import { MESSAGE_CHAR_CAP } from '../src/core/transcripts/render.ts';
+import { buildTranscriptSlug } from '../src/core/transcripts/types.ts';
+import { buildHermesFixture } from './fixtures/transcripts/hermes-fixture-builder.ts';
 
 const CODEX_SLUG = buildTranscriptSlug('codex', '2026-08-02T09:00:00.000Z', {
   sessionId: 'rollout-1', // payload.id — the per-thread id (#4981)
@@ -34,32 +38,28 @@ const AGENT_SLUG = buildTranscriptSlug('openclaw', '2026-08-03T14:00:00.000Z', {
   sessionId: 'agent-fixture-session-1',
 });
 
-const CODEX_FIXTURE = join(import.meta.dir, '..', 'fixtures', 'transcripts', 'codex-rollout.jsonl');
-const AGENT_FIXTURE = join(import.meta.dir, '..', 'fixtures', 'transcripts', 'agent-session.jsonl');
+const CODEX_FIXTURE = join(import.meta.dir, 'fixtures', 'transcripts', 'codex-rollout.jsonl');
+const AGENT_FIXTURE = join(import.meta.dir, 'fixtures', 'transcripts', 'agent-session.jsonl');
 const CLAUDE_CODE_FIXTURE = join(
   import.meta.dir,
-  '..',
   'fixtures',
   'conversation-formats',
   'claude-code.jsonl',
 );
 const CHATGPT_FIXTURE = join(
   import.meta.dir,
-  '..',
   'fixtures',
   'transcripts',
   'chatgpt-conversations.json',
 );
 const CLAUDE_EXPORT_FIXTURE = join(
   import.meta.dir,
-  '..',
   'fixtures',
   'transcripts',
   'claude-export.json',
 );
 const GROK_FIXTURE = join(
   import.meta.dir,
-  '..',
   'fixtures',
   'transcripts',
   'grok-session',

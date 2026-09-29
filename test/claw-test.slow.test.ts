@@ -14,6 +14,10 @@
  *
  * Tagged-skip env: CLAW_TEST_SKIP_E2E=1 to opt out (e.g. when PGLite
  * WASM is broken on the host — the macOS 26.3 #223 bug class).
+ *
+ * Lane: slow. Run: `bash scripts/run-slow-tests.sh test/claw-test.slow.test.ts`. Moved from test/e2e/
+ * by the 2026-09 lane-move pilot (PGLite-only, no DATABASE_URL); see
+ * docs/TESTING.md "Lane-move pilot".
  */
 
 import { describe, test, expect, beforeAll } from 'bun:test';
@@ -22,7 +26,7 @@ import { mkdirSync, existsSync, mkdtempSync, rmSync, readFileSync, readdirSync, 
 import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 
-const REPO_ROOT = resolve(import.meta.dir, '..', '..');
+const REPO_ROOT = resolve(import.meta.dir, '..');
 const BIN_CACHE = join(REPO_ROOT, 'test', '.cache');
 const BIN_PATH = join(BIN_CACHE, 'gbrain.sh');
 const SCENARIOS_DIR = join(REPO_ROOT, 'test', 'fixtures', 'claw-test-scenarios');
