@@ -329,6 +329,8 @@ export interface SynthesizePhaseOpts {
   to?: string;
   /** #4348: clock seam for deterministic cycle-date bucketing (tests). */
   now?: () => Date;
+  /** C-15: the cycle's calendar date (runCycle resolves one per cycle); --date still wins. */
+  cycleDate?: string;
   /** #4168 sibling: absolute wall-clock deadline (epoch ms) of the enclosing
    *  minion job. When set, child-subagent timeout_ms/wait are clamped via the
    *  clampSubagentBudgets template so a child submitted late in the cycle
@@ -405,7 +407,7 @@ async function runPhaseSynthesizeInner(
     // phase start so a run that crosses midnight stays in one bucket.
     // Pre-fix this was UTC toISOString().slice(0,10), so a run after local
     // midnight but before UTC midnight rewrote the previous day's summary.
-    const summaryDate = await resolveCycleDate(engine, { explicitDate: opts.date, now: opts.now });
+    const summaryDate = await resolveCycleDate(engine, { explicitDate: opts.date ?? opts.cycleDate, now: opts.now });
 
     // #4168 sibling: clamp the child-subagent budgets to the REAL remaining
     // job time (patterns.ts clampSubagentBudgets template). Pre-fix,
@@ -844,6 +846,7 @@ async function runPhaseSynthesizeInner(
         config.reflectionsPrefix,
         config.originalsPrefix,
         config.mode,
+        summaryDate,
       ));
       // One check for the whole chunk set: a transcript never half-submits.
       const callsPerChild = config.mode === 'agentic' ? config.maxTurns : 1;
@@ -2697,10 +2700,11 @@ function buildSynthesisPrompt(
   reflectionsPrefix = `${outputRoot}/personal/reflections`,
   originalsPrefix = `${outputRoot}/originals/ideas`,
   mode: 'agentic' | 'oneshot' = 'agentic',
+  // C-15: the child dates undated originals from this hint, so it is the
+  // cycle's calendar date, not the UTC day.
+  cycleDate: string = utcDate(),
 ): string {
-  // #4348: UTC projection retained here on purpose — this is a slug-name
-  // hint for undated sources, not calendar provenance.
-  const dateHint = t.inferredDate ?? utcDate();
+  const dateHint = t.inferredDate ?? cycleDate;
   const baseSlugSegment = sanitizeForSlug(t.basename) || `session-${dateHint}`;
   const isChunked = chunkTotal > 1;
   const hashSuffix = isChunked

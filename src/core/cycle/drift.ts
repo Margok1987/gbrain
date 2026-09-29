@@ -25,6 +25,7 @@
 import type { BrainEngine } from '../engine.ts';
 import { BudgetMeter, loadAllowUnpriced, parseBudgetUsd } from './budget-meter.ts';
 import { resolveSynthMaxOutputTokens } from './synthesize-concepts.ts';
+import { resolveCycleDate, shiftCalendarDate } from './cycle-date.ts';
 import { resolveModel } from '../model-config.ts';
 import type { DreamPhaseResult } from './auto-think.ts';
 
@@ -37,6 +38,8 @@ export interface DriftPhaseOpts {
   forceEnabled?: boolean;
   /** Inject the judge model call (tests). Defaults to gateway chat. */
   judge?: DriftJudgeFn;
+  /** C-15: the cycle's calendar date (runCycle resolves one per cycle). */
+  cycleDate?: string;
 }
 
 export interface DriftConfig {
@@ -187,8 +190,9 @@ export async function defaultDriftJudge(input: {
 async function findDriftCandidates(
   engine: BrainEngine,
   lookbackDays: number,
+  cycleDate?: string,
 ): Promise<DriftCandidate[]> {
-  const cutoffIso = lookbackCutoffIso(lookbackDays);
+  const cutoffIso = shiftCalendarDate(cycleDate ?? await resolveCycleDate(engine), -lookbackDays);
   // Only consider takes with weight in the "soft" middle band (0.3..0.85)
   // — facts (1.0) don't drift, very-low hunches (<0.3) aren't actionable yet.
   const rows = await engine.executeRaw<{
@@ -220,10 +224,6 @@ async function findDriftCandidates(
       weight: Number(r.weight),
       recentEvidenceCount: Number(r.recent_evidence),
     }));
-}
-
-function lookbackCutoffIso(lookbackDays: number): string {
-  return new Date(Date.now() - lookbackDays * 86_400_000).toISOString().slice(0, 10);
 }
 
 /** Format the candidate page's recent timeline entries as judge evidence. */
@@ -288,7 +288,8 @@ export async function runPhaseDrift(
     return skipped('not_configured', 'dream.drift.enabled is false');
   }
 
-  const candidates = await findDriftCandidates(engine, config.lookbackDays);
+  const cycleDate = opts.cycleDate ?? await resolveCycleDate(engine);
+  const candidates = await findDriftCandidates(engine, config.lookbackDays, cycleDate);
   if (candidates.length === 0) {
     return {
       name: 'drift',
@@ -323,7 +324,7 @@ export async function runPhaseDrift(
   });
   const maxOutputTokens = resolveSynthMaxOutputTokens(modelId);
   const judge = opts.judge ?? defaultDriftJudge;
-  const cutoffIso = lookbackCutoffIso(config.lookbackDays);
+  const cutoffIso = shiftCalendarDate(cycleDate, -config.lookbackDays);
 
   const judged: JudgedCandidate[] = [];
   let budgetExhausted = false;
@@ -353,14 +354,13 @@ export async function runPhaseDrift(
   const driftedCount = judged.filter(j => j.verdict.drifted).length;
   let reportSlug: string | undefined;
   if (judged.length > 0) {
-    const date = new Date().toISOString().slice(0, 10);
-    reportSlug = `reports/drift-${date}`;
+    reportSlug = `reports/drift-${cycleDate}`;
     // Report-only v1: the report page is the ONLY write this phase makes.
     // Lands in the default source (brain-global artifact, same-day re-runs
     // upsert the same slug).
     await engine.putPage(reportSlug, {
       type: 'report',
-      title: `Drift report ${date}`,
+      title: `Drift report ${cycleDate}`,
       compiled_truth: buildReportBody(judged, config, modelId),
     });
   }

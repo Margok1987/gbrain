@@ -64,6 +64,7 @@ import type { Page } from '../types.ts';
 import { prepareCanonicalProjections } from '../persistence/canonical-projections.ts';
 import { prepareAutomaticLinks } from '../persistence/links-preparation.ts';
 import { isAutoLinkEnabled } from '../link-extraction.ts';
+import { resolveCycleDate, utcDate } from './cycle-date.ts';
 
 /** Minimum quoted-span inner length considered a "quote" (shorter spans are
  * scare quotes / titles, not transcript quotations). */
@@ -1026,7 +1027,7 @@ export async function verifyAndRepairDreamPages(
   opts: { since: Date; sinceByTranscript?: Map<string, Date>; checkedAt?: string; signal?: AbortSignal },
 ): Promise<QuoteVerifyStats> {
   const stats = emptyQuoteVerifyStats();
-  const checkedAt = opts.checkedAt ?? new Date().toISOString().slice(0, 10);
+  const checkedAt = opts.checkedAt ?? await resolveCycleDate(engine).catch(() => utcDate());
   const pages = new Map<string, { slug: string; source_id: string; paths: string[]; first_write_at?: Date }>();
   for (const ref of refs) {
     const key = `${ref.source_id} ${ref.slug}`;
