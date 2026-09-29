@@ -22,9 +22,6 @@ on:
   pull_request:
     types: [labeled, synchronize, reopened]
   workflow_dispatch:
-  # TEMPORARY: lets the lane branch run this before the file exists on the default branch; reverted next commit.
-  push:
-    branches: [capy/w3-lane-cef]
 
 permissions:
   contents: read
