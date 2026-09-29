@@ -1,5 +1,16 @@
 # TODOS
 
+## Fix wave 3 lane A follow-ups (connectors, filed 2026-09-29, follow-up from v0.60.11.0)
+
+- [ ] **P1 — Move the cycle stamps out of `sources.config`.**
+  **What:** `runCycle` writes `last_source_cycle_at` / `last_full_cycle_at` into `sources.config` after every source cycle; that rotating blob was the root cause behind #5686. v0.60.11.0 keys connector identity on parsed settings instead, but nine files still read the stamps from the blob. **Fix:** dedicated columns or a cycle-state row, with a migration; community PR #5695 sketched one.
+- [ ] **P2 — Per-source "admit even if unchanged" bypass for the #5470 no-op skip.**
+  **What:** there is no way to force one connector, import or sync source to republish unchanged pages (for example after a renderer fix that keeps content hashes). **Fix:** a source-scoped, one-run flag that disables the kernel skip; `--reset-checkpoint` only re-walks.
+- [ ] **P3 — Configurable connector pending-wait budget, clamped to the run's deadline.**
+  **What:** the managed connector waits at most 30 s in total for accepted writes per run (`CONNECTOR_WAIT_BUDGET_MS`). **Fix:** a config key, clamped so it never exceeds the caller's job timeout.
+- [ ] **P2 — Multi-source connector fan-out deadline (`stopped_on_wait_budget` across sources).**
+  **What:** each connector run bounds its own waits and records `stopped_on_wait_budget`, but no in-process fan-out dispatches many connector sources against one shared deadline, so the plan's 50-source fan-out stop was not built. **Fix:** when such a fan-out exists (for example `sync --all` over connector sources), stop dispatching new sources at the deadline and report the rest.
+
 ## Test-audit follow-ups (filed 2026-09-29)
 
 Evidence for each item is in `docs/test-audit/2026-09-29/`.

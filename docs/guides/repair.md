@@ -2,8 +2,8 @@
 
 `gbrain doctor` finds some damage that it cannot fix on its own: timeline
 history that exists only in the database, derived pages without an explicit
-visibility, and pages indexed before the safe-chunk fence. `gbrain repair`
-fixes those three kinds. Every run is a preview unless you pass `--apply`.
+visibility, pages indexed before the safe-chunk fence, and connector
+checkpoint rows no source can load. `gbrain repair` fixes those four kinds. Every run is a preview unless you pass `--apply`.
 
 **Say to your agent:** *"Doctor says some timeline history is only in the
 database. Show me what `gbrain repair` would change, then apply it."* The
@@ -58,7 +58,7 @@ gbrain repair --all --apply                    # every kind in order
 
 `--apply` writes without a prompt, so review the preview first. With
 `--apply` you must name a kind or pass `--all`; `--yes` is refused. `--all`
-runs `timeline`, then `visibility`, then `safe-chunks`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `connector-checkpoints`, and stops at the
 first kind that stops.
 
 Each item is re-checked against the page's current state just before it is
@@ -71,7 +71,7 @@ left for the next run. Nothing is deleted.
 | --- | --- |
 | `--apply` | Write the repair. Without it, only preview. |
 | `--source <id>` | Limit the run to one active source. The default is every active (non-archived) source. An unknown or archived id is refused. |
-| `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each of the three kinds). Rerun the same command to continue. |
+| `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each kind). Rerun the same command to continue. |
 | `--no-embed` | `safe-chunks` only: re-seal chunk text and skip embedding. Run `gbrain embed --stale` later. |
 | `--all` | Run every kind in order. |
 | `--json` | Print `{ scope, mode, results[] }`, one result per kind with `affected`, `sample`, `residuals`, `cost`, `capacity`, `resumed_from`, `applied`, `skipped`, `complete`, `stopped` and `apply_command`. |
@@ -86,6 +86,7 @@ should also check `results[].complete`.
 | --- | --- | --- | --- |
 | `timeline` | `timeline_history` | Re-saves each page with its current body through a revision-bound `put_page`. The save writes each database-only timeline entry back into the page as a bullet preceded by `<!-- gbrain:materialized v1 <hash> -->`. | `kept_unrenderable_rows`: entries that would change if written as a bullet (for example an empty source). They stay in the database. |
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
+| `connector-checkpoints` | `connector_checkpoints` | Deletes managed connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days. They accumulate after a content setting such as `g_history_days` changes, or when a connector host older than v0.60.11.0 runs during an upgrade. Cleanup only: it never copies or re-keys a checkpoint, takes no journal admission and runs brain-wide (`--source` does not narrow it). | Rows a queued or running connector write, or a connector's recorded pending set, still references. |
 | `safe-chunks` | `contextual_retrieval_coverage` (`details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 
 Timeline rows that an earlier version of a page produced and its current text
@@ -97,6 +98,58 @@ without `--dry-run`.
 A timeline repair can make pages gain marked bullets. That is the fix: the
 history is now visible in the page and survives later edits. Deleting a marked
 bullet in a save that passes the current `expected_revision` deletes its entry.
+
+<a id="connector-checkpoints"></a>
+### Connector checkpoints and the upgrade to v0.60.11.0
+
+Managed Google and GitHub connector checkpoints are keyed on the parsed
+connector settings minus credential-delivery fields, so the per-cycle
+`last_source_cycle_at` stamp no longer makes every run start over. The
+v0.60.11.0 migration copies each connector source's newest committed
+checkpoint to the new key. A source whose newest checkpoint receipt was
+compacted re-walks its window once; unchanged pages are not admitted again.
+
+**Say to your agent:** *"Did my Gmail connector stop re-importing everything
+every hour?"* The agent runs `gbrain sources status --json` and reads the
+connector block below.
+
+`gbrain sources status --json` adds a `connector` object to each Google or
+GitHub source:
+
+```json
+"connector": {
+  "upgrade_recovery": "resumed",
+  "resumed_from": "2026-09-28 17:04:11.52+00",
+  "account_pinned": true,
+  "continuity_unverified": true,
+  "pending": 0,
+  "last_run": { "page_admissions": 0, "skipped_unchanged": 412, "pending": 0, "checkpoint_admissions": 1,
+                "stopped_on_wait_budget": false, "dropped_upstream": 0, "finished_at": "2026-09-29T21:00:03.114Z" }
+}
+```
+
+- `upgrade_recovery`: `resumed` (the migration copied a pre-upgrade checkpoint
+  from `resumed_from`), `rewalking_once` (until the first post-upgrade run
+  finishes) or `none`. Content selection since `resumed_from` is unverified;
+  if you changed a content setting since then, re-walk once with
+  `gbrain sync --source <id> --reset-checkpoint`.
+- `account_pinned` / `continuity_unverified`: the account the credential
+  resolved to is pinned on the first run. A migrated source is pinned on its
+  first post-upgrade run, so continuity before the upgrade is unverified. The
+  account itself is never printed here.
+- `last_run`: page admissions, unchanged pages skipped without an admission,
+  writes still pending, checkpoint admissions, whether the 30-second wait
+  budget stopped the run, and items dropped because they were deleted
+  upstream. A quiet source shows `page_admissions: 0`; a provider whose
+  cursor changes every run (Calendar sync token, Gmail history id) shows one
+  checkpoint admission per run.
+
+`gbrain sync --source <id> --reset-checkpoint` discards that connector
+source's checkpoint, including Google backfill state, after resolving its
+pending writes, and re-walks the configured window once. Existing pages stay,
+unchanged ones take no admission, and the account pin is kept. It refuses on a
+Git-backed source and while the account differs
+([`connector_account_changed`](write-refusals.md#connector-account-changed)).
 
 ## Resume
 
