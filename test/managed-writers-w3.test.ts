@@ -173,6 +173,52 @@ test('#5405: the purge phase hard-deletes expired tombstones through the coordin
   });
 });
 
+test('#5405: a tombstone restored and deleted again after the purge scan is not purged (its window restarted)', async () => {
+  const { purgeDeletedPagesCoordinated } = await import('../src/core/persistence/purge-deleted.ts');
+  await managedFixture(async (engine, sourceId) => {
+    await putPage(engine, sourceId, 'notes/cycled', '---\ntitle: Cycled\ntype: note\n---\nBack again.');
+    const snapshot = await engine.readPageSnapshot('notes/cycled', { sourceId });
+    await submitPageMutation(ctxFor(engine, sourceId), { operation: 'delete_page', params: {
+      slug: 'notes/cycled', expected_revision: snapshot!.revision, request_id: randomUUID() } });
+    await engine.executeRaw("UPDATE pages SET deleted_at=now() - interval '100 hours' WHERE source_id=$1 AND slug='notes/cycled'", [sourceId]);
+  }, async (engine, sourceId) => {
+    let cycled = false;
+    const racing = Object.create(engine) as BrainEngine;
+    racing.readPageSnapshot = async (slug, opts) => {
+      if (!cycled && slug === 'notes/cycled') {
+        cycled = true;
+        const tomb = await engine.readPageSnapshot(slug, { sourceId, includeDeleted: true });
+        await submitPageMutation(ctxFor(engine, sourceId), { operation: 'restore_page', params: { slug, expected_revision: tomb!.revision, request_id: randomUUID() } });
+        const live = await engine.readPageSnapshot(slug, { sourceId });
+        await submitPageMutation(ctxFor(engine, sourceId), { operation: 'delete_page', params: { slug, expected_revision: live!.revision, request_id: randomUUID() } });
+      }
+      return engine.readPageSnapshot(slug, opts);
+    };
+    const result = await purgeDeletedPagesCoordinated(racing, 72);
+    expect(result).toMatchObject({ count: 0, failed: 0, deferred: 1 });
+    expect((await engine.readPageSnapshot('notes/cycled', { sourceId, includeDeleted: true }))?.page.deleted_at).toBeTruthy();
+  });
+});
+
+test('#5405: the purge job fails when a coordinated purge fails, after reporting what it could not purge', async () => {
+  const { registerBuiltinHandlers } = await import('../src/commands/jobs.ts');
+  await managedFixture(async (engine, sourceId) => {
+    await putPage(engine, sourceId, 'notes/stuck', '---\ntitle: Stuck\ntype: note\n---\nOwned elsewhere.');
+    const snapshot = await engine.readPageSnapshot('notes/stuck', { sourceId });
+    await submitPageMutation(ctxFor(engine, sourceId), { operation: 'delete_page', params: {
+      slug: 'notes/stuck', expected_revision: snapshot!.revision, request_id: randomUUID() } });
+    await engine.executeRaw("UPDATE pages SET deleted_at=now() - interval '100 hours' WHERE source_id=$1 AND slug='notes/stuck'", [sourceId]);
+  }, async (engine, sourceId) => {
+    const handlers = new Map<string, (job: unknown) => Promise<unknown>>();
+    await registerBuiltinHandlers({ register(name: string, fn: (job: unknown) => Promise<unknown>) { handlers.set(name, fn); } } as never, engine);
+    // Another host owns the canonical worktree now: the purge cannot publish here.
+    await withEnv({ GBRAIN_HOME: mkdtempSync(join(tmpdir(), 'gbrain-w3-otherhost-')) }, async () => {
+      await expect(handlers.get('purge')!({ id: 1, data: { scope: 'pages' } })).rejects.toThrow(/could not be purged through the coordinator/);
+    });
+    expect((await engine.readPageSnapshot('notes/stuck', { sourceId, includeDeleted: true }))?.page.deleted_at).toBeTruthy();
+  });
+});
+
 test('#5280: enrich publishes the enriched page through the coordinator', async () => {
   await managedFixture(async (engine, sourceId) => {
     await putPage(engine, sourceId, 'people/alice-example', '---\ntitle: Alice Example\ntype: person\n---\nStub page.');
@@ -190,6 +236,31 @@ test('#5280: enrich publishes the enriched page through the coordinator', async 
     const page = await engine.getPage('people/alice-example', { sourceId });
     expect(page?.compiled_truth).toContain('Alice founded WidgetCo.');
     expect(page?.frontmatter?.enriched_by).toBeTruthy();
+  });
+});
+
+test('enrich carries the page facts and takes fences over the model output (Codex review)', async () => {
+  const facts = ['<!--- gbrain:facts:begin -->', '| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |',
+    '|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|',
+    '| 1 | Founded WidgetCo | fact | 1.0 | world | high | 2017-01-01 |  | linkedin |  |', '<!--- gbrain:facts:end -->'].join('\n');
+  const takes = ['<!--- gbrain:takes:begin -->', '| # | claim | kind | who | weight | since | source |',
+    '|---|-------|------|-----|--------|-------|--------|', '| 1 | Will ship widgets | take | brain | 0.5 | 2026-07 | notes |', '<!--- gbrain:takes:end -->'].join('\n');
+  await managedFixture(async (engine, sourceId) => {
+    await putPage(engine, sourceId, 'people/alice-example', `---\ntitle: Alice Example\ntype: person\n---\nStub.\n\n## Facts\n\n${facts}\n\n## Takes\n\n${takes}\n`);
+    await putPage(engine, sourceId, 'meetings/m1', '---\ntitle: M1\ntype: note\n---\nNotes about [[people/alice-example]] and her widget design system work.');
+  }, async (engine, sourceId) => {
+    const activeFacts = () => engine.executeRaw(`SELECT id FROM facts WHERE source_id=$1 AND entity_slug='people/alice-example' AND expired_at IS NULL`, [sourceId]);
+    const activeTakes = () => engine.executeRaw(`SELECT t.id FROM takes t JOIN pages p ON p.id=t.page_id WHERE p.source_id=$1 AND p.slug='people/alice-example' AND t.active`, [sourceId]);
+    const before = { facts: (await activeFacts()).length, takes: (await activeTakes()).length };
+    expect(before).toEqual({ facts: 1, takes: 1 });
+    const result = await runEnrichCore(engine, { sourceId, types: ['person'] as never[], order: 'inbound-links' as const, thinThreshold: 4000,
+      model: 'test:model', workers: 1, minContextChars: 20,
+      synthesizeFn: async () => '## Overview\nAlice founded WidgetCo. [Source: meetings/m1]' });
+    expect(result.pages_enriched).toBe(1);
+    const page = await engine.getPage('people/alice-example', { sourceId });
+    expect(page?.compiled_truth).toContain('Alice founded WidgetCo.');
+    expect(page?.compiled_truth).toContain('Founded WidgetCo');
+    expect({ facts: (await activeFacts()).length, takes: (await activeTakes()).length }).toEqual(before);
   });
 });
 

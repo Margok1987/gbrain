@@ -9,8 +9,8 @@
 import type { BrainEngine, LinkBatchInput } from '../engine.ts';
 import type { Page } from '../types.ts';
 import { serializeMarkdown, parseMarkdown } from '../markdown.ts';
-import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, parseFactsFence, replaceOrInsertFactsFence } from '../facts-fence.ts';
-import { TAKES_FENCE_BEGIN, TAKES_FENCE_END, parseTakesFence } from '../takes-fence.ts';
+import { FACTS_FENCE_BEGIN, FACTS_FENCE_END, parseFactsFence, replaceOrInsertFactsFence, stripFactsFence } from '../facts-fence.ts';
+import { TAKES_FENCE_BEGIN, TAKES_FENCE_END, parseTakesFence, stripTakesFence } from '../takes-fence.ts';
 import { isDbOnly, loadStorageConfig } from '../storage-config.ts';
 import { publishMaintenancePage, type MaintenanceAuthority } from '../persistence/prepared-maintenance.ts';
 import { withCoordinatedWrite } from '../persistence/context.ts';
@@ -68,23 +68,35 @@ export async function addManagedProvenanceLinks(engine: BrainEngine, sourceId: s
  */
 export function composeConceptRepublication(page: Pick<Page, 'type' | 'title' | 'compiled_truth' | 'timeline' | 'frontmatter'>,
   tags: string[], synthesized: Record<string, unknown>, narrative: string): string {
+  const compiled = preserveCanonicalFences(page, narrative);
+  const { type: _type, title: _title, tags: _tags, ...kept } = (page.frontmatter ?? {}) as Record<string, unknown>;
+  return serializeMarkdown({ ...kept, ...synthesized }, compiled, (page.timeline ?? '').trim(),
+    { type: page.type ?? 'concept', title: page.title, tags });
+}
+
+/**
+ * Carry a page's existing `## Facts` / `## Takes` fences into a replacement
+ * body written by a model or a synthesis phase, which owns only the prose. Any
+ * fence in the replacement is dropped and the original blocks are inserted
+ * verbatim, so publication neither expires fence facts nor deletes takes.
+ * Throws a hold (`concept_preservation_hold`) when the original fences are
+ * ambiguous or the result would not carry exactly the original rows.
+ */
+export function preserveCanonicalFences(page: Pick<Page, 'compiled_truth' | 'timeline'>, replacement: string): string {
   const hold = conceptPreservationHold(page);
   if (hold) throw conceptHoldError(hold);
   const body = page.compiled_truth ?? '';
-  let compiled = narrative.trim();
+  let compiled = stripTakesFence(stripFactsFence(replacement)).trim();
   const facts = fenceBlock(body, FACTS_FENCE_BEGIN, FACTS_FENCE_END);
   if (facts) compiled = replaceOrInsertFactsFence(compiled, facts).trimEnd();
   const takes = fenceBlock(body, TAKES_FENCE_BEGIN, TAKES_FENCE_END);
   if (takes) compiled = `${compiled}\n\n## Takes\n\n${takes}`;
-  const { type: _type, title: _title, tags: _tags, ...kept } = (page.frontmatter ?? {}) as Record<string, unknown>;
-  const markdown = serializeMarkdown({ ...kept, ...synthesized }, compiled, (page.timeline ?? '').trim(),
-    { type: page.type ?? 'concept', title: page.title, tags });
-  const out = parseMarkdown(markdown, 'concept');
+  const out = parseMarkdown(serializeMarkdown({}, compiled, (page.timeline ?? '').trim(), { type: 'note', title: 'x', tags: [] }), 'page');
   if (JSON.stringify(canonicalRows(out.compiled_truth)) !== JSON.stringify(canonicalRows(body))
     || (out.timeline ?? '').trim() !== (page.timeline ?? '').trim()) {
     throw conceptHoldError('CONCEPT_REPUBLICATION_LOSSY: composed page would not preserve the existing fences or timeline');
   }
-  return markdown;
+  return compiled;
 }
 
 function canonicalRows(body: string): { facts: unknown[]; takes: unknown[] } {

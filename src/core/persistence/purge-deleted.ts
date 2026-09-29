@@ -35,8 +35,8 @@ export async function purgeDeletedPagesCoordinated(engine: BrainEngine, olderTha
     return { slugs: result.slugs, count: result.count, blocked: [], deferred: 0, failed: 0 };
   }
   const hours = Math.max(0, Math.floor(olderThanHours));
-  const rows = await engine.executeRaw<{ source_id: string; slug: string }>(
-    `SELECT p.source_id, p.slug FROM pages p JOIN sources s ON s.id = p.source_id
+  const rows = await engine.executeRaw<{ source_id: string; slug: string; cutoff: string }>(
+    `SELECT p.source_id, p.slug, (now() - ($1 || ' hours')::interval)::text AS cutoff FROM pages p JOIN sources s ON s.id = p.source_id
       WHERE p.deleted_at IS NOT NULL AND p.deleted_at < now() - ($1 || ' hours')::interval AND NOT s.archived
       ORDER BY p.deleted_at ASC, p.source_id ASC, p.slug ASC`, [String(hours)]);
   const config = loadConfig() ?? { engine: engine.kind };
@@ -47,6 +47,8 @@ export async function purgeDeletedPagesCoordinated(engine: BrainEngine, olderTha
     try {
       const snapshot = await engine.readPageSnapshot(row.slug, { sourceId: row.source_id, includeDeleted: true });
       if (!snapshot?.page.deleted_at) continue;
+      // Restored and deleted again since the scan: its recovery window restarted.
+      if (new Date(snapshot.page.deleted_at).getTime() >= new Date(row.cutoff).getTime()) { deferred++; continue; }
       const ctx: OperationContext = { engine, config, remote: false, sourceId: row.source_id, dryRun: false,
         logger: { info() {}, warn() {}, error() {} } };
       await submitPageMutation(ctx, { operation: 'delete_page', params: { slug: row.slug, source_id: row.source_id,
@@ -55,7 +57,7 @@ export async function purgeDeletedPagesCoordinated(engine: BrainEngine, olderTha
     } catch (error) {
       const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : null;
       if (code && DEFERRAL_CODES.has(code)) deferred++; else failed++;
-      blocked.push({ ...row, code, reason: error instanceof Error ? error.message : String(error) });
+      blocked.push({ source_id: row.source_id, slug: row.slug, code, reason: error instanceof Error ? error.message : String(error) });
     }
   }
   const failures = blocked.filter(b => !b.code || !DEFERRAL_CODES.has(b.code));

@@ -34,6 +34,7 @@ import type { BrainEngine } from '../core/engine.ts';
 import type { EnrichCandidate, PageType } from '../core/types.ts';
 import { operations, OperationError } from '../core/operations.ts';
 import { maintenancePreflight, publishMaintenancePage, type MaintenanceAuthority } from '../core/persistence/prepared-maintenance.ts';
+import { preserveCanonicalFences } from '../core/cycle/concept-publication.ts';
 import type { WriteReceipt } from '../core/persistence/types.ts';
 import type { OperationContext } from '../core/operations.ts';
 import { configureGatewayIfUninitialized, isAvailable, chat, getChatModel, withBudgetTracker } from '../core/ai/gateway.ts';
@@ -441,7 +442,9 @@ async function enrichOneLocked(ctx: EnrichOneCtx, candidate: EnrichCandidate): P
     enriched_at: new Date().toISOString(),
     enriched_by: ENRICHED_BY,
   };
-  const content = serializeMarkdown(newFrontmatter, parsed.body, page.timeline ?? '', {
+  // The model owns the prose only: the page's facts/takes fences are carried
+  // over verbatim so publication never expires fence facts or deletes takes.
+  const content = serializeMarkdown(newFrontmatter, preserveCanonicalFences(page, parsed.body), page.timeline ?? '', {
     type: page.type,
     title: page.title,
     tags,
