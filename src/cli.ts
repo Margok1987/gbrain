@@ -2968,6 +2968,7 @@ async function handleCliOnly(command: string, args: string[]) {
     args = resolveAutopilotPositionals(args);
     if (args.includes('--uninstall')) { uninstallDaemon(); return; }
     if (args.includes('--status')) { runAutopilotStatus(args); return; }
+    if (args.includes('--pause') || args.includes('--resume')) { (await import('./commands/autopilot-pause.ts')).runAutopilotPauseCommand(args); return; }
   }
 
   // Thin-client `think` dispatch: runThinkCli already routes through
