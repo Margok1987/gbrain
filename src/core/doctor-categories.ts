@@ -132,6 +132,8 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'timeline_coverage',
   'timeline_orphans',
   'timeline_history',
+  // #5254 — pages written database-only to a source with no canonical owner.
+  'unbound_source',
   'undeclared_db_only_pages',
   'unified_multimodal_coverage',
   'unverified_extractions',
