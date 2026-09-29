@@ -970,11 +970,14 @@ export async function importFromContent(
     // A frontmatter-owned row whose tag left the frontmatter is deleted; rows
     // explicit adds own ('added': add_tag, enrichment, the code importer) and
     // legacy NULL rows are never deleted here (#1621: reindex must not wipe
-    // enrichment). A legacy row still in the frontmatter is adopted.
-    await tx.executeRaw(`DELETE FROM tags t USING pages p WHERE p.id = t.page_id AND p.source_id = $1 AND p.slug = $2
-      AND t.tag_source = 'frontmatter' AND NOT (t.tag = ANY($3::text[]))`, [txOpts.sourceId, slug, parsed.tags]);
+    // enrichment). A legacy row still in the frontmatter is adopted. Prepared
+    // (managed) imports keep the add-only union their canonical file renders.
+    if (!opts.prepare) {
+      await tx.executeRaw(`DELETE FROM tags t USING pages p WHERE p.id = t.page_id AND p.source_id = $1 AND p.slug = $2
+        AND t.tag_source = 'frontmatter' AND NOT (t.tag = ANY($3::text[]))`, [txOpts.sourceId, slug, parsed.tags]);
+    }
     for (const tag of parsed.tags) {
-      await tx.addTag(slug, tag, { ...txOpts, tagSource: 'frontmatter' });
+      await tx.addTag(slug, tag, opts.prepare ? txOpts : { ...txOpts, tagSource: 'frontmatter' });
     }
 
     // Replace every derived row atomically. Only vectors the A13 reuse gate
