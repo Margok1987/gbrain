@@ -52,6 +52,7 @@ import { upsertFactRow, parseFactsFence } from '../facts-fence.ts';
 import { contentHash } from '../utils.ts';
 import { extractFactsFromFenceText } from './extract-from-fence.ts';
 import { logStubGuardEvent } from './stub-guard-audit.ts';
+import { isFactWithdrawn } from './withdrawal.ts';
 import { assertUnmanagedCanonicalWriter } from '../persistence/maintenance.ts';
 
 /** Resolved source binding for the entity page. */
@@ -117,6 +118,12 @@ export interface FenceWriteResult {
    * `jared.md` stub.
    */
   stubGuardBlocked?: true;
+  /**
+   * Input facts dropped because their claim is withdrawn for this page's
+   * entity (write-path audit B-10): a withdrawn claim is never appended to
+   * the Markdown fence as an active row.
+   */
+  withdrawnSkipped?: number;
   /**
    * True when the shared page-target resolver could not produce a usable
    * fence file path (source tree missing / not a directory, or a hostile
@@ -321,6 +328,14 @@ export async function writeFactsToFence(
   return withPageLock(
     target.slug,
     async () => {
+      const kept: FenceInputFact[] = [];
+      for (const f of facts) {
+        if (!await isFactWithdrawn(engine, target.sourceId, f.visibility, f.fact, target.slug)) kept.push(f);
+      }
+      const withdrawnSkipped = facts.length - kept.length ? { withdrawnSkipped: facts.length - kept.length } : {};
+      facts = kept;
+      if (!facts.length) return { inserted: 0, ids: [], ...withdrawnSkipped };
+
       // 1. Read existing body or stub-create.
       let body: string;
       if (existsSync(filePath)) {
@@ -376,7 +391,7 @@ export async function writeFactsToFence(
               ? `[facts] refusing to stub-create unprefixed entity page slug=${target.slug} — routing to legacy DB-only path. Provide a directory prefix (people/, companies/, etc.) to opt into fence writes.`
               : `[facts] refusing to stub-create entity page slug=${target.slug} from a fallback-resolved reference (no live page verified) — routing to legacy DB-only path.`,
           );
-          return { inserted: 0, ids: [], stubGuardBlocked: true };
+          return { inserted: 0, ids: [], stubGuardBlocked: true, ...withdrawnSkipped };
         }
         // Stub-create the parent directory if it doesn't exist.
         mkdirSync(dirname(filePath), { recursive: true });
@@ -535,7 +550,7 @@ export async function writeFactsToFence(
           durabilityPrewriteState,
         );
       }
-      return { inserted: result.inserted, ids: result.ids };
+      return { inserted: result.inserted, ids: result.ids, ...withdrawnSkipped };
     },
     { timeoutMs: 5_000 },
   );

@@ -564,6 +564,7 @@ async function runPipelineBodyInner(
   const { resolveEntitySlugWithSource } = await import('../entities/resolve.ts');
   const { cosineSimilarity } = await import('./classify.ts');
   const { writeFactsToFence, lookupSourceLocalPath } = await import('./fence-write.ts');
+  const { isFactWithdrawn } = await import('./withdrawal.ts');
 
   if (abortSignal?.aborted) {
     return { inserted: 0, duplicate: 0, superseded: 0, fact_ids: [], entity_slugs: [] };
@@ -668,6 +669,10 @@ async function runPipelineBodyInner(
       : null;
     const resolvedSlug = resolved?.source === 'fallback_slugify' ? null : resolved?.slug ?? null;
     const resolutionSource = resolved?.source ?? null;
+
+    // B-10: a withdrawn claim for this entity is never re-written; the
+    // fence writer rechecks under its page lock.
+    if (await isFactWithdrawn(ctx.engine, ctx.sourceId, visibility, f.fact, resolvedSlug)) continue;
 
     // Dedup against DB candidates (correct per Codex Q7: fence rows
     // have no embeddings; FS lock + sync invariant means DB == fence
