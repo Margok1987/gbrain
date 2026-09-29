@@ -1,5 +1,12 @@
 # TODOS
 
+## Fix wave 3 lane B follow-ups (filed 2026-09-29, follow-up from v0.60.11.0)
+
+- [ ] **P2 — Managed `writeSingleFact` keeps unresolved entity attribution.**
+  **What:** on a managed brain a single fact for an entity with no page is stored database-only with `entity_slug` NULL (the response now reports that honestly), so the same claim for a second absent entity dedups against the first. The shared `managed_facts_entity` preparer accepts only the row's slug or NULL. **Fix:** an opt-in intent flag used only by `writeSingleFact`: `publishManagedFacts` keeps the resolver's fallback slug on `memory/unattributed` rows, and `prepareManagedFactsMutation` allows that slug on rows without a row number and passes it to `insertFact`, so dedup is per entity; add a test pinning the facts backstop's unchanged replay and dedup contract.
+- [ ] **P3 — Release the reservation of other permanent embedding rejections.**
+  **What:** the migration budget now refunds a provider token-limit rejection (it bills nothing), but the drain's per-chunk fan-out after another permanent 4xx (400/413/422) keeps the failed batch's maximum debit; the overshoot and exhaustion refusal bound it, but it can stop a migration early. **Fix:** map those unbilled rejections through the same `invokeAI` rejection mapper, with a test at exactly the printed cap.
+
 ## Test-audit follow-ups (filed 2026-09-29)
 
 Evidence for each item is in `docs/test-audit/2026-09-29/`.
