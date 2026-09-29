@@ -435,7 +435,9 @@ async function tryPrefixExpansion(
       if (rows.length === 1) return rows[0].slug;
       // Multiple matches: the top row (sorted by connection_count desc)
       // wins. The slug-ASC secondary key makes ties deterministic when
-      // connection counts collide — important for test pinning.
+      // connection counts collide — important for test pinning. The
+      // phantom pass's findPrefixCandidates gate refuses any multi-candidate
+      // redirect, so this top row is never taken on its own.
       return rows[0].slug;
     } catch {
       // Defensive: a missing table or index shouldn't crash extraction.
@@ -511,7 +513,8 @@ async function tryFuzzyMatch(
       const named = rows.filter(row => isFactEntityPage(row.slug, row.type) && sameEntityName(raw, row.title, row.slug));
       return named.length === 1 ? named[0].slug : null;
     }
-    if (rows.length > 0 && rows[0].score >= 0.7) return rows[0].slug;
+    // Phantom canonicals: a clear winner only, with a margin over the runner-up.
+    if (rows.length > 0 && rows[0].score >= 0.7 && (rows.length === 1 || rows[0].score - rows[1].score >= 0.1)) return rows[0].slug;
   } catch {
     // pg_trgm functions might not be available on every engine config;
     // fall through to slugify.
