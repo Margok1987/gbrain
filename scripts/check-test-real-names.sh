@@ -35,8 +35,7 @@ BANNED_NAMES=(
   # 'Hermes' removed (hermes-harness wave): here it names NousResearch/hermes-agent,
   # a PUBLIC platform gbrain documents (README hero, INSTALL_FOR_AGENTS.md) and now
   # tests against (claw-test hermes runner, install door e2e).
-  # test/readme-hero-anchors.test.ts REQUIRES the README to mention it. The original
-  # scrub targeted conflating the public agent with PRIVATE deployment names — those
+  # The original scrub targeted conflating the public agent with PRIVATE deployment names — those
   # (Wintermute, and any future private fork names) remain banned above/below.
   'Technium'        # real GP handle
   'McGrew'          # ex-OpenAI exec
@@ -62,7 +61,6 @@ ALLOWLIST=(
   "test/recency-decay.test.ts:Wintermute"              # regression-prevention test asserting wintermute is absent (structural)
   "test/scripts/check-proposal-pii.test.ts:Wintermute" # privacy-guard test asserting docs/proposals/ rejects wintermute (structural; same meta-rule exception as check-privacy.sh)
   "test/scripts/check-proposal-pii.test.ts:WINTERMUTE" # case-insensitive sentinel literal for the same privacy-guard test
-  "test/readme-hero-anchors.test.ts:OpenClaw"          # v0.36.0.0 D9 anchor test — asserts README mentions OpenClaw as a credit
   # v0.36.0.0: skillpack-harvest privacy linter tests structurally
   # require the literal "Wintermute" to verify the linter catches it.
   # Same meta-rule exception as integrations.test.ts and the proposal-pii

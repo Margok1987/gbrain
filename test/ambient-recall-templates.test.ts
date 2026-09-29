@@ -2,12 +2,12 @@
  * Ambient recall (v0.45.7) — template + doc content pins.
  *
  * The context_pack/delta verbs only deliver value if the shipped guidance
- * points agents at them. These pins keep the four guidance surfaces from
- * silently dropping the boundary instructions:
+ * points agents at them. These pins keep the three guidance surfaces from
+ * silently dropping the boundary instructions (the rendered template-repo copy
+ * is byte-diffed against the generator by scripts/check-bootstrap-templates.sh):
  *   - HEARTBEAT.md.template carries the ambient-delta row (heartbeats pull
  *     `gbrain delta`; session start / post-compaction pairs with
  *     `gbrain context-pack`)
- *   - the RENDERED template-repo HEARTBEAT.md carries the same row
  *   - docs/mcp/CODEX.md names context_pack for the session boundary (Codex
  *     has no lifecycle hooks — the pull path is the only path)
  *   - docs/guides/ambient-recall.md exists and names both verbs
@@ -33,12 +33,6 @@ describe('HEARTBEAT ambient-delta row', () => {
     expect(tpl).toContain('docs/guides/ambient-recall.md');
   });
 
-  test('rendered template-repo HEARTBEAT.md carries the same row', () => {
-    const rendered = read('templates/bootstrap/template-repo/HEARTBEAT.md');
-    expect(rendered).toContain('ambient-delta');
-    expect(rendered).toContain('gbrain delta');
-    expect(rendered).toContain('gbrain context-pack');
-  });
 });
 
 describe('docs surfaces', () => {

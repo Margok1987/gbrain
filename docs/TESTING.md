@@ -228,6 +228,69 @@ E2E schedule does not shorten a PR critical path dominated by persistence.
 Report matched executed timings separately from dry-run partition estimates,
 including setup, queueing and retries; never count skip-only output as coverage.
 
+### Authoring gate
+
+Before adding a test, answer four questions in the PR description or the test
+header:
+
+1. What observable behavior or contract does it protect?
+2. What credible regression makes it fail?
+3. Why does existing coverage not already catch it?
+4. Does it need a production seam that no production caller needs?
+
+A regression test must fail when its fix is reverted; prove it with
+`scripts/check-test-discriminates.sh` (see CONTRIBUTING.md). If question 1 has
+no answer, or the answer to question 3 names an existing owner at the same
+boundary, do not add the test.
+
+Good: a test that runs `gbrain remote ping` against a fake MCP server returning
+`{ status: 'failed' }` and asserts exit code 1 with the failure reason in the
+JSON output. It protects a user-visible contract, fails if the poll loop reads
+the wrong field, and needs no seam.
+
+Bad: a test that reads `src/commands/remote.ts` and asserts it contains
+`job.status`. It passes when the loop is broken in a way that keeps the token,
+fails on a harmless rename, and duplicates the behavioral test above.
+
+### Retiring a test
+
+Delete or merge a test only with evidence, recorded in the PR body:
+
+1. Name the contract the test claims to protect and classify the evidence case
+   below.
+2. Probe it: make a behavior-breaking edit to the production code (or, for a
+   vacuous assertion, show that such an edit passes), run the test and the
+   surviving owner, then revert. Behavior-preserving edits that fail the test
+   are useful extra evidence of implementation coupling.
+3. Confirm the surviving owner executes (executed-test counts, not skip output)
+   at the same or a more frequent cadence, with an equal or stronger failure
+   gate, per "Coverage responsibilities before consolidation" above.
+4. Remove the deleted file's entries from `scripts/ubicloud/weights.json`,
+   `scripts/test-weights.json`, `scripts/serial-weights.json` and
+   `scripts/e2e-weights.json`, grep `scripts/`, `.github/`,
+   `scripts/e2e-test-map.ts` and `test/fixtures/e2e-unmapped-baseline.txt` for
+   the path, and regenerate `scripts/structural-suites.tsv`
+   (`bun scripts/classify-tests.ts`).
+
+Evidence cases:
+
+- **Retained contract:** the contract still matters. Evidence is a surviving
+  owner at the same boundary plus an executed mutation that fails it.
+- **Intentionally abandoned contract:** the behavior is being removed or was
+  never shipped. Evidence is the approved disposition plus reachability proof
+  (no production caller) and a check that no user-facing promise (docs, skills,
+  `--help`, CHANGELOG) still describes it.
+- **Vacuous assertion:** the test asserts nothing about product behavior (a
+  constant compared to itself, a copied function, a `typeof` probe that
+  typecheck already enforces). Evidence is a demonstration that a
+  behavior-breaking edit leaves it passing, or that it imports no product code.
+
+Evidence template:
+
+| Deleted test | Probe edit | Result | Surviving owner | Owner result |
+|---|---|---|---|---|
+| `test/x.test.ts` › "name" | `src/y.ts`: what changed | deleted test passes (blind) | `test/z.test.ts` › "name" | fails (N of M) |
+
 ### Test command tiers
 
 The sequential E2E runner gives each test file a fresh `HOME` and `GBRAIN_HOME`.
@@ -690,7 +753,7 @@ per-file rules. They do not cache passing results. Candidate scanner failures
 fail the guard, and matching files retain the same allowlists and diagnostics.
 
 `scripts/guards-manifest.tsv` is THE single registry of `scripts/check-*`
-guards (currently 48), each classified `scanner` (greps/parses repo sources —
+guards (currently 56), each classified `scanner` (greps/parses repo sources —
 must eventually carry fixtures), `buildfresh`, or `repostate` (build/freshness
 guards are exempt-with-reason, not fixture-tested).
 `scripts/guard-self-test.sh` (`bun run check:guard-self-test`, wired into
@@ -701,6 +764,41 @@ trees under `test/fixtures/guards/<guard>/{bad,good}/` via the
 `scripts/check-*` script that isn't registered in the manifest fails the
 build. A guard whose pattern rots into a permanently-green no-op fails CI
 instead of masquerading as coverage.
+
+### Placeholder assertions
+
+`scripts/check-test-placeholders.mjs` (`bun run check:test-placeholders`, in
+`bun run verify`) parses every `test/**/*.test.ts` file outside
+`test/fixtures/` with the TypeScript compiler API and fails on the no-op forms
+`expect(true)` with no matcher, `expect(true).toBe(true)`,
+`expect(true).toBeTruthy()` and `expect(1).toBe(1)`. Text inside strings and
+template literals is ignored, and `expect(true).toBe(false)` fail sentinels
+are allowed. Remaining sites (type-only contracts enforced by typecheck,
+skip-arm markers, gates that fail by throwing) sit in a reasoned allowlist in
+the script, keyed by file, test name and exact count; a site above its count
+fails as new, and an entry whose file, test or count shrank fails as stale.
+This is a hygiene check for one pattern, not a detector of low-value tests in
+general; the authoring gate above owns that.
+
+### Source reads in tests
+
+`test/test-reads-source-smell.test.ts` finds test code that reads `src/` text:
+`readFileSync`, `readFile` (including `fs.promises.readFile`) and `Bun.file`
+calls whose arguments name a `src/` literal, a `'src'` path segment, or a
+constant holding such a path. Each read site needs a tagged marker on its line
+or within the three lines above:
+
+```ts
+// test-reads-source-ok[structural]: <why a source read is the right tool>
+```
+
+The category is one of `prompt-byte`, `trust-boundary`, `generated-artifact`,
+`structural` or `raw-bytes`, and every marker must carry one. Files that
+predate the rule are ratcheted by their exact count of unjustified read sites,
+so a new untagged read in such a file fails and a count that drops must be
+lowered. The ratchet counts read sites only: a new assertion over an existing
+source binding is not detected and remains the authoring gate's job. Rerun with
+`bun test test/test-reads-source-smell.test.ts`.
 
 ### Registry-walking ratchets
 

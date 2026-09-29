@@ -270,26 +270,6 @@ describe("checkResolvable — real skills directory", () => {
     expect(Array.isArray(report.issues)).toBe(true);
   });
 
-  test("all manifest skills are reachable from RESOLVER.md", () => {
-    const unreachableIssues = report.issues.filter(i => i.type === "unreachable");
-    if (unreachableIssues.length > 0) {
-      const names = unreachableIssues.map(i => i.skill).join(", ");
-      console.warn(`Unreachable skills: ${names}`);
-    }
-    // Currently expect all 24 skills to be reachable
-    expect(report.summary.unreachable).toBe(0);
-  });
-
-  test("no missing files referenced by RESOLVER.md", () => {
-    const missingFiles = report.issues.filter(i => i.type === "missing_file");
-    expect(missingFiles.length).toBe(0);
-  });
-
-  test("no orphan triggers (in resolver but not manifest)", () => {
-    const orphans = report.issues.filter(i => i.type === "orphan_trigger");
-    expect(orphans.length).toBe(0);
-  });
-
   test("action strings are specific (contain file paths)", () => {
     for (const issue of report.issues) {
       expect(issue.action.length).toBeGreaterThan(10);

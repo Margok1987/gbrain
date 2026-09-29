@@ -61,6 +61,9 @@ CHECKS=(
   # true orphans (unreachable from every entrypoint AND every test), ratchets
   # the test-only-reachable tier. Whole-tree readFileSync walk, ~1s.
   "check:orphan-modules"
+  # No-op placeholder assertions (expect(true).toBe(true) and friends) in
+  # test/**/*.test.ts; TypeScript AST scan, ~3s over the full corpus.
+  "check:test-placeholders"
   # Chronicle eval: $0, deterministic, exit-0-only-on-perfect (6 gold tasks).
   # Boots its own PGLite — budget ≤60s under a saturated pool; if it breaches
   # ~100s under contention, move it into the serial-tests CI job instead.

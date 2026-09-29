@@ -65,57 +65,6 @@ describe('dream CLI flag wiring', () => {
     expect(dreamSrc).toContain('host timezone');
   });
 
-  // v0.41.13: --source / --source-id flag wiring (supersedes PR #1559).
-  // Structural-only tests; behavioral tests live in test/dream.test.ts.
-  describe('--source / --source-id wiring (v0.41.13)', () => {
-    test('declares --source flag in argv parsing', () => {
-      expect(dreamSrc).toContain("'--source'");
-    });
-
-    test('declares --source-id alias in argv parsing', () => {
-      expect(dreamSrc).toContain("'--source-id'");
-    });
-
-    test('forwards resolved sourceId to runCycle', () => {
-      // The runCycle call must pass sourceId; gate name "sourceId"
-      // not "source" because CycleOpts.sourceId is the contract.
-      expect(dreamSrc).toMatch(/sourceId:\s*resolvedSourceId/);
-    });
-
-    test('imports resolveSourceId from canonical source-resolver helper', () => {
-      expect(dreamSrc).toContain("from '../core/source-resolver.ts'");
-      expect(dreamSrc).toContain('resolveSourceId');
-    });
-
-    test('uses the shared isResolverUserError predicate for the typed-error catch (T3 from eng review)', () => {
-      // One predicate, exported from source-resolver.ts next to the messages
-      // it matches — never a local copy that can drift from the wording.
-      expect(dreamSrc).not.toContain('function isResolverUserError');
-      expect(dreamSrc).toMatch(/import \{[^}]*\bisResolverUserError\b[^}]*\} from '\.\.\/core\/source-resolver\.ts'/);
-      expect(dreamSrc).toContain('if (isResolverUserError(e))');
-    });
-
-    test('documents --source in --help output', () => {
-      expect(dreamSrc).toContain('--source <id>');
-      expect(dreamSrc).toContain('--source-id <id>');
-    });
-
-    test('preserves --help short-circuit ordering comment (IRON RULE)', () => {
-      // The comment lives in runDream BEFORE the engine-null gate.
-      // Future refactors that reorder these blocks will trip this guard.
-      expect(dreamSrc).toContain('IRON RULE: --help short-circuits BEFORE');
-    });
-
-    test('declares engine-null guard for --source', () => {
-      expect(dreamSrc).toContain('requires a connected brain');
-    });
-
-    test('declares archived-source guard', () => {
-      expect(dreamSrc).toMatch(/source.*is archived/);
-      expect(dreamSrc).toContain('gbrain sources restore');
-    });
-  });
-
   // issue #1678 — --drain bounded backlog drain wiring (structural).
   describe('--drain wiring', () => {
     test('declares --drain and --window flags', () => {
@@ -147,52 +96,4 @@ describe('dream CLI flag wiring', () => {
     });
   });
 
-  // issue #2860 — --once one-shot phase-enabled-gate bypass (structural).
-  // Behavioral coverage: test/e2e/dream-patterns-pglite.test.ts (bypass +
-  // config-untouched) and test/core/cycle.serial.test.ts (non-leak across
-  // phases via CycleOpts.onceForPhase).
-  describe('--once wiring (issue #2860)', () => {
-    test('declares --once flag', () => {
-      expect(dreamSrc).toContain("'--once'");
-    });
-
-    test('rejects bare --once with no --phase (exit 2)', () => {
-      expect(dreamSrc).toContain('--once requires an explicit --phase <name>');
-      // --help must short-circuit this validation (Codex review finding) —
-      // see the "--help --once" test in test/dream.test.ts for the
-      // behavioral pin of this exact ordering.
-      expect(dreamSrc).toContain('if (once && !phaseWasExplicit && !wantsHelp)');
-    });
-
-    // Codex P3 finding: the derived phase value gets populated by
-    // --input/--drain BEFORE this validation used to run, so those two
-    // silently slipped past an emptiness-based check. The fix validates
-    // against `phaseWasExplicit` (captured from the raw flag occurrences,
-    // before any implicit defaulting) instead. Behavioral pins live in
-    // test/dream.test.ts. (#4493: the capture source moved from
-    // `phaseIdx !== -1` to `phaseValues.length > 0` when --phase became
-    // repeatable — same before-defaulting ordering contract.)
-    test('validates against phaseWasExplicit, captured before --input/--drain defaulting', () => {
-      expect(dreamSrc).toContain('const phaseWasExplicit = phaseValues.length > 0;');
-      // Must be declared before the --input-implies-synthesize and
-      // --drain-implies-extract_atoms defaulting blocks so it captures
-      // presence prior to any implicit phase assignment.
-      const explicitIdx = dreamSrc.indexOf('const phaseWasExplicit = phaseValues.length > 0;');
-      const inputImpliesIdx = dreamSrc.indexOf("phases = ['synthesize']");
-      const drainImpliesIdx = dreamSrc.indexOf("phases = ['extract_atoms']");
-      expect(explicitIdx).toBeGreaterThan(-1);
-      expect(explicitIdx).toBeLessThan(inputImpliesIdx);
-      expect(explicitIdx).toBeLessThan(drainImpliesIdx);
-    });
-
-    test('threads onceForPhase to runCycle, gated on opts.once', () => {
-      // #4493: opts.phases[0] — parseArgs guarantees exactly one when --once.
-      expect(dreamSrc).toMatch(/onceForPhase:\s*opts\.once\s*\?\s*opts\.phases\[0\]!\s*:\s*undefined/);
-    });
-
-    test('documents --once in --help output', () => {
-      expect(dreamSrc).toContain('--once');
-      expect(dreamSrc).toContain('Never reads or writes config');
-    });
-  });
 });
