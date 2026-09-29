@@ -127,6 +127,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'takes_weight_grid',
   'text_projection_readiness',
   'timeline_coverage',
+  'timeline_orphans',
   'undeclared_db_only_pages',
   'unified_multimodal_coverage',
   'unverified_extractions',

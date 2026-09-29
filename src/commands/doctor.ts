@@ -2659,6 +2659,9 @@ export async function buildChecks(
   } finally {
     staleMentionsHb();
   }
+  progress.heartbeat('timeline_orphans');
+  const { timelineOrphansCheck } = await import('./doctor/checks/timeline-orphans.ts');
+  checks.push(await timelineOrphansCheck(engine));
 
   // 10. Integrity sample scan (v0.13 knowledge runtime).
   // Read-only — no network, no writes, no resolver calls. Samples the first
