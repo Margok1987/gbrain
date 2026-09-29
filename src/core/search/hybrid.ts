@@ -1312,11 +1312,14 @@ export async function hybridSearch(
   // shared by the fused path and both keyword-only paths. Caller re-sorts.
   const applyIdentityBoosts = async (list: SearchResult[]): Promise<void> => {
     if (intentWeights.exactMatchBoost === 1.0) {
-      // #4694: intents without an exact-match boost still honor a
-      // multi-token title that is the query's subject — except in a
-      // relational question ("who invested in <title>"), whose answer is the
-      // pages linked to that title, not the title page itself.
-      if (intentWeightingOn && parseRelationalQuery(query) === null) applyTitleMentionBoost(list, query);
+      // #4694: general and temporal questions still honor a multi-token
+      // title that is the query's subject. Not concept intent (Cat 13: a
+      // lexical title decoy is exactly what paraphrase probes must not
+      // reward) and not a relational question ("who invested in <title>"),
+      // whose answer is the pages linked to that title, not the title page.
+      if (intentWeightingOn && suggestions.intent !== 'concept' && parseRelationalQuery(query) === null) {
+        applyTitleMentionBoost(list, query);
+      }
       return;
     }
     applyExactMatchBoost(list, query, intentWeights);

@@ -162,8 +162,8 @@ export function applyExactMatchBoost(
 }
 
 /**
- * #4694 — score multiplier under intents WITHOUT an exact-match boost
- * (general, temporal, concept) for a result whose multi-token title or slug
+ * #4694 — score multiplier under general and temporal intent (no
+ * exact-match boost; concept intent is excluded, see hybrid.ts) for a result whose multi-token title or slug
  * tail is the query's subject (`titleAsQuerySubject`: "Which document is
  * <title>?" classifies as general, so the entity-intent boost never reached
  * it).
