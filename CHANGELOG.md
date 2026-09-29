@@ -10,6 +10,70 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.4.0] - 2026-09-29
+
+**Idle `gbrain serve` stops holding database connections open, large local brains stop freezing mid-import, dream stops paying for the same failing input forever, and hot memory is sent once per session.**
+
+Every `gbrain serve` asked the database "anything to do?" four times a second, forever. Behind a pooler that kept 4 to 7 connections per serve open all day, so a handful of agent sessions could use up a shared Postgres server. Now an idle serve checks with one small query, slows down to once every 5 seconds, and lets its other connections close. A write made through that same serve is picked up at once; a write from another process waits at most about 5 seconds.
+
+Large local (PGLite) brains froze at 100% CPU after roughly 1,000 to 2,000 imported pages in one process, and Ctrl+C did nothing. The database was running its periodic checkpoint in the middle of a write and never finished it. GBrain now runs that checkpoint itself, between writes, before it gets that far.
+
+When the same dream transcript kept failing, every cycle paid to try it again. After 3 failures in 24 hours dream now refuses that input and tells you how to re-enable it. Separately, the prompt hook stopped repeating the same hot-memory facts on every prompt of a session.
+
+| What we measured | Before | After |
+| --- | --- | --- |
+| Idle `serve` behind a transaction-mode PgBouncer, connections after 30 s | 7 | 1 |
+| PGLite import, 40 KB pages, default settings, one process | froze at page 1,183 (549 MB WAL since checkpoint) | 3,000 pages in 208 s, WAL stayed under 269 MB |
+| Dream resubmissions of a key that died 3 times | every cycle | none until reset |
+
+### How to use it
+
+```bash
+gbrain dream reset-key --list            # inputs the breaker is refusing
+gbrain dream reset-key '<key>'           # re-enable one after fixing the cause
+gbrain config set dream.breaker.max_dead_submissions 5   # 0 turns the breaker off
+```
+
+### Things to watch
+
+- A transcript that keeps growing gets a new key each cycle, so the breaker cannot catch it. Patterns runs outside maintenance carry no key and are not covered either.
+- The breaker check happens before synthesis submission. Triage for that run may already have been paid for.
+- If the checkpoint itself fails, a PGLite write is refused before it starts, with a hint to restart and run `gbrain pglite-repair --dry-run`.
+
+## To take advantage of v0.60.4.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Your agent reads `skills/migrations/v0.60.4.0.md` the next time you interact with it.** Nothing needs changing by hand; migration 170 adds an index.
+3. **Verify the outcome:**
+   ```bash
+   gbrain doctor --json | grep -A3 dream_paid_loop
+   gbrain dream reset-key --list
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+### Itemized changes
+
+- **Idle persistence consumer backs off (#5370).** When a tick finds nothing, the next tick runs one probe statement that mirrors every worker's selection instead of the full worker fan-out, and the interval doubles from 250 ms to a 5 s cap. `PersistenceConsumer.wake()` runs a full tick immediately; `waitForWrite` calls it after a same-process admission commits. No LISTEN is used, so transaction-mode PgBouncer behaves like a direct server. On Postgres pools of three or more, idle probes share one reserved connection and the rest of the pool closes through the existing 20 s `idle_timeout`.
+- **PGLite checkpoint guard (#5449, #5284).** Before an outermost write transaction begins, gbrain issues a top-level `CHECKPOINT` once WAL since the last redo point passes half the automatic-checkpoint distance (256 MB with the default 1 GB `max_wal_size`). Savepoints never checkpoint. A failed WAL probe proceeds with a one-time warning; a failed `CHECKPOINT` refuses before BEGIN.
+- **Dream paid-loop breaker.** A dream synthesize or patterns key whose submissions died `dream.breaker.max_dead_submissions` times (default 3) within 24 hours is refused before synthesis submission. The refusal lands in the cycle summary and the autopilot log with the reset command. `gbrain dream reset-key <key>` and `--list` manage it; resets persist in the brain. The new `dream_paid_loop` doctor check reports looping keys. Only dead jobs count: completed jobs, including legitimate zero-write answers, never do. A failed count skips the breaker for that run with a warning.
+- **Released keys are recorded.** When a dead or cancelled job's idempotency key is reused, the old row keeps it as `data.__released_idempotency_key`, and the synthesize daily cap now counts those dead rows too.
+- **Hot memory is not repeated (#5591).** Facts already injected earlier in the session are left out of later prompts, matched without the drifting confidence score. Contributed by @mariopenterman.
+- **Migration 170** adds a partial index on dead subagent jobs' finish time.
+
+### For contributors
+
+- New tests: `test/persistence-consumer-idle.test.ts`, `test/e2e/persistence-idle-pool.test.ts`, `test/pglite-checkpoint-guard.test.ts`, `test/dream-breaker.test.ts`, `test/cycle-synthesize-breaker.test.ts`, `test/e2e/dream-breaker-postgres.test.ts`; `test/turn-context.test.ts` gains the #5591 cases.
+- `scripts/pglite-checkpoint-harness/` is the large-store PGLite harness (external supervisor, wedge detection, WAL-bound assertion). It runs outside CI; see "PGLite checkpoint harness" in `docs/TESTING.md`.
+
 ## [0.59.11.0] - 2026-09-28
 
 **Your brain stops losing notes, stops linking people to the wrong person, and forgets links and dates you deleted.**

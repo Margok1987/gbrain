@@ -873,6 +873,16 @@ export async function buildChecks(
     }
   }
 
+  // 2g. Dream paid-loop breaker: keys whose submissions keep dying.
+  if (engine) {
+    try {
+      const { dreamPaidLoopCheck } = await import('./doctor/checks/dream-breaker.ts');
+      checks.push(await dreamPaidLoopCheck(engine));
+    } catch (e) {
+      checks.push({ name: 'dream_paid_loop', status: 'warn', message: `Could not count dead dream submissions: ${e instanceof Error ? e.message : String(e)}` });
+    }
+  }
+
   // 3. Half-migrated Minions detection (filesystem-only).
   // If completed.jsonl has any status:"partial" entry with no later
   // status:"complete" for the same version, the install is mid-migration.
