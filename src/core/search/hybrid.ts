@@ -1845,6 +1845,7 @@ export async function hybridSearch(
     }
   }
 
+  let imageQueryEmbedding: Float32Array | null = null;
   if (!unifiedDone && (effectiveModality === 'image' || effectiveModality === 'both')) {
     // Attempt image-side embedding. Fail-open: if multimodal is unconfigured
     // OR the embed throws, log a structured warning and fall through to text.
@@ -1857,6 +1858,7 @@ export async function hybridSearch(
         throw new Error('gateway not configured for embedding — multimodal would also fail');
       }
       const imageEmbedding = await embedQueryMultimodal(query);
+      imageQueryEmbedding = imageEmbedding;
       const imageSearchOpts: SearchOpts = {
         ...searchOpts,
         embeddingColumn: 'embedding_image',
@@ -2184,7 +2186,10 @@ export async function hybridSearch(
   if (queryEmbedding) {
     // Unified routing embedded the query with the multimodal model, so the
     // rescore must hydrate the multimodal column, not the text column.
-    fused = await cosineReScore(engine, fused, queryEmbedding, unifiedDone ? 'embedding_multimodal' : resolvedCol.name);
+    fused = await cosineReScore(
+      engine, fused, queryEmbedding, unifiedDone ? 'embedding_multimodal' : resolvedCol.name,
+      imageQueryEmbedding && !unifiedDone ? { queryEmbedding: imageQueryEmbedding, column: 'embedding_image' } : undefined,
+    );
   }
 
   // Phase E3 (Cat 13): metadata boost gate — decided from the SAME lexical
@@ -3151,26 +3156,37 @@ export async function cosineReScore(
   results: SearchResult[],
   queryEmbedding: Float32Array,
   column: string = 'embedding',
+  imageSpace?: { queryEmbedding: Float32Array; column: string },
 ): Promise<SearchResult[]> {
-  const chunkIds = results
+  // 'both' mode: image-arm rows live in the image space (image column,
+  // multimodal query vector); everything else in the text space.
+  const inImageSpace = (r: SearchResult): boolean => imageSpace !== undefined && r.modality === 'image';
+  const idsFor = (image: boolean) => results
+    .filter(r => inImageSpace(r) === image)
     .map(r => r.chunk_id)
     .filter((id): id is number => id != null);
+  const chunkIds = idsFor(false);
+  const imageChunkIds = idsFor(true);
 
-  if (chunkIds.length === 0) return results;
+  if (chunkIds.length === 0 && imageChunkIds.length === 0) return results;
 
   let embeddingMap: Map<number, Float32Array>;
+  let imageEmbeddingMap = new Map<number, Float32Array>();
   try {
     // v0.36 (D9): hydrate from the active column so rescore happens in
     // the same embedding space the HNSW just ranked in. Without this,
     // a Voyage HNSW retrieval would HNSW-rank against Voyage vectors but
     // rescore against OpenAI vectors → NaN or wrong rankings.
-    embeddingMap = await engine.getEmbeddingsByChunkIds(chunkIds, column);
+    embeddingMap = chunkIds.length > 0 ? await engine.getEmbeddingsByChunkIds(chunkIds, column) : new Map();
+    if (imageSpace && imageChunkIds.length > 0) {
+      imageEmbeddingMap = await engine.getEmbeddingsByChunkIds(imageChunkIds, imageSpace.column);
+    }
   } catch {
     // DB error is non-fatal, return results without re-scoring
     return results;
   }
 
-  if (embeddingMap.size === 0) return results;
+  if (embeddingMap.size === 0 && imageEmbeddingMap.size === 0) return results;
 
   // Normalize RRF scores to 0-1 for blending
   const maxRrf = Math.max(...results.map(r => r.score));
@@ -3186,8 +3202,9 @@ export async function cosineReScore(
     // results). Route it through the SAME blend with cosine=0 instead of
     // excluding it — excluding would make embed_skip pages unsearchable,
     // a different (undesired) behavior change.
-    const chunkEmb = r.chunk_id != null ? embeddingMap.get(r.chunk_id) : undefined;
-    const cosine = chunkEmb ? cosineSimilarity(queryEmbedding, chunkEmb) : 0;
+    const image = inImageSpace(r);
+    const chunkEmb = r.chunk_id != null ? (image ? imageEmbeddingMap : embeddingMap).get(r.chunk_id) : undefined;
+    const cosine = chunkEmb ? cosineSimilarity(image ? imageSpace!.queryEmbedding : queryEmbedding, chunkEmb) : 0;
     const normRrf = maxRrf > 0 ? r.score / maxRrf : 0;
     const blended = 0.7 * normRrf + 0.3 * cosine;
 
