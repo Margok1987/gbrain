@@ -8,9 +8,9 @@
  * held-out paraphrase split in gbrain-evals is deliberately not mirrored.
  */
 import { describe, test, expect } from 'bun:test';
-import { parseRelationalQuery, KNOWN_LINK_TYPES } from '../src/core/search/relational-intent.ts';
+import { parseRelationalQuery, KNOWN_LINK_TYPES, type RelationalKind, type RelationDirection } from '../src/core/search/relational-intent.ts';
 
-type Expect = { kind: string; seeds: string[]; linkTypes: string[] | null; direction: string };
+type Expect = { kind: RelationalKind; seeds: string[]; linkTypes: string[] | null; direction: RelationDirection };
 const INVEST = ['invested_in', 'led_round'];
 
 const POSITIVES: Array<[string, Expect]> = [

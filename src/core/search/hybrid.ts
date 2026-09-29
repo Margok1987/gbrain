@@ -1313,8 +1313,10 @@ export async function hybridSearch(
   const applyIdentityBoosts = async (list: SearchResult[]): Promise<void> => {
     if (intentWeights.exactMatchBoost === 1.0) {
       // #4694: intents without an exact-match boost still honor a
-      // multi-token title mentioned in the query.
-      if (intentWeightingOn) applyTitleMentionBoost(list, query);
+      // multi-token title that is the query's subject — except in a
+      // relational question ("who invested in <title>"), whose answer is the
+      // pages linked to that title, not the title page itself.
+      if (intentWeightingOn && parseRelationalQuery(query) === null) applyTitleMentionBoost(list, query);
       return;
     }
     applyExactMatchBoost(list, query, intentWeights);
