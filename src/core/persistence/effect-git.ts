@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
-import { dirname, join, relative, resolve as resolvePath, sep } from 'node:path';
+import { basename, dirname, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { execFileBounded, isDurabilityHardenedAsync } from '../brain-repo-durability.ts';
 import { OperationError } from '../ops/contract.ts';
 import { persistenceHome } from './identity.ts';
@@ -9,8 +9,12 @@ import { nativeFileTarget } from './native-file-target.ts';
 const INDEX_LOCK_GRACE_MS = 10 * 60 * 1000;
 /** Git's lock refusal (LC_ALL=C below keeps it untranslated); greedy across lines so a path may hold apostrophes or newlines. */
 const LOCK_REFUSAL = /Unable to create '([\s\S]*)': File exists/;
-/** One filesystem spelling for a path, so a symlinked or PWD-preserved spelling of the same lock compares equal. */
-const canonical = (path: string) => { try { return realpathSync(path); } catch { return path; } };
+/**
+ * One filesystem spelling for a lock path: the directory is canonicalized (a symlinked or PWD-preserved spelling of
+ * the same checkout compares equal) but the lock's own name is not, because git locks the directory entry and a
+ * symlink named like another lock must stay a different lock.
+ */
+const canonical = (path: string) => { try { return join(realpathSync(dirname(path)), basename(path)); } catch { return path; } };
 
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', GIT_GLOB_PATHSPECS: '0', GIT_NOGLOB_PATHSPECS: '0',
   GIT_ICASE_PATHSPECS: '0', LC_ALL: 'C' };

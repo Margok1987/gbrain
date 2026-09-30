@@ -158,3 +158,15 @@ test('a lock reported under another spelling of the checkout (symlink) or under 
     await expect(commitGitTargets(alias, ['a.md'])).rejects.toMatchObject({ code: 'git_index_locked' });
   } finally { rmSync(parent, { recursive: true, force: true }); }
 });
+
+test('a different lock that is a symlink to the index lock is not the index lock', async () => {
+  const root = repo();
+  const lock = join(root, '.git', 'index.lock');
+  const other = join(root, '.git', 'refs', 'heads', 'main.lock');
+  const shim = refusingGit(`echo "fatal: Unable to create '${other}': File exists." >&2`);
+  try {
+    writeFileSync(lock, '');
+    symlinkSync(lock, other);
+    await expect(withEnv({ PATH: shim.path }, () => commitGitTargets(root, ['a.md']))).rejects.toMatchObject({ code: 'git_unavailable' });
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(shim.bin, { recursive: true, force: true }); }
+});
