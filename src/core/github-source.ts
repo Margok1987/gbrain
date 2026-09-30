@@ -1,6 +1,7 @@
 import { withConnectorSync, rethrowConnectorWriteError, pendingConnectorResult, type ManagedConnectorSync } from './persistence/connector-sync.ts';
 import { resolveGitHubAccount } from './persistence/connector-account.ts';
 import { isValidRepoName } from './github-source-config.ts';
+import { connectorRender } from './connectors/connector-text.ts';
 export { isValidRepoName, parseGitHubSourceConfig } from './github-source-config.ts';
 import { slugifyPath } from './sync.ts';
 /**
@@ -1034,6 +1035,7 @@ interface GitHubSyncDeps {
 async function materializePage(deps: GitHubSyncDeps, filePath: string, content: string,
   activePack: Parameters<typeof importPage>[2]) {
   const rel = relative(deps.cfg.dir, filePath).replace(/\\/g, '/');
+  content = connectorRender(content, { path: rel });
   if (deps.managed) return deps.managed.importMarkdown(rel, content);
   const created = !existsSync(filePath);
   mkdirSync(dirname(filePath), { recursive: true });

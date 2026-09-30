@@ -1,5 +1,6 @@
 import { withConnectorSync, rethrowConnectorWriteError, pendingConnectorResult, type ManagedConnectorSync } from '../persistence/connector-sync.ts';
 import { resolveGoogleAccount } from '../persistence/connector-account.ts';
+import { connectorRender } from '../connectors/connector-text.ts';
 /**
  * google-source — Gmail/Calendar/Contacts sync for the `google` source kind.
  *
@@ -187,7 +188,9 @@ async function importRendered(
   activePack: ActivePack,
   summary: GoogleSyncSummary,
   countedSlugs: Set<string>,
+  identity: Record<string, string | readonly string[]> = {},
 ): Promise<string> {
+  markdown = connectorRender(markdown, { path: relPath, account: deps.cfg.account, ...identity });
   if (deps.managed) {
     const result = await deps.managed.importMarkdown(relPath, markdown);
     if (result.status === 'imported') {
@@ -472,7 +475,8 @@ async function processThread(
   // Pure noise renders no page AND skips detection — an all-noise thread
   // produces an empty verdict anyway, so nothing opens and nothing closes.
   if (!rendered) return thread;
-  const slug = await importRendered(deps, rendered.relPath, rendered.markdown, activePack, summary, countedSlugs);
+  const slug = await importRendered(deps, rendered.relPath, rendered.markdown, activePack, summary, countedSlugs,
+    { thread_id: thread.threadId, message_ids: thread.messages.map((m) => m.id) });
   for (const message of thread.messages) {
     const state = message.attachmentInspection?.state ?? 'not_inspected';
     summary.attachmentInspection[state] = (summary.attachmentInspection[state] ?? 0) + 1;
