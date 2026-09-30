@@ -6797,7 +6797,7 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     // doctor count scans only non-NULL rows; bootstrap-coverage: column-only).
     // Keep in sync with src/schema.sql (regenerate schema-embedded.ts via
     // build:schema) and src/core/pglite-schema.ts.
-    version: 182,
+    version: 177,
     name: 'pages_database_only_reason',
     idempotent: true,
     sql: `ALTER TABLE pages ADD COLUMN IF NOT EXISTS database_only_reason TEXT;`,
@@ -6811,7 +6811,7 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     // or published after it are expected to carry stamps. persistence_requests
     // and persistence_brain are migration-created on PGLite and no index
     // references these columns (bootstrap-coverage: column-only exemptions).
-    version: 191,
+    version: 178,
     name: 'persistence_writer_version_stamps',
     idempotent: true,
     sql: `

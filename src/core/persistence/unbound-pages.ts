@@ -6,16 +6,17 @@
  * page's slug-derived path; `gbrain sources reconcile` then previews both sides
  * against that path instead of refusing for want of a recorded origin.
  *
- * Contract for the #5254 durable classification: `isDatabaseOnlyPage` is the
- * one predicate reconcile consults; narrow it to the page-level
- * `unbound_source` marker where that marker exists.
+ * `isDatabaseOnlyPage` is the one predicate reconcile consults. It requires
+ * the durable page-level marker (`pages.database_only_reason='unbound_source'`,
+ * stamped in the publication transaction), so an ordinary page that merely
+ * lacks a recorded origin is never matched to a slug-derived file.
  */
 import { resolveSourceLocalFilePath } from '../markdown.ts';
 import { scannerSourcePath } from '../write-through.ts';
 import { resolveSlugForPath } from '../sync.ts';
 
-export function isDatabaseOnlyPage(page: { source_path?: string | null; source_uri?: string | null }): boolean {
-  return !page.source_path?.trim() && !page.source_uri?.trim();
+export function isDatabaseOnlyPage(page: { source_path?: string | null; source_uri?: string | null; database_only_reason?: string | null }): boolean {
+  return page.database_only_reason === 'unbound_source' && !page.source_path?.trim() && !page.source_uri?.trim();
 }
 
 /**

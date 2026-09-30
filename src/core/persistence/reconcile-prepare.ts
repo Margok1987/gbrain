@@ -89,8 +89,13 @@ export async function prepareReconcileMutation(engine: BrainEngine, row: WriteRe
     },
     apply: async tx => {
       await ready.apply(tx);
-      if (state.originSourcePath) await tx.executeRaw(`UPDATE pages SET source_path=$3 WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL
-        AND source_path IS NULL`, [row.source_id, row.slug, state.originSourcePath]);
+      if (state.originSourcePath) {
+        await tx.executeRaw(`UPDATE pages SET source_path=$3 WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL
+          AND source_path IS NULL`, [row.source_id, row.slug, state.originSourcePath]);
+        // The page now has a canonical origin: drop the #5254 database-only classification.
+        await tx.executeRaw(`UPDATE pages SET database_only_reason=NULL WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL
+          AND database_only_reason='unbound_source' AND source_path IS NOT NULL`, [row.source_id, row.slug]);
+      }
       if (!ready.noop) { await prepared.project!(tx); await sealPageTextProjection(tx, row.slug, row.source_id); }
       const final = await tx.readPageSnapshot(row.slug, { sourceId: row.source_id });
       const scanStateTransferred = final ? await transferLegacyAtomPageState(tx, state.snapshot, final) : false;

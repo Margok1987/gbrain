@@ -990,7 +990,7 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   // reference to trip on, and every reader treats NULL as an unclaimed legacy
   // row (never import-deleted).
   'tags.tag_source',
-  // Migration 191 — writer-version stamps. persistence_requests and
+  // Migration 178 — writer-version stamps. persistence_requests and
   // persistence_brain are migration-created on PGLite (absent from
   // PGLITE_SCHEMA_SQL), so no PGLite-blob forward reference can exist; no
   // index in either blob references these columns; every reader treats NULL
@@ -1001,7 +1001,7 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   'persistence_requests.consumer_host_id',
   'persistence_requests.published_at',
   'persistence_brain.writer_version_cutoff',
-  // #5254 (migration v182) — unbound-source page classification. Column-only
+  // #5254 (migration v177) — unbound-source page classification. Column-only
   // and nullable; no index in either schema blob references it, and every
   // reader treats NULL as an ordinary page.
   'pages.database_only_reason',

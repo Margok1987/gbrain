@@ -19,6 +19,9 @@ import type { GitHubSourceConfig } from '../github-source.ts';
 import type { GoogleSourceConfig } from '../google/types.ts';
 
 export type ConnectorKind = 'google' | 'github';
+
+/** A managed Google or GitHub connector source (`sources.config.kind`). */
+export function isConnectorSourceKind(kind: unknown): kind is ConnectorKind { return kind === 'google' || kind === 'github'; }
 export type ConnectorConfig = GoogleSourceConfig | GitHubSourceConfig;
 type LeafClass = 'identity' | 'excluded';
 type Rule = LeafClass | ((config: GitHubSourceConfig) => LeafClass);

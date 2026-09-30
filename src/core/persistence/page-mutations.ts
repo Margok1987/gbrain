@@ -20,6 +20,7 @@ import type { Principal } from './model.ts';
 import { normalizeSubagentPageInput } from './page-input.ts';
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
 import { readUnboundWritePolicy, unboundSourceError } from './unbound-source.ts';
+import { isConnectorSourceKind } from './connector-identity.ts';
 
 export async function requestPrincipalForContext(ctx: OperationContext): Promise<Principal> {
   if (ctx.auth?.principal) return { ...ctx.auth.principal };
@@ -98,8 +99,8 @@ export async function submitPageMutation(ctx: OperationContext,
     return writeResponse(await waitForWrite(ctx.engine, prior, ctx.config, input.waitMs));
   }
   if (input.operation === 'delete_page') assertPurgeParams(p, ctx.remote);
-  const [source] = await ctx.engine.executeRaw<{ incarnation: string; archived: boolean; local_path: string | null }>(
-    'SELECT incarnation,archived,local_path FROM sources WHERE id=$1', [sourceId]);
+  const [source] = await ctx.engine.executeRaw<{ incarnation: string; archived: boolean; local_path: string | null; kind: string | null }>(
+    "SELECT incarnation,archived,local_path,config->>'kind' AS kind FROM sources WHERE id=$1", [sourceId]);
   if (!source || source.archived) throw new OperationError('source_changed', 'The write source is not active.');
   let slug = typeof p.slug === 'string' ? p.slug.toLowerCase() : '';
   const intent = ['takes_add','takes_update','takes_supersede','takes_resolve'].includes(input.operation)
@@ -162,7 +163,10 @@ export async function submitPageMutation(ctx: OperationContext,
     if (!matches) throw new OperationError('invalid_params', 'The CLI directory must match the selected source canonical root.',
       'Register the source canonical path, then omit --dir or use that same path.');
   }
-  if (writeThrough && root && !binding) {
+  // A connector source without a canonical owner is database-only by design
+  // (connector_database): a page write never claims it or refuses as unbound.
+  if (writeThrough && root && !binding && isConnectorSourceKind(source.kind)) authority.databaseOnlyReason = 'connector_database';
+  else if (writeThrough && root && !binding) {
     if (ctx.engine.kind === 'pglite') binding = await claimWorktree(ctx.engine, sourceId, root, undefined, undefined, { automatic: true });
     else {
       const scope = input.operation !== 'put_page' ? 'other' : snapshot?.page.source_path ? 'file_backed' : 'put_page';

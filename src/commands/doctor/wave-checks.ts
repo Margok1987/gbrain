@@ -74,6 +74,13 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     run: async engine => (await import('./checks/connector-checkpoints.ts')).checkConnectorCheckpoints(engine),
   },
   {
+    id: 'unbound_source', resolution: 'operator', registration: 'wave',
+    count: d => (d.sources ?? []).filter((source: { bound?: boolean }) => source.bound).reduce((sum: number, source: { pages?: number }) => sum + Number(source.pages ?? 0), 0),
+    impact: 'Some pages written database-only while their source was unbound now sit outside canonical files',
+    instruction: 'Keep them database-only, or for a page whose slug already has a canonical file preview both sides with `gbrain sources reconcile <source> <slug> --brain <brain> --preview` and apply the agreed resolution (docs/guides/write-refusals.md#unbound-sources-on-postgres).',
+    run: async engine => (await import('./checks/unbound-source.ts')).checkUnboundSource(engine),
+  },
+  {
     id: 'persistence_capacity', resolution: 'operator', registration: 'doctor.ts',
     count: d => (d.resources ?? []).length,
     impact: 'A cumulative managed-write limit is at or above 80%',

@@ -1,4 +1,4 @@
-/** Writer-version stamps on persistence_requests (migration 191): observation of older writers, not prevention. */
+/** Writer-version stamps on persistence_requests (migration 178): observation of older writers, not prevention. */
 import { VERSION } from '../../version.ts';
 import { localHostId } from './identity.ts';
 import type { SqlEngine } from './model.ts';

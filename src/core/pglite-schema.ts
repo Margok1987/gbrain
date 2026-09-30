@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS pages (
   -- (mirrors src/schema.sql). NULL = never extracted. Powers
   -- gbrain extract --stale + the links_extraction_lag doctor check.
   links_extracted_at    TIMESTAMPTZ,
-  -- #5254 (migration v182; mirrors src/schema.sql): 'unbound_source' marks a
+  -- #5254 (migration v177; mirrors src/schema.sql): 'unbound_source' marks a
   -- page written database-only while its source had no canonical owner.
   database_only_reason  TEXT,
   -- v0.40.3.0 contextual retrieval (renumbered from v81 to v90 on master

@@ -8,7 +8,7 @@ const SAMPLE = 20;
 /**
  * Writer-version advisory: committed requests from the last seven days whose admitting or publishing
  * binary predates v0.60.5.0 or this release (no stamp). Observation, not prevention; older writers are
- * not blocked. Pending requests never count, and only requests admitted or published after migration 191
+ * not blocked. Pending requests never count, and only requests admitted or published after migration 178
  * are expected to carry stamps.
  */
 export async function writerVersionCheck(engine: BrainEngine): Promise<Check> {

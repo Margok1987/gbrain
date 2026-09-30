@@ -17,6 +17,7 @@ import { validateEmbeddingCreds, EmbeddingCredentialError } from '../embed-prefl
 import { wrapChunkTextsForStoredMode } from '../embedding-context.ts';
 import { isEmbedRetriableError, MAX_RATE_LIMIT_RETRIES, rateLimitDelayMs, restampIfDemotedToTitleTier, transientBackoffMs } from '../embed-retry.ts';
 import { AIConfigError, normalizeAIError } from '../ai/errors.ts';
+import { EMBEDDING_ZERO_NORM, isEmbeddingZeroNormError, type EmbeddingZeroNormError } from '../ai/embedding-guard.ts';
 import { isAIInvocationPolicyError, withAIInvocationPreflight } from '../ai/invocation-guard.ts';
 import { quoteIdentifier } from '../search/embedding-column.ts';
 import { acquireWorktree, getWorktreeBinding, type WorktreeBinding } from './ownership.ts';
@@ -213,7 +214,9 @@ async function embedPage(engine: BrainEngine, config: GBrainConfig, effect: Pers
       if (!renewing && !signal.aborted) renewing = renew().finally(() => { renewing = undefined; });
     }, 10_000);
     interval.unref?.();
-    let vectors: Float32Array[];
+    let vectors: (Float32Array | null)[];
+    // #4616: a degenerate vector refuses only its own chunk; the usable vectors still install.
+    let refused: EmbeddingZeroNormError | undefined;
     try {
       await renew();
       signal.throwIfAborted();
@@ -223,12 +226,16 @@ async function embedPage(engine: BrainEngine, config: GBrainConfig, effect: Pers
         signal.throwIfAborted();
         await assertEmbeddingEffectEnabled(engine, config);
       }, () => (opts.embedding?.embed ?? embedBatch)(wrapChunkTextsForStoredMode(prepared.snapshot.page, pending), { abortSignal: signal, maxRetries: 0 }));
+    } catch (error) {
+      if (!isEmbeddingZeroNormError(error) || error.vectors.length !== pending.length) throw error;
+      refused = error;
+      vectors = error.vectors;
     } finally {
       clearInterval(interval);
       await renewing;
     }
     signal.throwIfAborted();
-    if (vectors.length !== pending.length || pending.some((_, index) => !vectors[index]?.length)) {
+    if (vectors.length !== pending.length || pending.some((_, index) => !vectors[index]?.length && !refused?.failures.some(f => f.index === index))) {
       throw new OperationError('embedding_unavailable', 'The provider returned an incomplete embedding batch.');
     }
     const installed = await engine.transaction(async tx => {
@@ -238,13 +245,21 @@ async function embedPage(engine: BrainEngine, config: GBrainConfig, effect: Pers
       await tx.executeRaw("SELECT key FROM config WHERE key='embedding_disabled' FOR SHARE");
       await assertEmbeddingEffectEnabled(tx, config);
       signal.throwIfAborted();
+      // A partially refused page keeps its signature unstamped so `gbrain embed --stale` finds the refused chunks.
       const installed = await installPageEmbeddings(tx, prepared, pending.map((chunk, i) => ({ chunk_index: chunk.chunk_index,
-        chunk_text: chunk.chunk_text, chunk_source: chunk.chunk_source, embedding: vectors[i], model: opts.embedding?.model })), signature);
+        chunk_text: chunk.chunk_text, chunk_source: chunk.chunk_source, embedding: vectors[i] ?? undefined, model: opts.embedding?.model })),
+      refused ? undefined : signature);
       if (installed) await restampIfDemotedToTitleTier(tx, prepared.snapshot.page, snapshot.page.slug, effect.source_id);
       signal.throwIfAborted();
-      if (installed) await finishPage(tx, effect, snapshot);
+      if (installed && !refused) await finishPage(tx, effect, snapshot);
       return installed;
     });
+    if (installed && refused) {
+      // Terminal, never retried: the same input would return the same vector. A scan moves on to its next page.
+      if (targetedWithdrawalEffect(effect) || effect.data.source_scan) await finishPage(engine, effect, snapshot);
+      else await failEffect(engine, effect, EMBEDDING_ZERO_NORM);
+      return;
+    }
     if (!installed) {
       if (targetedWithdrawalEffect(effect) || effect.data.source_scan) throw new OperationError('revision_conflict', 'The page changed while embedding.');
       await completeEffect(engine, effect, { embedding: 'superseded', reason: 'revision_changed' }); return;

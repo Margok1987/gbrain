@@ -12,6 +12,7 @@ import type { ConnectorConfig, ConnectorKind } from './connector-identity.ts';
 import type { GitHubSourceConfig } from '../github-source.ts';
 import type { GoogleSourceConfig } from '../google/types.ts';
 import { UNBOUND_PUBLICATION_MESSAGE, UNBOUND_SOURCE_DOCS, unboundPublicationHint } from './unbound-source.ts';
+import { EMBEDDING_ZERO_NORM, EMBEDDING_ZERO_NORM_DOCS } from '../ai/embedding-guard.ts';
 
 export const REFUSAL_DOCS = 'docs/guides/write-refusals.md';
 export const docsAnchor = (code: string) => `${REFUSAL_DOCS}#${code.replaceAll('_', '-')}`;
@@ -56,7 +57,7 @@ export const CONNECTOR_INTENT_OUTDATED_OLD_HOST = 'A connector host older than t
  * a stored receipt: connector codes, the #5254 unbound-source publication
  * refusal, and the per-item embedding refusal.
  */
-export function receiptDeliveredHint(receipt: { error_code?: string | null; error_message?: string | null; source_id?: string; intent?: Record<string, unknown> | null }):
+export function receiptDeliveredHint(receipt: { error_code?: string | null; error_message?: string | null; source_id?: string; slug?: string | null; intent?: Record<string, unknown> | null }):
   { suggestion: string; detail?: string; docs: string } | null {
   const source = receipt.source_id ?? '<source>';
   switch (receipt.error_code) {
@@ -73,6 +74,13 @@ export function receiptDeliveredHint(receipt: { error_code?: string | null; erro
       if (!kind.startsWith('connector_v2_')) return null;
       return { detail: 'consumer_upgrade_required', docs: docsAnchor('unsupported_mutation_protocol'),
         suggestion: `The persistence consumer that owns ${source} runs a gbrain older than this connector. Run gbrain upgrade on every consumer and worktree-owner host, then gbrain sync --source ${source}.` };
+    }
+    case EMBEDDING_ZERO_NORM: {
+      const slug = receipt.slug ?? '<slug>';
+      const sourceFlag = receipt.source_id && receipt.source_id !== 'default' ? ` --source ${receipt.source_id}` : '';
+      return { docs: EMBEDDING_ZERO_NORM_DOCS,
+        suggestion: `The embedding provider gave no usable vector for some chunks of ${slug}; the other chunks were stored and nothing is retried. `
+          + `Inspect those chunks' text (empty, whitespace- or symbol-only chunks are the usual cause) or the provider, then run gbrain embed ${slug}${sourceFlag}.` };
     }
     case 'owner_unavailable':
       if (receipt.error_message !== UNBOUND_PUBLICATION_MESSAGE) return null;

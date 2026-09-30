@@ -9,13 +9,24 @@
  */
 import type { BrainEngine } from '../../core/engine.ts';
 import { runWaveChecks } from './wave-checks.ts';
+import { readConnectorSourceStatuses } from '../../core/persistence/connector-status.ts';
+
+/** #5686: connector sources that re-walk their window once, or resumed from a pre-upgrade checkpoint. */
+async function connectorRewalkNote(engine: BrainEngine): Promise<string | null> {
+  const statuses = [...(await readConnectorSourceStatuses(engine)).values()];
+  const rewalking = statuses.filter(status => status.upgrade_recovery === 'rewalking_once').length;
+  const resumed = statuses.filter(status => status.upgrade_recovery === 'resumed').length;
+  if (!rewalking && !resumed) return null;
+  return `connector_rewalk: ${rewalking} connector source(s) re-walk their window once on the next run (a one-time admission spike, not new churn)`
+    + `${resumed ? `; ${resumed} resumed from a pre-upgrade checkpoint` : ''}. Check with: gbrain sources status`;
+}
 
 /**
  * Extra banner lines contributed by other subsystems (for example the count
  * of connector sources that will re-walk once after a checkpoint migration).
  * Each returns null when it has nothing to say.
  */
-export const POST_UPGRADE_NOTES: Array<(engine: BrainEngine) => Promise<string | null>> = [];
+export const POST_UPGRADE_NOTES: Array<(engine: BrainEngine) => Promise<string | null>> = [connectorRewalkNote];
 
 export async function postUpgradeRecoveryBanner(engine: BrainEngine, brainLabel: string): Promise<string[]> {
   const findings = (await runWaveChecks(engine)).filter(f => f.state !== 'ok');

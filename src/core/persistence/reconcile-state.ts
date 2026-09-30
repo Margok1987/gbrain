@@ -12,6 +12,7 @@ import { isWriteTargetContained } from '../path-confine.ts';
 import { recordedPathFromFileUri, scannerSlugRootMode } from '../write-through.ts';
 import { localHostId } from './identity.ts';
 import { isDatabaseOnlyPage, slugDerivedOrigin } from './unbound-pages.ts';
+import { isUnboundSourcePage } from './unbound-source.ts';
 import { getWorktreeBinding, type WorktreeBinding } from './ownership.ts';
 import { digest, requireUuid, sha256, stableJson } from './digest.ts';
 import { reconcileCanonical, strictReconcileKeys, validateReconcileJson, type ReconcileConflict, type ReconcileDecision } from './reconcile-merge.ts';
@@ -66,7 +67,8 @@ export async function readReconcileState(engine: BrainEngine, sourceId: string, 
   const recorded = recordedPathFromFileUri(snapshot.page.source_uri, root);
   const mode = await scannerSlugRootMode(engine, sourceId, root);
   const recordedPath = recordedReconcilePath(root, snapshot.page, mode);
-  const derived = !recordedPath && isDatabaseOnlyPage(snapshot.page) ? slugDerivedOrigin(root, slug, mode) : null;
+  const derived = !recordedPath && isDatabaseOnlyPage({ ...snapshot.page,
+    database_only_reason: await isUnboundSourcePage(engine, sourceId, slug) ? 'unbound_source' : null }) ? slugDerivedOrigin(root, slug, mode) : null;
   const origin = derived ? 'slug_derived' : 'recorded';
   const path = recordedPath ?? derived?.path ?? null;
   if (!path || !isWriteTargetContained(path, root)) throw new OperationError('source_changed', 'The page has no unambiguous confined recorded Markdown origin.');
