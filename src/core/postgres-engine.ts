@@ -44,7 +44,7 @@ import { CheckoutGauge, type PoolGaugeSnapshot } from './pool-gauge.ts';
 import {
   valueHash,
   normalizeDimension,
-  isNovelDimension,
+  isNovelDimension, isBackdatedObservation,
 } from './chronicle/ontology.ts';
 import { logDbDisconnect } from './audit/db-disconnect-audit.ts';
 import { logPoolRecovery } from './audit/pool-recovery-audit.ts';
@@ -2026,7 +2026,7 @@ export class PostgresEngine implements BrainEngine {
        LIMIT 1`;
     const current = cur[0];
 
-    if (current && current.value_hash === vh) {
+    if (current && current.value_hash === vh && !isBackdatedObservation(validFrom, current.valid_from)) {
       // Same value → corroboration (or exact dup → noop via the dedup unique).
       const ins = await sql<{ id: number }[]>`
         INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, dimension, value, value_hash, dim_status,

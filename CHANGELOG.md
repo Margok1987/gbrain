@@ -10,6 +10,44 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.12.1] - 2026-09-30
+
+**Seven correctness fixes, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**
+
+Before this release, an agent connected over MCP could ask for the `entity` card (or `context_pack`) of a public page and see inbound links from private pages, including the private page's slug and the sentence it wrote. That is fixed, along with six smaller bugs in name resolution, federated recall, as-of facts, "last seen" and search date filters. Each one was found by a benchmark with known answers and is now pinned by a test.
+
+| Benchmark (synthetic worlds, $0, no keys) | Before | After |
+| --- | --- | --- |
+| Visibility leak fuzz: probes that leaked private content to a remote caller | 8 of 3,158 | 0 of 3,158 |
+| Temporal as-of: `ontology_get` as-of accuracy | 99/104 | 104/104 |
+| Temporal as-of: `chronicle_last_seen` probes right | 76/83 (mean error 16.3 days) | 83/83 (0 days) |
+| Temporal as-of: bad date bounds rejected | 4/5 | 5/5 |
+| Entity resolution: wrong merges (resolver / recall) | 1/136 / 3/144 | 0/136 / 0/144 |
+| Entity resolution: exact-name floor (resolver / recall) | 47/48 / 49/50 | 48/48 / 50/50 |
+| Entity resolution: recall correct refusals | 90.5% of 21 | 100% of 21 |
+
+### What changes for you
+
+- **The entity card keeps private pages private.** For remote callers, `entity`, `context_pack` and `delta` now leave out inbound links from pages marked `visibility: private`, from derived pages (atoms and synthesized concepts, private by default) and from edges authored by a private page, and `backlink_count` stops counting them, matching `get_backlinks`. Links from soft-deleted pages are left out for every caller. Your own local CLI still sees private links.
+- **A person's own name beats someone else's former name.** When one page is titled "Jordan Lee-Example" and another page lists "Jordan Lee-Example" as an alias, the name now resolves to the first page. `remember`, `recall` and save-time fact attribution follow.
+- **Federated recall stops mixing up namesakes.** With a grant over several sources, `recall({ entity })` used to merge two different people who share a slug in two sources. It now returns no facts and an `ambiguous_entity` list naming each `(source_id, entity_slug)`, so the agent can pick one with `source_id`. Pages linked with `entity_identity_link` still merge. Every recalled fact now carries `source_id`.
+- **A stint learned late stays in as-of answers.** If you record that someone works at a company, then later learn they also worked there years earlier, `ontology_get --asof` now returns the earlier stint instead of nothing.
+- **"Last seen" is exact.** `chronicle_last_seen` no longer credits `people/kim-example` with sightings of `people/kim-example-2` (it matches the exact slug or a wikilink to it), and a late-evening event no longer outranks a row dated the next day, so it stops reporting the day before.
+- **Bad search dates fail loudly.** `query --since "May 5"` used to return an empty list. Search date bounds now accept only `YYYY-MM-DD`, an ISO timestamp or a duration like `7d`, and anything else is rejected with a clear message.
+
+### To take advantage of v0.60.12.1
+
+`gbrain upgrade`. There is no migration. Agents that read `recall` results over several sources should handle the new `ambiguous_entity` field.
+
+### Itemized changes
+
+- `src/core/verbs/entity-card.ts`: the card's inbound-edge query and `backlink_count` apply `privatePagesFilterFragment` and `privateLinkOriginFilterFragment` for untrusted callers and skip soft-deleted referrers; outgoing links and recent timeline rows use the same private-page gate.
+- `src/core/entities/resolve.ts`: an exact slug-basename match on a live page resolves before the alias arm in both `resolveEntitySlug` and `resolveEntitySlugWithSource`.
+- `src/core/ops/facts.ts`: `recall`'s entity arms (with and without `since`) refuse namesakes in several sources unless an entity-identity group links them; fact rows add `source_id`. New `identityIdsForPages` in `src/core/entity-identity.ts`.
+- `mergeOntologyFact` (both engines): a same-value observation dated before the current open value's start is stored as a live row, not an expired corroboration (`isBackdatedObservation` in `src/core/chronicle/ontology.ts`).
+- `src/core/engine-sql/timeline.ts` `getLastSeen`: exact and wikilink matching with LIKE metacharacters escaped; newest projected day first, event instant only within a day.
+- `src/core/search/date-bounds.ts`: strict ISO-8601 grammar; `src/core/search/hybrid/arms.ts` surfaces a datetime cast error (SQLSTATE 22007/22008) instead of treating it as a degraded arm.
+
 ## [0.60.12.0] - 2026-09-30
 
 **Nothing you use changes. Under the hood, GBrain's storage code is now written once instead of twice, and its biggest files are split into pieces a person can read, so fixes stop landing on one database and missing the other.**

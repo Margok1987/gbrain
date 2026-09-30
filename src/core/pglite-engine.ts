@@ -66,7 +66,7 @@ import {
 import {
   valueHash,
   normalizeDimension,
-  isNovelDimension,
+  isNovelDimension, isBackdatedObservation,
 } from './chronicle/ontology.ts';
 import { logBatchRetry as auditLogBatchRetry, logBatchExhausted as auditLogBatchExhausted } from './audit/batch-retry-audit.ts';
 import { runMigrations } from './migrate.ts';
@@ -2273,7 +2273,7 @@ export class PGLiteEngine implements BrainEngine {
     );
     const current = cur.rows[0] as { id: number; value_hash: string; valid_from: string | null } | undefined;
 
-    if (current && current.value_hash === vh) {
+    if (current && current.value_hash === vh && !isBackdatedObservation(validFrom, current.valid_from)) {
       const ins = await this.db.query(
         `INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, dimension, value, value_hash, dim_status,
                             confidence, source, source_markdown_slug, valid_from, valid_until, expired_at, consolidated_into)

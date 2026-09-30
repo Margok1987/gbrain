@@ -30,6 +30,7 @@ import { ENTITY_HINTS_CAP } from '../facts/extract.ts';
 import { parseTtlShorthand } from '../facts/ttl-parse.ts';
 import { MEMORY_VERBS_VERSION } from '../verbs.ts';
 import type { SearchResult } from '../types.ts';
+import type { BrainEngine, FactRow } from '../engine.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 
 // ============================================================
@@ -181,7 +182,7 @@ const recall: Operation = {
   description:
     'MEMORY VERB (v1): retrieve saved facts/snippets — the protocol read verb. Filters hot-memory facts by entity / since / session_id; pass `query` to ALSO run hybrid search over pages (results[] arm); pass `budget_tokens` for server-side packing (response reports budget_used + dropped_count — never trims client-side). Remote callers see visibility=world facts only. Routing: for ONE known person/company/project card use `entity` (zero LLM); for broad questions needing reasoning use `synthesize` (expensive). Branch on structured fields (status/kind/evidence), never on prose. Every response carries protocol_version.',
   params: {
-    entity: { type: 'string', description: 'Entity slug (canonical). Returns facts about this entity newest first.' },
+    entity: { type: 'string', description: 'Entity slug (canonical). Returns facts about this entity newest first, each labelled with its source_id. Across several granted sources, same-slug entities that no entity-identity group links are different entities: facts comes back empty and ambiguous_entity names each (source_id, entity_slug); pass source_id to read one.' },
     query: { type: 'string', description: 'MEMORY_VERBS v1: free-text retrieval over pages (hybrid search arm). Response adds results[] (slug, title, chunk, evidence, create_safety, provenance). Combinable with entity (both arms run). Degrades to keyword-only search when no embedding provider is configured (search_degraded notes it; never an error).' },
     budget_tokens: { type: 'number', description: 'MEMORY_VERBS v1: server-side token budget (char/4 estimate). Facts pack first, then results. Response adds budget_tokens, budget_used, dropped_count.' },
     budget_policy: { type: 'string', enum: ['facts_first', 'query_first'], description: 'Optional packing order. facts_first preserves legacy behavior (default). query_first packs the ranked page prefix before facts only with a nonblank query and positive finite budget; a positive budget below one token keeps neither arm. No query or inactive budget preserves legacy behavior. Neither policy skips oversized items or truncates. Supplying this option adds budget_packing accounting. Keep fact-focused/entity-filtered questions on facts_first.' },
@@ -271,6 +272,7 @@ const recall: Operation = {
     const byEventTime = (rec: Record<string, unknown>) => rec.valid_from ?? rec.created_at;
 
     let rows: FactRows = [];
+    let ambiguousEntity: EntityCandidate[] | null = null;
 
     // `since` is parsed once, up front, and a value that does not parse is
     // rejected instead of silently widening the window: a caller that asked
@@ -317,29 +319,22 @@ const recall: Operation = {
       // in this session) since T" is a question about when the underlying
       // events occurred, not about when a batch extraction wrote the rows.
       const { resolveEntitySlug } = await import('../entities/resolve.ts');
-      rows = mergeNewest(
-        await Promise.all(factSources.map(async (src) => {
-          const entitySlug = entityParam
-            ? ((await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam)
-            : undefined;
-          return ctx.engine.listFactsSince(src, since, {
-            ...listOpts,
-            eventTime: true,
-            entitySlug,
-            sessionId: sessionParam ?? undefined,
-          });
-        })),
-        byEventTime,
-      );
+      const lists = await Promise.all(factSources.map(async (src) => {
+        const entitySlug = entityParam
+          ? ((await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam)
+          : undefined;
+        return ctx.engine.listFactsSince(src, since, { ...listOpts, eventTime: true, entitySlug, sessionId: sessionParam ?? undefined });
+      }));
+      ambiguousEntity = entityParam ? await unlinkedNamesakes(ctx.engine, lists) : null;
+      rows = ambiguousEntity ? [] : mergeNewest(lists, byEventTime);
     } else if (entityParam) {
       const { resolveEntitySlug } = await import('../entities/resolve.ts');
-      rows = mergeNewest(
-        await Promise.all(factSources.map(async (src) => {
-          const slug = (await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam;
-          return ctx.engine.listFactsByEntity(src, slug, listOpts);
-        })),
-        (rec) => rec.valid_from ?? rec.created_at,
-      );
+      const lists = await Promise.all(factSources.map(async (src) => {
+        const slug = (await resolveEntitySlug(ctx.engine, src, entityParam)) ?? entityParam;
+        return ctx.engine.listFactsByEntity(src, slug, listOpts);
+      }));
+      ambiguousEntity = await unlinkedNamesakes(ctx.engine, lists);
+      rows = ambiguousEntity ? [] : mergeNewest(lists, (rec) => rec.valid_from ?? rec.created_at);
     } else if (sessionParam) {
       rows = mergeNewest(
         await Promise.all(factSources.map(src =>
@@ -497,6 +492,7 @@ const recall: Operation = {
         fact: r.fact,
         kind: r.kind,
         entity_slug: r.entity_slug,
+        source_id: r.source_id,
         visibility: r.visibility,
         // v0.31.2: notability surfaced to recall consumers (CLI, MCP, admin).
         // Pre-v46 brains return 'medium' via the row mapper's fallback so the
@@ -523,6 +519,7 @@ const recall: Operation = {
         provenance: r.source,
       })),
       total: packedFacts.length,
+      ...(ambiguousEntity ? { ambiguous_entity: { candidates: ambiguousEntity, suggestion: AMBIGUOUS_ENTITY_SUGGESTION } } : {}),
       ...(pending_consolidation_count !== undefined ? { pending_consolidation_count } : {}),
       // MEMORY_VERBS v1 envelope (G1B superset — additive on every response).
       protocol_version: MEMORY_VERBS_VERSION,
@@ -546,6 +543,26 @@ const recall: Operation = {
     };
   },
 };
+
+type EntityCandidate = { source_id: string; entity_slug: string };
+const AMBIGUOUS_ENTITY_SUGGESTION = 'These are different entities in different sources. Pass source_id to read one, or link them with entity_identity_link if they are the same.';
+
+/**
+ * The identity key is (source_id, slug): an entity name resolved in several
+ * granted sources names different entities unless an entity-identity group
+ * links their pages. Merging them would hand the caller a stranger's facts,
+ * so federated recall refuses unlinked namesakes and names the candidates.
+ * Returns null when the per-source fact lists are one entity.
+ */
+async function unlinkedNamesakes(engine: BrainEngine, lists: FactRow[][]): Promise<EntityCandidate[] | null> {
+  const candidates = [...new Map(lists.flat().map((r): [string, EntityCandidate] =>
+    [`${r.source_id}:${r.entity_slug}`, { source_id: r.source_id, entity_slug: r.entity_slug as string }])).values()];
+  if (candidates.length < 2) return null;
+  const { identityIdsForPages } = await import('../entity-identity.ts');
+  const ids = await identityIdsForPages(engine, candidates.map(c => ({ sourceId: c.source_id, slug: c.entity_slug })));
+  const groups = new Set(candidates.map(c => ids.get(`${c.source_id}:${c.entity_slug}`) ?? null));
+  return groups.size === 1 && !groups.has(null) ? null : candidates;
+}
 
 /** Parse an `entities` param (comma-string or array) to a trimmed name list. */
 function parseEntityList(v: unknown): string[] {
