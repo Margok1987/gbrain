@@ -302,11 +302,13 @@ export class ManagedConnectorSync {
    * still pending is waited for (within the budget) before anything else.
    */
   private async resolvePendingSet(): Promise<void> {
-    const principal = this.authority.writer.principal;
     for (const entry of this.connectorState.pending) {
-      let row = await getWriteRequest(this.engine, principal, entry.requestId);
+      // By source incarnation, not the current principal: a replaced writer registration must not orphan the ledger.
+      let [row] = await this.engine.executeRaw<WriteRequest>('SELECT * FROM persistence_requests WHERE request_id=$1::uuid AND source_id=$2 AND source_incarnation=$3::uuid',
+        [entry.requestId, this.sourceId, this.source.incarnation]);
+      if (!row) { this.carried.push(entry); continue; }
       if (row && entry.itemRef === CHECKPOINT_SLUG && !isTerminal(row)) row = await this.budgetedWait(row, connectorWaitBudget.ms);
-      if (!row || row.state === 'committed') continue;
+      if (row.state === 'committed') continue;
       if (entry.itemRef === CHECKPOINT_SLUG && !isTerminal(row)) { this.pendingCheckpoint = entry; this.blockedByCheckpoint = true; continue; }
       if (!isTerminal(row)) { this.pendingRows.set(row.id, { entry, row, bytes: 0 }); continue; }
       this.autoRetry.add(entry.baseRequestId);
@@ -348,8 +350,10 @@ export class ManagedConnectorSync {
     }
     this.carried = []; this.autoRetry.clear(); this.failedPending = [];
     if (this.checkpoint.length) {
-      await this.submit('connector_v2_checkpoint', CHECKPOINT_SLUG, null, { checkpointAfter: [], receipts: [], fresh: false });
-      this.checkpoint = [];
+      // The empty cursor keeps a rising generation, so the next save can never replay an older committed checkpoint receipt.
+      const next = [{ generation: Number((this.checkpoint[0] as { generation?: number }).generation ?? 0) + 1, state: null }];
+      await this.submit('connector_v2_checkpoint', CHECKPOINT_SLUG, null, { checkpointAfter: next, receipts: [], fresh: false });
+      this.checkpoint = next;
       this.receipts = [];
     }
     this.connectorState = { ...this.connectorState, upgrade_recovery: 'none', resumed_from: null };

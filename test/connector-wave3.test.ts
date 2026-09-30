@@ -145,6 +145,11 @@ test('--reset-checkpoint re-walks once: newly covered items import, unchanged pa
     expect(pages.map(row => row.slug)).toEqual(['people/second-example']);
     const state = await readManagedConnectorState(engine, f.id, await incarnation(engine, f.id));
     expect(state.account).toEqual({ kind: 'google', email: googleConfig.g_account });
+    // The re-walk saved a fresh cursor (it did not replay an older committed checkpoint), so the next run is incremental.
+    await disposePersistenceConsumer(engine);
+    calls.length = 0;
+    await google(engine, f, fetcher);
+    expect(calls.some(url => url.includes('syncToken=contacts-stable'))).toBe(true);
     await disposePersistenceConsumer(engine);
     before = await mark(engine, f.id);
     await google(engine, f, fetcher, googleConfig.g_account, { resetCheckpoint: true });
