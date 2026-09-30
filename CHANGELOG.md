@@ -10,6 +10,62 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.14.0] - 2026-09-30
+
+<!-- Fix wave 4. Lane E section below; the integrator merges the lane sections into one entry. -->
+
+**Lane E: links stop jumping to transcripts, long Claude sessions keep being captured, and a batch of search, CLI and ingestion fixes, most of them from community pull requests.**
+
+If you keep `related: [[some-page]]` links in frontmatter and turned on `link_resolution.global_basename`, the automatic link sweep on managed brains could quietly point those links at a chat transcript that happened to repeat the word. A page whose file name is exactly the link text now wins, the way the entity resolver already works. Your next sync repairs links the sweep moved.
+
+Long Claude Code and Codex sessions (over 50 MiB) stopped being captured because the hook refused the file before reading the recent part it only ever needed. They are captured again.
+
+Self-hosted embedding models such as Qwen3-Embedding, e5, BGE and nomic expect an instruction in front of each search query. You can now set one per brain, and `gbrain doctor` suggests the documented value for those models.
+
+### How to use it
+
+```bash
+gbrain doctor                                  # embedding_query_prefix names the value for your model
+gbrain config set embedding_query_prefix "query: "
+gbrain config get embedding_query_prefix --raw # verify the stored bytes
+gbrain config unset embedding_query_prefix     # back to bare queries
+gbrain get notes/example --include-timeline-entries   # timeline rows beside the page
+```
+
+### Things to watch
+
+- The query prefix applies to query embeddings only. Keyword search and stored vectors are unchanged, nothing is re-embedded, and it takes effect on the next query without restarting a server.
+- The link fix moves the link extractor watermark, so every page re-extracts links once on the next `extract --stale` or managed sync.
+- `get_page` output is unchanged unless you pass `include_timeline_entries`.
+
+### Itemized changes (Lane E)
+
+- **#5749:** with `link_resolution.global_basename` on, `makeResolver().resolve()` takes a unique global-basename match (the page itself excluded) right after the exact slug and folder-hint steps, before the fuzzy title and live keyword steps (`src/core/link-extraction.ts`, `ResolveOptions`). `LINK_EXTRACTOR_VERSION_TS` moves to 2026-09-30 so edges the managed stale sweep re-pointed re-extract. Test: `test/link-resolution-basename-before-search.test.ts`.
+- **#5701:** hook lanes confine a transcript path with `allowOversize`, so a session over the 50 MiB whole-file cap reaches the bounded tail read; path, symlink and root confinement are unchanged and the full-file import path keeps its cap (thanks @RerankerGuo, PR #5713).
+- **ci:local:** `scripts/ci-local.sh` failed at its smoke step before any test ran, because it expected the E2E glob count while `run-e2e.sh` skips four live-key-only files. Both now read one list, `scripts/e2e-live-key-only.txt`; the smoke check lives in `scripts/ci-local-e2e-smoke.sh`.
+- **Test fixture race:** `test/noop-kernel-paths.test.ts` drains the pending `safe_chunk_reseal` projection job before injecting projection lag, so the fourth admission is no longer skipped when the consumer finishes late.
+- **#5691 / #3783:** new per-brain `embedding_query_prefix` config key, read once per request and threaded to the text vector arm's query embeddings and to the query-cache key (append-only `qp=` part); doctor check `embedding_query_prefix` (brain category) suggests the documented value for Qwen3-Embedding, e5, BGE v1.5 and nomic-embed and never applies it; `docs/guides/search-modes.md#query-instruction-prefix` (thanks @furuchanchan, PR #5745).
+- **#5709:** `get_page` takes `include_timeline_entries` and returns `timeline_entries`, the rows `get_timeline` returns for the same caller; the description says `timeline` is only the markdown section.
+- **#5226:** `gbrain migrate embeddings --dry-run` reports chunks to embed and chunks to restamp separately (`chunks_to_restamp`, 0 on a width change), and the `embed --stale` summary counts each page once.
+- **#5700:** `gbrain put x --content --source default` now fails with "--content requires a value…; omit --content (or put it last) to read stdin" instead of storing `--source` as the page body, and `put --help` documents stdin (thanks @RerankerGuo, PR #5712).
+- **#5671:** `gbrain bootstrap harness` and doctor's `memory_writeback` check warn when `facts.default_visibility=private` meets remote or HTTP readers, and the agent instruction says private facts cannot be recalled over MCP.
+- **#5754:** doctor's integrity sample on Postgres skips soft-deleted pages (thanks @mml-studio, PR #5755).
+- **#5759:** dream-cycle budget gates honor `pricing.overrides` (thanks @mml-studio, PR #5760).
+- **#5735:** checkpoint harvest, the maintenance sweep, OpenClaw compaction and the backstop use the extraction model the brain resolves, so a database-configured local model is no longer treated as keyless (thanks @TheAngryPit, PR #5736).
+- **#5669:** the CI shard selector no longer truncates its file list when stdout is a slow pipe (thanks @RerankerGuo, PR #5710).
+- **#5750:** `add_timeline_entry` rejects bad dates as `invalid_params` instead of `internal_error` (thanks @mvanhorn, PR #5758).
+- **#5764:** `gbrain takes propose --accept` works on managed brains, promoting through the writer coordinator (thanks @dovstern, PR #5764).
+- **#5757:** managed `extract-conversation-facts` keeps a conversation's previous facts until the replacement commits in one transaction (thanks @Masashi-Ono0611, PR #5757).
+- **#5720:** `gbrain sync` names the frontmatter `slug:` that conflicts with a file's path, the slug the path expects, and the fix; `gbrain write-request` shows the same text as `write_error_message`.
+- **#5707:** not changed. Wave 3 already moved `enrich` onto the maintenance coordinator, so listing it as an unsupported managed writer would advertise a working lane as unsupported.
+
+### To take advantage of v0.60.14.0 (Lane E)
+
+1. `gbrain upgrade`.
+2. If you use `link_resolution.global_basename`, let the next sync run, or run `gbrain extract --stale --catch-up --include-frontmatter`, so frontmatter links the sweep re-pointed resolve again.
+3. Run `gbrain doctor`. If it reports `embedding_query_prefix`, run the command it prints.
+4. If doctor's `memory_writeback` warns about a private default with remote readers, and your agents need to recall their own facts, run `gbrain config set facts.default_visibility world`, then `gbrain bootstrap harness --yes`.
+
 ## [0.60.13.0] - 2026-09-30
 
 **Two things: your agent can now ask search for the whole conversation, section or page around each hit in the same call (off by default until a matched study shows it helps), and seven correctness fixes land, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**
