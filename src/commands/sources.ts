@@ -67,6 +67,7 @@ import {
 } from '../core/sources-load.ts';
 import { sqlQueryForEngine } from '../core/sql-query.ts';
 import { preflightOauthClientColumns } from './auth.ts';
+import { deleteSourceRow } from '../core/source-delete.ts';
 
 // ── Validation ──────────────────────────────────────────────
 
@@ -829,7 +830,7 @@ async function runRemove(engine: BrainEngine, args: string[]): Promise<void> {
         );
         if (Number(rows[0]?.n ?? 0) > 0) throw new SourceReferencedError();
       }
-      await tx.executeRaw(`DELETE FROM sources WHERE id = $1`, [id]);
+      await deleteSourceRow(tx, id);
     });
   } catch (e) {
     const code = typeof e === 'object' && e !== null && 'code' in e ? String((e as { code?: unknown }).code) : '';
@@ -1041,7 +1042,7 @@ async function runPurge(engine: BrainEngine, args: string[]): Promise<void> {
       process.exit(5);
     }
 
-    await engine.executeRaw(`DELETE FROM sources WHERE id = $1`, [id]);
+    await deleteSourceRow(engine, id);
     console.log(`Permanently deleted source "${id}" (${impact.pageCount} pages cascaded).`);
     return;
   }

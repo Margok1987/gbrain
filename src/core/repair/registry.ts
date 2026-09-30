@@ -21,6 +21,7 @@ import { visibilityRepair } from './visibility.ts';
 import { safeChunksRepair } from './safe-chunks.ts';
 import { contextualModeRepair } from './contextual-mode.ts';
 import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
+import { orphanBindingsRepair } from './orphan-bindings.ts';
 
 export interface RepairKindSpec {
   kind: RepairKind;
@@ -56,6 +57,11 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     handler: connectorCheckpointsRepair, embeds: 'none', checks: ['connector_checkpoints'],
     summary: 'Delete connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days (#5686). '
       + 'Cleanup only; no journal admission. Rows a pending write still references are kept. Brain-wide.',
+  },
+  'orphan-bindings': {
+    handler: orphanBindingsRepair, embeds: 'none', checks: ['orphan_persistence_bindings'],
+    summary: 'Delete persistence source bindings whose source or source incarnation no longer exists (#5732), so a source re-added under the same id can be claimed again. '
+      + 'Bookkeeping only; no journal admission. A binding a pending request still references is kept. Brain-wide.',
   },
 };
 
