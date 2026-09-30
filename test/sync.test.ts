@@ -840,6 +840,34 @@ describe('sync regression — #132 nested transaction deadlock', () => {
       expect(line.trim().startsWith('//')).toBe(true);
     }
   });
+
+  // Refactor wave 1 (A10 cross-file): the loop now lives in imports.ts, so the
+  // prelude scan above cannot see a transaction opened by the orchestrator
+  // around the phase CALL. This pins the call site, and the mutation fixture
+  // proves the check fails when the call is wrapped.
+  const importsPhaseCallWrapped = (orchestrator: string): boolean => {
+    const call = orchestrator.indexOf('runImportsPhase(run,');
+    expect(call).toBeGreaterThan(-1);
+    const lineStart = orchestrator.lastIndexOf('\n', call) + 1;
+    const body = orchestrator.slice(orchestrator.indexOf('export async function performSyncInner'), call);
+    return body.split('\n').some((l) => l.includes('.transaction(') && !l.trim().startsWith('//'))
+      || orchestrator.slice(lineStart, call).includes('.transaction(');
+  };
+
+  test('performSyncInner does not run the imports phase inside engine.transaction()', () => {
+    const orchestrator = surfaceFileSource('sync', 'src/commands/sync/incremental.ts');
+    expect(importsPhaseCallWrapped(orchestrator)).toBe(false);
+  });
+
+  test('mutation fixture: wrapping the imports phase call in engine.transaction() fails the guard', () => {
+    const orchestrator = surfaceFileSource('sync', 'src/commands/sync/incremental.ts');
+    const call = '(await runImportsPhase(run, plan, progress, noEmbed))';
+    expect(orchestrator).toContain(call);
+    const mutated = orchestrator.replace(call, '(await engine.transaction(async () => runImportsPhase(run, plan, progress, noEmbed)))');
+    expect(importsPhaseCallWrapped(mutated)).toBe(true);
+    const hoisted = orchestrator.replace('  const pre = await preflightIncrementalSync', '  return engine.transaction(async () => {\n  const pre = await preflightIncrementalSync');
+    expect(importsPhaseCallWrapped(hoisted)).toBe(true);
+  });
 });
 
 describe('resolveSlugByPathOrSourcePath (CJK wave v0.32.7, codex F4)', () => {
