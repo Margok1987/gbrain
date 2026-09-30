@@ -126,7 +126,7 @@ describe('#1569 --no-schema-pack + heartbeat wiring (structural)', () => {
   // A10: containment pins read the whole sync surface; the ordering pin names
   // the single file that holds the import loop.
   const SYNC = surfaceSource('sync');
-  const SYNC_IMPORTS = surfaceFileSource('sync', 'src/commands/sync/incremental.ts');
+  const SYNC_IMPORTS = surfaceFileSource('sync', 'src/commands/sync/imports.ts');
 
   test('SyncOpts carries noSchemaPack and it gates loadActivePack', () => {
     expect(SYNC).toContain('noSchemaPack?: boolean');

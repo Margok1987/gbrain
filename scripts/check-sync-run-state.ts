@@ -12,6 +12,8 @@
  *   1. destructuring a mutable field from a SyncRun value
  *      (`const { bankedFiles } = run`, or a `{ bankedFiles }: SyncRun` parameter)
  *   2. aliasing one (`const banked = run.bankedFiles`)
+ *   3. writing a checkpoint field (JSDoc tag `@checkpoint`) outside
+ *      sync-run.ts, which is the single owner of checkpoint and cleanup state
  * Mutable fields are the non-`readonly` properties of `interface SyncRun`;
  * readonly fields (collection references, fixed config) may be destructured.
  * A SyncRun value is a variable or parameter annotated `SyncRun` or
@@ -39,19 +41,21 @@ function listTs(dir: string): string[] {
 
 const parse = (file: string) => ts.createSourceFile(file, readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
 
-function mutableFields(): Set<string> | null {
+function syncRunFields(): { mutable: Set<string>; checkpoint: Set<string> } | null {
   const file = join(ROOT, TYPE_FILE);
   if (!existsSync(file)) return null;
   const sf = parse(file);
   const decl = sf.statements.find((s): s is ts.InterfaceDeclaration => ts.isInterfaceDeclaration(s) && s.name.text === 'SyncRun');
   if (!decl) return null;
-  const out = new Set<string>();
+  const mutable = new Set<string>();
+  const checkpoint = new Set<string>();
   for (const m of decl.members) {
     if (!ts.isPropertySignature(m) || !m.name) continue;
     const readonly = m.modifiers?.some((mod) => mod.kind === ts.SyntaxKind.ReadonlyKeyword);
-    if (!readonly) out.add(m.name.getText(sf));
+    if (!readonly) mutable.add(m.name.getText(sf));
+    if (ts.getJSDocTags(m).some((t) => t.tagName.text === 'checkpoint')) checkpoint.add(m.name.getText(sf));
   }
-  return out;
+  return { mutable, checkpoint };
 }
 
 function isSyncRunType(t: ts.TypeNode | undefined): boolean {
@@ -61,9 +65,10 @@ function isCreateCall(e: ts.Expression | undefined): boolean {
   return !!e && ts.isCallExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === 'createSyncRun';
 }
 
-const fields = mutableFields();
+const shape = syncRunFields();
+const fields = shape?.mutable;
 const problems: string[] = [];
-if (!fields) {
+if (!shape || !fields) {
   problems.push(`FAIL: ${TYPE_FILE}:1 interface SyncRun not found`);
 } else {
   for (const file of listTs(join(ROOT, DIR))) {
@@ -94,6 +99,15 @@ if (!fields) {
         }
       }
       if (ts.isParameter(n) && ts.isObjectBindingPattern(n.name) && isSyncRunType(n.type)) checkPattern(n.name);
+      if (rel !== TYPE_FILE) {
+        const target =
+          ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment ? n.left
+          : (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) ? n.operand
+          : undefined;
+        if (target && ts.isPropertyAccessExpression(target) && isRunExpr(target.expression) && shape.checkpoint.has(target.name.text)) {
+          problems.push(`FAIL: ${at(n)} writes checkpoint field '${target.name.text}' outside ${TYPE_FILE}`);
+        }
+      }
       ts.forEachChild(n, visit);
     };
     visit(sf);
@@ -102,8 +116,9 @@ if (!fields) {
 
 if (problems.length > 0) {
   for (const p of problems) console.log(p);
-  console.log('Why:  SyncRun fields change across awaits (checkpoint flush, workers, stall watchdog); a local copy goes stale.');
-  console.log('Fix:  read and write the field as run.<field> at each use; declare it `readonly` in SyncRun only if it is never reassigned.');
+  console.log('Why:  SyncRun fields change across awaits (checkpoint flush, workers, stall watchdog); a local copy goes stale,');
+  console.log('      and checkpoint/cleanup state has one owner so a flush, the SIGTERM hook and partial() cannot disagree.');
+  console.log(`Fix:  use run.<field> at each read/write; change @checkpoint fields only through a function in ${TYPE_FILE}.`);
   console.log(`See:  ${SEE}`);
   process.exit(1);
 }

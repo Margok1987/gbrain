@@ -985,10 +985,15 @@ run`, or a `{ checkpointDead }: SyncRun` parameter) or copied into a local
 (`const banked = run.bankedFiles`), because such a copy goes stale at the next
 await. A SyncRun value is a binding named `run`, annotated `SyncRun`, or
 initialized from `createSyncRun()`. Readonly fields (collection references,
-fixed configuration) may be destructured. Each failure prints
+fixed configuration) may be destructured. Fields tagged `@checkpoint` in their
+JSDoc (the flush cadence, banked count, single-flight flag, dead flag, SIGTERM
+deregistration and yield counter) have one owner: only functions in
+`sync-run.ts` may assign them, so the flush, the SIGTERM hook and `partial()`
+cannot disagree about checkpoint state. Each failure prints
 `FAIL: <file:line>` plus `Why:` / `Fix:` / `See:`; the fix is to use
-`run.<field>` at each read and write. Fixtures:
-`test/fixtures/guards/check-sync-run-state.ts/{good,bad,bad-alias,bad-param}`.
+`run.<field>` at each read and write, and to change checkpoint state through a
+`sync-run.ts` function. Fixtures:
+`test/fixtures/guards/check-sync-run-state.ts/{good,bad,bad-alias,bad-param,bad-owner}`.
 
 ### Source reads in tests
 
