@@ -33,6 +33,46 @@ import {
   shouldSpawnAutopilotWorker,
 } from './autopilot.ts';
 
+/**
+ * Mutable daemon state shared by the tick loop, the shutdown path and the tick
+ * steps. Each field keeps the name of the closure variable it replaced.
+ */
+export interface AutopilotDaemonState {
+  stopping: boolean;
+  /** #1872: the in-flight inline runCycle, drained by closeEngine on shutdown. */
+  inflightInlineCycle: Promise<unknown> | null;
+  consecutiveErrors: number;
+  /**
+   * Parser-probe fixture warning is once-per-process, not once-per-cycle
+   * (compiled-binary installs have no source tree; don't spam the log).
+   */
+  parserProbeFixtureWarned: boolean;
+  /**
+   * #2608: once-per-process no-chat-provider warning. A keyless daemon used
+   * to run every cycle "green" while all LLM phases silently no-op'd
+   * (chronicle reported no_events, propose_takes skipped, …) — the operator
+   * had no signal that shell-profile keys never reached launchd/systemd.
+   */
+  noChatProviderWarned: boolean;
+  /**
+   * v0.37.7.0 #1162 — counter for consecutive reconnect failures.
+   * Reset on every successful health probe or reconnect. Threshold
+   * controlled by GBRAIN_AUTOPILOT_MAX_RECONNECT_FAILS env (default 30).
+   */
+  autopilotReconnectFails: number;
+  /** Consecutive --no-worker ticks with no live worker signal (see NO_WORKER_WARN_TICKS). */
+  noWorkerConsecutiveIdle: number;
+  /**
+   * v0.36+ T8: track time since last full cycle for the 60-min floor.
+   * Initialized to "long ago" (0) so the first tick on a healthy brain still
+   * runs the full cycle (phase-coupling exercise) before settling into
+   * targeted-submit mode.
+   */
+  lastFullCycleAt: number;
+  /** Log the pause/resume transition once each, not every poll. */
+  pausedAnnounced: boolean;
+}
+
 export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): Promise<void> {
   const repoPath = parseArg(args, '--repo') || await engine.getConfig('sync.repo_path');
   // Same NaN guard as the status path: a typo'd interval would otherwise
@@ -121,7 +161,17 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
   // crash-on-launch is recorded known-bad and a success is confirmed.
   reconcileSelfUpgradeAtBoot();
 
-  let stopping = false;
+  const state: AutopilotDaemonState = {
+    stopping: false,
+    inflightInlineCycle: null,
+    consecutiveErrors: 0,
+    parserProbeFixtureWarned: false,
+    noChatProviderWarned: false,
+    autopilotReconnectFails: 0,
+    noWorkerConsecutiveIdle: 0,
+    lastFullCycleAt: 0,
+    pausedAnnounced: false,
+  };
   let childSupervisor: ChildWorkerSupervisor | null = null;
   const processingState = spawnManagedWorker ? new OwnerProcessingState('autopilot', 'default') : null;
   const configurationBlocked = () => processingState?.blocked ?? false;
@@ -144,14 +194,13 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
   // a second call is a no-op (disconnect snapshots + nulls the handle), so
   // both paths firing is safe.
   const shutdownAbort = new AbortController();
-  let inflightInlineCycle: Promise<unknown> | null = null;
   const closeEngine = async () => {
     shutdownAbort.abort(new Error('autopilot shutdown'));
-    if (inflightInlineCycle) {
+    if (state.inflightInlineCycle) {
       // ponytail: 2s cap keeps us inside process-cleanup's 3s deadline; a
       // between-phase abort resolves instantly, a mid-phase one may not.
       await Promise.race([
-        inflightInlineCycle.catch(() => { /* cycle errors already logged by the loop */ }),
+        state.inflightInlineCycle.catch(() => { /* cycle errors already logged by the loop */ }),
         new Promise((r) => setTimeout(r, 2_000)),
       ]);
     }
@@ -178,7 +227,7 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
       args: [...invocation.argsPrefix, 'jobs', 'work', '--max-rss', String(autopilotMaxRssMb)],
       env: { ...process.env, GBRAIN_SUPERVISED: undefined } as Record<string, string | undefined>,
       maxCrashes: 5,
-      isStopping: () => stopping,
+      isStopping: () => state.stopping,
       onMaxCrashesExceeded: (count, max) => {
         console.error(`[autopilot] ${count}/${max} consecutive worker crashes, giving up.`);
         void shutdown('max_crashes');
@@ -242,8 +291,8 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
   // cannot await the worker's drain.
   const shutdown = async (sig: string) => {
     if (configurationBlocked() && sig !== 'SIGTERM' && sig !== 'SIGINT') return;
-    if (stopping) return;
-    stopping = true;
+    if (state.stopping) return;
+    state.stopping = true;
     console.log(`Autopilot stopping (${sig}).`);
     if (childSupervisor) {
       childSupervisor.killChild('SIGTERM');
@@ -253,7 +302,7 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
       }
     }
     if (configurationBlocked() && sig !== 'SIGTERM' && sig !== 'SIGINT') {
-      stopping = false;
+      state.stopping = false;
       return;
     }
     // #1872: abort the in-flight inline cycle and close the engine BEFORE
@@ -267,19 +316,6 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
   process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
   process.on('SIGINT',  () => { void shutdown('SIGINT'); });
 
-  let consecutiveErrors = 0;
-  // Parser-probe fixture warning is once-per-process, not once-per-cycle
-  // (compiled-binary installs have no source tree; don't spam the log).
-  let parserProbeFixtureWarned = false;
-  // #2608: once-per-process no-chat-provider warning. A keyless daemon used
-  // to run every cycle "green" while all LLM phases silently no-op'd
-  // (chronicle reported no_events, propose_takes skipped, …) — the operator
-  // had no signal that shell-profile keys never reached launchd/systemd.
-  let noChatProviderWarned = false;
-  // v0.37.7.0 #1162 — counter for consecutive reconnect failures.
-  // Reset on every successful health probe or reconnect. Threshold
-  // controlled by GBRAIN_AUTOPILOT_MAX_RECONNECT_FAILS env (default 30).
-  let autopilotReconnectFails = 0;
   const AUTOPILOT_MAX_RECONNECT_FAILS = Math.max(
     1,
     Number(process.env.GBRAIN_AUTOPILOT_MAX_RECONNECT_FAILS) || 30,
@@ -295,16 +331,8 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
   // the operator can spot "I set --no-worker but forgot to start one"
   // before the queue piles up.
   const NO_WORKER_WARN_TICKS = 3;
-  let noWorkerConsecutiveIdle = 0;
-  // v0.36+ T8: track time since last full cycle for the 60-min floor.
-  // Initialized to "long ago" so the first tick on a healthy brain still
-  // runs the full cycle (phase-coupling exercise) before settling into
-  // targeted-submit mode.
-  let lastFullCycleAt = 0;
-  // Log the pause/resume transition once each, not every poll.
-  let pausedAnnounced = false;
 
-  while (!stopping) {
+  while (!state.stopping) {
     const cycleStart = Date.now();
     let cycleOk = true;
 
@@ -320,8 +348,8 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
     // #2608: loud once-per-process signal when no chat provider is servable.
     // Without this a keyless daemon looks healthy forever while every LLM
     // phase quietly skips.
-    if (!noChatProviderWarned) {
-      noChatProviderWarned = true;
+    if (!state.noChatProviderWarned) {
+      state.noChatProviderWarned = true;
       try {
         const { isAvailable } = await import('../core/ai/gateway.ts');
         if (!isAvailable('chat')) {
@@ -377,18 +405,18 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
         try { unlinkSync(autopilotPausedMarkerPath()); } catch { /* already gone */ }
       }
       if (autopilotPaused()) {
-        if (!pausedAnnounced) {
+        if (!state.pausedAnnounced) {
           console.log('[autopilot] paused (autopilot-paused marker present) — skipping cycles until it clears.');
-          pausedAnnounced = true;
+          state.pausedAnnounced = true;
         }
         // Poll faster than a normal tick so a migration's quiesce window is short.
         await new Promise((r) => setTimeout(r, Math.min(baseInterval, 30) * 1000));
         continue;
       }
     }
-    if (pausedAnnounced) {
+    if (state.pausedAnnounced) {
       console.log('[autopilot] resumed — pause marker cleared.');
-      pausedAnnounced = false;
+      state.pausedAnnounced = false;
     }
 
     // DB health check (reconnect if needed).
@@ -408,7 +436,7 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
     //     thrashing.
     try {
       await engine.getConfig('version');
-      autopilotReconnectFails = 0; // reset on success
+      state.autopilotReconnectFails = 0; // reset on success
     } catch (probeErr) {
       if (configurationBlocked()) continue;
       try {
@@ -419,11 +447,11 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
         // transient DB blip) AND tore down the pool postgres.js can otherwise
         // self-heal.
         await engine.reconnect({ error: probeErr });
-        autopilotReconnectFails = 0;
+        state.autopilotReconnectFails = 0;
       } catch (e) {
         if (configurationBlocked()) continue;
         logError('reconnect', e);
-        autopilotReconnectFails++;
+        state.autopilotReconnectFails++;
         const klass = classifyReconnectError(e);
         if (klass === 'crash') {
           // A gbrain BUG, not an operator misconfiguration. Say so plainly
@@ -433,23 +461,23 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
           console.error(
             `[autopilot] BUG: internal error during reconnect (${(e as Error).message ?? 'unknown'}). ` +
             `This is a gbrain defect, not a configuration problem — please report it. ` +
-            `Retrying (${autopilotReconnectFails}/${AUTOPILOT_MAX_RECONNECT_FAILS}).`,
+            `Retrying (${state.autopilotReconnectFails}/${AUTOPILOT_MAX_RECONNECT_FAILS}).`,
           );
         } else if (klass === 'unrecoverable') {
           console.error(
             `[autopilot] FATAL: unrecoverable DB error (${(e as Error).message ?? 'unknown'}). ` +
             `Exiting so launchd ThrottleInterval can apply backoff.`,
           );
-          stopping = true;
+          state.stopping = true;
           setCliExitVerdict(1);
           break;
         }
-        if (autopilotReconnectFails >= AUTOPILOT_MAX_RECONNECT_FAILS) {
+        if (state.autopilotReconnectFails >= AUTOPILOT_MAX_RECONNECT_FAILS) {
           console.error(
-            `[autopilot] FATAL: ${autopilotReconnectFails} consecutive reconnect failures. ` +
+            `[autopilot] FATAL: ${state.autopilotReconnectFails} consecutive reconnect failures. ` +
             `Last error: ${(e as Error).message ?? 'unknown'}. Exiting.`,
           );
-          stopping = true;
+          state.stopping = true;
           setCliExitVerdict(1);
           break;
         }
@@ -475,8 +503,8 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
         );
         const liveWorkerSignal = Number((rows as Array<{ n: number }>)?.[0]?.n ?? 0);
         if (liveWorkerSignal === 0) {
-          noWorkerConsecutiveIdle++;
-          if (noWorkerConsecutiveIdle === NO_WORKER_WARN_TICKS) {
+          state.noWorkerConsecutiveIdle++;
+          if (state.noWorkerConsecutiveIdle === NO_WORKER_WARN_TICKS) {
             // Fire loud on the Nth consecutive idle tick; don't repeat on every
             // subsequent cycle (the operator already saw it), re-arm once a
             // live worker is seen again.
@@ -487,10 +515,10 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
             );
           }
         } else {
-          if (noWorkerConsecutiveIdle >= NO_WORKER_WARN_TICKS) {
+          if (state.noWorkerConsecutiveIdle >= NO_WORKER_WARN_TICKS) {
             console.log('[autopilot] --no-worker probe: live worker signal detected; warning re-armed.');
           }
-          noWorkerConsecutiveIdle = 0;
+          state.noWorkerConsecutiveIdle = 0;
         }
       } catch (e) {
         // Probe failures never block the main dispatch loop. Log once per
@@ -788,7 +816,7 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
         const estTotal = plan.reduce((s, r) => s + r.est_seconds, 0);
 
         // Track time since last full cycle for the 60-min floor.
-        const minutesSinceLastFull = (Date.now() - lastFullCycleAt) / 60000;
+        const minutesSinceLastFull = (Date.now() - state.lastFullCycleAt) / 60000;
 
         const shouldFullCycle = shouldRunAutopilotFullCycle({
           score,
@@ -872,7 +900,7 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
             result.legacy_fallback ||
             result.all_sources_handled
           ) {
-            lastFullCycleAt = Date.now();
+            state.lastFullCycleAt = Date.now();
           }
           if (jsonMode) {
             process.stderr.write(JSON.stringify({
@@ -960,8 +988,8 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
             await new Promise(r => setImmediate(r));
           },
         });
-        inflightInlineCycle = cyclePromise;
-        const report = await cyclePromise.finally(() => { inflightInlineCycle = null; });
+        state.inflightInlineCycle = cyclePromise;
+        const report = await cyclePromise.finally(() => { state.inflightInlineCycle = null; });
         // Only 'failed' (every attempted phase failed) trips the autopilot
         // circuit breaker. 'partial' means at least one phase warned or
         // failed while others ran — that's a soft signal, not a fatal
@@ -1001,13 +1029,13 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
 
     if (configurationBlocked()) continue;
     if (cycleOk) {
-      consecutiveErrors = 0;
+      state.consecutiveErrors = 0;
     } else {
-      consecutiveErrors++;
-      if (consecutiveErrors >= 5) {
+      state.consecutiveErrors++;
+      if (state.consecutiveErrors >= 5) {
         console.error('5 consecutive cycle failures. Stopping autopilot.');
         await shutdown('cycle-failure-cap');
-        if (!stopping) continue;
+        if (!state.stopping) continue;
         break;
       }
     }
@@ -1107,8 +1135,8 @@ export async function runAutopilotDaemon(engine: BrainEngine, args: string[]): P
         // rate_limited is a non-run: the loop ticks every few minutes, so
         // logging every skip would flood the audit file with no-signal rows.
         if (result.outcome !== 'rate_limited') logParserProbeEvent(result);
-      } else if (shouldInvoke && !parserProbeFixtureWarned) {
-        parserProbeFixtureWarned = true;
+      } else if (shouldInvoke && !state.parserProbeFixtureWarned) {
+        state.parserProbeFixtureWarned = true;
         console.error(`[parser-probe] fixtures not found under ${pkgRoot}; skipping (probe needs a source-checkout install)`);
       }
     } catch (e) {
