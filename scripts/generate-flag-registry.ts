@@ -138,6 +138,14 @@ function facadeExpansion(p: string): string[] {
     join(ROOT, 'src/commands/mcp-admin-http.ts'),
   ];
   if (rel === 'src/commands/doctor.ts') return collect(join(ROOT, 'src/commands/doctor'));
+  // Refactor wave 1 (W4 serve-http) peeled runServeHttp into flat
+  // serve-http-<area>.ts modules; their text (e.g. the expired-magic-link
+  // page's `--url` / `--oauth-request` hint) used to live in serve-http.ts.
+  if (rel === 'src/commands/serve-http.ts') {
+    return ['oauth', 'metrics', 'admin-api', 'spa', 'mcp', 'webhooks']
+      .map(m => join(ROOT, `src/commands/serve-http-${m}.ts`))
+      .filter(p => existsSync(p));
+  }
   // Refactor wave 1 (W3): the MIGRATIONS array moved to one file per migration.
   if (rel === 'src/core/migrate.ts') return collect(join(ROOT, 'src/core/schema-migrations'));
   if (rel === 'src/commands/skillpack.ts') return collect(join(ROOT, 'src/commands/skillpack'));
