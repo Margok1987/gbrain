@@ -260,7 +260,7 @@ test/scripts/run-verify-parallel.test.ts	guard registration ⇒ execution covera
 test/scripts/test-shard.slow.test.ts	test-shard.sh — LPT balance contract	5	readFileSync
 test/scripts/test-shard.slow.test.ts	test-shard.sh — exclusion contract	7	readFileSync
 test/search/graph-signals-wire-integration.test.ts	v0.40.4 — source-grep regression guard	1	source-surface-helper
-test/serve-http-admin-route-guard.test.ts	(file-level)	4	readFileSync
+test/serve-http-admin-route-guard.test.ts	(file-level)	5	readFileSync
 test/serve-http-github-webhook.test.ts	handler wiring (source pin)	1	source-surface-helper
 test/serve-http-mcp-transport-cleanup.test.ts	POST /mcp transport cleanup (#2844)	2	source-surface-helper
 test/serve-http-metrics.test.ts	serve-http.ts wiring (structural — the two defects of the original PR)	2	source-surface-helper
