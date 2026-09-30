@@ -855,7 +855,13 @@ export async function embeddingWidthStartupWarning(engine: BrainEngine): Promise
   }
 }
 
-export async function runServeHttp(engine: BrainEngine, options: ServeHttpOptions) {
+/**
+ * Builds the complete Express app for `gbrain serve --http`: startup checks,
+ * OAuth provider, admin auth, every route and middleware in registration
+ * order. `runServeHttp` is the production caller; it owns listen, the banner,
+ * the resolve-IPC binding and shutdown.
+ */
+export async function buildServeHttpApp(app: express.Express, engine: BrainEngine, options: ServeHttpOptions) {
   const { port, tokenTtl, enableDcr, enableDcrInsecure, publicUrl, logFullParams } = options;
   // v0.34.1 (#864, D11): default bind flipped from 0.0.0.0 to 127.0.0.1.
   // gbrain's primary use case is a personal-knowledge brain on a laptop;
@@ -1072,8 +1078,6 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
     }
   }
 
-  // Express 5 app
-  const app = express();
   // v0.41.3 (T8): configurable trust-proxy via GBRAIN_HTTP_TRUST_PROXY env.
   // Default 'loopback' (trust Caddy/Tailscale on the same host) preserves
   // pre-v0.41.3 behavior. Operators behind Fly.io / Render / Vercel / nginx
@@ -3030,6 +3034,16 @@ export async function runServeHttp(engine: BrainEngine, options: ServeHttpOption
       }
     },
   );
+
+  return { bind, config, sql, issuerUrl, skillStatus, bootstrapToken, bootstrapFromEnv, suppressBootstrapPrint };
+}
+
+export async function runServeHttp(engine: BrainEngine, options: ServeHttpOptions) {
+  const { port, tokenTtl, enableDcr, enableDcrInsecure } = options;
+  // Express 5 app
+  const app = express();
+  const { bind, config, sql, issuerUrl, skillStatus, bootstrapToken, bootstrapFromEnv, suppressBootstrapPrint } =
+    await buildServeHttpApp(app, engine, options);
 
   // ---------------------------------------------------------------------------
   // Start server
