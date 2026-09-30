@@ -1,0 +1,5 @@
+{"ts":"2026-09-30T21:23:44.928Z","purpose":"S7 synthetic transcripts","provider":"openai","model":"gpt-5.6-luna","input_tokens":31472,"output_tokens":438778,"usd":0.5328}
+{"ts":"2026-09-30T21:28:58.354Z","purpose":"S7 synthetic transcripts","provider":"openai","model":"gpt-5.6-luna","input_tokens":12903,"output_tokens":181061,"usd":0.2199}
+{"ts":"2026-09-30T21:52:00Z","purpose":"S7 calibrate+qualify+4 matched-pair arms (Jev, from decide_spend in the eval brain)","provider":"typesafe","model":"jev-1.13.0","input_tokens":5924479,"output_tokens":0,"usd":0.2488}
+{"ts":"2026-09-30T21:52:00Z","purpose":"S7 matched pair LLM triage (off-1, off-2, on-1/on-2 margin_hold fallbacks, smoke)","provider":"anthropic","model":"claude-haiku-4-5-20251001","input_tokens":null,"output_tokens":null,"usd":1.1555}
+{"ts":"2026-09-30T21:52:00Z","purpose":"LongMemEval smoke (2 questions, embeddings, upper bound)","provider":"openai","model":"text-embedding-3-large","input_tokens":250000,"output_tokens":0,"usd":0.0325}
