@@ -46,6 +46,8 @@ export interface SyncResult {
    * bookmark advancement; rename the files to import them.
    */
   malformedSkipped?: number;
+  /** #5751: unchanged managed working-tree files skipped although a no-op publication cannot resolve their admit reason. */
+  legacySkips?: { contextualMode: number; canonicalBytes: number };
   /** Managed sync: files skipped because another origin keeps their slug, and links derived after the checkpoint. */
   slugCollisions?: import('../core/persistence/sync-discovery.ts').SyncSlugCollision[]; links?: import('../core/persistence/links-maintenance.ts').ManagedLinkExtraction;
   /**

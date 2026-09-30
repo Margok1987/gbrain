@@ -101,7 +101,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   or `gbrain repair <kind> --apply` on the brain host. After an upgrade, follow
   [recover after upgrading](./docs/guides/repair.md#recover-after-upgrading-to-this-release). A refused
   write names its reason and recovery command
-  ([write refusal reasons](./docs/guides/write-refusals.md)).
+  ([write refusal reasons](./docs/guides/write-refusals.md)). A managed sync
+  blocked with `checkpoint_validation_timeout`: run the printed commands
+  (`gbrain repair request-indexes --apply` when an index is missing or INVALID,
+  then the printed `gbrain sync --source <id> --no-pull --retry-failed …`);
+  doctor `persistence_request_growth` warns before lifetime request IDs run out.
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes --no-autopilot-install` (manual migration orchestration without service installation).

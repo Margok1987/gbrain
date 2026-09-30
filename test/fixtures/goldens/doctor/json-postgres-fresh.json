@@ -365,7 +365,7 @@
         },
         {
           "category": "meta",
-          "message": "Version 178 (latest: 178)",
+          "message": "Version 179 (latest: 179)",
           "name": "schema_version",
           "status": "ok"
         },
@@ -502,6 +502,66 @@
           },
           "message": "No orphan connector checkpoint rows older than 7 days.",
           "name": "connector_checkpoints",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
+          "details": {
+            "command": "gbrain repair request-indexes --apply",
+            "count": 0,
+            "docs": "docs/guides/repair.md#request-indexes",
+            "indexes": [
+              {
+                "name": "persistence_requests_sync_run_open",
+                "state": "valid"
+              },
+              {
+                "name": "persistence_requests_sync_run_committed",
+                "state": "valid"
+              }
+            ],
+            "repair": "request-indexes"
+          },
+          "message": "Managed sync request indexes are valid.",
+          "name": "persistence_request_indexes",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
+          "details": {
+            "commands": [],
+            "docs": "docs/guides/repair.md#request-growth",
+            "rows": 0,
+            "rows_exact": false,
+            "scopes": [
+              {
+                "admissions_in_window": 1,
+                "config_key": "persistence.limits.brain_lifetime_ids",
+                "days_to_exhaustion": null,
+                "exhaustion_date": null,
+                "lifetime_ids": 1,
+                "limit": 1000000,
+                "per_day": 0,
+                "scope": "brain",
+                "window_days": 7
+              },
+              {
+                "admissions_in_window": 1,
+                "config_key": "persistence.limits.principal_lifetime_ids",
+                "days_to_exhaustion": null,
+                "exhaustion_date": null,
+                "lifetime_ids": 1,
+                "limit": 250000,
+                "per_day": 0,
+                "scope": "principal:local_cli:<uuid>",
+                "window_days": 7
+              }
+            ],
+            "verify": "gbrain doctor --json (check persistence_request_growth)",
+            "window_days": 7
+          },
+          "message": "~0 request row(s); no scope exhausts its lifetime request IDs within 90 days at its last-7-day rate.",
+          "name": "persistence_request_growth",
           "status": "ok"
         },
         {

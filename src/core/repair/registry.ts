@@ -21,6 +21,7 @@ import { visibilityRepair } from './visibility.ts';
 import { safeChunksRepair } from './safe-chunks.ts';
 import { contextualModeRepair } from './contextual-mode.ts';
 import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
+import { requestIndexesRepair } from './request-indexes.ts';
 
 export interface RepairKindSpec {
   kind: RepairKind;
@@ -56,6 +57,11 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     handler: connectorCheckpointsRepair, embeds: 'none', checks: ['connector_checkpoints'],
     summary: 'Delete connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days (#5686). '
       + 'Cleanup only; no journal admission. Rows a pending write still references are kept. Brain-wide.',
+  },
+  'request-indexes': {
+    handler: requestIndexesRepair, embeds: 'none', checks: ['persistence_request_indexes'],
+    summary: 'Create a missing managed sync request index, or drop an INVALID one and rebuild it (#5762), so sync checkpoints validate within their '
+      + 'statement budget. Postgres builds CONCURRENTLY, one index at a time. No journal admission and no user data changes. Brain-wide.',
   },
 };
 
