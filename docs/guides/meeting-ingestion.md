@@ -49,7 +49,8 @@ on new_meeting_transcript(meeting):
 
     # Step 5: Back-link everything (bidirectional graph)
     #   Attendees are the exception: auto-link derives their `attended`
-    #   edges from the meeting page's `Attendees:` line, so skip them here
+    #   edges from the meeting page's `Attendees:` line and `attendees:`
+    #   frontmatter, so skip them here
     for entity in all_entities_mentioned - meeting.attendees:
         gbrain link <slug> <entity_slug>   # meeting -> entity
         gbrain link <entity_slug> <slug>    # entity -> meeting

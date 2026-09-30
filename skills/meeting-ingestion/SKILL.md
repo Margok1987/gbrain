@@ -224,6 +224,11 @@ and sometimes confidently WRONG names. Resolve by evidence:
 ### Phase 5: Create meeting page
 
 ```markdown
+---
+type: meeting
+attendees: [{comma-separated slugs of the same people, e.g. people/alice-example}]
+---
+
 # {Meeting Title} — {Date}
 
 Attendees: {comma-separated links to the people pages of everyone in the room}
@@ -256,9 +261,9 @@ speaker confidence, a low-confidence guess, or an unresolved speaker such as
 `UNKNOWN_2` in Discussion Notes instead: any extra text on the line stops the
 extractor from reading it as the attendance record, and a line wrapped onto a
 second line loses everyone after the break. Leave people who were only
-invited or mentioned off the line. If the page also carries `attendees:`
-frontmatter, list exactly the same people there or leave the field out:
-extraction reads it as a second attendance record.
+invited or mentioned off the line. The `attendees:` frontmatter lists
+exactly the same people by slug; extraction reads it as a second attendance
+record, so the two must agree.
 
 The four required sections are Summary, Key Decisions, Action Items, and
 Notable Quotes — additional sections (Discussion Notes, a link to the
@@ -331,7 +336,7 @@ worse than a missing one.
 **Note:** Once the meeting page is written via `gbrain put`, the auto-link
 post-hook reads attendance from the page. Where the active schema pack does
 not override attendance (gbrain-base-v2, which `gbrain init` sets), each
-person linked on the `Attendees:` line (Phase 5) gets a
+person on the `Attendees:` line and in `attendees:` frontmatter (Phase 5) gets a
 `person --attended--> meeting` edge, and people linked anywhere else on the
 page are not recorded as attendance; a pack that overrides attendance, such as
 the older `gbrain-base`, sets its own rule and direction. Leave attendance to
@@ -341,8 +346,8 @@ edge can point the wrong way. Over MCP, `put_page` skips auto-link: a stdio
 `gbrain serve --http` you run `gbrain sweep --once` or
 `gbrain extract links --source db`.
 
-A missing `attended` edge has one of two causes. Either the `Attendees:` line
-breaks a Phase 5 rule, or it links a person whose page did not exist when the
+A missing `attended` edge has one of two causes. Either the attendee record
+breaks a Phase 5 rule, or it names a person whose page did not exist when the
 meeting page was written; auto-link then reports an error and writes none of
 the page's links. This skill creates new people pages in Phase 7, after the
 meeting page, so once Phase 7 is done run `gbrain extract --stale` (over MCP,

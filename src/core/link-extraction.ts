@@ -56,6 +56,9 @@ export { parseInlineCitationTimelineEntries, type InlineCitationTimelineCandidat
 // basename match resolves a frontmatter wikilink before the fuzzy and live
 // keyword steps, so edges the managed stale sweep re-pointed at a transcript
 // re-extract back to the named page on the next `extract --stale`.
+// 2026-09-30: #5765 — a bold `**Attendees:**` label before a bare link list is
+// attendance evidence (the meeting-ingestion template wrote it), so meeting
+// pages filed with it re-extract and gain their attended edges.
 // 2026-09-09: #4985 — normalizeBasename strips Unicode variation selectors (twin
 // of slugifySegment), so emoji+VS16 wikilinks re-resolve to the clean slug.
 // 2026-09-09 (same wave): #4977 — the page-role prior no longer applies to
@@ -1031,7 +1034,7 @@ export function attendanceEvidenceRanges(content: string): Array<[number, number
       section.entries.push([line.start, line.end]);
       continue;
     }
-    const inline = /^Attendees:[ \t]*(.*)$/i.exec(line.text);
+    const inline = /^(?:Attendees:|\*\*Attendees:\*\*|\*\*Attendees\*\*:)[ \t]*(.*)$/i.exec(line.text);
     if (inline && list(inline[1])) ranges.push([line.start, line.end]);
   }
   finishSection();

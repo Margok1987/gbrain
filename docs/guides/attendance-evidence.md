@@ -13,8 +13,8 @@ count people who were only invited or mentioned."*
 ## Supported evidence
 
 On a `meeting` page, use canonical structured `attendees` frontmatter, a bare
-`Attendees:` link list, or a dedicated `## Attendees` section containing only
-bare link-list entries. Each reference must resolve unambiguously to a live
+`Attendees:` link list (the bold `**Attendees:**` label works the same way), or
+a dedicated `## Attendees` section containing only bare link-list entries. Each reference must resolve unambiguously to a live
 `person` page in the allowed source scope. For example:
 
 ```markdown
