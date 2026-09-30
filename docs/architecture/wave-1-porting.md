@@ -38,8 +38,8 @@ If the method's domain is migrated (a `migrated` row in `scripts/engine-sql-base
 the SQL now lives once in `src/core/engine-sql/<domain>.ts` and both engines delegate to it. Apply
 the fix there once, not in `pglite-engine.ts` and `postgres-engine.ts`. Keep master's
 Postgres text byte for byte unless the fix changes SQL on purpose, then refresh the SQL-text golden
-(`GBRAIN_TEST_UPDATE_GOLDENS=1 bun test test/engine-sql-sql-text.test.ts`) and say why in the PR.
-Run `bun test test/engine-sql-*.test.ts` and the domain's parity E2E. If the domain is not migrated,
+(`GBRAIN_TEST_UPDATE_GOLDENS=1 bun test --timeout=60000 test/engine-sql-sql-text.test.ts`) and say why in the PR.
+Run `bun test --timeout=60000 test/engine-sql-*.test.ts` and the domain's parity E2E. If the domain is not migrated,
 fix both engines as before; a new SQL-bearing engine member fails `check:engine-sql-ratchet`.
 
 ### Schema migration
@@ -50,7 +50,7 @@ with the next free version and regenerates the registry. Paste the body into the
 already took your number, renumber: `git mv` the file, edit `version:`, and run
 `bun run build:schema-migrations`. Never renumber a migration that already ran on retained data.
 Schema text for fresh installs goes in `src/schema.sql` (or its TS fragment), then
-`bun run build:schema`. Run `bun test test/scripts/build-schema-migrations.test.ts test/migrate.test.ts`.
+`bun run build:schema`. Run `bun test --timeout=60000 test/scripts/build-schema-migrations.test.ts test/migrate.test.ts`.
 
 ### Doctor check
 
@@ -58,7 +58,7 @@ Schema text for fresh installs goes in `src/schema.sql` (or its TS fragment), th
 `{ name, emits, run }` entry in the topic module under `src/commands/doctor/checks/`,
 listed in `DOCTOR_CHECK_REGISTRY` (`src/commands/doctor/registry.ts`) at the position its
 output should take, with every emitted name categorized in `src/core/doctor-categories.ts`.
-Run `bun test test/doctor-registry.test.ts test/doctor-mode-matrix.serial.test.ts`; refresh the
+Run `bun test --timeout=60000 test/doctor-registry.test.ts test/doctor-mode-matrix.serial.test.ts`; refresh the
 registry and `--json` goldens deliberately if the output is meant to change.
 
 ### CLI flag or command
@@ -66,7 +66,7 @@ registry and `--json` goldens deliberately if the output is meant to change.
 The `handleCliOnly` switch became `src/cli/command-table.ts` plus one dispatch module per
 command in `src/cli/commands/`. A new command is one record plus its module; a new flag on an
 existing command is an edit to the command's implementation. Then `bun run build:flag-registry`
-and `bun test test/cli-command-table.test.ts test/cli-flag-validation.test.ts`. A new command
+and `bun test --timeout=60000 test/cli-command-table.test.ts test/cli-flag-validation.test.ts`. A new command
 changes the membership and dispatch goldens: regenerate them with `GBRAIN_TEST_UPDATE_GOLDENS=1`
 and review the diff.
 
@@ -75,7 +75,7 @@ and review the diff.
 `runServeHttp` became `buildServeHttpApp` plus `serve-http-<area>.ts` modules, each
 exporting `mount<Area>(app, ctx)` over one shared `ServeHttpContext`. Put the route in the
 module for its area; an `/admin` route carries `requireAdmin` before its handler. Run
-`bun test test/serve-http-admin-route-guard.test.ts test/serve-http-route-runtime-golden.test.ts`
+`bun test --timeout=60000 test/serve-http-admin-route-guard.test.ts test/serve-http-route-runtime-golden.test.ts`
 and refresh the route goldens deliberately for a new route.
 
 ### Sync closure
@@ -84,7 +84,7 @@ and refresh the route goldens deliberately for a new route.
 (`src/commands/sync/sync-run.ts`), and the body became phases under `src/commands/sync/`.
 Rewrite a read or write of a former local as `run.<field>` at each use; never destructure a
 mutable field or copy it into a local (`check:sync-run-state`). Checkpoint state changes only
-through a `sync-run.ts` function. Run `bun test test/sync.test.ts test/sync-run-ordering.serial.test.ts`.
+through a `sync-run.ts` function. Run `bun test --timeout=60000 test/sync.test.ts test/sync-run-ordering.serial.test.ts`.
 
 ### Jobs handler
 
@@ -92,14 +92,14 @@ Built-in Minion handler bodies moved from `src/commands/jobs.ts` to one module e
 `src/core/minions/handlers/`; `registerBuiltinHandlers` (still exported from
 `jobs.ts`) registers them in the same order. Apply the handler fix in its module. A new handler
 is a module plus one registration line, and changes `test/fixtures/goldens/jobs/handler-registry.json`
-(`bun test test/jobs-handler-registry-golden.test.ts`).
+(`bun test --timeout=60000 test/jobs-handler-registry-golden.test.ts`).
 
 ### Hybrid search stage
 
 `hybridSearch` and `hybridSearchCached` run as named stages under
 `src/core/search/hybrid/` (request, arms, rank, cache stages, keyword-only, degraded). Apply the
 fix in the stage that owns the code. The deterministic output is pinned exactly:
-`bun test test/hybrid-golden.test.ts`. A retrieval change also needs `gbrain eval replay`.
+`bun test --timeout=60000 test/hybrid-golden.test.ts`. A retrieval change also needs `gbrain eval replay`.
 
 ### Generated-file conflicts: regenerate, never hand-merge
 

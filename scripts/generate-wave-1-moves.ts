@@ -531,8 +531,8 @@ If the method's domain is migrated (a ${code('migrated')} row in ${code('scripts
 the SQL now lives once in ${code('src/core/engine-sql/<domain>.ts')} and both engines delegate to it. Apply
 the fix there once, not in ${code('pglite-engine.ts')} and ${code('postgres-engine.ts')}. Keep master's
 Postgres text byte for byte unless the fix changes SQL on purpose, then refresh the SQL-text golden
-(${code('GBRAIN_TEST_UPDATE_GOLDENS=1 bun test test/engine-sql-sql-text.test.ts')}) and say why in the PR.
-Run ${code('bun test test/engine-sql-*.test.ts')} and the domain's parity E2E. If the domain is not migrated,
+(${code('GBRAIN_TEST_UPDATE_GOLDENS=1 bun test --timeout=60000 test/engine-sql-sql-text.test.ts')}) and say why in the PR.
+Run ${code('bun test --timeout=60000 test/engine-sql-*.test.ts')} and the domain's parity E2E. If the domain is not migrated,
 fix both engines as before; a new SQL-bearing engine member fails ${code('check:engine-sql-ratchet')}.
 
 ### Schema migration
@@ -543,7 +543,7 @@ with the next free version and regenerates the registry. Paste the body into the
 already took your number, renumber: ${code('git mv')} the file, edit ${code('version:')}, and run
 ${code('bun run build:schema-migrations')}. Never renumber a migration that already ran on retained data.
 Schema text for fresh installs goes in ${code('src/schema.sql')} (or its TS fragment), then
-${code('bun run build:schema')}. Run ${code('bun test test/scripts/build-schema-migrations.test.ts test/migrate.test.ts')}.
+${code('bun run build:schema')}. Run ${code('bun test --timeout=60000 test/scripts/build-schema-migrations.test.ts test/migrate.test.ts')}.
 
 ### Doctor check
 
@@ -551,7 +551,7 @@ ${code('buildChecks')} is a registry runner. A check you added inline now goes i
 ${code('{ name, emits, run }')} entry in the topic module under ${code('src/commands/doctor/checks/')},
 listed in ${code('DOCTOR_CHECK_REGISTRY')} (${code('src/commands/doctor/registry.ts')}) at the position its
 output should take, with every emitted name categorized in ${code('src/core/doctor-categories.ts')}.
-Run ${code('bun test test/doctor-registry.test.ts test/doctor-mode-matrix.serial.test.ts')}; refresh the
+Run ${code('bun test --timeout=60000 test/doctor-registry.test.ts test/doctor-mode-matrix.serial.test.ts')}; refresh the
 registry and ${code('--json')} goldens deliberately if the output is meant to change.
 
 ### CLI flag or command
@@ -559,7 +559,7 @@ registry and ${code('--json')} goldens deliberately if the output is meant to ch
 The ${code('handleCliOnly')} switch became ${code('src/cli/command-table.ts')} plus one dispatch module per
 command in ${code('src/cli/commands/')}. A new command is one record plus its module; a new flag on an
 existing command is an edit to the command's implementation. Then ${code('bun run build:flag-registry')}
-and ${code('bun test test/cli-command-table.test.ts test/cli-flag-validation.test.ts')}. A new command
+and ${code('bun test --timeout=60000 test/cli-command-table.test.ts test/cli-flag-validation.test.ts')}. A new command
 changes the membership and dispatch goldens: regenerate them with ${code('GBRAIN_TEST_UPDATE_GOLDENS=1')}
 and review the diff.
 
@@ -568,7 +568,7 @@ and review the diff.
 ${code('runServeHttp')} became ${code('buildServeHttpApp')} plus ${code('serve-http-<area>.ts')} modules, each
 exporting ${code('mount<Area>(app, ctx)')} over one shared ${code('ServeHttpContext')}. Put the route in the
 module for its area; an ${code('/admin')} route carries ${code('requireAdmin')} before its handler. Run
-${code('bun test test/serve-http-admin-route-guard.test.ts test/serve-http-route-runtime-golden.test.ts')}
+${code('bun test --timeout=60000 test/serve-http-admin-route-guard.test.ts test/serve-http-route-runtime-golden.test.ts')}
 and refresh the route goldens deliberately for a new route.
 
 ### Sync closure
@@ -577,7 +577,7 @@ ${code('performSyncInner')}'s closure ${code('let')}s became fields of the ${cod
 (${code('src/commands/sync/sync-run.ts')}), and the body became phases under ${code('src/commands/sync/')}.
 Rewrite a read or write of a former local as ${code('run.<field>')} at each use; never destructure a
 mutable field or copy it into a local (${code('check:sync-run-state')}). Checkpoint state changes only
-through a ${code('sync-run.ts')} function. Run ${code('bun test test/sync.test.ts test/sync-run-ordering.serial.test.ts')}.
+through a ${code('sync-run.ts')} function. Run ${code('bun test --timeout=60000 test/sync.test.ts test/sync-run-ordering.serial.test.ts')}.
 
 ### Jobs handler
 
@@ -585,14 +585,14 @@ Built-in Minion handler bodies moved from ${code('src/commands/jobs.ts')} to one
 ${code('src/core/minions/handlers/')}; ${code('registerBuiltinHandlers')} (still exported from
 ${code('jobs.ts')}) registers them in the same order. Apply the handler fix in its module. A new handler
 is a module plus one registration line, and changes ${code('test/fixtures/goldens/jobs/handler-registry.json')}
-(${code('bun test test/jobs-handler-registry-golden.test.ts')}).
+(${code('bun test --timeout=60000 test/jobs-handler-registry-golden.test.ts')}).
 
 ### Hybrid search stage
 
 ${code('hybridSearch')} and ${code('hybridSearchCached')} run as named stages under
 ${code('src/core/search/hybrid/')} (request, arms, rank, cache stages, keyword-only, degraded). Apply the
 fix in the stage that owns the code. The deterministic output is pinned exactly:
-${code('bun test test/hybrid-golden.test.ts')}. A retrieval change also needs ${code('gbrain eval replay')}.
+${code('bun test --timeout=60000 test/hybrid-golden.test.ts')}. A retrieval change also needs ${code('gbrain eval replay')}.
 
 ### Generated-file conflicts: regenerate, never hand-merge
 
