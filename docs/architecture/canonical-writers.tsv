@@ -96,7 +96,7 @@ src/core/postgres-engine.ts	31	engine_guard	Canonical table SQL trigger requires
 src/core/schema-pack/mutate.ts	0	filesystem_guard	The shared manifest write primitive checks its root before atomic replacement.
 src/core/schema-pack/page-to-alias.ts	2	engine_guard	Canonical table SQL trigger requires coordinator capability; legacy calls fail before canonical DB publication.
 src/core/schema-pack/page-to-link.ts	1	engine_guard	Canonical table SQL trigger requires coordinator capability; legacy calls fail before canonical DB publication.
-src/core/schema-pack/retype.ts	1	engine_guard	Canonical table SQL trigger requires coordinator capability; legacy calls fail before canonical DB publication.
+src/core/schema-pack/retype.ts	1	engine_guard	Canonical table SQL trigger requires coordinator capability; on a managed brain unify-types refuses apply up front with writer_coordinator_required before its lock or any retype, and the dry run says apply is unsupported there.
 src/core/schema-pack/sync.ts	1	engine_guard	Canonical table SQL trigger requires coordinator capability; legacy calls fail before canonical DB publication.
 src/core/search/safe-chunks.ts	1	projection	Derived indexing, retrieval telemetry, or source settings; canonical fields remain guarded by SQL triggers.
 src/core/source-config-sql.ts	1	projection	Derived indexing, retrieval telemetry, or source settings; canonical fields remain guarded by SQL triggers.

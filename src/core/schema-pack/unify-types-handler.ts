@@ -37,6 +37,8 @@ import { runStatsCore } from './stats.ts';
 import { runSyncCore } from './sync.ts';
 import { tryAcquireDbLock, type DbLockHandle } from '../db-lock.ts';
 import type { PackMappingRule } from './manifest-v1.ts';
+import { OperationError } from '../ops/contract.ts';
+import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 
 export interface UnifyTypesInput {
   /** The pack name to upgrade TO (e.g. 'gbrain-base-v2'). */
@@ -86,6 +88,17 @@ export async function runUnifyTypes(
   const warnings: string[] = [];
 
   onProgress(`[unify-types] starting (apply=${apply}, target_pack=${input.target_pack})`);
+
+  // #5634: the retype, link and alias phases write canonical tables outside
+  // the persistence coordinator, which a managed brain refuses mid-run.
+  // Refuse apply before the lock or any write; the dry run still previews.
+  const managed = await managedPersistenceEnabled(ctx.engine);
+  if (managed && apply) {
+    throw new OperationError('writer_coordinator_required',
+      'unify-types apply is not supported on a managed brain: its retype runs outside the persistence coordinator. No page was changed.',
+      `Preview the plan with gbrain jobs submit unify-types --params '${JSON.stringify({ target_pack: input.target_pack })}'. Coordinated retype is not available yet.`);
+  }
+  if (managed) warnings.push('unify-types apply is not supported on a managed brain; this dry run is a preview only.');
 
   // 1. Preflight — load target pack
   const targetPack = await loadActivePack({
