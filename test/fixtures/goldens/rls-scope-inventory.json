@@ -3278,7 +3278,6 @@
         "executeRaw": "none",
         "executeRawDirect": "none",
         "expireFact": "none",
-        "factsDeps": "none",
         "findAnomalies": "none",
         "findByTitleFuzzy": "none",
         "findCandidateDuplicates": "none",

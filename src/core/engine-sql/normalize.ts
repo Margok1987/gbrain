@@ -28,13 +28,13 @@ const CONVERT: Record<ColumnKind, (value: unknown) => unknown> = {
   'text[]': (v) => (v === null || v === undefined ? v : (v as unknown[]).map((x) => (x === null ? null : String(x)))),
 };
 
-export function compileRowNormalizer<R extends Row = Row>(kinds: Readonly<Record<string, ColumnKind>>): (row: Row) => R {
+export function compileRowNormalizer<R extends object = Row>(kinds: Readonly<Record<string, ColumnKind>>): (row: Row) => R {
   const entries = Object.entries(kinds).map(([column, kind]) => [column, CONVERT[kind]] as const);
   return (row) => {
     const out: Row = { ...row };
     for (const [column, convert] of entries) {
       if (column in out) out[column] = convert(out[column]);
     }
-    return out as R;
+    return out as unknown as R;
   };
 }

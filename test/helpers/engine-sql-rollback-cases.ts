@@ -46,6 +46,27 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return Number(rows[0]?.w ?? 0);
     },
   },
+  {
+    domain: 'facts',
+    async seed(engine) {
+      await engine.insertFact(
+        { fact: 'seeded rollback fact', source: 'test:rollback', entity_slug: 'people/alice-example' },
+        { source_id: 'default' },
+      );
+    },
+    async write(tx) {
+      const res = await tx.insertFact(
+        { fact: 'rolled-back fact', source: 'test:rollback', entity_slug: 'people/alice-example' },
+        { source_id: 'default' },
+      );
+      expect(res.status).toBe('inserted');
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ n: number }>(
+        `SELECT count(*)::int AS n FROM facts WHERE source_id = 'default' AND fact = 'rolled-back fact'`);
+      return Number(rows[0]?.n ?? 0);
+    },
+  },
 ];
 
 class Rollback extends Error {}

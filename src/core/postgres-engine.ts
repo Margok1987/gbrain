@@ -116,8 +116,7 @@ import { EMBED_SKIP_FILTER_FRAGMENT } from './embed-skip.ts';
 import { QUARANTINE_FILTER_FRAGMENT, quarantineFilterFragment } from './quarantine.ts';
 import { acquireInitSchemaAdvisoryLock } from './postgres-engine/init-schema-lock.ts';
 import { applyPostgresForwardReferenceBootstrap } from './postgres-engine/forward-reference-bootstrap.ts';
-import * as factsImpl from './postgres-engine/facts.ts';
-import type { PgFactsDeps } from './postgres-engine/facts.ts';
+import * as factsImpl from './engine-sql/facts.ts';
 import * as takesImpl from './postgres-engine/takes.ts';
 import type { PgTakesDeps } from './postgres-engine/takes.ts';
 import * as codeEdgesImpl from './postgres-engine/code-edges.ts';
@@ -4367,19 +4366,10 @@ export class PostgresEngine implements BrainEngine {
   // v0.31: Hot memory — facts table operations
   // ============================================================
 
-  // Peeled into ./postgres-engine/facts.ts (containment sprint C15): the
-  // methods below are one-line delegates over free functions with a narrow
-  // deps surface.
+  // Facts SQL lives once in ./engine-sql/facts.ts (refactor wave 1 C11): the
+  // methods below are one-line delegations over the engine-sql executor.
 
   /** Narrow deps for the peeled facts module. */
-  private get factsDeps(): PgFactsDeps {
-    const self = this;
-    return {
-      get sql() { return self.sql; },
-      resolveFactsEmbeddingCast: () => self.resolveFactsEmbeddingCast(),
-    };
-  }
-
   /**
    * v0.41.15.0 (T6, codex #20): per-process cache for the
    * `facts.embedding` cast suffix. Migration v40 creates the column as
@@ -4432,11 +4422,11 @@ export class PostgresEngine implements BrainEngine {
     input: NewFact,
     ctx: { source_id: string; supersedeId?: number },
   ): Promise<{ id: number; status: FactInsertStatus }> {
-    return factsImpl.insertFact(this.factsDeps, input, ctx);
+    return factsImpl.insertFact(this.engineSql, () => this.resolveFactsEmbeddingCast(), input, ctx);
   }
 
   async expireFact(id: number, opts?: { supersededBy?: number; at?: Date }): Promise<boolean> {
-    return factsImpl.expireFact(this.factsDeps, id, opts);
+    return factsImpl.expireFact(this.engineSql, id, opts);
   }
 
   async insertFacts(
@@ -4444,7 +4434,7 @@ export class PostgresEngine implements BrainEngine {
     ctx: { source_id: string },
     opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean } },
   ): Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number }> {
-    return factsImpl.insertFacts(this.factsDeps, rows, ctx, opts);
+    return factsImpl.insertFacts(this.engineSql, () => this.resolveFactsEmbeddingCast(), rows, ctx, opts);
   }
 
   async deleteFactsForPage(
@@ -4452,7 +4442,7 @@ export class PostgresEngine implements BrainEngine {
     source_id: string,
     opts?: { excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean },
   ): Promise<{ deleted: number }> {
-    return factsImpl.deleteFactsForPage(this.factsDeps, slug, source_id, opts);
+    return factsImpl.deleteFactsForPage(this.engineSql, slug, source_id, opts);
   }
 
   async listFactsByEntity(
@@ -4460,7 +4450,7 @@ export class PostgresEngine implements BrainEngine {
     entitySlug: string,
     opts?: FactListOpts,
   ): Promise<FactRow[]> {
-    return factsImpl.listFactsByEntity(this.factsDeps, source_id, entitySlug, opts);
+    return factsImpl.listFactsByEntity(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, entitySlug, opts);
   }
 
   async listFactsSince(
@@ -4468,7 +4458,7 @@ export class PostgresEngine implements BrainEngine {
     since: Date,
     opts?: FactListOpts & { entitySlug?: string; sessionId?: string },
   ): Promise<FactRow[]> {
-    return factsImpl.listFactsSince(this.factsDeps, source_id, since, opts);
+    return factsImpl.listFactsSince(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, since, opts);
   }
 
   async listFactsBySession(
@@ -4476,18 +4466,18 @@ export class PostgresEngine implements BrainEngine {
     sessionId: string,
     opts?: FactListOpts,
   ): Promise<FactRow[]> {
-    return factsImpl.listFactsBySession(this.factsDeps, source_id, sessionId, opts);
+    return factsImpl.listFactsBySession(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, sessionId, opts);
   }
 
   async listSupersessions(
     source_id: string,
     opts?: { since?: Date; limit?: number; visibility?: ('private' | 'world')[] },
   ): Promise<FactRow[]> {
-    return factsImpl.listSupersessions(this.factsDeps, source_id, opts);
+    return factsImpl.listSupersessions(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, opts);
   }
 
   async countUnconsolidatedFacts(source_id: string): Promise<number> {
-    return factsImpl.countUnconsolidatedFacts(this.factsDeps, source_id);
+    return factsImpl.countUnconsolidatedFacts(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id);
   }
 
   async findCandidateDuplicates(
@@ -4496,19 +4486,19 @@ export class PostgresEngine implements BrainEngine {
     factText: string,
     opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null },
   ): Promise<FactRow[]> {
-    return factsImpl.findCandidateDuplicates(this.factsDeps, source_id, entitySlug, factText, opts);
+    return factsImpl.findCandidateDuplicates(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, entitySlug, factText, opts);
   }
 
   async consolidateFact(id: number, takeId: number): Promise<void> {
-    return factsImpl.consolidateFact(this.factsDeps, id, takeId);
+    return factsImpl.consolidateFact(this.engineSql, id, takeId);
   }
 
   async findTrajectory(opts: import('./engine.ts').TrajectoryOpts): Promise<import('./engine.ts').TrajectoryPoint[]> {
-    return factsImpl.findTrajectory(this.factsDeps, opts);
+    return factsImpl.findTrajectory(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), opts);
   }
 
   async getFactsHealth(source_id: string): Promise<FactsHealth> {
-    return factsImpl.getFactsHealth(this.factsDeps, source_id);
+    return factsImpl.getFactsHealth(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id);
   }
 
   // ============================================================

@@ -8,6 +8,7 @@
 # SQL-bearing engine member never gets a row: move the SQL, or mark it
 # `// engine-sql-ok: <reason>`.
 # docs/TESTING.md#engine-sql-ratchet
+migrated	facts
 migrated	salience
 method	src/core/pglite-engine.ts	PGLiteEngine._addLinksBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._addTimelineEntriesBatchOnce
@@ -114,16 +115,6 @@ method	src/core/pglite-engine/code-edges.ts	deleteCodeEdgesForChunks
 method	src/core/pglite-engine/code-edges.ts	getCalleesOf
 method	src/core/pglite-engine/code-edges.ts	getCallersOf
 method	src/core/pglite-engine/code-edges.ts	getEdgesByChunk
-method	src/core/pglite-engine/facts.ts	_listFacts
-method	src/core/pglite-engine/facts.ts	consolidateFact
-method	src/core/pglite-engine/facts.ts	countUnconsolidatedFacts
-method	src/core/pglite-engine/facts.ts	deleteFactsForPage
-method	src/core/pglite-engine/facts.ts	expireFact
-method	src/core/pglite-engine/facts.ts	findCandidateDuplicates
-method	src/core/pglite-engine/facts.ts	findTrajectory
-method	src/core/pglite-engine/facts.ts	getFactsHealth
-method	src/core/pglite-engine/facts.ts	insertFact
-method	src/core/pglite-engine/facts.ts	insertFacts
 method	src/core/pglite-engine/takes.ts	_addTakesBatchOnce
 method	src/core/pglite-engine/takes.ts	_updateTakeEmbeddingsOnce
 method	src/core/pglite-engine/takes.ts	addSynthesisEvidence
@@ -248,19 +239,6 @@ method	src/core/postgres-engine/code-edges.ts	deleteCodeEdgesForChunks
 method	src/core/postgres-engine/code-edges.ts	getCalleesOf
 method	src/core/postgres-engine/code-edges.ts	getCallersOf
 method	src/core/postgres-engine/code-edges.ts	getEdgesByChunk
-method	src/core/postgres-engine/facts.ts	consolidateFact
-method	src/core/postgres-engine/facts.ts	countUnconsolidatedFacts
-method	src/core/postgres-engine/facts.ts	deleteFactsForPage
-method	src/core/postgres-engine/facts.ts	expireFact
-method	src/core/postgres-engine/facts.ts	findCandidateDuplicates
-method	src/core/postgres-engine/facts.ts	findTrajectory
-method	src/core/postgres-engine/facts.ts	getFactsHealth
-method	src/core/postgres-engine/facts.ts	insertFact
-method	src/core/postgres-engine/facts.ts	insertFacts
-method	src/core/postgres-engine/facts.ts	listFactsByEntity
-method	src/core/postgres-engine/facts.ts	listFactsBySession
-method	src/core/postgres-engine/facts.ts	listFactsSince
-method	src/core/postgres-engine/facts.ts	listSupersessions
 method	src/core/postgres-engine/forward-reference-bootstrap.ts	applyPostgresForwardReferenceBootstrap
 method	src/core/postgres-engine/init-schema-lock.ts	acquireInitSchemaAdvisoryLock
 method	src/core/postgres-engine/init-schema-lock.ts	lockHolderPid
