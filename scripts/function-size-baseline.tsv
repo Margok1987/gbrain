@@ -34,8 +34,6 @@ src/commands/serve-http.ts	runServeHttp	2251	seed: W5 baseline, refactor wave 1 
 src/commands/serve-http.ts	runServeHttp>app.post('/mcp')	415	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/serve.ts	installStdioLifecycle	315	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/sources.ts	runAdd	362	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/sync/full.ts	performFullSync	436	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/sync/run.ts	runSyncInner	1003	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/upgrade.ts	runPostUpgrade	319	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/ai/gateway.ts	chat	311	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/bootstrap/harness.ts	applyHarness	1167	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)

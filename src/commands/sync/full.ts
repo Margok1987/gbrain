@@ -72,43 +72,7 @@ export async function performFullSync(
   // default-markdown `isSyncable(rel)`, so `gbrain sync --strategy
   // code --dry-run` always reported zero files even when ~1500 code
   // files were waiting.
-  if (opts.dryRun) {
-    const dryRunMalformed: string[] = [];
-    let allFiles = collectSyncableFiles(syncScopeRoot, {
-      strategy: opts.strategy ?? 'markdown',
-      includeGitignored: opts.includeGitignored,
-      onExcluded: (rel) => { dryRunMalformed.push(rel); },
-      includeHidden: opts.includeHidden,
-    });
-    if (opts.exclude && opts.exclude.length > 0) {
-      allFiles = allFiles.filter(abs => !matchesAnyGlob(relative(syncScopeRoot, abs), opts.exclude));
-    }
-    slog(
-      `Full-sync dry run (strategy=${opts.strategy ?? 'markdown'}): ` +
-      `${allFiles.length} file(s) would be imported ` +
-      `from ${syncScopeRoot} @ ${headCommit.slice(0, 8)}.`,
-    );
-    if (dryRunMalformed.length > 0) {
-      slog(
-        `  ${dryRunMalformed.length} file(s) would be skipped: malformed filename ` +
-        `(brackets/control chars; rename to import): ` +
-        dryRunMalformed.slice(0, 20).map(sanitizePathForDisplay).join(', ') +
-        (dryRunMalformed.length > 20 ? `, … (+${dryRunMalformed.length - 20} more)` : ''),
-      );
-    }
-    return {
-      status: 'dry_run',
-      fromCommit: null,
-      toCommit: headCommit,
-      added: allFiles.length,
-      modified: 0,
-      deleted: 0,
-      renamed: 0,
-      chunksCreated: 0,
-      embedded: 0,
-      pagesAffected: [],
-    };
-  }
+  if (opts.dryRun) return fullSyncDryRun(syncScopeRoot, headCommit, opts);
 
   // v0.22.13 (PR #490 A1 + Q5): full sync is always "large" by definition
   // (entire working tree). Auto-concurrency fires unconditionally for Postgres;
@@ -197,65 +161,7 @@ export async function performFullSync(
   // that throws never clears anything, and the sweep carries the full
   // clear-then-verify-restore semantics.
   await sweepOrphanedRenameSentinels(engine, fullSourceId, fullFailureSet);
-
-  if (!fullGate.advanced) {
-    const codeBreakdown = formatCodeBreakdown(result.failures);
-    if (fullGate.sentinelBlocked) {
-      // #3479 review — say WHICH sentinel fired: a `<rename:…>` block here
-      // used to print the history-changed message, pointing the operator at
-      // a force-push that never happened.
-      const fullRenameRows = result.failures.filter(f => f.path.startsWith(RENAME_SENTINEL_PREFIX));
-      if (fullRenameRows.length > 0) {
-        serr(
-          `\nFull sync blocked: a rename left a stale duplicate that could not be removed:\n` +
-          `${fullRenameRows.map(f => `  ${f.path}: ${f.error}`).join('\n')}\n\n` +
-          `If the delete keeps failing in your environment, remove the stale row ` +
-          `yourself: 'gbrain delete <stale-slug>' with the stale slug named above ` +
-          `(only rows whose backing file is gone are ever named — never a live page). ` +
-          `A sentinel reading 'stale row ?' names nothing on purpose: that run could not ` +
-          `prove ANY row stale — fix the unreadable tracked file it reports instead. ` +
-          `The sentinel then clears on the next sync.`,
-        );
-      } else {
-        serr(`\nFull sync blocked: repository history changed during sync.\n${codeBreakdown}`);
-      }
-    } else {
-      const fileFailCount = result.failures.filter(f => isSkippablePath(f.path)).length;
-      // #3875: code-aware copy — provider-infra failures must not be routed
-      // to --skip-failed (same rationale as the incremental gate above).
-      const infraCodes = summarizeFailuresByCode(result.failures).filter(c => isEmbeddingInfraCode(c.code));
-      if (infraCodes.length > 0) {
-        serr(
-          `\nFull sync blocked: ${fileFailCount} file(s) failed — embedding provider errors:\n` +
-          `${codeBreakdown}\n\n` +
-          `These are provider-health failures (timeout / rate limit / quota), not bad ` +
-          `files — do NOT use --skip-failed for them. Check the embedding provider, ` +
-          `then re-run 'gbrain sync --full'.`,
-        );
-      } else {
-        serr(
-          `\nFull sync blocked: ${fileFailCount} file(s) failed:\n` +
-          `${codeBreakdown}\n${formatFailedFileList(result.failures)}\n\n` +
-          `Pinpoint a file with 'gbrain frontmatter validate <path>' (--fix auto-repairs), ` +
-          `fix the YAML and re-run, or use '--skip-failed'. A file ` +
-          `that keeps failing auto-skips after ${resolveAutoSkipThreshold()} consecutive syncs.`,
-        );
-      }
-    }
-    await engine.setConfig('sync.last_run', new Date().toISOString());
-    await writeSyncAnchor(engine, opts.sourceId, 'repo_path', anchorPath);
-    return {
-      status: 'blocked_by_failures',
-      fromCommit: null,
-      toCommit: headCommit,
-      added: 0, modified: 0, deleted: 0, renamed: 0,
-      chunksCreated: result.chunksCreated,
-      embedded: 0,
-      pagesAffected: [],
-      failedFiles: result.failures.length,
-      failureCodes: summarizeFailuresByCode(result.failures),
-    };
-  }
+  if (!fullGate.advanced) return await reportBlockedFullSync(engine, opts, anchorPath, headCommit, result, fullGate);
   if (fullGate.acknowledged > 0) {
     serr(`  Acknowledged ${fullGate.acknowledged} failure(s) and advanced past them.`);
   }
@@ -267,6 +173,169 @@ export async function performFullSync(
     );
   }
 
+  const reconciledDeletes = await reconcileFullSyncDeletes(engine, opts, { company, gitContextRoot, syncScopeRoot, slugRoot });
+
+  // #3479 blocker 2 — the post-gate sweep above ran BEFORE this reconcile,
+  // so a `<rename:…>` sentinel whose stale row the reconcile just removed
+  // would stay open until the NEXT run. Sweep again afterwards: a full sync
+  // is the operator's usual reset move, and it should converge in one run.
+  await sweepOrphanedRenameSentinels(engine, fullSourceId, fullFailureSet);
+
+  // Full sync doesn't track pagesAffected, so fall back to embed --stale.
+  // v0.37 fix wave (Lane D.3 + CDX2-8): switched to runEmbedCore for the
+  // same reason as the incremental path — surface dim-mismatch via hint
+  // instead of silently swallowing or killing the process.
+  let embedded = 0;
+  if (!opts.noEmbed) {
+    try {
+      const { runEmbedCore } = await import('../embed.ts');
+      await runEmbedCore(engine, { stale: true });
+      embedded = result.imported;
+    } catch (e: unknown) {
+      const { EmbeddingDimMismatchError } = await import('../embed.ts');
+      if (e instanceof EmbeddingDimMismatchError) {
+        serr('\n' + e.recipeMessage + '\n');
+        serr(`Tip: pass --no-embed to sync without embedding, then`);
+        serr(`run 'gbrain embed --stale' after fixing the schema.\n`);
+      }
+      // Other errors stay best-effort.
+    }
+  }
+
+  return {
+    status: 'first_sync',
+    fromCommit: null,
+    toCommit: headCommit,
+    added: result.imported,
+    modified: 0,
+    deleted: reconciledDeletes,
+    renamed: 0,
+    chunksCreated: result.chunksCreated,
+    embedded,
+    pagesAffected: [],
+    // Warning aggregates ride the result for worker/JSON consumers — a full
+    // sync that only prints to a daemon's stderr hides them from cron
+    // topologies (codex re-review; same rationale as the incremental path).
+    ...(result.malformedSkipped ? { malformedSkipped: result.malformedSkipped } : {}),
+    ...(result.type_warnings ? { type_warnings: result.type_warnings } : {}),
+    ...(result.resealed ? { resealed: result.resealed } : {}),
+  };
+}
+
+function fullSyncDryRun(syncScopeRoot: string, headCommit: string, opts: SyncOpts): SyncResult {
+  const dryRunMalformed: string[] = [];
+  let allFiles = collectSyncableFiles(syncScopeRoot, {
+    strategy: opts.strategy ?? 'markdown',
+    includeGitignored: opts.includeGitignored,
+    onExcluded: (rel) => { dryRunMalformed.push(rel); },
+    includeHidden: opts.includeHidden,
+  });
+  if (opts.exclude && opts.exclude.length > 0) {
+    allFiles = allFiles.filter(abs => !matchesAnyGlob(relative(syncScopeRoot, abs), opts.exclude));
+  }
+  slog(
+    `Full-sync dry run (strategy=${opts.strategy ?? 'markdown'}): ` +
+    `${allFiles.length} file(s) would be imported ` +
+    `from ${syncScopeRoot} @ ${headCommit.slice(0, 8)}.`,
+  );
+  if (dryRunMalformed.length > 0) {
+    slog(
+      `  ${dryRunMalformed.length} file(s) would be skipped: malformed filename ` +
+      `(brackets/control chars; rename to import): ` +
+      dryRunMalformed.slice(0, 20).map(sanitizePathForDisplay).join(', ') +
+      (dryRunMalformed.length > 20 ? `, … (+${dryRunMalformed.length - 20} more)` : ''),
+    );
+  }
+  return {
+    status: 'dry_run',
+    fromCommit: null,
+    toCommit: headCommit,
+    added: allFiles.length,
+    modified: 0,
+    deleted: 0,
+    renamed: 0,
+    chunksCreated: 0,
+    embedded: 0,
+    pagesAffected: [],
+  };
+}
+
+async function reportBlockedFullSync(
+  engine: BrainEngine,
+  opts: SyncOpts,
+  anchorPath: string,
+  headCommit: string,
+  result: import('../import.ts').RunImportResult,
+  fullGate: Awaited<ReturnType<typeof applySyncFailureGate>>,
+): Promise<SyncResult> {
+  const codeBreakdown = formatCodeBreakdown(result.failures);
+  if (fullGate.sentinelBlocked) {
+    // #3479 review — say WHICH sentinel fired: a `<rename:…>` block here
+    // used to print the history-changed message, pointing the operator at
+    // a force-push that never happened.
+    const fullRenameRows = result.failures.filter(f => f.path.startsWith(RENAME_SENTINEL_PREFIX));
+    if (fullRenameRows.length > 0) {
+      serr(
+        `\nFull sync blocked: a rename left a stale duplicate that could not be removed:\n` +
+        `${fullRenameRows.map(f => `  ${f.path}: ${f.error}`).join('\n')}\n\n` +
+        `If the delete keeps failing in your environment, remove the stale row ` +
+        `yourself: 'gbrain delete <stale-slug>' with the stale slug named above ` +
+        `(only rows whose backing file is gone are ever named — never a live page). ` +
+        `A sentinel reading 'stale row ?' names nothing on purpose: that run could not ` +
+        `prove ANY row stale — fix the unreadable tracked file it reports instead. ` +
+        `The sentinel then clears on the next sync.`,
+      );
+    } else {
+      serr(`\nFull sync blocked: repository history changed during sync.\n${codeBreakdown}`);
+    }
+  } else {
+    const fileFailCount = result.failures.filter(f => isSkippablePath(f.path)).length;
+    // #3875: code-aware copy — provider-infra failures must not be routed
+    // to --skip-failed (same rationale as the incremental gate above).
+    const infraCodes = summarizeFailuresByCode(result.failures).filter(c => isEmbeddingInfraCode(c.code));
+    if (infraCodes.length > 0) {
+      serr(
+        `\nFull sync blocked: ${fileFailCount} file(s) failed — embedding provider errors:\n` +
+        `${codeBreakdown}\n\n` +
+        `These are provider-health failures (timeout / rate limit / quota), not bad ` +
+        `files — do NOT use --skip-failed for them. Check the embedding provider, ` +
+        `then re-run 'gbrain sync --full'.`,
+      );
+    } else {
+      serr(
+        `\nFull sync blocked: ${fileFailCount} file(s) failed:\n` +
+        `${codeBreakdown}\n${formatFailedFileList(result.failures)}\n\n` +
+        `Pinpoint a file with 'gbrain frontmatter validate <path>' (--fix auto-repairs), ` +
+        `fix the YAML and re-run, or use '--skip-failed'. A file ` +
+        `that keeps failing auto-skips after ${resolveAutoSkipThreshold()} consecutive syncs.`,
+      );
+    }
+  }
+  await engine.setConfig('sync.last_run', new Date().toISOString());
+  await writeSyncAnchor(engine, opts.sourceId, 'repo_path', anchorPath);
+  return {
+    status: 'blocked_by_failures',
+    fromCommit: null,
+    toCommit: headCommit,
+    added: 0, modified: 0, deleted: 0, renamed: 0,
+    chunksCreated: result.chunksCreated,
+    embedded: 0,
+    pagesAffected: [],
+    failedFiles: result.failures.length,
+    failureCodes: summarizeFailuresByCode(result.failures),
+  };
+}
+
+/**
+ * Soft-delete file-backed pages whose source file is gone (advancing full
+ * syncs only). Returns the number of pages that transitioned.
+ */
+async function reconcileFullSyncDeletes(
+  engine: BrainEngine,
+  opts: SyncOpts,
+  input: { company: ReturnType<typeof currentCompanyBrainSync>; gitContextRoot: string; syncScopeRoot: string; slugRoot: string | undefined },
+): Promise<number> {
+  const { company, gitContextRoot, syncScopeRoot, slugRoot } = input;
   // #1970 (F-A): runImport is import-only — it never purges pages whose backing
   // file was deleted since the last sync. A full re-import is authoritative for
   // the whole tree, so reconcile deletes here too (this is what makes the
@@ -433,50 +502,5 @@ export async function performFullSync(
       }
     }
   }
-
-  // #3479 blocker 2 — the post-gate sweep above ran BEFORE this reconcile,
-  // so a `<rename:…>` sentinel whose stale row the reconcile just removed
-  // would stay open until the NEXT run. Sweep again afterwards: a full sync
-  // is the operator's usual reset move, and it should converge in one run.
-  await sweepOrphanedRenameSentinels(engine, fullSourceId, fullFailureSet);
-
-  // Full sync doesn't track pagesAffected, so fall back to embed --stale.
-  // v0.37 fix wave (Lane D.3 + CDX2-8): switched to runEmbedCore for the
-  // same reason as the incremental path — surface dim-mismatch via hint
-  // instead of silently swallowing or killing the process.
-  let embedded = 0;
-  if (!opts.noEmbed) {
-    try {
-      const { runEmbedCore } = await import('../embed.ts');
-      await runEmbedCore(engine, { stale: true });
-      embedded = result.imported;
-    } catch (e: unknown) {
-      const { EmbeddingDimMismatchError } = await import('../embed.ts');
-      if (e instanceof EmbeddingDimMismatchError) {
-        serr('\n' + e.recipeMessage + '\n');
-        serr(`Tip: pass --no-embed to sync without embedding, then`);
-        serr(`run 'gbrain embed --stale' after fixing the schema.\n`);
-      }
-      // Other errors stay best-effort.
-    }
-  }
-
-  return {
-    status: 'first_sync',
-    fromCommit: null,
-    toCommit: headCommit,
-    added: result.imported,
-    modified: 0,
-    deleted: reconciledDeletes,
-    renamed: 0,
-    chunksCreated: result.chunksCreated,
-    embedded,
-    pagesAffected: [],
-    // Warning aggregates ride the result for worker/JSON consumers — a full
-    // sync that only prints to a daemon's stderr hides them from cron
-    // topologies (codex re-review; same rationale as the incremental path).
-    ...(result.malformedSkipped ? { malformedSkipped: result.malformedSkipped } : {}),
-    ...(result.type_warnings ? { type_warnings: result.type_warnings } : {}),
-    ...(result.resealed ? { resealed: result.resealed } : {}),
-  };
+  return reconciledDeletes;
 }
