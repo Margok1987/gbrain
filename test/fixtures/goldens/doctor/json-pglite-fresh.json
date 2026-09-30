@@ -359,13 +359,13 @@
         },
         {
           "category": "meta",
-          "message": "Version 179 (latest: 179)",
+          "message": "Version 183 (latest: 183)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "709 column(s) verified against live schema",
+          "message": "708 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -572,6 +572,19 @@
         {
           "category": "brain",
           "details": {
+            "bindings": [],
+            "count": 0,
+            "docs": "docs/guides/repair.md#orphan-bindings",
+            "repair": "orphan-bindings",
+            "truncated": false
+          },
+          "message": "Every persistence source binding belongs to an existing source.",
+          "name": "orphan_persistence_bindings",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
             "sources": [],
             "total": 0
           },
@@ -623,14 +636,18 @@
         {
           "category": "ops",
           "details": {
+            "command": "gbrain repair embedding-effects",
             "count": "exact",
             "docs": "docs/guides/repair.md#stale-queued-embedding-effects",
             "effects": [],
-            "resolution": "unsupported",
+            "failed_effects": 0,
+            "repair": "embedding-effects",
+            "resolution": "repairable",
+            "retry_queued_effects": 0,
             "stale_effects": 0,
             "truncated": false
           },
-          "message": "No committed write has a queued embedding effect older than an hour.",
+          "message": "No committed write has a stale queued or failed embedding effect.",
           "name": "stale_embedding_effects",
           "status": "ok"
         },

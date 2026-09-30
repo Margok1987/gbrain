@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 199293,
-    "stdoutSha256": "a20c6d031840f2e711f8bbd272cefec1d61455c16fdd665333076bf0511471ef",
+    "stdoutBytes": 199477,
+    "stdoutSha256": "f786702cc5f72f442c7e10fba6df96f06ff3e1bef9726aeea28a96a908b5c72f",
     "toolNames": [
       "remember",
       "entity",
@@ -5077,7 +5077,7 @@
         }
       },
       {
-        "description": "The open-loop engine's killer output: who is waiting on you, what you promised, and the context needed to respond. Grouped by counterparty (default, ranked) or flat. Loops come from the deterministic Gmail thread-state detector and the LLM commitment extractor. Remote callers get redacted evidence (no verbatim quotes); trusted local callers also get quotes, Gmail deep links, entity-card context, and a pre-rendered text digest. Carries google-source freshness (stale flag).",
+        "description": "The open-loop engine's killer output: who is waiting on you, what you promised, and the context needed to respond. Grouped by counterparty (default, ranked) or flat. Loops come from the deterministic Gmail thread-state detector and the LLM commitment extractor. Remote callers get redacted evidence (no verbatim quotes); trusted local callers also get quotes, Gmail deep links, entity-card context, and a pre-rendered text digest. Carries google-source freshness (stale flag) and completeness: when it is \"partial\", some mail in the window is held after repeated import failures; present the answer as partial and name the held items and their retry command.",
         "name": "open_loops",
         "parameters": {
           "all_sources": "boolean?",
