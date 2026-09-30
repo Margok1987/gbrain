@@ -623,6 +623,29 @@ export async function deleteChunks(exec: SqlExecutor, slug: string, opts?: { sou
     `);
   }
 
+/**
+ * `tryParseEmbedding`'s result for every input, with a native fast path for
+ * well-formed pgvector text. Both drivers return the vector as its text
+ * literal; PGLite master decoded it with `JSON.parse`, Postgres master with
+ * `tryParseEmbedding` (split + `Number`, about twice as slow per 1024-d row on
+ * the hybrid rescoring path). JSON's number grammar is a subset of
+ * `Number()`'s with the same values, so an all-finite numeric array decodes
+ * identically; anything else (malformed, non-finite, not an array) takes
+ * `tryParseEmbedding` and keeps its skip-and-warn contract.
+ * `test/engine-sql-chunks.test.ts` pins the equivalence.
+ */
+export function decodeEmbedding(value: unknown): Float32Array | null {
+  if (typeof value === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (Array.isArray(parsed) && parsed.every((n) => typeof n === 'number' && Number.isFinite(n))) return Float32Array.from(parsed as number[]);
+    } catch {
+      // Not JSON: tryParseEmbedding decides (corrupt rows skip with one warning).
+    }
+  }
+  return tryParseEmbedding(value);
+}
+
 export async function getEmbeddingsByChunkIds(exec: LegacyUnscopedRead, ids: number[], column: string): Promise<Map<number, Float32Array>> {
     if (ids.length === 0) return new Map();
     // v0.36 (D9): column parameter used by hybrid.cosineReScore so
@@ -642,7 +665,7 @@ export async function getEmbeddingsByChunkIds(exec: LegacyUnscopedRead, ids: num
     const { rows } = await exec.unsafe(text, params);
     const result = new Map<number, Float32Array>();
     for (const row of rows) {
-      const embedding = tryParseEmbedding(row.embedding);
+      const embedding = decodeEmbedding(row.embedding);
       if (embedding) result.set(row.id as number, embedding);
     }
     return result;
