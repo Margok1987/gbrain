@@ -642,7 +642,9 @@ export const GMAIL_RECENT_HORIZON_MS = 14 * 86_400_000;
  */
 export const GMAIL_PENDING_MAX_IDS = 1_000;
 export const GMAIL_PENDING_MAX_BYTES = 64 * 1024;
-const fitsPendingCap = (ids: readonly string[]) => ids.length <= GMAIL_PENDING_MAX_IDS && Buffer.byteLength(JSON.stringify(ids)) <= GMAIL_PENDING_MAX_BYTES;
+/** Test seam: overflow fixtures lower the cap instead of flagging 1,000 threads. */
+export const gmailPendingCap = { ids: GMAIL_PENDING_MAX_IDS, bytes: GMAIL_PENDING_MAX_BYTES };
+const fitsPendingCap = (ids: readonly string[]) => ids.length <= gmailPendingCap.ids && Buffer.byteLength(JSON.stringify(ids)) <= gmailPendingCap.bytes;
 
 type WalkOutcome = 'done' | 'failed' | 'aborted';
 
@@ -883,7 +885,7 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
   if (!fitsPendingCap(merged)) {
     // Overflow: never park part of the delta. Keep the retained anchor, record
     // the candidate, and walk the window again; the parked ids still drain.
-    deps.log(`[google] history delta flags ${merged.length} threads (over the ${GMAIL_PENDING_MAX_IDS}-id pending cap); walking the window instead`);
+    deps.log(`[google] history delta flags ${merged.length} threads (over the ${gmailPendingCap.ids}-id pending cap); walking the window instead`);
     state.gmail_delta_candidate_history_id = newHistoryId ?? state.gmail_history_id;
     openGmailGap(state, cutoffMs);
     await saveGoogleState(deps, state);

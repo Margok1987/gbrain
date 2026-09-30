@@ -356,3 +356,41 @@ test(`connector_holds_exhausted: a run that would hold a ${HOLD_CAP + 1}st item 
     expect(readFileSync(gitHubStateFile(f.dir), 'utf8')).toBe(before);
   }
 }), 120_000);
+
+test('#5581: a delta over the pending cap keeps its anchor, walks the window across a crash and an expired token, and loses no thread', async () => withEnv(env, async () => {
+  const { gmailPendingCap, readGoogleState } = await import('../src/core/google/google-source.ts');
+  for (const engine of engines) {
+    const f = await gmailSource(engine, false);
+    const fx = fakeGmail(account);
+    addThread(fx, 'a1b2c3d4e5f60600', Date.now() - 5 * 3_600_000);
+    const run = (signal?: AbortSignal) => runGoogleSync(engine, f.id, f.cfg, { ...options, ...(signal ? { signal } : {}) }, withGoogleAccount(gmailFetch(fx), account));
+    await run();
+    expect(readGoogleState(f.dir)).toMatchObject({ gmail_history_id: '100', gmail_backfill_done: true });
+    gmailPendingCap.ids = 3;
+    try {
+      const flagged = Array.from({ length: 5 }, (_, i) => `a1b2c3d4e5f6070${i}`);
+      flagged.forEach((id, i) => addThread(fx, id, Date.now() - (60 + i) * 60_000));
+      fx.history = flagged;
+      fx.historyResponseId = '200';
+      // Crash after two fetches: the retained anchor stays, the candidate waits, nothing is parked beyond the cap.
+      const controller = new AbortController();
+      fx.onThreadFetch = () => { if (fx.fetched.length >= 2) controller.abort(); };
+      fx.fetched.length = 0;
+      await run(controller.signal);
+      let state = readGoogleState(f.dir);
+      expect(state).toMatchObject({ gmail_history_id: '100', gmail_delta_candidate_history_id: '200' });
+      expect(state.gmail_gap_floor_ms).not.toBeNull();
+      expect((state.gmail_pending_thread_ids ?? []).length).toBeLessThanOrEqual(3);
+      // The token expires and a new message arrives; the walk resumes, then installs the candidate.
+      fx.onThreadFetch = undefined;
+      fx.historyExpired = true;
+      addThread(fx, 'a1b2c3d4e5f60799', Date.now() - 30 * 60_000);
+      expect((await run()).status).not.toBe('partial');
+      state = readGoogleState(f.dir);
+      expect(state).toMatchObject({ gmail_history_id: '200', gmail_delta_candidate_history_id: null, gmail_gap_floor_ms: null });
+      await run();
+      const slugs = await engine.executeRaw<{ n: number }>("SELECT count(*)::int AS n FROM pages WHERE source_id=$1 AND slug LIKE 'emails/%'", [f.id]);
+      expect(slugs[0].n).toBe(7);
+    } finally { gmailPendingCap.ids = 1_000; }
+  }
+}), 120_000);
