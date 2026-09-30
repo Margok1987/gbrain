@@ -57,6 +57,14 @@ reproduce byte for byte. Each file is written by `test/helpers/golden.ts` as
   through `hybridSearch` and `hybridSearchCached` cold + warm, hash stub embedder via
   `queryEmbedFn`, pinned clock.
 
+## Jobs handler registry (A15)
+
+- `jobs/handler-registry.json` (`test/jobs-handler-registry-golden.test.ts`,
+  `jobs-handler-registry-v1`, identity): every job name `registerBuiltinHandlers`
+  registers, in registration order, captured with a recording worker. The same
+  test checks a real `MinionWorker.registeredNames` and the supervisor's
+  `deriveHandlerNames` probe (dynamic import of `src/commands/jobs.ts`) against it.
+
 ## Migrations, routes, exports (A11 / TE1 / O13)
 
 - `migrations/records.json` (`test/migrations-golden.test.ts`, `migrations-record-v1`):
