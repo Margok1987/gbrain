@@ -8,6 +8,7 @@
 # SQL-bearing engine member never gets a row: move the SQL, or mark it
 # `// engine-sql-ok: <reason>`.
 # docs/TESTING.md#engine-sql-ratchet
+migrated	salience
 method	src/core/pglite-engine.ts	PGLiteEngine._addLinksBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._addTimelineEntriesBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._connectInternal
@@ -123,11 +124,6 @@ method	src/core/pglite-engine/facts.ts	findTrajectory
 method	src/core/pglite-engine/facts.ts	getFactsHealth
 method	src/core/pglite-engine/facts.ts	insertFact
 method	src/core/pglite-engine/facts.ts	insertFacts
-method	src/core/pglite-engine/salience.ts	batchLoadEmotionalInputs
-method	src/core/pglite-engine/salience.ts	findAnomalies
-method	src/core/pglite-engine/salience.ts	getRecentSalience
-method	src/core/pglite-engine/salience.ts	listEnrichCandidates
-method	src/core/pglite-engine/salience.ts	setEmotionalWeightBatch
 method	src/core/pglite-engine/takes.ts	_addTakesBatchOnce
 method	src/core/pglite-engine/takes.ts	_updateTakeEmbeddingsOnce
 method	src/core/pglite-engine/takes.ts	addSynthesisEvidence
@@ -268,11 +264,6 @@ method	src/core/postgres-engine/facts.ts	listSupersessions
 method	src/core/postgres-engine/forward-reference-bootstrap.ts	applyPostgresForwardReferenceBootstrap
 method	src/core/postgres-engine/init-schema-lock.ts	acquireInitSchemaAdvisoryLock
 method	src/core/postgres-engine/init-schema-lock.ts	lockHolderPid
-method	src/core/postgres-engine/salience.ts	batchLoadEmotionalInputs
-method	src/core/postgres-engine/salience.ts	findAnomalies
-method	src/core/postgres-engine/salience.ts	getRecentSalience
-method	src/core/postgres-engine/salience.ts	listEnrichCandidates
-method	src/core/postgres-engine/salience.ts	setEmotionalWeightBatch
 method	src/core/postgres-engine/takes.ts	_addTakesBatchOnce
 method	src/core/postgres-engine/takes.ts	_updateTakeEmbeddingsOnce
 method	src/core/postgres-engine/takes.ts	addSynthesisEvidence

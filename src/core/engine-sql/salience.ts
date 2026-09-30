@@ -1,13 +1,11 @@
-import { pageReadFilter } from '../search/read-policy-sql.ts';
 /**
- * v0.29 — Salience + Anomaly Detection, peeled out of PostgresEngine
- * (containment sprint C15). Free functions over a NARROW deps surface —
- * never the whole engine class.
+ * Salience, anomaly detection and enrich candidates: one SQL implementation
+ * for both engines (refactor wave 1, W1-core C10). The statement text is
+ * PostgresEngine's master text (SQL-text golden `sql-text/salience.json`);
+ * PGLite runs the same statements. Every read was unscoped on master
+ * (EO4 inventory), so reads take `LegacyUnscopedRead`.
  */
-import type postgres from '#postgres'
-
-type PgSql = ReturnType<typeof postgres>;
-
+import { pageReadFilter } from '../search/read-policy-sql.ts';
 import { clampSearchLimit } from '../engine.ts';
 import type {
   SalienceOpts, SalienceResult, AnomaliesOpts, AnomalyResult,
@@ -21,20 +19,16 @@ import {
 } from '../search/recency-decay.ts';
 import { buildRecencyComponentSql } from '../search/sql-ranking.ts';
 import { computeAnomaliesFromBuckets } from '../cycle/anomaly.ts';
+import type { SqlExecutor } from './executor.ts';
+import type { LegacyUnscopedRead } from './brands.ts';
+import { sqlFragment, trustedSql } from './fragment.ts';
 
-/** Narrow slice of PostgresEngine the salience/anomaly operations use. */
-export interface PgSalienceDeps {
-  /** Live postgres.js pool (getter-backed at the call site). */
-  readonly sql: PgSql;
-}
-
-export async function batchLoadEmotionalInputs(deps: PgSalienceDeps, slugs?: string[]): Promise<EmotionalWeightInputRow[]> {
-    const sql = deps.sql;
+export async function batchLoadEmotionalInputs(exec: LegacyUnscopedRead, slugs?: string[]): Promise<EmotionalWeightInputRow[]> {
     // Two CTEs avoid the N×M cartesian product (codex C4#4): a page with N tags
     // and M takes joined directly would emit N×M rows and corrupt aggregates.
     // Per-table aggregation keeps each table's grouping correct.
     const rows = slugs
-      ? await sql`
+      ? (await exec.run(sqlFragment`
           WITH page_tags AS (
             SELECT page_id, array_agg(DISTINCT tag) AS tags
               FROM tags GROUP BY page_id
@@ -52,8 +46,8 @@ export async function batchLoadEmotionalInputs(deps: PgSalienceDeps, slugs?: str
             LEFT JOIN page_tags pt  ON pt.page_id = p.id
             LEFT JOIN page_takes pk ON pk.page_id = p.id
            WHERE p.slug = ANY(${slugs}::text[])
-        `
-      : await sql`
+        `)).rows
+      : (await exec.run(sqlFragment`
           WITH page_tags AS (
             SELECT page_id, array_agg(DISTINCT tag) AS tags
               FROM tags GROUP BY page_id
@@ -70,7 +64,7 @@ export async function batchLoadEmotionalInputs(deps: PgSalienceDeps, slugs?: str
             FROM pages p
             LEFT JOIN page_tags pt  ON pt.page_id = p.id
             LEFT JOIN page_takes pk ON pk.page_id = p.id
-        `;
+        `)).rows;
     return rows.map((r: Record<string, unknown>) => ({
       slug: String(r.slug),
       source_id: String(r.source_id),
@@ -79,9 +73,8 @@ export async function batchLoadEmotionalInputs(deps: PgSalienceDeps, slugs?: str
     }));
   }
 
-export async function setEmotionalWeightBatch(deps: PgSalienceDeps, rows: EmotionalWeightWriteRow[]): Promise<number> {
+export async function setEmotionalWeightBatch(exec: SqlExecutor, rows: EmotionalWeightWriteRow[]): Promise<number> {
     if (rows.length === 0) return 0;
-    const sql = deps.sql;
     const slugs = rows.map(r => r.slug);
     const sourceIds = rows.map(r => r.source_id);
     const weights = rows.map(r => r.weight);
@@ -95,7 +88,7 @@ export async function setEmotionalWeightBatch(deps: PgSalienceDeps, rows: Emotio
     // salience_touched_at to NOW() so the salience query window
     // (GREATEST(updated_at, salience_touched_at) >= boundary) surfaces a
     // previously calm page that just became salient without a content edit.
-    const result = await sql`
+    const result = (await exec.run(sqlFragment`
       UPDATE pages
          SET emotional_weight = u.weight,
              salience_touched_at = now()
@@ -104,12 +97,11 @@ export async function setEmotionalWeightBatch(deps: PgSalienceDeps, rows: Emotio
        WHERE pages.slug = u.slug AND pages.source_id = u.source_id
          AND pages.emotional_weight IS DISTINCT FROM u.weight
       RETURNING 1
-    `;
+    `)).rows;
     return result.length;
   }
 
-export async function getRecentSalience(deps: PgSalienceDeps, opts: SalienceOpts): Promise<SalienceResult[]> {
-    const sql = deps.sql;
+export async function getRecentSalience(exec: LegacyUnscopedRead, opts: SalienceOpts): Promise<SalienceResult[]> {
     const days = Math.max(0, opts.days ?? 14);
     const limit = clampSearchLimit(opts.limit, 20, 100);
     const slugPrefix = opts.slugPrefix;
@@ -117,67 +109,64 @@ export async function getRecentSalience(deps: PgSalienceDeps, opts: SalienceOpts
     const boundaryIso = new Date(Date.now() - days * 86400000).toISOString();
     // Escape LIKE meta for the optional prefix match.
     const prefixCondition = slugPrefix
-      ? sql`AND p.slug LIKE ${slugPrefix.replace(/[\\%_]/g, (c) => '\\' + c) + '%'} ESCAPE '\\'`
-      : sql``;
+      ? sqlFragment`AND p.slug LIKE ${slugPrefix.replace(/[\\%_]/g, (c) => '\\' + c) + '%'} ESCAPE '\\'`
+      : sqlFragment``;
     // TIM-37: exclude briefing pages from their own Brain Pulse. The cron
     // briefing writes to 90_Briefings/, gets re-ingested, and would otherwise
     // top tomorrow's salience as pure self-reference. Suppress unless the
     // caller explicitly asked for the briefings/ prefix.
     const excludeBriefings = !(slugPrefix && slugPrefix.startsWith('briefings'))
-      ? sql`AND p.slug NOT LIKE 'briefings/%'`
-      : sql``;
+      ? sqlFragment`AND p.slug NOT LIKE 'briefings/%'`
+      : sqlFragment``;
     // Source scope: array wins over scalar (canonical precedence). Parity with
     // pglite-engine.getRecentSalience() and listEnrichCandidates().
     const sourceCondition = opts.sourceIds && opts.sourceIds.length > 0
-      ? sql`AND p.source_id = ANY(${opts.sourceIds}::text[])`
+      ? sqlFragment`AND p.source_id = ANY(${opts.sourceIds}::text[])`
       : opts.sourceId
-        ? sql`AND p.source_id = ${opts.sourceId}`
-        : sql``;
+        ? sqlFragment`AND p.source_id = ${opts.sourceId}`
+        : sqlFragment``;
     // v0.29.1: third score term via buildRecencyComponentSql. Default
     // 'flat' = v0.29.0 behavior (1 / (1 + days_old)). 'on' opts into the
     // per-prefix decay map (concepts/ evergreen, daily/ aggressive, etc.).
     const recencyBias = opts.recency_bias ?? 'flat';
-    let recencySql: string;
-    if (recencyBias === 'on') {
-      recencySql = buildRecencyComponentSql({
+    const recencySql = recencyBias === 'on'
+      ? buildRecencyComponentSql({
         slugColumn: 'p.slug',
         dateExpr: 'COALESCE(p.effective_date, p.updated_at)',
         decayMap: resolveRecencyDecayMap(),
         fallback: DEFAULT_FALLBACK,
-      });
-    } else {
-      recencySql = buildRecencyComponentSql({
+      })
+      : buildRecencyComponentSql({
         slugColumn: 'p.slug',
         dateExpr: 'p.updated_at',
         decayMap: {},
         fallback: { halflifeDays: 1, coefficient: 1.0 },
       });
-    }
     const restricted = opts.takesHoldersAllowList !== undefined;
     const emotionalSql = restricted ? '0' : 'p.emotional_weight';
     const touchedSql = restricted ? 'p.updated_at' : 'GREATEST(p.updated_at, COALESCE(p.salience_touched_at, p.updated_at))';
-    const holderCondition = restricted ? sql`AND t.holder = ANY(${opts.takesHoldersAllowList!}::text[])` : sql``;
+    const holderCondition = restricted ? sqlFragment`AND t.holder = ANY(${opts.takesHoldersAllowList!}::text[])` : sqlFragment``;
     // Scope is already bound above; use the shared live/privacy predicate
     // before ranking and LIMIT, including for holder-unrestricted callers.
-    const readCondition = sql.unsafe(`AND ${pageReadFilter('p', { excludePrivate: opts.excludePrivate }, [], true)}`);
-    const rows = await sql`
-      SELECT p.slug, p.source_id, p.title, p.type, p.updated_at, ${sql.unsafe(emotionalSql)} AS emotional_weight,
+    const readCondition = trustedSql(`AND ${pageReadFilter('p', { excludePrivate: opts.excludePrivate }, [], true)}`);
+    const rows = (await exec.run(sqlFragment`
+      SELECT p.slug, p.source_id, p.title, p.type, p.updated_at, ${trustedSql(emotionalSql)} AS emotional_weight,
              COUNT(DISTINCT t.id) AS take_count,
              COALESCE(AVG(t.weight), 0) AS take_avg_weight,
-             (${sql.unsafe(emotionalSql)} * 5)
+             (${trustedSql(emotionalSql)} * 5)
                + ln(1 + COUNT(DISTINCT t.id))
-               + ${sql.unsafe(recencySql)}
+               + ${trustedSql(recencySql)}
                AS score
         FROM pages p
         LEFT JOIN takes t ON t.page_id = p.id AND t.active = TRUE ${holderCondition}
-       WHERE ${sql.unsafe(touchedSql)} >= ${boundaryIso}::timestamptz
+       WHERE ${trustedSql(touchedSql)} >= ${boundaryIso}::timestamptz
          ${prefixCondition}
          ${excludeBriefings}
          ${sourceCondition} ${readCondition}
        GROUP BY p.id
        ORDER BY score DESC
        LIMIT ${limit}
-    `;
+    `)).rows;
     return rows.map((r: Record<string, unknown>) => ({
       slug: String(r.slug),
       source_id: String(r.source_id),
@@ -191,42 +180,41 @@ export async function getRecentSalience(deps: PgSalienceDeps, opts: SalienceOpts
     }));
   }
 
-export async function listEnrichCandidates(deps: PgSalienceDeps, opts: EnrichCandidatesOpts): Promise<EnrichCandidate[]> {
+export async function listEnrichCandidates(exec: LegacyUnscopedRead, opts: EnrichCandidatesOpts): Promise<EnrichCandidate[]> {
     // v0.41.39 (issue #1700). Empty types → no rows (no SQL).
     if (!opts.types || opts.types.length === 0) return [];
-    const sql = deps.sql;
     const limit = Math.max(1, Math.min(opts.limit ?? 50, 5000));
     const threshold = Math.max(0, opts.thinThreshold);
 
     // Source scope: array wins over scalar (canonical precedence).
     const sourceCondition = opts.sourceIds && opts.sourceIds.length > 0
-      ? sql`AND p.source_id = ANY(${opts.sourceIds}::text[])`
+      ? sqlFragment`AND p.source_id = ANY(${opts.sourceIds}::text[])`
       : opts.sourceId
-        ? sql`AND p.source_id = ${opts.sourceId}`
-        : sql``;
+        ? sqlFragment`AND p.source_id = ${opts.sourceId}`
+        : sqlFragment``;
 
     // Re-enrich recency guard. enriched_at is written as toISOString() so a
     // lexical text comparison is correct AND can't throw on a malformed value
     // (a ::timestamptz cast would). Pages never enriched (NULL) are eligible.
     const reenrichMs = opts.reenrichAfterMs ?? 0;
     const recencyCondition = reenrichMs > 0
-      ? sql`AND NOT (
+      ? sqlFragment`AND NOT (
             p.frontmatter ->> 'enriched_at' IS NOT NULL
             AND p.frontmatter ->> 'enriched_at' > ${new Date(Date.now() - reenrichMs).toISOString()}
           )`
-      : sql``;
+      : sqlFragment``;
 
     // Exclude dream/synthesize-generated pages (reflections, originals, cycle
     // logs carrying frontmatter dream_generated:true). enrich develops ENTITY
     // stubs; running it on a generated essay/log creates circular self-citation
     // and drops the H1. IS DISTINCT FROM 'true' keeps NULL/'false' rows.
-    const dreamCondition = sql`AND (p.frontmatter ->> 'dream_generated') IS DISTINCT FROM 'true'`;
+    const dreamCondition = sqlFragment`AND (p.frontmatter ->> 'dream_generated') IS DISTINCT FROM 'true'`;
 
     // Whitelisted ORDER BY (no injection — enum maps to a literal fragment).
     const orderKey = ENRICH_ORDER_SQL[opts.order] ? opts.order : 'inbound-links';
-    const orderBy = sql.unsafe(ENRICH_ORDER_SQL[orderKey]);
+    const orderBy = trustedSql(ENRICH_ORDER_SQL[orderKey]);
 
-    const rows = await sql`
+    const rows = (await exec.run(sqlFragment`
       SELECT
         p.slug,
         p.source_id,
@@ -248,7 +236,7 @@ export async function listEnrichCandidates(deps: PgSalienceDeps, opts: EnrichCan
         ${dreamCondition}
       ORDER BY ${orderBy}
       LIMIT ${limit}
-    `;
+    `)).rows;
     return rows.map((r: Record<string, unknown>) => ({
       slug: String(r.slug),
       source_id: String(r.source_id),
@@ -259,8 +247,7 @@ export async function listEnrichCandidates(deps: PgSalienceDeps, opts: EnrichCan
     }));
   }
 
-export async function findAnomalies(deps: PgSalienceDeps, opts: AnomaliesOpts): Promise<AnomalyResult[]> {
-    const sql = deps.sql;
+export async function findAnomalies(exec: LegacyUnscopedRead, opts: AnomaliesOpts): Promise<AnomalyResult[]> {
     const sigma = opts.sigma ?? 3.0;
     const lookbackDays = Math.max(1, opts.lookback_days ?? 30);
     // Boundaries: today's window is [since, since+1day); baseline is [since-lookback, since).
@@ -273,16 +260,16 @@ export async function findAnomalies(deps: PgSalienceDeps, opts: AnomaliesOpts): 
     // windows so the anomaly math stays self-consistent. Parity with
     // pglite-engine.findAnomalies().
     const sourceCondition = opts.sourceIds && opts.sourceIds.length > 0
-      ? sql`AND p.source_id = ANY(${opts.sourceIds}::text[])`
+      ? sqlFragment`AND p.source_id = ANY(${opts.sourceIds}::text[])`
       : opts.sourceId
-        ? sql`AND p.source_id = ${opts.sourceId}`
-        : sql``;
+        ? sqlFragment`AND p.source_id = ${opts.sourceId}`
+        : sqlFragment``;
 
     // Baseline keys, baseline counts and current counts must share visibility.
-    const readCondition = sql.unsafe(`AND ${pageReadFilter('p', { excludePrivate: opts.excludePrivate }, [], true)}`);
+    const readCondition = trustedSql(`AND ${pageReadFilter('p', { excludePrivate: opts.excludePrivate }, [], true)}`);
 
     // Tag cohort baseline with day densification + zero-fill (codex C4#6).
-    const tagBaseline = await sql`
+    const tagBaseline = (await exec.run(sqlFragment`
       WITH days AS (
         SELECT day::date FROM generate_series(
           ${baselineStart.toISOString()}::date,
@@ -309,9 +296,9 @@ export async function findAnomalies(deps: PgSalienceDeps, opts: AnomaliesOpts): 
       SELECT cd.tag AS cohort_value, d.day::text AS day, COALESCE(t.cnt, 0)::int AS count
         FROM cohort_keys cd CROSS JOIN days d
         LEFT JOIN touched t ON t.tag = cd.tag AND t.day = d.day
-    `;
+    `)).rows;
 
-    const typeBaseline = await sql`
+    const typeBaseline = (await exec.run(sqlFragment`
       WITH days AS (
         SELECT day::date FROM generate_series(
           ${baselineStart.toISOString()}::date,
@@ -338,10 +325,10 @@ export async function findAnomalies(deps: PgSalienceDeps, opts: AnomaliesOpts): 
       SELECT cd.type AS cohort_value, d.day::text AS day, COALESCE(t.cnt, 0)::int AS count
         FROM cohort_keys cd CROSS JOIN days d
         LEFT JOIN touched t ON t.type = cd.type AND t.day = d.day
-    `;
+    `)).rows;
 
     // Today's window — current counts + slugs per cohort.
-    const tagToday = await sql`
+    const tagToday = (await exec.run(sqlFragment`
       SELECT t.tag AS cohort_value,
              COUNT(DISTINCT p.id)::int AS count,
              array_agg(DISTINCT p.slug) AS slugs
@@ -350,8 +337,8 @@ export async function findAnomalies(deps: PgSalienceDeps, opts: AnomaliesOpts): 
          AND p.updated_at <  ${sinceEnd.toISOString()}::timestamptz
          ${sourceCondition} ${readCondition}
        GROUP BY 1
-    `;
-    const typeToday = await sql`
+    `)).rows;
+    const typeToday = (await exec.run(sqlFragment`
       SELECT p.type AS cohort_value,
              COUNT(DISTINCT p.id)::int AS count,
              array_agg(DISTINCT p.slug) AS slugs
@@ -360,7 +347,7 @@ export async function findAnomalies(deps: PgSalienceDeps, opts: AnomaliesOpts): 
          AND p.updated_at <  ${sinceEnd.toISOString()}::timestamptz
          ${sourceCondition} ${readCondition}
        GROUP BY 1
-    `;
+    `)).rows;
 
     const baseline = [
       ...tagBaseline.map((r: Record<string, unknown>) => ({

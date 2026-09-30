@@ -3388,7 +3388,6 @@
         "rlsScopeBindingEnabled": "none",
         "runMigration": "none",
         "runUnsafe": "none",
-        "salienceDeps": "none",
         "searchKeyword": "direct",
         "searchKeywordChunks": "direct",
         "searchTakes": "none",

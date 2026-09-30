@@ -61,7 +61,6 @@ const ALLOWLIST = new Map([
 // reason 'script-reachable', which the guard verifies.
 const PERMITTED_TEST_ONLY = [
   { path: 'src/core/bootstrap/template-repo.ts', reason: 'script-reachable' },
-  { path: 'src/core/engine-sql/brands.ts', reason: 'held: refactor wave 1 C9 lands the executor first; the W1-core domain commits (C10-C14) wire it' },
   { path: 'src/core/engine-sql/normalize.ts', reason: 'held: refactor wave 1 C9 lands the executor first; the W1-core domain commits (C10-C14) wire it' },
   { path: 'src/core/eval-contradictions/fixture-redact.ts', reason: 'script-reachable' },
   { path: 'src/eval/longmemeval/diagnostics.ts', reason: 'script-reachable' },

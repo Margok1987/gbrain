@@ -2608,13 +2608,23 @@
         "default": [
           {
             "paramCount": 0,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "slugs": [
           {
             "paramCount": 1,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ]
       },
@@ -2622,55 +2632,115 @@
         "default": [
           {
             "paramCount": 6,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 6,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 2,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 2,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "sourceId": [
           {
             "paramCount": 8,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 8,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 3,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 3,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "sourceIds": [
           {
             "paramCount": 8,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 8,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 3,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           },
           {
             "paramCount": 3,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ]
       },
@@ -2678,19 +2748,34 @@
         "default": [
           {
             "paramCount": 2,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "slugPrefix+sourceId+recency": [
           {
             "paramCount": 5,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "sourceIds": [
           {
             "paramCount": 3,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ]
       },
@@ -2698,19 +2783,34 @@
         "default": [
           {
             "paramCount": 3,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "sourceId": [
           {
             "paramCount": 4,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "sourceIds+reenrich": [
           {
             "paramCount": 5,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ]
       },
@@ -2718,7 +2818,12 @@
         "default": [
           {
             "paramCount": 3,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ],
         "empty": []

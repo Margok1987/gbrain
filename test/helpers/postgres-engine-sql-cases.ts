@@ -72,7 +72,6 @@ export const DOMAIN_OF: Record<string, string> = {
   'factsDeps': OOS.helper,
   'takesDeps': OOS.helper,
   'codeEdgesDeps': OOS.helper,
-  'salienceDeps': OOS.helper,
   'resolveFactsEmbeddingCast': OOS.helper,
   'activeEmbeddingColId': OOS.helper,
   'buildStaleChunkWhere': OOS.helper,

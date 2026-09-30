@@ -122,13 +122,13 @@ import * as takesImpl from './postgres-engine/takes.ts';
 import type { PgTakesDeps } from './postgres-engine/takes.ts';
 import * as codeEdgesImpl from './postgres-engine/code-edges.ts';
 import type { PgCodeEdgesDeps } from './postgres-engine/code-edges.ts';
-import * as salienceImpl from './postgres-engine/salience.ts';
-import type { PgSalienceDeps } from './postgres-engine/salience.ts';
+import * as salienceImpl from './engine-sql/salience.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './postgres-engine/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
 import { postgresExecutor, type RunUnsafeOpts } from './engine-sql/dialect-postgres.ts';
 import type { SqlExecutor } from './engine-sql/executor.ts';
+import { unscopedExecutor } from './engine-sql/brands.ts';
 
 function escapeSqlStringLiteral(value: string): string {
   return value.replace(/'/g, "''");
@@ -5579,31 +5579,26 @@ export class PostgresEngine implements BrainEngine {
   // v0.29 — Salience + Anomaly Detection
   // ============================================================
 
-  // Peeled into ./postgres-engine/salience.ts (containment sprint C15).
+  // Salience SQL lives once in ./engine-sql/salience.ts (refactor wave 1 C10).
 
   /** Narrow deps for the peeled salience module. */
-  private get salienceDeps(): PgSalienceDeps {
-    const self = this;
-    return { get sql() { return self.sql; } };
-  }
-
   async batchLoadEmotionalInputs(slugs?: string[]): Promise<EmotionalWeightInputRow[]> {
-    return salienceImpl.batchLoadEmotionalInputs(this.salienceDeps, slugs);
+    return salienceImpl.batchLoadEmotionalInputs(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), slugs);
   }
 
   async setEmotionalWeightBatch(rows: EmotionalWeightWriteRow[]): Promise<number> {
-    return salienceImpl.setEmotionalWeightBatch(this.salienceDeps, rows);
+    return salienceImpl.setEmotionalWeightBatch(this.engineSql, rows);
   }
 
   async getRecentSalience(opts: SalienceOpts): Promise<SalienceResult[]> {
-    return salienceImpl.getRecentSalience(this.salienceDeps, opts);
+    return salienceImpl.getRecentSalience(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), opts);
   }
 
   async listEnrichCandidates(opts: EnrichCandidatesOpts): Promise<EnrichCandidate[]> {
-    return salienceImpl.listEnrichCandidates(this.salienceDeps, opts);
+    return salienceImpl.listEnrichCandidates(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), opts);
   }
 
   async findAnomalies(opts: AnomaliesOpts): Promise<AnomalyResult[]> {
-    return salienceImpl.findAnomalies(this.salienceDeps, opts);
+    return salienceImpl.findAnomalies(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), opts);
   }
 }
