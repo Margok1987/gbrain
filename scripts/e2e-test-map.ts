@@ -29,7 +29,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/migration-orchestration-lock.ts": ["test/e2e/apply-migrations-orchestration-lock.test.ts"],
   "src/core/source-delete.ts": ["test/e2e/sources-remove-bindings.test.ts"],
   "src/core/persistence/orphan-bindings.ts": ["test/e2e/sources-remove-bindings.test.ts"],
-  "src/core/persistence/deactivation.ts": ["test/e2e/persistence-deactivate-race.test.ts"],
+  "src/core/persistence/deactivation.ts": ["test/e2e/persistence-deactivate-race.test.ts", "test/e2e/fix-wave-4-integration.test.ts"],
   // SkillOpt orchestrator, outcome/resume, models plan + strict mode, spend ledger.
   "src/core/skillopt/**": [
     "test/e2e/skillopt-loop.serial.test.ts",
@@ -289,7 +289,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/migrations/v0_32_2.ts": ["test/e2e/migrations-v0_32_2-managed.test.ts"],
   "src/core/facts/withdrawal.ts": ["test/e2e/facts-withdrawal-fingerprint-once.test.ts"],
   "src/core/extract-takes-from-pages.ts": ["test/e2e/persistence-managed-takes-extract.test.ts", "test/e2e/extract-takes-from-pages-resolutions.test.ts"],
-  "src/core/persistence/prepared-maintenance.ts": ["test/e2e/migrations-v0_32_2-managed.test.ts"],
+  "src/core/persistence/prepared-maintenance.ts": ["test/e2e/migrations-v0_32_2-managed.test.ts", "test/e2e/fix-wave-4-integration.test.ts"],
   "src/core/pool-budget.ts": ["test/e2e/persistence-runtime-matrix.test.ts"],
   "src/core/connection-manager.ts": ["test/e2e/persistence-runtime-matrix.test.ts", "test/e2e/pgbouncer-teardown.test.ts"],
   "src/core/postgres-engine.ts": [
@@ -525,7 +525,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/take-proposals.ts": ["test/e2e/takes-propose-accept-managed.test.ts"],
   "src/core/persistence/connector-sync.ts": ["test/e2e/connector-wave3.test.ts", "test/e2e/connector-holds.test.ts"],
   "src/core/persistence/connector-identity.ts": ["test/e2e/connector-wave3.test.ts"],
-  "src/core/persistence/connector-state.ts": ["test/e2e/connector-wave3.test.ts", "test/e2e/connector-holds.test.ts"],
+  "src/core/persistence/connector-state.ts": ["test/e2e/connector-wave3.test.ts", "test/e2e/connector-holds.test.ts", "test/e2e/fix-wave-4-integration.test.ts"],
   "src/core/persistence/connector-account.ts": ["test/e2e/connector-wave3.test.ts"],
   "src/core/persistence/connector-errors.ts": ["test/e2e/connector-wave3.test.ts"],
   "src/core/persistence/connector-status.ts": ["test/e2e/connector-wave3.test.ts"],
