@@ -15,7 +15,7 @@ import { preparePageMutation, prepareFileTarget } from './page-prepare.ts';
 import { prepareTakesMutation } from './takes-prepare.ts';
 import { digest } from './digest.ts';
 import type { PreparedMutation } from './coordinator.ts';
-import type { WriteAuthority, WriteRequest } from './model.ts';
+import { isTerminal, type WriteAuthority, type WriteRequest } from './model.ts';
 import { authorizePageVisibility } from './page-visibility.ts';
 import { nativeLockCapability } from './native-lock.ts';
 import { assertPhysicalRoot } from './physical-root.ts';
@@ -192,7 +192,13 @@ export async function submitFactFenceAdoption(engine: BrainEngine, authority: Ma
   const facts: FactFenceAssignment[] = options.assignments.map(a => ({ ...a, hash: digest(current.find(f => f.id === a.id)?.value ?? null) }));
   const intent = { kind: 'managed_maintenance_adopt_fact_fence', expected_revision: options.expectedRevision,
     source_incarnation: authority.writer.sourceIncarnation, content: options.content, facts };
-  return submitMaintenance(engine, authority, slug, intent, maintenanceRequestId({ authority: authority.writer, slug, intent }), options.file);
+  // A retry replays a pending or committed receipt; after a terminal refusal
+  // (a drifted file, a conflict) the same inputs get a fresh attempt identity.
+  for (let attempt = 0; ; attempt++) {
+    const requestId = maintenanceRequestId({ authority: authority.writer, slug, intent, ...(attempt ? { attempt } : {}) });
+    const prior = await getWriteRequest(engine, authority.writer.principal, requestId);
+    if (!prior || prior.state === 'committed' || !isTerminal(prior)) return submitMaintenance(engine, authority, slug, intent, requestId, options.file);
+  }
 }
 
 async function prepareFactFenceAdoption(engine: BrainEngine, row: WriteRequest, config: GBrainConfig): Promise<PreparedMutation> {
@@ -207,8 +213,9 @@ async function prepareFactFenceAdoption(engine: BrainEngine, row: WriteRequest, 
     const current = await readFacts(db, row.source_id, facts.map(f => f.id), lock);
     for (const assignment of facts) {
       const fact = current.find(f => f.id === assignment.id);
-      if (!fact || digest(fact.value) !== assignment.hash || fact.value.entity_slug !== row.slug) {
-        throw new OperationError('revision_conflict', 'A legacy fact changed or moved to another owner before adoption.');
+      if (!fact || digest(fact.value) !== assignment.hash || fact.value.entity_slug !== row.slug
+        || fact.value.row_num !== null || fact.value.expired_at !== null) {
+        throw new OperationError('revision_conflict', 'A legacy fact changed, was already adopted or moved to another owner before adoption.');
       }
       const cell = fence.get(assignment.row_num);
       if (!cell?.active || cell.claim !== fact.value.fact || cell.visibility !== fact.value.visibility) {
@@ -225,11 +232,21 @@ async function prepareFactFenceAdoption(engine: BrainEngine, row: WriteRequest, 
   return { ...prepared, validate: async tx => { await prepared.validate?.(tx); await check(tx, true); }, apply: async tx => {
     // Runs ahead of the page import and its canonical projection, so the
     // projection's expiry pass and insertFacts see the adopted positions.
-    await tx.executeRaw(`UPDATE facts f SET row_num=a.row_num,source_markdown_slug=$2
+    const adopted = await tx.executeRaw(`UPDATE facts f SET row_num=a.row_num,source_markdown_slug=$2
       FROM jsonb_to_recordset($3::text::jsonb) AS a(id integer,row_num integer)
-      WHERE f.source_id=$1 AND f.id=a.id AND f.row_num IS NULL`,
+      WHERE f.source_id=$1 AND f.id=a.id AND f.row_num IS NULL RETURNING f.id`,
     [row.source_id, row.slug, JSON.stringify(facts.map(({ id, row_num }) => ({ id, row_num })))]);
-    return { ...await prepared.apply(tx), facts_adopted: facts.length };
+    if (adopted.length !== facts.length) throw new OperationError('revision_conflict', 'A legacy fact was adopted by another run.');
+    // The page's takes fence is republished unchanged; its projection would
+    // clear resolutions recorded only in the database, so restore them.
+    const resolved = await tx.executeRaw<Record<string, unknown>>(`SELECT row_num,resolved_at,resolved_quality,resolved_outcome,
+      resolved_source,resolved_value,resolved_unit,resolved_by FROM takes WHERE page_id=$1 AND resolved_at IS NOT NULL`, [row.page_id]);
+    const outcome = await prepared.apply(tx);
+    for (const take of resolved) await tx.executeRaw(`UPDATE takes SET resolved_at=$3,resolved_quality=$4,resolved_outcome=$5,
+      resolved_source=$6,resolved_value=$7,resolved_unit=$8,resolved_by=$9 WHERE page_id=$1 AND row_num=$2 AND resolved_at IS NULL`,
+    [row.page_id, take.row_num, take.resolved_at, take.resolved_quality, take.resolved_outcome, take.resolved_source,
+      take.resolved_value, take.resolved_unit, take.resolved_by]);
+    return { ...outcome, facts_adopted: facts.length };
   } };
 }
 

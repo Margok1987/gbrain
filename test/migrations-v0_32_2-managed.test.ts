@@ -13,7 +13,7 @@
  * Seams: none; `managedBrain` and the migration's exported `__testing` phases.
  */
 import { expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { __testing } from '../src/commands/migrations/v0_32_2.ts';
 import type { OrchestratorOpts } from '../src/commands/migrations/types.ts';
@@ -30,7 +30,7 @@ const OPTS: OrchestratorOpts = { yes: true, dryRun: false, noAutopilotInstall: t
 async function factRows(engine: BrainEngine, ids: number[]) {
   return engine.executeRaw<Record<string, unknown>>(
     `SELECT id, row_num, source_markdown_slug, fact, expired_at, embedding::text AS embedding, embedded_at::text AS embedded_at,
-            source_session, confidence, notability, context FROM facts WHERE id = ANY($1::integer[]) ORDER BY id`, [ids]);
+            source_session, confidence, notability, context, (extract(epoch FROM valid_from))::bigint AS valid_from_epoch FROM facts WHERE id = ANY($1::integer[]) ORDER BY id`, [ids]);
 }
 
 for (const backend of testBackends()) {
@@ -56,7 +56,7 @@ for (const backend of testBackends()) {
         [seed.extractorFactId, 1, LEGACY_FILE_SLUG, null],
       ]);
       for (let i = 0; i < after.length; i++) {
-        for (const key of ['fact', 'embedding', 'embedded_at', 'source_session', 'confidence', 'notability', 'context']) {
+        for (const key of ['fact', 'embedding', 'embedded_at', 'source_session', 'confidence', 'notability', 'context', 'valid_from_epoch']) {
           expect(after[i][key]).toEqual(before[i][key]);
         }
       }
@@ -69,10 +69,44 @@ for (const backend of testBackends()) {
       expect(parseFactsFence(dbOnly.page.compiled_truth).facts.map(f => f.rowNum)).toEqual([1]);
       expect(existsSync(join(root, `${LEGACY_DB_ONLY_SLUG}.md`))).toBe(false);
 
+      expect(await engine.executeRaw('SELECT row_num, resolved_quality, resolved_by FROM takes t JOIN pages p ON p.id=t.page_id WHERE p.slug=$1 ORDER BY row_num',
+        [LEGACY_FILE_SLUG])).toEqual([{ row_num: 1, resolved_quality: 'correct', resolved_by: 'people/alice-example' },
+        { row_num: 2, resolved_quality: null, resolved_by: null }]);
+
+      const authority = (await maintenancePreflight(engine, 'default'))!;
+      const page = (await engine.readPageSnapshot(LEGACY_FILE_SLUG, { sourceId: 'default' }))!;
+      const readopt = replaceOrInsertFactsFence(serializePageToMarkdown(page.page, page.tags), renderFactsTable([...parseFactsFence(file).facts,
+        { rowNum: 9, claim: 'Alice example founded Acme example', kind: 'fact', confidence: 0.9, visibility: 'world', notability: 'high', active: true }]));
+      await expect(submitFactFenceAdoption(engine, authority, LEGACY_FILE_SLUG, { content: readopt, expectedRevision: page.revision,
+        assignments: [{ id: seed.legacyFactIds[0], row_num: 9 }], file: true })).rejects.toMatchObject({ code: 'revision_conflict' });
+
       const rerun = await __testing.phaseBFenceFacts(engine, OPTS);
       expect(rerun).toMatchObject({ status: 'complete' });
       expect(rerun.detail).toContain('scanned=0 fenced=0 pages=0');
       expect(await factRows(engine, [...adopted, seed.extractorFactId])).toEqual(after);
+    }, { databaseUrl, setup: async ({ engine, root }) => {
+      seed = await seedLegacyManagedContent(engine, root);
+      // A take graded only in the database, as a pre-activation grader left it.
+      const [{ id }] = await engine.executeRaw<{ id: number }>('SELECT id FROM pages WHERE slug=$1', [LEGACY_FILE_SLUG]);
+      await engine.addTakesBatch([{ page_id: id, row_num: 1, claim: 'Acme example raised a seed round', kind: 'fact', holder: 'world',
+        weight: 1, since_date: '2026-01', source: 'press note', active: true, superseded_by: null }]);
+      await engine.resolveTake(id, 1, { quality: 'correct', source: 'grader note', resolvedBy: 'people/alice-example' });
+    } });
+  }, 120_000);
+
+  test(`${backend}: a refused adoption is retried under a new request identity once the file is restored`, async () => {
+    let seed!: LegacySeed;
+    await managedBrain(async ({ engine, root }) => {
+      const path = join(root, `${LEGACY_FILE_SLUG}.md`);
+      const file = readFileSync(path, 'utf8');
+      writeFileSync(path, `${file}\nAn uncoordinated local edit.\n`);
+      const refused = await __testing.phaseBFenceFacts(engine, OPTS);
+      expect(refused.status).toBe('failed');
+      expect(refused.detail).toContain('uncoordinated local edit');
+      writeFileSync(path, file);
+      const retried = await __testing.phaseBFenceFacts(engine, OPTS);
+      expect(retried).toMatchObject({ status: 'complete' });
+      expect(retried.detail).toContain('scanned=2 fenced=2 pages=1');
     }, { databaseUrl, setup: async ({ engine, root }) => { seed = await seedLegacyManagedContent(engine, root); } });
   }, 120_000);
 

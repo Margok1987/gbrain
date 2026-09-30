@@ -35,13 +35,13 @@ async function embeddingLiteral(engine: BrainEngine, seed: number): Promise<stri
   return `[${Array.from({ length: width }, (_, i) => (i === seed ? 1 : 0)).join(',')}]`;
 }
 
-async function legacyFact(engine: BrainEngine, slug: string, fact: string, seed: number): Promise<number> {
+async function legacyFact(engine: BrainEngine, slug: string, fact: string, seed: number, validFrom = '2026-02-03T00:00:00Z'): Promise<number> {
   const [row] = await engine.executeRaw<{ id: number }>(
     `INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, context, valid_from, source,
        source_session, confidence, embedding, embedded_at, embedding_model)
-     VALUES ('default', $1, $2, 'fact', 'world', 'high', 'from a call', '2026-02-03T00:00:00Z', 'mcp:put_page',
+     VALUES ('default', $1, $2, 'fact', 'world', 'high', 'from a call', $4::timestamptz, 'mcp:put_page',
        'session-legacy', 0.9, $3::vector, '2026-02-04T00:00:00Z', 'openai:text-embedding-3-large') RETURNING id`,
-    [slug, fact, await embeddingLiteral(engine, seed)]);
+    [slug, fact, await embeddingLiteral(engine, seed), validFrom]);
   return Number(row.id);
 }
 
@@ -58,7 +58,7 @@ export async function seedLegacyManagedContent(engine: BrainEngine, root: string
 
   const legacyFactIds = [
     await legacyFact(engine, LEGACY_FILE_SLUG, 'Alice example founded Acme example', 0),
-    await legacyFact(engine, LEGACY_FILE_SLUG, 'Alice example moved to Lisbon', 1),
+    await legacyFact(engine, LEGACY_FILE_SLUG, 'Alice example moved to Lisbon', 1, '2026-02-05T13:45:12Z'),
   ];
   const dbOnlyFactIds = [await legacyFact(engine, LEGACY_DB_ONLY_SLUG, 'Dana example advises Widget co', 2)];
   const [extractor] = await engine.executeRaw<{ id: number }>(

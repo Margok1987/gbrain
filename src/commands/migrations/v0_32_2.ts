@@ -42,7 +42,7 @@ import type {
 import type { BrainEngine } from '../../core/engine.ts';
 import { loadConfig, toEngineConfig } from '../../core/config.ts';
 import { createEngine } from '../../core/engine-factory.ts';
-import { parseFactsFence, renderFactsTable, replaceOrInsertFactsFence } from '../../core/facts-fence.ts';
+import { formatFenceDate, parseFactsFence, renderFactsTable, replaceOrInsertFactsFence } from '../../core/facts-fence.ts';
 import { resolvePageWriteTarget } from '../../core/write-through.ts';
 import { serializePageToMarkdown } from '../../core/markdown.ts';
 import { managedPersistenceEnabled } from '../../core/persistence/ownership.ts';
@@ -197,11 +197,11 @@ async function planFence(engine: BrainEngine, sourceId: string, entitySlug: stri
       claimed.add(existing.rowNum);
       continue;
     }
-    const validFromStr = (row.valid_from instanceof Date ? row.valid_from : new Date(row.valid_from))
-      .toISOString().slice(0, 10);
+    // Full timestamps survive the fence (date-only at midnight UTC), so the
+    // canonical projection writes back the value the row already holds.
+    const validFromStr = formatFenceDate(row.valid_from instanceof Date ? row.valid_from : new Date(row.valid_from));
     const validUntilStr = row.valid_until
-      ? (row.valid_until instanceof Date ? row.valid_until : new Date(row.valid_until))
-          .toISOString().slice(0, 10)
+      ? formatFenceDate(row.valid_until instanceof Date ? row.valid_until : new Date(row.valid_until))
       : undefined;
     const rowNum = nextRowNum++;
     existingFence.facts.push({
@@ -260,7 +260,7 @@ async function fenceFactsManaged(engine: BrainEngine, groups: Map<string, Legacy
       await submitFactFenceAdoption(engine, authority, entitySlug, {
         content: plan.body, expectedRevision: snapshot.revision,
         assignments: plan.assignments.map(a => ({ id: Number(a.id), row_num: a.row_num })),
-        file: Boolean(snapshot.page.source_path) || (target.ok && existsSync(target.filePath)),
+        file: Boolean(snapshot.page.source_path) || snapshot.page.source_uri?.startsWith('file:') === true || (target.ok && existsSync(target.filePath)),
       });
       outcome.fenced += plan.assignments.length;
       outcome.pages_touched += 1;

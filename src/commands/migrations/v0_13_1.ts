@@ -153,7 +153,12 @@ export async function phaseCGrandfather(
     const ids = idRows.map(r => Number(r.id));
     const managed = await managedPersistenceEnabled(engine);
     if (managed) {
-      try { await assertGrandfatherCapacity(engine, ids.length); }
+      // Only pages the managed pass can admit need a request ID: archived
+      // sources, code and image pages and non-Markdown files are skipped below.
+      const [{ n: admissible }] = await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM pages p
+        JOIN sources s ON s.id=p.source_id WHERE p.id=ANY($1::int[]) AND NOT s.archived AND p.type NOT IN ('code','image')
+          AND NOT (COALESCE(p.source_path,'') ~ '\\.[^./]+$' AND COALESCE(p.source_path,'') !~* '\\.mdx?$')`, [ids]);
+      try { await assertGrandfatherCapacity(engine, Number(admissible)); }
       catch (error) {
         if (!(error instanceof OperationError) || error.code !== 'queue_capacity') throw error;
         return { result: { name: 'grandfather', status: 'failed', detail: `queue_capacity: ${error.message} ${error.suggestion ?? ''}`.trim() }, detail: gf };
