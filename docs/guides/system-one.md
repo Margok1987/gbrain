@@ -589,12 +589,12 @@ gbrain decide disable <slot>
   and `decide.provider none` stops shadow along with everything else.
 
 Evals can set slot modes for one process with `GBRAIN_DECIDE_SLOTS` (for
-example `triage=on`). Only eval commands and `gbrain dream --eval-run` honor
-it, it never bypasses consent, egress or the daily cap, and every receipt
-records it.
-<!-- reconcile: the `--decide <slot>=<mode>` flag on `gbrain eval longmemeval|brainbench|retrieval-quality` and `gbrain decide judge-agreement --suite <suite>` are not on feat/system-one-v1-docs @ 45a5857. -->
-Matched eval pairs use `--decide <slot>=<mode>` on `gbrain eval longmemeval`,
-`gbrain eval brainbench` and `gbrain eval retrieval-quality`, and
-`gbrain decide judge-agreement --suite <suite>` compares Jev with the LLM
-judge on a labelled set. Protocols and verdicts:
+example `triage=on`). Only eval commands (and dream's eval-run mode, once it
+ships) honor it, it never bypasses consent, egress or the daily cap, and
+every receipt records it.
+<!-- reconcile: planned, not on feat/system-one-v1-docs @ 45a5857: dream --eval-run, the eval --decide <slot>=<mode> flag (longmemeval, brainbench, retrieval-quality) and decide judge-agreement --suite <suite>. Restore exact command syntax here when those land. -->
+Planned for the eval lane, not in this build yet: matched eval pairs through
+a `--decide <slot>=<mode>` flag on the LongMemEval, BrainBench and
+retrieval-quality eval commands, and a `decide judge-agreement` subcommand
+that compares Jev with the LLM judge on a labelled set. Protocols and verdicts:
 [`docs/eval/system-one/`](../eval/system-one/).
