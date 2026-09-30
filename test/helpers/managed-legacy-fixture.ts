@@ -8,11 +8,12 @@ import { renderTakesFence } from '../../src/core/takes-fence.ts';
  * Legacy (pre-activation) brain content the managed migrations must adopt:
  * a file-backed entity page with a takes fence that has no `takes` rows,
  * unfenced legacy facts with vectors, a conversation-extractor fact on the
- * same page, and a database-only page with its own legacy fact. Seeded with
+ * same page, and a page under a declared `storage.db_only` directory with
+ * its own legacy fact. Seeded with
  * direct SQL before `claimWorktree` / activation, as an old binary wrote it.
  */
 export const LEGACY_FILE_SLUG = 'people/alice-example';
-export const LEGACY_DB_ONLY_SLUG = 'people/dana-example';
+export const LEGACY_DB_ONLY_SLUG = 'private/dana-example';
 export const LEGACY_EXTRACTOR_SOURCE = 'cli:extract-conversation-facts:session-example';
 
 export interface LegacySeed {
@@ -52,6 +53,7 @@ export async function seedLegacyManagedContent(engine: BrainEngine, root: string
   const path = join(root, `${LEGACY_FILE_SLUG}.md`);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, serializePageToMarkdown(snapshot.page, snapshot.tags));
+  writeFileSync(join(root, 'gbrain.yml'), 'storage:\n  db_only:\n    - private/\n');
   await engine.putPage(LEGACY_DB_ONLY_SLUG, { type: 'person', title: 'Dana Example', compiled_truth: '# Dana Example\n\nDatabase-only notes.' });
 
   const legacyFactIds = [
