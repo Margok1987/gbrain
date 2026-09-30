@@ -363,7 +363,7 @@ floor: verbatim quotes, numbers, visibility and trust rules always win.
 
 | Failure | What happens |
 |---|---|
-| Timeout (`decide.timeout_ms`, 1500 ms per decision; `decide.query_budget_ms`, 1500 ms for all decide work of one query) | The slot takes its fail direction. Later stages skip with `late`. |
+| Timeout (`decide.timeout_ms`, 1500 ms per decision; `decide.query_budget_ms`, 1500 ms for the time decide work adds to one query, not counting retrieval or expansion) | The slot takes its fail direction. Later stages skip with `late`. |
 | HTTP 429 | Retried once only when `retry-after` fits the deadline, else the fail direction. |
 | HTTP 5xx, bad key | The fail direction. |
 | A missing answer or an out-of-range value | The whole decision fails (`malformed_response`); partial answers are never used. |

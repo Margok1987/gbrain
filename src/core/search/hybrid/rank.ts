@@ -264,6 +264,7 @@ export async function rerankAndPin(
   // System One S1 (search/decide-stage.ts): Jev shadow scoring starts in
   // parallel; `on` mode writes receipts. Both are no-ops when the slot is off.
   const s1 = req.decide?.policies.rerank;
+  req.decide?.budget.anchor();
   const s1Shadow = startRerankShadow(req.decide, query, deduped.slice(0, rerankerOpts.enabled ? rerankerOpts.topNIn : resolvedMode.reranker_top_n_in), rerankerOpts.timeoutMs ?? resolvedMode.reranker_timeout_ms);
   let s1Failure: string | undefined;
   let s1Meta: RerankMeta | undefined;

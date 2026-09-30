@@ -70,8 +70,12 @@ questions ordered by rank then id. `runBatches`: at most `decide.max_concurrency
 (hot, default 16) or `decide.background_concurrency` (background, default 4)
 requests in flight under one deadline; a 429 `retry-after` is honored once only
 when it fits the deadline; background lanes drop to one worker after a 429.
-`runtime.ts`: `decide.query_budget_ms` bounds all decide work of one query
-(`stageDeadlineMs`, stages skip with `late`); detached shadow work runs under
+`runtime.ts`: `decide.query_budget_ms` bounds the latency decide work adds to
+one query (`stageDeadlineMs`, stages skip with `late`). Retrieval and expansion
+time is not decide time: the first post-retrieval stage (S1 in `hybrid/rank.ts`,
+or the S3/S4 gate on the keyword-only path, or S4 after think's gather) calls
+`budget.anchor()`, which restarts the clock minus the time S2's wait blocked
+(`budget.charge`). Detached shadow work runs under
 its own `BudgetTracker`, behind a bounded queue, drained at CLI exit.
 
 `unpacked.ts` `runDecideUnpacked`: slots whose answers must not depend on

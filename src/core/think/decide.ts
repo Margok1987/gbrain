@@ -117,6 +117,7 @@ function answerability(ctx: Ctx, policy: SlotPolicy): ThinkDecide['answerability
       strongGrade: gradeRetrievalConfidence([...pages], { ignoreDecideEvidence: true }).level === 'strong',
     };
     const run = async (): Promise<ThinkAbstention | null> => {
+      ctx.budget.anchor();
       const deadline = stageDeadlineMs(ctx.budget, ctx.cfg.timeoutMs);
       try {
         if (deadline === null) throw new DecideError('late', 'late');

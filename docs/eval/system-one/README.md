@@ -139,9 +139,13 @@ and differs only in the reranker.
   questions where it was present; Voyage did in 220/233.
 - **Answers.** 100 questions, Haiku 4.5 reader, gpt-4o judge: 91% with Voyage,
   89% with Jev@30 (1 win, 3 losses).
-- **Bug found.** With query expansion on, S1 never reranks: the 1,500 ms
-  per-query decide budget (`decide.query_budget_ms`) starts at request start,
-  and the expansion call uses it up. Every row fell back to fused order.
+- **Bug found, then fixed.** In this run, with query expansion on, S1 never
+  reranked: the 1,500 ms per-query decide budget (`decide.query_budget_ms`)
+  started at request start, and the expansion call used it up. Every row fell
+  back to fused order, so the "expansion + Jev 100" row above measures fused
+  order, not Jev. The budget now starts at the first post-retrieval decide
+  stage (regression test in `test/decide/search-slots.serial.test.ts`); that arm
+  was not re-measured.
 
 ### S2 intent (no measurable change)
 

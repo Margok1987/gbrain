@@ -1,9 +1,12 @@
 /**
  * decide runtime safety: the per-query decide budget and detached shadow work.
  *
- * Query budget: decide.query_budget_ms bounds ALL decide work of one `query`
- * request (S2 wait, S1 rerank, the S3/S5 and S4 stage); later stages get the
- * remainder and skip with `late`. `think` gets the same budget per call.
+ * Query budget: decide.query_budget_ms bounds the latency decide work ADDS to
+ * one `query` request (the S2 wait, S1 rerank, the S3/S5 and S4 stage); later
+ * stages get the remainder and skip with `late`. Retrieval and expansion time
+ * between request start and the first post-retrieval stage is not decide time:
+ * `anchor()` restarts the clock there, minus what S2's wait already blocked
+ * (`charge()`). `think` gets the same budget per call and anchors after gather.
  *
  * Shadow isolation: detached shadow work runs in its own budget scope (a
  * dedicated BudgetTracker, not the ambient request tracker), behind a bounded
@@ -20,11 +23,26 @@ export const MIN_STAGE_MS = 50;
 export interface DecideQueryBudget {
   deadlineAt: number;
   remaining(now?: number): number;
+  /** Record time a decide stage blocked the request before `anchor()`. */
+  charge(ms: number): void;
+  /** Start the post-retrieval clock once: the deadline becomes now + budget - charged. */
+  anchor(now?: number): void;
 }
 
 export function createQueryBudget(budgetMs: number, now = Date.now()): DecideQueryBudget {
-  const deadlineAt = now + budgetMs;
-  return { deadlineAt, remaining: (t = Date.now()) => Math.max(0, deadlineAt - t) };
+  let charged = 0;
+  let anchored = false;
+  const budget: DecideQueryBudget = {
+    deadlineAt: now + budgetMs,
+    remaining: (t = Date.now()) => Math.max(0, budget.deadlineAt - t),
+    charge: (ms) => { if (!anchored) charged += Math.max(0, ms); },
+    anchor: (t = Date.now()) => {
+      if (anchored) return;
+      anchored = true;
+      budget.deadlineAt = t + Math.max(0, budgetMs - charged);
+    },
+  };
+  return budget;
 }
 
 /** The deadline one stage may use: its own timeout capped by what the query budget has left, or null (`late`). */

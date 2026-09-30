@@ -229,6 +229,7 @@ const tally = (outcomes: Record<string, string>): Record<string, number> => {
  */
 export async function applyEvidenceGate(ctx: DecideSearchContext | undefined, query: string, pool: SearchResult[]): Promise<SearchResult[]> {
   if (!ctx || pool.length === 0) return pool;
+  ctx.budget.anchor();
   const answerability = startQueryAnswerability(ctx, query, pool);
   try {
     return await evidenceStage(ctx, query, pool);

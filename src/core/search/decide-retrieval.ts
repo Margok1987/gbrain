@@ -168,7 +168,9 @@ export async function applySearchIntent(ctx: DecideSearchContext, query: string,
     return regex;
   }
   const ask = ctx.intentAsk ?? askIntent(inputs);
+  const waitStarted = Date.now();
   const settled = mode === 'shadow' ? await ask.done : await awaitWithin(ask, ctx.cfg.intentWaitMs);
+  ctx.budget.charge(Date.now() - waitStarted);
   const v = settleIntent({ ...inputs, ask, mode, regexLabel: regex.intent }, settled);
   const result = settled?.result;
   ctx.meta.intent = {

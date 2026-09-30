@@ -278,6 +278,31 @@ describe('S1 rerank', () => {
     expect(rows.every((r) => r.slot === 'rerank' && r.outcome === 'kept')).toBe(true);
   });
 
+  test('retrieval time before rerank does not spend the decide query budget (expansion regression)', async () => {
+    await setConfig({ ...JEV, 'decide.provider': 'typesafe:jev-1.13.0', 'decide.slots.rerank.mode': 'on', 'decide.query_budget_ms': '200' });
+    __setRerankTransportForTests(async (_url, init) => {
+      await new Promise((r) => setTimeout(r, 60));
+      init.signal?.throwIfAborted();
+      const body = JSON.parse(init.body as string);
+      return new Response(JSON.stringify({
+        model: 'jev-1.13.0',
+        answers: Object.fromEntries(Object.entries(body.questions).map(([id, q]: [string, any]) => [id, { type: 'score', score: q.instructions.candidate.includes('five') ? 3 : 1 }])),
+        usage: { input_tokens: 50 },
+      }));
+    });
+    __setEmbedTransportForTests(async (args: any) => {
+      await new Promise((r) => setTimeout(r, 400));
+      return { embeddings: args.values.map(() => FAKE_EMB) } as any;
+    });
+    try {
+      const { results, meta } = await search();
+      expect(meta?.decide?.rerank).toMatchObject({ mode: 'on', effective: 'on', model_resolved: 'jev-1.13.0' });
+      expect(results[0]!.slug).toBe('notes/five');
+    } finally {
+      __setEmbedTransportForTests(async (args: any) => ({ embeddings: args.values.map(() => FAKE_EMB) }) as any);
+    }
+  });
+
   test('off writes no receipts even with the Jev reranker selected (the #5178 path)', async () => {
     await setConfig(JEV);
     rerankTransport(() => 2);
