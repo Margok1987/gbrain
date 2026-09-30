@@ -109,6 +109,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/context-engine.ts": [
     "test/e2e/openclaw-context-engine-plugin.test.ts",
     "test/e2e/openclaw-plugin-load-real.test.ts",
+    "test/e2e/context-engine-rung3-extraction.test.ts",
   ],
   "src/openclaw-context-engine.ts": [
     "test/e2e/openclaw-context-engine-plugin.test.ts",
