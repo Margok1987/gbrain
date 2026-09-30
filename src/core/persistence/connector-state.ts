@@ -106,13 +106,14 @@ export async function recordConnectorSyncAttempt(engine: Pick<BrainEngine, 'exec
  * `syncEnabled=false`), so the new gate idles no source autopilot synced.
  */
 export async function seedConnectorDispatchAttempts(engine: Pick<BrainEngine, 'executeRaw'>): Promise<number> {
-  const { isSyncDisabledConfig } = await import('../sync-policy.ts');
   const rows = await engine.executeRaw<{ id: string; config: unknown }>(`SELECT id,config FROM sources
     WHERE config->>'kind' IN ('google','github') AND local_path IS NOT NULL`);
   let seeded = 0;
   const at = new Date().toISOString();
   for (const row of rows) {
-    if (isSyncDisabledConfig(row.config)) continue;
+    // Same predicate as isSyncDisabledConfig (sync-policy.ts), inlined so the schema-migration closure stays small.
+    const config = (typeof row.config === 'string' ? JSON.parse(row.config) : row.config) as { syncEnabled?: unknown } | null;
+    if (config?.syncEnabled === false) continue;
     await recordConnectorSyncAttempt(engine, row.id, at);
     seeded++;
   }

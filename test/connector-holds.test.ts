@@ -22,6 +22,8 @@ beforeAll(setup, 120_000);
 afterAll(teardown);
 
 const account = 'reader@example.com';
+/** Synthetic Gmail thread ids (hex, like Gmail's). */
+const thread = (suffix: string) => `a1b2c3d4e5f6${suffix}`;
 const gmailConfig = { kind: 'google', g_account: account, g_services: 'gmail', g_access: 'env', g_token_env: 'CONNECTOR_TEST_TOKEN' };
 
 async function gmailSource(engine: BrainEngine, managed: boolean) {
@@ -129,7 +131,7 @@ test('Gmail holds (managed and unmanaged): held after 3 runs, the floor passes i
       await disposePersistenceConsumer(engine);
     }
     const [held] = await sourceHolds(engine, f.id);
-    expect(held).toMatchObject({ key: 'a1b2c3d4e5f60202', state: 'held', code: 'http_4xx', class: 'content', attempts: 3,
+    expect(held).toMatchObject({ key: thread('0202'), state: 'held', code: 'http_4xx', class: 'content', attempts: 3,
       meta: { sender: null, subject: null, upstream_at: null } });
     // Run 4 skips the held thread; the backfill finishes around it and the source is fresh.
     fx.fetched.length = 0;
@@ -151,7 +153,7 @@ test('Gmail holds (managed and unmanaged): held after 3 runs, the floor passes i
     // Unknown upstream date counts as inside the window: coverage is partial, and the empty answer says so.
     const answer = await waiting(engine, f.id);
     expect(answer.completeness).toBe('partial');
-    expect(answer.held).toEqual([expect.objectContaining({ key: 'a1b2c3d4e5f60202', retry_command: `gbrain sources retry-held ${f.id}` })]);
+    expect(answer.held).toEqual([expect.objectContaining({ key: thread('0202'), retry_command: `gbrain sources retry-held ${f.id}` })]);
     expect(answer.text).toContain('No open loops found, but coverage is partial: 1 held item(s)');
     expect(answer.text).not.toContain('You are clean');
     // retry-held: --dry-run changes nothing; the real request survives until the next sync, which re-attempts and clears it.
@@ -186,7 +188,7 @@ test('a lone surrogate in a Gmail identity field refuses with invalid_connector_
       await disposePersistenceConsumer(engine);
     }
     const [held] = await sourceHolds(engine, f.id);
-    expect(held).toMatchObject({ key: 'a1b2c3d4e5f60404', code: 'invalid_connector_text', class: 'content', meta: { subject: 'Subject a1b2c3d4e5f60404' } });
+    expect(held).toMatchObject({ key: thread('0404'), code: 'invalid_connector_text', class: 'content', meta: { subject: 'Subject a1b2c3d4e5f60404' } });
     const pages = await engine.executeRaw<{ compiled_truth: string; title: string }>('SELECT compiled_truth,title FROM pages WHERE source_id=$1', [f.id]);
     expect(pages).toHaveLength(1);
     expect(pages[0].compiled_truth.isWellFormed()).toBe(true);
@@ -208,7 +210,7 @@ test('legacy gmail_fail_counts carry over once as held items with unknown metada
     await runGoogleSync(engine, f.id, f.cfg, options, withGoogleAccount(gmailFetch(fx), account));
     expect(fx.fetched).not.toContain('a1b2c3d4e5f60505');
     expect(readGoogleState(f.dir).gmail_fail_counts).toBeUndefined();
-    expect(await sourceHolds(engine, f.id)).toEqual([expect.objectContaining({ key: 'a1b2c3d4e5f60505', legacy: true, code: 'legacy_poison',
+    expect(await sourceHolds(engine, f.id)).toEqual([expect.objectContaining({ key: thread('0505'), legacy: true, code: 'legacy_poison',
       meta: { sender: null, subject: null, title: null, upstream_at: null } })]);
     expect((await waiting(engine, f.id)).completeness).toBe('partial');
   }

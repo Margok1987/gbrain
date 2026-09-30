@@ -256,12 +256,12 @@ export async function dispatchFreshnessSyncs(
   try {
     const { isFederatedV2Enabled } = await import('../core/feature-flags.ts');
     if (await isFederatedV2Enabled(engine)) {
+      const { attemptedConnectorSourceIds } = await import('../core/persistence/connector-state.ts');
+      const attempted = await attemptedConnectorSourceIds(engine).catch(() => null);
       const sources = await loadAllSources(engine);
       const activationPending = await loadActivationPendingSourceIds(engine);
       const intervalMs = baseInterval * 1000;
       const now = Date.now();
-      const { attemptedConnectorSourceIds } = await import('../core/persistence/connector-state.ts');
-      const attempted = await attemptedConnectorSourceIds(engine).catch(() => null);
       for (const src of sources) {
         if (!src.local_path) continue;
         // DX O1 (fix wave 4): automatic capture is opt-in, so a Google or

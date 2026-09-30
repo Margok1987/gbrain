@@ -365,7 +365,7 @@
         },
         {
           "category": "meta",
-          "message": "Version 178 (latest: 178)",
+          "message": "Version 179 (latest: 179)",
           "name": "schema_version",
           "status": "ok"
         },
@@ -502,6 +502,17 @@
           },
           "message": "No orphan connector checkpoint rows older than 7 days.",
           "name": "connector_checkpoints",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "docs": "docs/guides/repair.md#connector-held-items",
+            "held": 0,
+            "sources": []
+          },
+          "message": "No connector items are held.",
+          "name": "connector_held_items",
           "status": "ok"
         },
         {
