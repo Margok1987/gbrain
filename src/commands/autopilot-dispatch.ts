@@ -230,7 +230,7 @@ const connectorNoticePrinted = new Set<string>();
  */
 export function connectorAwaitingFirstSync(src: { id: string; config: unknown }, attempted: Set<string> | null, jsonMode: boolean,
   write: (line: string) => void = (line) => process.stderr.write(line + '\n')): boolean {
-  const kind = (src.config as { kind?: unknown } | null)?.kind;
+  const kind = parseSourceConfig(src.config).kind;
   if (!isConnectorSourceKind(kind)) return false;
   if (attempted?.has(src.id)) return false;
   if (!connectorNoticePrinted.has(src.id)) {

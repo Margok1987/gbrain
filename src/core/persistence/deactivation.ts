@@ -37,12 +37,13 @@ import { managedFilesystemDatastorePath, refreshManagedFilesystemRoots } from '.
 import { recordTopologyChange } from './topology-receipts.ts';
 import { lockTopologyPrincipal, topologyPrincipal } from './topology-locks.ts';
 import { canonicalFilesystemPath } from './root-registry.ts';
+import { readAllSourceHolds } from '../connectors/item-holds-store.ts';
 import { PHYSICAL_ROOT_MARKER, physicalRootReservationPath } from './physical-root-record.ts';
 
 export const DEACTIVATE_DOCS = 'docs/architecture/topologies.md#deactivate-runbook';
 
 export interface DeactivationBlocker {
-  kind: 'writer_admin_lock' | 'request' | 'topology_recovery' | 'effect' | 'lease';
+  kind: 'writer_admin_lock' | 'request' | 'topology_recovery' | 'effect' | 'lease' | 'connector_holds';
   id: string;
   source_id?: string;
   detail: string;
@@ -111,6 +112,12 @@ export async function deactivationBlockers(engine: BrainEngine): Promise<Deactiv
       exit: e.kind === 'embedding' ? (e.source_live ? `gbrain repair embedding-effects --source ${e.source_id}` : 'gbrain repair embedding-effects (its source was removed; run it brain-wide)')
         : e.state === 'failed' ? `gbrain sources writer retry-effects ${e.source_id} --request-id ${e.request_id} --dry-run`
           : 'wait for the owner to drain it, then rerun deactivate' });
+  }
+  // Managed connector holds live in the managed checkpoint, which classic mode does not read: a held item outside
+  // the classic backfill window would drop out of retries and coverage warnings, so it is resolved first.
+  for (const source of await readAllSourceHolds(engine)) {
+    blockers.push({ kind: 'connector_holds', id: source.sourceId, source_id: source.sourceId, detail: `${source.held.length} held ${source.kind} item(s)`,
+      exit: `gbrain sources retry-held ${source.sourceId}, then gbrain sync --source ${source.sourceId}; an item that still fails stays held until gbrain sync --source ${source.sourceId} --full clears the holds` });
   }
   const leases = await engine.executeRaw<{ id: string; holder_host: string; holder_pid: number }>(
     'SELECT id, holder_host, holder_pid FROM gbrain_cycle_locks WHERE ttl_expires_at > now() ORDER BY id');

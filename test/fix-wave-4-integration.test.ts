@@ -46,6 +46,7 @@ import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts'
 import { attemptedConnectorSourceIds } from '../src/core/persistence/connector-state.ts';
 import { dispatchFreshnessSyncs } from '../src/commands/autopilot-dispatch.ts';
 import { readAllSourceHolds } from '../src/core/connectors/item-holds-store.ts';
+import { retryHeld } from '../src/commands/sources-retry-held.ts';
 import { planRepairSteps } from '../src/core/remediation/repairs.ts';
 import { runRemediate } from '../src/commands/doctor/remediate.ts';
 import { REPAIR_REGISTRY } from '../src/core/repair/registry.ts';
@@ -141,7 +142,7 @@ test('X4: the v0.32.2 facts adoption on a connector page publishes above the tim
   }
 }), 240_000);
 
-test('X6: deactivating a managed brain keeps the connector dispatch gate open and re-attempts a held item instead of skipping it', async () => withEnv(env, async () => {
+test('X6: deactivate refuses while a connector item is held (classic mode cannot read managed holds); after the printed exit it succeeds and the dispatch gate stays open', async () => withEnv(env, async () => {
   const account = 'reader@example.com';
   const gmailConfig = { kind: 'google', g_account: account, g_services: 'gmail', g_access: 'env', g_token_env: 'CONNECTOR_TEST_TOKEN' };
   for (const engine of engines) {
@@ -156,8 +157,28 @@ test('X6: deactivating a managed brain keeps the connector dispatch gate open an
     expect((await readAllSourceHolds(engine, { sourceIds: [f.id] }))[0]?.held.map(h => h.key)).toEqual(['a1b2c3d4e5f60302']);
     expect((await attemptedConnectorSourceIds(engine)).has(f.id)).toBe(true);
 
-    await engine.transaction(async tx => { await declarePersistenceProtocol(tx); await tx.executeRaw("UPDATE persistence_effects SET state='committed' WHERE state<>'committed'"); });
-    const done = await runPersistenceAdministration(engine, 'writer_deactivate', { admin_intent: 'writer_deactivate', expected_state: await writerAdminState(engine) }) as Record<string, unknown>;
+    const settle = () => engine.transaction(async tx => { await declarePersistenceProtocol(tx); await tx.executeRaw("UPDATE persistence_effects SET state='committed' WHERE state<>'committed'"); });
+    await settle();
+    const dry = await runPersistenceAdministration(engine, 'writer_deactivate', { dry_run: true }) as { blockers: Array<{ kind: string; source_id?: string; exit: string }>; apply_command?: string };
+    const held = dry.blockers.find(b => b.kind === 'connector_holds');
+    expect(held).toMatchObject({ source_id: f.id, exit: expect.stringContaining(`gbrain sources retry-held ${f.id}`) });
+    expect(dry.apply_command).toBeUndefined();
+    await expect(runPersistenceAdministration(engine, 'writer_deactivate', { admin_intent: 'writer_deactivate', expected_state: await writerAdminState(engine) }))
+      .rejects.toMatchObject({ code: 'writer_not_quiesced' });
+
+    // The printed exit: retry the held thread (recovered upstream) and sync; the hold clears and deactivate proceeds.
+    await retryHeld(engine, f.id);
+    fx.failThreads.delete('a1b2c3d4e5f60302');
+    fx.fetched.length = 0;
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    expect(fx.fetched).toContain('a1b2c3d4e5f60302');
+    expect(await readAllSourceHolds(engine, { sourceIds: [f.id] })).toEqual([]);
+    await settle();
+    const clean = await runPersistenceAdministration(engine, 'writer_deactivate', { dry_run: true }) as { apply_command?: string };
+    const expected = /--expected-state ([a-f0-9]{64})$/.exec(clean.apply_command ?? '')?.[1];
+    expect(expected).toBeDefined();
+    const done = await runPersistenceAdministration(engine, 'writer_deactivate', { admin_intent: 'writer_deactivate', expected_state: expected }) as Record<string, unknown>;
     expect(done).toMatchObject({ mode: 'classic', deactivated: true });
 
     // Lane B's gate survives Lane D's mode change: autopilot keeps dispatching the connector.
@@ -171,12 +192,7 @@ test('X6: deactivating a managed brain keeps the connector dispatch gate open an
     finally { write.mockRestore(); log.mockRestore(); }
     expect(added.filter(job => job.name === 'sync').map(job => job.data.sourceId)).toContain(f.id);
 
-    // The classic run never skips the formerly held thread silently: it is fetched again and, recovered, imported.
-    fx.failThreads.delete('a1b2c3d4e5f60302');
-    fx.fetched.length = 0;
     expect((await run()).status).not.toBe('partial');
-    expect(fx.fetched).toContain('a1b2c3d4e5f60302');
-    expect(await readAllSourceHolds(engine, { sourceIds: [f.id] })).toEqual([]);
     // Restore managed mode for the next check on this engine.
     await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
   }

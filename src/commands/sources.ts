@@ -458,7 +458,7 @@ async function runAdd(engine: BrainEngine, args: string[]): Promise<void> {
     console.log(`  clone path: ${created.local_path}`);
   }
   console.log(
-    `  federated: ${fed}${fed ? ' — appears in cross-source default search' : ' — only searched when explicitly named via --source'}${gKind || ghKind ? `\n  first sync: gbrain sync --source ${id} (autopilot keeps the source synced after its first sync)` : ''}`,
+    `  federated: ${fed}${fed ? ' — appears in cross-source default search' : ' — only searched when explicitly named via --source'}`,
   );
   if (ghKind || gKind) {
     console.log(`  sync: run \`gbrain sync --source ${id}\` once; after its first sync, autopilot keeps it synced on the autopilot interval.`);

@@ -208,10 +208,13 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
     keys(params, ['dry_run', 'admin_intent', 'expected_state', 'request_id']);
     const { deactivatePersistence } = await import('./deactivation.ts');
     if (params.dry_run === true) {
+      // DX-O13: a clean preview prints the state-bound command that applies exactly what it reviewed, so the
+      // state is read before the preview and the command is printed only when nothing moved while it ran.
+      const state = await writerAdminState(engine);
       const report = await deactivatePersistence(engine, { dryRun: true });
-      // DX-O13: a clean preview prints the state-bound command that applies exactly what it reviewed.
-      return { ...report, action: operation, ...(report.mode === 'managed' && report.blockers.length === 0
-        ? { apply_command: `gbrain sources writer deactivate --admin-intent writer_deactivate --expected-state ${await writerAdminState(engine)}` } : {}) };
+      const unchanged = state === await writerAdminState(engine);
+      return { ...report, action: operation, ...(report.mode === 'managed' && report.blockers.length === 0 && unchanged
+        ? { apply_command: `gbrain sources writer deactivate --admin-intent writer_deactivate --expected-state ${state}` } : {}) };
     }
     let expectedState: string | undefined;
     try { expectedState = await requireWriterAdminIntent(engine, operation, params); }
