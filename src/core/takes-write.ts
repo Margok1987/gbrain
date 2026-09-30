@@ -49,6 +49,7 @@ import {
   TAKES_FENCE_END,
   type ParsedTake,
   type ParseResult,
+  type TakeQuality,
 } from './takes-fence.ts';
 import { withPageLock } from './page-lock.ts';
 import { resolvePageFilePath, resolveSourceLocalFilePath } from './markdown.ts';
@@ -442,6 +443,30 @@ export interface AddTakeInput {
   weight?: number;
   source?: string;
   sinceDate?: string;
+}
+
+/**
+ * Carry take resolutions recorded only in the database into the page's takes
+ * fence, so a republication of the page keeps them: the canonical projection
+ * writes every resolution column from the fence.
+ */
+export async function materializeTakeResolutions(engine: BrainEngine, pageId: number, body: string): Promise<string> {
+  const parsed = parseTakesFence(body);
+  if (!parsed.takes.length) return body;
+  const rows = await engine.executeRaw<{ row_num: number; resolved_at: Date | string; resolved_quality: TakeQuality | null;
+    resolved_source: string | null; resolved_value: number | string | null; resolved_unit: string | null; resolved_by: string | null }>(
+    `SELECT row_num,resolved_at,resolved_quality,resolved_source,resolved_value,resolved_unit,resolved_by FROM takes
+      WHERE page_id=$1 AND resolved_at IS NOT NULL AND resolved_quality IS NOT NULL`, [pageId]);
+  let changed = false;
+  const takes = parsed.takes.map(take => {
+    const row = rows.find(r => Number(r.row_num) === take.rowNum);
+    if (!row || take.resolvedQuality !== undefined) return take;
+    changed = true;
+    return { ...take, resolvedAt: new Date(row.resolved_at).toISOString(), resolvedQuality: row.resolved_quality!,
+      resolvedEvidence: row.resolved_source ?? undefined, resolvedValue: row.resolved_value === null ? undefined : Number(row.resolved_value),
+      resolvedUnit: row.resolved_unit ?? undefined, resolvedBy: row.resolved_by ?? undefined };
+  });
+  return changed ? replaceFence(body, takes) : body;
 }
 
 /** Compose the same append sequence used by the legacy md-first writer. */

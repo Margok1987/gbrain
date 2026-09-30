@@ -147,4 +147,21 @@ for (const backend of testBackends()) {
       await engine.setConfig('persistence.limits.principal_lifetime_ids', '0');
     } });
   }, 120_000);
+
+  test(`${backend}: an archived source's legacy facts are skipped and never block the active source`, async () => {
+    let seed!: LegacySeed;
+    await managedBrain(async ({ engine }) => {
+      const phase = await __testing.phaseBFenceFacts(engine, OPTS);
+      expect(phase).toMatchObject({ name: 'fence_facts', status: 'complete' });
+      expect(phase.detail).toContain('fenced=3 pages=2');
+      expect(phase.detail).toContain('skipped_archived=1');
+      expect((await factRows(engine, seed.legacyFactIds)).map(r => r.row_num)).toEqual([2, 3]);
+    }, { databaseUrl, setup: async ({ engine, root }) => {
+      seed = await seedLegacyManagedContent(engine, root);
+      await engine.executeRaw("INSERT INTO sources (id, name, archived) VALUES ('archived-example', 'Archived example', true)");
+      await engine.putPage('people/erin-example', { type: 'person', title: 'Erin Example', compiled_truth: '# Erin Example' }, { sourceId: 'archived-example' });
+      await engine.executeRaw(`INSERT INTO facts (source_id, entity_slug, fact, kind, visibility, notability, valid_from, source, confidence)
+        VALUES ('archived-example', 'people/erin-example', 'Erin example left Acme example', 'fact', 'world', 'medium', now(), 'mcp:put_page', 0.8)`);
+    } });
+  }, 120_000);
 }

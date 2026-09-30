@@ -132,6 +132,7 @@ interface LegacyFactRow {
 interface SourceLookup {
   id: string;
   local_path: string | null;
+  archived?: boolean;
 }
 
 interface PhaseBOutcome {
@@ -140,6 +141,7 @@ interface PhaseBOutcome {
   skipped_no_entity: number;
   skipped_no_local_path: number;
   skipped_no_page: number;
+  skipped_archived: number;
   pages_touched: number;
   failed_pages: string[];
 }
@@ -283,10 +285,11 @@ async function phaseBFenceFacts(
     const managed = await managedPersistenceEnabled(engine);
     // Look up all sources + their local_paths.
     const sources = await engine.executeRaw<SourceLookup>(
-      `SELECT id, local_path FROM sources`,
+      `SELECT id, local_path, archived FROM sources`,
     );
     const localPathById = new Map<string, string | null>();
     for (const s of sources) localPathById.set(s.id, s.local_path);
+    const archived = new Set(sources.filter(s => s.archived).map(s => s.id));
 
     // Walk legacy rows in (source_id, entity_slug) groups for per-page
     // atomic writes.
@@ -307,6 +310,7 @@ async function phaseBFenceFacts(
       skipped_no_entity: 0,
       skipped_no_local_path: 0,
       skipped_no_page: 0,
+      skipped_archived: 0,
       pages_touched: 0,
       failed_pages: [],
     };
@@ -317,6 +321,12 @@ async function phaseBFenceFacts(
     for (const row of legacy) {
       if (row.entity_slug === null) {
         outcome.skipped_no_entity += 1;
+        continue;
+      }
+      // A managed brain publishes through the source's maintenance authority,
+      // which an archived source does not grant; it never blocks the others.
+      if (managed && archived.has(row.source_id)) {
+        outcome.skipped_archived += 1;
         continue;
       }
       const localPath = localPathById.get(row.source_id);
@@ -431,6 +441,7 @@ function fenceFactsResult(outcome: PhaseBOutcome): OrchestratorPhaseResult {
   const detail = `scanned=${outcome.scanned} fenced=${outcome.fenced} ` +
     `pages=${outcome.pages_touched} skipped_no_entity=${outcome.skipped_no_entity} ` +
     `skipped_no_local_path=${outcome.skipped_no_local_path} skipped_no_page=${outcome.skipped_no_page}` +
+    (outcome.skipped_archived > 0 ? ` skipped_archived=${outcome.skipped_archived}` : '') +
     (outcome.failed_pages.length > 0 ? ` failed=${outcome.failed_pages.length}` : '');
   if (outcome.failed_pages.length > 0) {
     return {

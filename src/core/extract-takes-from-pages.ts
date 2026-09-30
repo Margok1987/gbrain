@@ -22,6 +22,7 @@ import { chat, getChatModel, isAvailable } from './ai/gateway.ts';
 import {
   appendTakesToPageBody,
   appendTakesToPageMdFirst,
+  materializeTakeResolutions,
   isSafeFenceCellText,
   resolveTakesRepoDir,
   resolveTakesWritePath,
@@ -344,7 +345,7 @@ export async function extractTakesFromPages(
           source: 'cli:takes-bootstrap-from-pages',
         }));
       if (managedJournalWrites) {
-        const body = serializePageToMarkdown(managedSnapshot!.page, managedSnapshot!.tags);
+        const body = await materializeTakeResolutions(engine, managedSnapshot!.page.id, serializePageToMarkdown(managedSnapshot!.page, managedSnapshot!.tags));
         const composed = appendTakesToPageBody(body, rows);
         const { operations } = await import('./operations.ts');
         const putPage = operations.filter(operation => !operation.localOnly).find(operation => operation.name === 'put_page');
