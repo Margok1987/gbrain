@@ -1,4 +1,4 @@
-import { maintenancePreflight, stampMaintenancePage, verifyMaintenanceOutputs } from '../persistence/prepared-maintenance.ts';
+import { maintenancePreflight, stampMaintenancePage, verifyMaintenanceOutputs, type MaintenanceAuthority } from '../persistence/prepared-maintenance.ts';
 import { digest } from '../persistence/digest.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 /**
@@ -360,17 +360,7 @@ export async function runPhasePatterns(
     throwIfAborted(opts.signal, '[dream] patterns output');
     const writtenRefs = await collectChildPutPageSlugs(engine, [job.id], cycleSourceId);
 
-    // #5733: pages under the patterns output prefix are dream output and carry
-    // the dream_generated identity stamp every dream_generated consumer reads.
-    const patternRefs = writtenRefs.filter(ref => ref.slug.startsWith(`${config.outputSlugPrefix}/`));
-    if (maintenance) {
-      for (const ref of patternRefs) {
-        throwIfAborted(opts.signal, '[dream] patterns provenance');
-        await stampMaintenancePage(engine, maintenance, ref.slug, cycleDate);
-      }
-    } else await stampDreamProvenance(engine, patternRefs, cycleDate, opts.signal);
-
-    // Reverse-write to fs.
+    await stampPatternOutputs(engine, maintenance, writtenRefs.filter(ref => ref.slug.startsWith(`${config.outputSlugPrefix}/`)), cycleDate, opts.signal);
     const reverseWriteCount = maintenance ? await verifyMaintenanceOutputs(engine, maintenance, writtenRefs)
       : await reverseWriteRefs(engine, opts.brainDir, writtenRefs, cycleSourceId, opts.signal);
 
@@ -618,6 +608,20 @@ REFLECTIONS
 ${corpus}
 
 When done, briefly list the pattern slugs you wrote/updated in your final message.`;
+}
+
+/**
+ * #5733: pages under the patterns output prefix are dream output and carry the
+ * dream_generated identity stamp every dream_generated consumer reads, through
+ * the managed maintenance write on a managed brain, before the reverse-write.
+ */
+async function stampPatternOutputs(engine: BrainEngine, maintenance: MaintenanceAuthority | null,
+  refs: Array<{ slug: string; source_id: string }>, cycleDate: string, signal?: AbortSignal): Promise<void> {
+  if (!maintenance) return stampDreamProvenance(engine, refs, cycleDate, signal);
+  for (const ref of refs) {
+    throwIfAborted(signal, '[dream] patterns provenance');
+    await stampMaintenancePage(engine, maintenance, ref.slug, cycleDate);
+  }
 }
 
 // ── Provenance via put_page tool execution rows ─────────────────────

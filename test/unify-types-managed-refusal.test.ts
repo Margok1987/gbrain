@@ -23,6 +23,7 @@ import { makeUnifyTypesHandler } from '../src/core/minions/handlers/unify-types.
 import { UnrecoverableError } from '../src/core/minions/errors.ts';
 import { managedBrain } from './helpers/managed-brain.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { isolatedSharedSkillsEngine } from './helpers/shared-skills-engine.ts';
 
 async function seed({ engine }: { engine: BrainEngine }) {
   for (const [slug, type] of [['books/x', 'book'], ['analysis/y', 'competitive-intel'], ['note/civic-1', 'civic']]) {
@@ -61,9 +62,7 @@ test('managed apply refuses before any mutation; the dry run previews and names 
 }, 120_000);
 
 test('an unmanaged dry run carries no managed warning', async () => {
-  const { PGLiteEngine } = await import('../src/core/pglite-engine.ts');
-  const engine = new PGLiteEngine();
-  await engine.connect({}); await engine.initSchema();
+  const { engine, close } = await isolatedSharedSkillsEngine();
   const unifyHome = mkdtempSync(join(tmpdir(), 'gbrain-unify-unmanaged-'));
   try {
     await seed({ engine });
@@ -72,7 +71,7 @@ test('an unmanaged dry run carries no managed warning', async () => {
     const dry = await withEnv({ GBRAIN_HOME: unifyHome }, () => runUnifyTypes(ctx, { target_pack: 'gbrain-base-v2', apply: false }));
     expect(dry.warnings.join('\n')).not.toContain('managed brain');
   } finally {
-    await engine.disconnect();
+    await close();
     rmSync(unifyHome, { recursive: true, force: true });
     _resetPackCacheForTests();
   }

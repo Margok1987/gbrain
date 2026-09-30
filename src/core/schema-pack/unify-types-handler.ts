@@ -71,6 +71,21 @@ export interface UnifyTypesResult {
 }
 
 /**
+ * #5634: the retype, link and alias phases write canonical tables outside the
+ * persistence coordinator, which a managed brain refuses mid-run. Apply is
+ * refused before the lock or any write; the dry run still previews.
+ */
+async function managedApplyWarnings(ctx: OperationContext, targetPack: string, apply: boolean): Promise<string[]> {
+  if (!await managedPersistenceEnabled(ctx.engine)) return [];
+  if (apply) {
+    throw new OperationError('writer_coordinator_required',
+      'unify-types apply is not supported on a managed brain: its retype runs outside the persistence coordinator. No page was changed.',
+      `Preview the plan with gbrain jobs submit unify-types --params '${JSON.stringify({ target_pack: targetPack })}'. Coordinated retype is not available yet.`);
+  }
+  return ['unify-types apply is not supported on a managed brain; this dry run is a preview only.'];
+}
+
+/**
  * Pure orchestrator for the unify-types handler. Engine is supplied via
  * OperationContext. Caller (jobs.ts wrapper) wires engine + onProgress.
  *
@@ -85,20 +100,9 @@ export async function runUnifyTypes(
   const apply = input.apply === true;
   const sourceId = input.sourceId;
   const onProgress = input.onProgress ?? (() => {});
-  const warnings: string[] = [];
+  const warnings = await managedApplyWarnings(ctx, input.target_pack, apply);
 
   onProgress(`[unify-types] starting (apply=${apply}, target_pack=${input.target_pack})`);
-
-  // #5634: the retype, link and alias phases write canonical tables outside
-  // the persistence coordinator, which a managed brain refuses mid-run.
-  // Refuse apply before the lock or any write; the dry run still previews.
-  const managed = await managedPersistenceEnabled(ctx.engine);
-  if (managed && apply) {
-    throw new OperationError('writer_coordinator_required',
-      'unify-types apply is not supported on a managed brain: its retype runs outside the persistence coordinator. No page was changed.',
-      `Preview the plan with gbrain jobs submit unify-types --params '${JSON.stringify({ target_pack: input.target_pack })}'. Coordinated retype is not available yet.`);
-  }
-  if (managed) warnings.push('unify-types apply is not supported on a managed brain; this dry run is a preview only.');
 
   // 1. Preflight — load target pack
   const targetPack = await loadActivePack({
