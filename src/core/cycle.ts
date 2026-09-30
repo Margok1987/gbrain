@@ -1509,6 +1509,7 @@ async function runPhaseExtractFacts(
         `destructive full walk may have wiped non-fence facts (#1928).`,
       );
     }
+    const decideConflict = dryRun ? undefined : await (await import('./ai/decide/sweep.ts')).conflictSweepTail(engine, sourceId, signal);
     return {
       phase: 'extract_facts',
       status: result.warnings.length > 0 ? 'warn' : 'ok',
@@ -1531,6 +1532,7 @@ async function runPhaseExtractFacts(
         phantoms_skipped_drift: result.phantomsSkippedDrift,
         phantoms_lock_busy: result.phantomsLockBusy,
         phantoms_more_pending: result.phantomsMorePending,
+        ...(decideConflict ? { decide_conflict: decideConflict } : {}),
       },
     };
   } catch (e) {
