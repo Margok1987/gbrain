@@ -27,7 +27,6 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   // Fix wave 4, Lane D: the apply-migrations orchestration lease (#5693), source deletes and
   // orphan bindings (#5732), and deactivate racing admission (#5455).
   "src/core/migration-orchestration-lock.ts": ["test/e2e/apply-migrations-orchestration-lock.test.ts"],
-  "src/commands/apply-migrations.ts": ["test/e2e/apply-migrations-orchestration-lock.test.ts"],
   "src/core/source-delete.ts": ["test/e2e/sources-remove-bindings.test.ts"],
   "src/core/persistence/orphan-bindings.ts": ["test/e2e/sources-remove-bindings.test.ts"],
   "src/core/persistence/deactivation.ts": ["test/e2e/persistence-deactivate-race.test.ts"],
@@ -428,6 +427,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/migration-flow.test.ts",
   ],
   "src/commands/apply-migrations.ts": [
+    "test/e2e/apply-migrations-orchestration-lock.test.ts",
     "test/e2e/migration-preview-safety.test.ts",
     "test/e2e/migrate-chain.test.ts",
     "test/e2e/migration-flow.test.ts",
