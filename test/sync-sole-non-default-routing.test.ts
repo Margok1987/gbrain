@@ -21,13 +21,13 @@ import { join } from 'path';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { runSources } from '../src/commands/sources.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
+import { withEnv } from './helpers/with-env.ts';
 
 let engine: PGLiteEngine;
 let repoPath: string;
 // runSync records the monthly backup check under GBRAIN_HOME; a file-local home keeps that
 // (and every other state file sync writes) out of the shared per-run test home.
 let home: string;
-let priorHome: string | undefined;
 
 async function pageCountBySource(): Promise<Record<string, number>> {
   const rows = await engine.executeRaw<{ source_id: string; n: number }>(
@@ -40,9 +40,7 @@ async function pageCountBySource(): Promise<Record<string, number>> {
 
 describe('#1434 — runSync auto-routes to sole_non_default source', () => {
   beforeAll(async () => {
-    priorHome = process.env.GBRAIN_HOME;
     home = mkdtempSync(join(tmpdir(), 'gbrain-snd-home-'));
-    process.env.GBRAIN_HOME = home;
     engine = new PGLiteEngine();
     await engine.connect({});
     await engine.initSchema();
@@ -50,7 +48,6 @@ describe('#1434 — runSync auto-routes to sole_non_default source', () => {
 
   afterAll(async () => {
     if (engine) await engine.disconnect();
-    if (priorHome === undefined) delete process.env.GBRAIN_HOME; else process.env.GBRAIN_HOME = priorHome;
     rmSync(home, { recursive: true, force: true });
   }, 60_000);
 
@@ -76,7 +73,7 @@ describe('#1434 — runSync auto-routes to sole_non_default source', () => {
     if (repoPath) rmSync(repoPath, { recursive: true, force: true });
   });
 
-  test('sole non-default source: performSync without --source routes there', async () => {
+  test('sole non-default source: performSync without --source routes there', () => withEnv({ GBRAIN_HOME: home }, async () => {
     // local_path is required for tier 5.5 to fire — point at the synthetic
     // git repo so resolveSourceWithTier sees one non-default source with
     // a local_path AND falls through brain_default (unset).
@@ -133,9 +130,9 @@ describe('#1434 — runSync auto-routes to sole_non_default source', () => {
     const stderrText = captured.join('');
     expect(stderrText).toContain("routing to source 'studiovault'");
     expect(stderrText).toContain('sole non-default source registered');
-  }, 60_000);
+  }), 60_000);
 
-  test('explicit --source overrides auto-routing (no nudge)', async () => {
+  test('explicit --source overrides auto-routing (no nudge)', () => withEnv({ GBRAIN_HOME: home }, async () => {
     await runSources(engine, ['add', 'studiovault', '--path', repoPath, '--no-federated']);
     const { runSync } = await import('../src/commands/sync.ts');
 
@@ -171,9 +168,9 @@ describe('#1434 — runSync auto-routes to sole_non_default source', () => {
     // Pages went to 'default' as requested.
     const counts = await pageCountBySource();
     expect(counts['default']).toBeGreaterThan(0);
-  }, 60_000);
+  }), 60_000);
 
-  test('2+ non-default sources: no auto-route, no nudge, falls through to default', async () => {
+  test('2+ non-default sources: no auto-route, no nudge, falls through to default', () => withEnv({ GBRAIN_HOME: home }, async () => {
     // Both need local_path to be counted by the sole_non_default helper.
     // Pre-existing helper filters local_path IS NOT NULL.
     // secondRepo is a bare temp dir (no git init) — its content is
@@ -237,5 +234,5 @@ describe('#1434 — runSync auto-routes to sole_non_default source', () => {
     expect(counts['default'] ?? 0).toBeGreaterThan(0);
     expect(counts['studiovault'] ?? 0).toBe(0);
     expect(counts['second-vault'] ?? 0).toBe(0);
-  }, 60_000);
+  }), 60_000);
 });
