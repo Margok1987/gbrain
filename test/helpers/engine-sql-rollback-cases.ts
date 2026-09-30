@@ -100,6 +100,20 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return Number(rows[0]?.n ?? 0);
     },
   },
+  {
+    domain: 'sources',
+    async seed(engine) {
+      expect(await engine.updateSourceConfig('default', { engine_sql_rollback_probe: 'seeded' })).toBe(true);
+    },
+    async write(tx) {
+      expect(await tx.updateSourceConfig('default', { engine_sql_rollback_probe: 'rolled-back' })).toBe(true);
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ v: string | null }>(
+        `SELECT config->>'engine_sql_rollback_probe' AS v FROM sources WHERE id = 'default'`);
+      return rows[0]?.v ?? null;
+    },
+  },
 ];
 
 async function rollbackChunk(engine: BrainEngine): Promise<number> {

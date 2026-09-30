@@ -78,7 +78,6 @@ import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defa
 import { readStoredEmbeddingIdentity } from './stored-embedding-identity.ts';
 import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP, TRAVERSE_WALK_ROW_CAP } from './engine-constants.ts';
 import { PageMissingError } from './engine-errors.ts';
-import { SOURCE_CONFIG_OBJECT_SQL } from './source-config-sql.ts';
 import { SAFE_FENCE_CHUNKER_VERSION, bodyWriteChunkVersion, chunkWriteInvalidation, currentTextProjectionFilter, requiresSafeChunks, safeChunksFilter } from './search/safe-chunks.ts';
 import { acquireLock, releaseLock, type LockHandle } from './pglite-lock.ts';
 // Engine-live path (#3596): static import, never a lazy `import()` in the
@@ -140,6 +139,7 @@ import { scopedRead, unscopedExecutor } from './engine-sql/brands.ts';
 import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import { getEdgesByChunk as getEdgesByChunkPglite, type PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
+import * as sourcesImpl from './engine-sql/sources.ts';
 import { searchKeywordCJK } from './engine-sql/cjk-search.ts';
 import { applyForwardReferenceBootstrap, pgliteBootstrapTarget } from './engine-sql/bootstrap.ts';
 
@@ -1596,52 +1596,13 @@ export class PGLiteEngine implements BrainEngine {
     }));
   }
 
-  async listAllSources(opts?: {
-    includeArchived?: boolean;
-    localPathOnly?: boolean;
-  }): Promise<SourceRow[]> {
-    // v0.38: parity with postgres-engine.listAllSources. Defaults match
-    // sources-ops.listSources (archived rows filtered out by default).
-    // localPathOnly skips pure-DB sources so autopilot fan-out doesn't
-    // dispatch jobs that would fall back to the global sync.repo_path.
-    const includeArchived = opts?.includeArchived === true;
-    const localPathOnly = opts?.localPathOnly === true;
-    const { rows } = await this.db.query<{
-      id: string;
-      name: string | null;
-      local_path: string | null;
-      last_sync_at: string | null;
-      config: unknown;
-    }>(
-      `SELECT id, name, local_path, last_sync_at, config
-         FROM sources
-        WHERE ($1::boolean OR archived IS NOT TRUE)
-          AND ($2::boolean OR local_path IS NOT NULL)
-        ORDER BY (id = 'default') DESC, id`,
-      [includeArchived, !localPathOnly],
-    );
-    return rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      local_path: r.local_path,
-      last_sync_at: r.last_sync_at ? new Date(r.last_sync_at) : null,
-      config: typeof r.config === 'string'
-        ? JSON.parse(r.config) as Record<string, unknown>
-        : ((r.config as Record<string, unknown> | null) ?? {}),
-    }));
+  // Sources SQL lives once in ./engine-sql/sources.ts (refactor wave 1, W1-extended).
+  async listAllSources(opts?: { includeArchived?: boolean; localPathOnly?: boolean }): Promise<SourceRow[]> {
+    return sourcesImpl.listAllSources(unscopedExecutor(this.engineSql, 'sources: unscoped on master (EO4 inventory)'), opts);
   }
 
   async updateSourceConfig(sourceId: string, patch: Record<string, unknown>): Promise<boolean> {
-    // Parity with postgres-engine.updateSourceConfig: normalize historical
-    // string/array shapes atomically before the JSONB patch merge.
-    const result = await this.db.query<{ id: string }>(
-      `UPDATE sources
-          SET config = ${SOURCE_CONFIG_OBJECT_SQL} || $1::jsonb
-        WHERE id = $2
-        RETURNING id`,
-      [JSON.stringify(patch), sourceId],
-    );
-    return result.rows.length > 0;
+    return sourcesImpl.updateSourceConfig(this.engineSql, sourceId, patch);
   }
 
   // v0.37.0 — domain-bank engine methods (D14 + D5 + D10).

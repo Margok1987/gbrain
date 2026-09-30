@@ -109,7 +109,6 @@ import { DEFAULT_EMBEDDING_MODEL, DEFAULT_EMBEDDING_DIMENSIONS } from './ai/defa
 import { readStoredEmbeddingIdentity } from './stored-embedding-identity.ts';
 import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP, TRAVERSE_WALK_ROW_CAP } from './engine-constants.ts';
 import { PageMissingError } from './engine-errors.ts';
-import { SOURCE_CONFIG_OBJECT_SQL } from './source-config-sql.ts';
 import { shouldExcludeFromOrphanReporting, loadOrphanPolicyOverrides } from './orphan-policy.ts';
 import { LINK_EXTRACTOR_VERSION_TS } from './link-extraction.ts';
 import { EMBED_SKIP_FILTER_FRAGMENT } from './embed-skip.ts';
@@ -120,6 +119,7 @@ import * as factsImpl from './engine-sql/facts.ts';
 import * as takesImpl from './engine-sql/takes.ts';
 import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
+import * as sourcesImpl from './engine-sql/sources.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './engine-sql/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
@@ -1145,75 +1145,13 @@ export class PostgresEngine implements BrainEngine {
     }));
   }
 
-  async listAllSources(opts?: {
-    includeArchived?: boolean;
-    localPathOnly?: boolean;
-  }): Promise<SourceRow[]> {
-    // v0.38: lean per-source enumeration for autopilot dispatch + doctor.
-    // Filters at SQL so the autopilot tick stays one query regardless of
-    // how many archived rows exist. ORDER BY (id='default') DESC, id
-    // matches sources-ops.listSources for operator-output stability.
-    const sql = this.sql;
-    const includeArchived = opts?.includeArchived === true;
-    const localPathOnly = opts?.localPathOnly === true;
-    const rows = await sql`
-      SELECT id, name, local_path, last_sync_at, config
-        FROM sources
-       WHERE (${includeArchived} OR archived IS NOT TRUE)
-         AND (${!localPathOnly} OR local_path IS NOT NULL)
-       ORDER BY (id = 'default') DESC, id
-    `;
-    return rows.map((r) => ({
-      id: r.id as string,
-      name: (r.name as string | null) ?? null,
-      local_path: (r.local_path as string | null) ?? null,
-      last_sync_at: r.last_sync_at ? new Date(r.last_sync_at as string) : null,
-      config: typeof r.config === 'string' ? JSON.parse(r.config) : ((r.config as Record<string, unknown> | null) ?? {}),
-    }));
+  // Sources SQL lives once in ./engine-sql/sources.ts (refactor wave 1, W1-extended).
+  async listAllSources(opts?: { includeArchived?: boolean; localPathOnly?: boolean }): Promise<SourceRow[]> {
+    return sourcesImpl.listAllSources(unscopedExecutor(this.engineSql, 'sources: unscoped on master (EO4 inventory)'), opts);
   }
 
   async updateSourceConfig(sourceId: string, patch: Record<string, unknown>): Promise<boolean> {
-    // Atomic single-statement merge. The previous read-then-write form dropped
-    // concurrent updates: two callers patching different keys could both read
-    // the same old config and the later `SET config = ...` clobbered the
-    // earlier patch. These keys are written by background cycle/autopilot
-    // paths, so the merge must happen inside the UPDATE (parity with
-    // pglite-engine.updateSourceConfig, which already uses JSONB `||`).
-    //
-    // The shared SQL coercion normalizes historical bad shapes inline (so
-    // `config` is re-read against the row-locked latest version — a detached
-    // read/normalize/write cycle would reintroduce the lost-update race under
-    // READ COMMITTED): older code paths
-    // could store config as a JSONB string (double-encoded) or as a JSONB array
-    // of patch objects. We coerce those to a flat object before the `||` merge
-    // so doctor and source routing keep getting flat keys.
-    //
-    // String branch guard: a JSONB string whose inner text is NOT itself valid
-    // JSON (one of the historical bad shapes this path repairs) would make the
-    // bare `::jsonb` cast raise `invalid input syntax for type json`, failing
-    // the whole UPDATE. Postgres has no `try_cast`, so we gate the cast with
-    // the SQL `IS JSON` predicate (Postgres 16+): parseable inner text is
-    // double-encoded config and gets parsed; unparseable text falls back to `{}`.
-    // The guard keeps the merge a single atomic statement (no extra round-trip,
-    // no lost-update race).
-    //
-    // MUST use sql.json(patch) inside the template tag — postgres-js's
-    // positional executeRaw + `$1::jsonb` cast DOUBLE-ENCODES the
-    // JSON.stringify'd string, producing a JSONB STRING shape instead
-    // of OBJECT. `||` between JSONB object + JSONB string yields a
-    // JSONB ARRAY (concat semantics for non-matching types), which
-    // wipes every existing config key. sql.json(...) inside the
-    // template tag is the canonical safe path — same pattern as
-    // putPage + submitJob elsewhere in this file. Empirically verified
-    // produces jsonb_typeof = 'object'.
-    const sql = this.sql;
-    const result = await sql`
-      UPDATE sources
-         SET config = ${sql.unsafe(SOURCE_CONFIG_OBJECT_SQL)}
-           || ${sql.json(patch as Parameters<typeof sql.json>[0])}
-       WHERE id = ${sourceId}
-    `;
-    return (result.count ?? 0) > 0;
+    return sourcesImpl.updateSourceConfig(this.engineSql, sourceId, patch);
   }
 
   // v0.37.0 — domain-bank engine methods (D14 + D5 + D10).

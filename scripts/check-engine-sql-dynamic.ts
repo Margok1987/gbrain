@@ -43,6 +43,7 @@ const EXEMPT_FILES: Record<string, string> = {
 
 const CONSTANT_ALLOWLIST: Record<string, string> = {
   ENRICH_ORDER_SQL: 'src/core/types.ts: ORDER BY text keyed by the EnrichCandidatesOpts order union (whitelisted enum)',
+  SOURCE_CONFIG_OBJECT_SQL: 'src/core/source-config-sql.ts: static sources.config coercion expression (no input)',
 };
 
 const VETTED_BUILDERS: Record<string, string> = {

@@ -12,6 +12,7 @@ migrated	cjk-search
 migrated	code-edges
 migrated	facts
 migrated	salience
+migrated	sources
 migrated	takes
 method	src/core/pglite-engine.ts	PGLiteEngine._addLinksBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._addTimelineEntriesBatchOnce
@@ -61,7 +62,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.getVersions
 method	src/core/pglite-engine.ts	PGLiteEngine.invalidateContentDriftEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.invalidateStaleSignatureEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.listAllPageRefs
-method	src/core/pglite-engine.ts	PGLiteEngine.listAllSources
 method	src/core/pglite-engine.ts	PGLiteEngine.listChunklessPagesWithContent
 method	src/core/pglite-engine.ts	PGLiteEngine.listConfigKeys
 method	src/core/pglite-engine.ts	PGLiteEngine.listCorpusSample
@@ -107,7 +107,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.traversePathsDetailed
 method	src/core/pglite-engine.ts	PGLiteEngine.unsetConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.updatePageContextualRetrievalState
 method	src/core/pglite-engine.ts	PGLiteEngine.updateSlug
-method	src/core/pglite-engine.ts	PGLiteEngine.updateSourceConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.upsertEventProjection
 method	src/core/pglite-engine.ts	PGLiteEngine.upsertFile
 method	src/core/pglite-engine.ts	probePgliteScratchStore
@@ -162,7 +161,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.initSchema
 method	src/core/postgres-engine.ts	PostgresEngine.invalidateContentDriftEmbeddings
 method	src/core/postgres-engine.ts	PostgresEngine.invalidateStaleSignatureEmbeddings
 method	src/core/postgres-engine.ts	PostgresEngine.listAllPageRefs
-method	src/core/postgres-engine.ts	PostgresEngine.listAllSources
 method	src/core/postgres-engine.ts	PostgresEngine.listChunklessPagesWithContent
 method	src/core/postgres-engine.ts	PostgresEngine.listConfigKeys
 method	src/core/postgres-engine.ts	PostgresEngine.listCorpusSample
@@ -208,7 +206,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.traversePathsDetailed
 method	src/core/postgres-engine.ts	PostgresEngine.unsetConfig
 method	src/core/postgres-engine.ts	PostgresEngine.updatePageContextualRetrievalState
 method	src/core/postgres-engine.ts	PostgresEngine.updateSlug
-method	src/core/postgres-engine.ts	PostgresEngine.updateSourceConfig
 method	src/core/postgres-engine.ts	PostgresEngine.upsertEventProjection
 method	src/core/postgres-engine.ts	PostgresEngine.upsertFile
 method	src/core/postgres-engine.ts	PostgresEngine.withScopedReadTransaction
