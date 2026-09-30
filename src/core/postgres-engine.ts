@@ -121,6 +121,7 @@ import * as takesImpl from './engine-sql/takes.ts';
 import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
 import * as pagesImpl from './engine-sql/pages.ts';
+import * as tagsImpl from './engine-sql/tags.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './engine-sql/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
@@ -3196,24 +3197,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getTags(slug: string, opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; liveOnly?: boolean }): Promise<string[]> {
-    const sql = this.sql;
-    // #2200: federated grant (sourceIds[]) wins over scalar sourceId. Use
-    // `page_id IN (subquery)` — NOT `= (subquery)` — because a federated read of
-    // a slug present in >1 allowed source resolves multiple page-ids, which would
-    // throw under the scalar-subquery form. DISTINCT unions tags across the
-    // matched pages. Scalar/unscoped path keeps the legacy `?? 'default'` default.
-    const scope =
-      opts?.sourceIds && opts.sourceIds.length > 0
-        ? sql`source_id = ANY(${opts.sourceIds}::text[])`
-        : sql`source_id = ${opts?.sourceId ?? 'default'}`;
-    const privacy = opts?.excludePrivate ? sql.unsafe(`AND ${privatePagesFilterFragment('pages')}`) : sql``;
-    const live = opts?.liveOnly ? sql`AND deleted_at IS NULL` : sql``;
-    const rows = await sql`
-      SELECT DISTINCT tag FROM tags
-      WHERE page_id IN (SELECT id FROM pages WHERE slug = ${slug} AND ${scope} ${privacy} ${live})
-      ORDER BY tag
-    `;
-    return rows.map((r) => r.tag as string);
+    return tagsImpl.getTags(unscopedExecutor(this.engineSql, 'tags: unscoped on master (EO4 inventory)'), slug, opts);
   }
 
   // Timeline

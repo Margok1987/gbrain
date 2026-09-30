@@ -141,6 +141,7 @@ import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import { getEdgesByChunk as getEdgesByChunkPglite, type PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
 import * as pagesImpl from './engine-sql/pages.ts';
+import * as tagsImpl from './engine-sql/tags.ts';
 import { searchKeywordCJK } from './engine-sql/cjk-search.ts';
 import { applyForwardReferenceBootstrap, pgliteBootstrapTarget } from './engine-sql/bootstrap.ts';
 
@@ -3395,23 +3396,7 @@ export class PGLiteEngine implements BrainEngine {
   }
 
   async getTags(slug: string, opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; liveOnly?: boolean }): Promise<string[]> {
-    // #2200: federated grant (sourceIds[]) wins over scalar. `page_id IN (..)`
-    // (not `= (..)`) so a slug present in >1 allowed source doesn't blow up;
-    // DISTINCT unions tags across the matched pages. Scalar/unscoped keeps the
-    // legacy `?? 'default'` default. Source-qualify; slugs are unique per source.
-    const scope =
-      opts?.sourceIds && opts.sourceIds.length > 0
-        ? { sql: 'source_id = ANY($2::text[])', param: opts.sourceIds }
-        : { sql: 'source_id = $2', param: opts?.sourceId ?? 'default' };
-    const privacy = opts?.excludePrivate ? `AND ${privatePagesFilterFragment('pages')}` : '';
-    const live = opts?.liveOnly ? 'AND deleted_at IS NULL' : '';
-    const { rows } = await this.db.query(
-      `SELECT DISTINCT tag FROM tags
-       WHERE page_id IN (SELECT id FROM pages WHERE slug = $1 AND ${scope.sql} ${privacy} ${live})
-       ORDER BY tag`,
-      [slug, scope.param]
-    );
-    return (rows as { tag: string }[]).map(r => r.tag);
+    return tagsImpl.getTags(unscopedExecutor(this.engineSql, 'tags: unscoped on master (EO4 inventory)'), slug, opts);
   }
 
   // Timeline

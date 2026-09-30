@@ -116,6 +116,19 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return rows[0] ? { body: rows[0].body, deleted: rows[0].deleted } : null;
     },
   },
+  {
+    domain: 'tags',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.addTag(SLUG, 'seeded-tag');
+    },
+    async write(tx) {
+      await tx.addTag(SLUG, 'rolled-back-tag');
+    },
+    async observe(engine) {
+      return engine.getTags(SLUG, { sourceId: 'default' });
+    },
+  },
 ];
 
 async function rollbackChunk(engine: BrainEngine): Promise<number> {

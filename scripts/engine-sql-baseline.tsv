@@ -12,6 +12,7 @@ migrated	cjk-search
 migrated	code-edges
 migrated	facts
 migrated	pages
+migrated	tags
 migrated	salience
 migrated	takes
 method	src/core/pglite-engine.ts	PGLiteEngine._addLinksBatchOnce
@@ -46,7 +47,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.getOntology
 method	src/core/pglite-engine.ts	PGLiteEngine.getRawData
 method	src/core/pglite-engine.ts	PGLiteEngine.getSince
 method	src/core/pglite-engine.ts	PGLiteEngine.getStats
-method	src/core/pglite-engine.ts	PGLiteEngine.getTags
 method	src/core/pglite-engine.ts	PGLiteEngine.getTimeline
 method	src/core/pglite-engine.ts	PGLiteEngine.getTimelineForDate
 method	src/core/pglite-engine.ts	PGLiteEngine.invalidateContentDriftEmbeddings
@@ -118,7 +118,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.getOntology
 method	src/core/postgres-engine.ts	PostgresEngine.getRawData
 method	src/core/postgres-engine.ts	PostgresEngine.getSince
 method	src/core/postgres-engine.ts	PostgresEngine.getStats
-method	src/core/postgres-engine.ts	PostgresEngine.getTags
 method	src/core/postgres-engine.ts	PostgresEngine.getTimeline
 method	src/core/postgres-engine.ts	PostgresEngine.getTimelineForDate
 method	src/core/postgres-engine.ts	PostgresEngine.initSchema
