@@ -6,8 +6,6 @@
 # fewer. Raising a row or adding one needs an issue/TODO id in the justification.
 # docs/TESTING.md#function-size-ratchet
 path	name	lines	justification
-src/cli.ts	handleCliOnly	1520	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/cli.ts	main	415	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/apply-migrations.ts	runApplyMigrations	305	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/autopilot.ts	runAutopilot	1116	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/bootstrap.ts	runHooks	597	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)

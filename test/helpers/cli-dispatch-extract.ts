@@ -1,28 +1,54 @@
 /**
  * Refactor wave 1 (W0, A16b / EO5 / EO13): static extraction of the CLI
- * dispatch contract from `src/cli.ts` with the TypeScript compiler API.
+ * dispatch contract with the TypeScript compiler API.
  *
- * The dispatcher is a hand-written `main()` plus a `handleCliOnly()` whose
- * pre-connect `if (command === ...)` branches run engine-free and whose
- * `switch (command)` runs after the `connectEngine()` terminator. W4 replaces
- * both with a command table; this module records master's shape so that
- * table can be proven equal:
+ * On master the dispatcher was a hand-written `main()` plus a
+ * `handleCliOnly()` whose pre-connect `if (command === ...)` branches ran
+ * engine-free and whose `switch (command)` ran after the `connectEngine()`
+ * terminator. W4 (cli) replaced the plain branches and the switch with the
+ * command table (src/cli/command-table.ts + src/cli/commands/*.ts) and split
+ * the remaining explicit branches into `@cliPipelineStage` functions. This
+ * module reads that shape and reports it in master's vocabulary, so the W0
+ * goldens stay byte-identical:
  *
  *   - membership sets (CLI_ONLY, CLI_ONLY_SELF_HELP, SELF_HELP_WITHOUT_ENGINE,
  *     THIN_CLIENT_REFUSED_COMMANDS, THIN_CLIENT_REFUSE_HINTS,
- *     STARTUP_HOOK_SKIP_COMMANDS), sorted, because they are sets;
+ *     STARTUP_HOOK_SKIP_COMMANDS), sorted, because they are sets; the table
+ *     derives them, so they are read from the runtime table exports;
  *   - per-command dispatch phase (pre-connect / pre-connect-own-engine /
- *     post-connect / unhandled) relative to the connectEngine terminator;
+ *     post-connect / unhandled) relative to the connectEngine terminator. The
+ *     pipeline is flattened with every stage inlined (scripts/lib/cli-pipeline.ts);
+ *     the pre-connect table step contributes, at its position, the rule a
+ *     plain `command === 'x'` branch contributed on master (condition
+ *     `command === 'x'`, terminating, flags read from the module's run()),
+ *     for each pre-connect record no earlier explicit branch already decided;
  *   - per-command thin-client mode (none / refuse / route-then-refuse) and
  *     every explicit subcommand routing rule, as whitespace-collapsed source
  *     text of the branch condition, in dispatch order;
- *   - per switch case, the dynamic `import()` specifiers (EO13 baseline).
+ *   - per post-connect record (master's switch cases, in table order), the
+ *     dynamic `import()` specifiers of its module's run(), rewritten relative to
+ *     src/ as the case bodies wrote them (EO13 baseline).
  *
- * Pure: reads source text, no engine, no env, no network.
+ * Pure: reads source text and the side-effect-free command table; no engine,
+ * no env, no network.
  */
-import { readFileSync } from 'fs';
-import { join, resolve } from 'path';
+import { readdirSync, readFileSync, statSync } from 'fs';
+import { dirname, join, relative, resolve } from 'path';
 import ts from 'typescript';
+import {
+  CLI_COMMANDS,
+  CLI_ONLY as TABLE_CLI_ONLY,
+  CLI_ONLY_SELF_HELP as TABLE_SELF_HELP,
+  STARTUP_HOOK_SKIP_COMMANDS as TABLE_STARTUP_HOOK_SKIP,
+  THIN_CLIENT_REFUSED_COMMANDS as TABLE_REFUSED,
+} from '../../src/cli/command-table.ts';
+import {
+  PRE_CONNECT_TABLE_STEP,
+  flattenCliPipeline,
+  isTableStep,
+  readCommandModule,
+  readTableRecords,
+} from '../../scripts/lib/cli-pipeline.ts';
 
 const REPO_ROOT = resolve(import.meta.dir, '..', '..');
 
@@ -273,15 +299,49 @@ export interface CliDispatchShape {
   computedImports: string[];
 }
 
+/** Every .ts file of the CLI dispatch surface: src/cli.ts plus src/cli/** (sorted). */
+function cliSurfaceFiles(): string[] {
+  const out = ['src/cli.ts'];
+  const walkDir = (rel: string): void => {
+    for (const entry of readdirSync(join(REPO_ROOT, rel)).sort()) {
+      const child = `${rel}/${entry}`;
+      if (statSync(join(REPO_ROOT, child)).isDirectory()) walkDir(child);
+      else if (entry.endsWith('.ts')) out.push(child);
+    }
+  };
+  walkDir('src/cli');
+  return out;
+}
+
+/** A module's `import()` specifier rewritten relative to src/, the way master's case bodies spelled it. */
+function srcRelativeSpecifier(modulePath: string, specifier: string): string {
+  if (!specifier.startsWith('.')) return specifier;
+  const abs = resolve(REPO_ROOT, dirname(modulePath), specifier);
+  return `./${relative(join(REPO_ROOT, 'src'), abs).replace(/\\/g, '/')}`;
+}
+
+/** The rule master's plain `if (command === 'x') { ...; return; }` branch contributed, rebuilt from the module. */
+function tableRule(name: string, run: ts.FunctionDeclaration): BranchRule {
+  return {
+    unconditionalFor: [name],
+    condition: `command === '${name}'`,
+    terminates: true,
+    connectsEngine: containsCall(run.body!, 'connectEngine'),
+    thinClientCheck: containsCall(run.body!, 'isThinClient'),
+    refusesThinClient: containsCall(run.body!, 'refuseThinClient'),
+    routesThinClient: containsCall(run.body!, 'routeThinClientCommand'),
+  };
+}
+
 export function extractCliDispatch(): CliDispatchShape {
   const sf = parseTs('src/cli.ts');
-  const cliOnly = setLiteral(sf, 'CLI_ONLY');
-  const refused = setLiteral(sf, 'THIN_CLIENT_REFUSED_COMMANDS');
+  const cliOnly = [...TABLE_CLI_ONLY];
+  const refused = [...TABLE_REFUSED];
   const setsByName: Record<string, string[]> = {
     CLI_ONLY: cliOnly,
-    CLI_ONLY_SELF_HELP: setLiteral(sf, 'CLI_ONLY_SELF_HELP'),
+    CLI_ONLY_SELF_HELP: [...TABLE_SELF_HELP],
     THIN_CLIENT_REFUSED_COMMANDS: refused,
-    STARTUP_HOOK_SKIP_COMMANDS: setLiteral(sf, 'STARTUP_HOOK_SKIP_COMMANDS'),
+    STARTUP_HOOK_SKIP_COMMANDS: [...TABLE_STARTUP_HOOK_SKIP],
   };
   const sorted = (xs: string[]) => [...xs].sort();
 
@@ -303,25 +363,21 @@ export function extractCliDispatch(): CliDispatchShape {
     });
   }
 
-  const handle = findFunction(sf, 'handleCliOnly');
-  const body = handle.body!.statements;
+  const body = flattenCliPipeline(sf).statements;
   const terminatorIdx = body.findIndex(isConnectTerminator);
-  if (terminatorIdx < 0) throw new Error('cli-dispatch-extract: connectEngine terminator not found in handleCliOnly');
+  if (terminatorIdx < 0) throw new Error('cli-dispatch-extract: connectEngine terminator not found in the handleCliOnly pipeline');
   const pre = body.slice(0, terminatorIdx);
-  const post = body.slice(terminatorIdx);
 
+  const astRecords = readTableRecords(REPO_ROOT);
+  const modules = new Map(astRecords.map((r) => [r.name, r.loadSpecifier ? readCommandModule(REPO_ROOT, r.loadSpecifier) : null] as const));
   const switchCases: string[] = [];
   const switchCaseImports: Record<string, string[]> = {};
-  for (const st of post) {
-    walk(st, (n) => {
-      if (ts.isSwitchStatement(n) && isCommandIdent(n.expression)) {
-        for (const clause of n.caseBlock.clauses) {
-          if (!ts.isCaseClause(clause) || !ts.isStringLiteral(clause.expression)) continue;
-          switchCases.push(clause.expression.text);
-          switchCaseImports[clause.expression.text] = importSpecifiers(clause).literal;
-        }
-      }
-    });
+  for (const record of CLI_COMMANDS) {
+    if (record.phase !== 'post-connect') continue;
+    const mod = modules.get(record.name);
+    if (!mod) throw new Error(`cli-dispatch-extract: post-connect record ${record.name} has no src/cli/commands module`);
+    switchCases.push(record.name);
+    switchCaseImports[record.name] = importSpecifiers(mod.run).literal.map((spec) => srcRelativeSpecifier(mod.path, spec));
   }
 
   const routes = thinClientRoutes();
@@ -333,19 +389,30 @@ export function extractCliDispatch(): CliDispatchShape {
   const guardExtras = commandsIn(firstIf.expression, {});
 
   const commandAgnosticConnectBranches: string[] = [];
-  const rulesByCommand = new Map<string, Array<{ st: ts.IfStatement; r: BranchRule }>>();
+  const rulesByCommand = new Map<string, Array<{ st: ts.IfStatement | null; r: BranchRule }>>();
+  const addRule = (c: string, entry: { st: ts.IfStatement | null; r: BranchRule }) => {
+    const list = rulesByCommand.get(c) ?? [];
+    list.push(entry);
+    rulesByCommand.set(c, list);
+  };
+  const decided = (c: string) => (rulesByCommand.get(c) ?? []).some(({ r }) => r.unconditionalFor.includes(c) && r.terminates);
   for (const st of pre) {
+    if (isTableStep(st, PRE_CONNECT_TABLE_STEP)) {
+      for (const record of CLI_COMMANDS) {
+        if (record.phase === 'post-connect' || record.dispatchedBy || decided(record.name)) continue;
+        const mod = modules.get(record.name);
+        if (!mod) throw new Error(`cli-dispatch-extract: pre-connect record ${record.name} has no src/cli/commands module`);
+        addRule(record.name, { st: null, r: tableRule(record.name, mod.run) });
+      }
+      continue;
+    }
     if (!ts.isIfStatement(st) || st === firstIf) continue;
     const cmds = commandsIn(st.expression, setsByName);
     if (cmds.length === 0) {
       if (containsCall(st.thenStatement, 'connectEngine')) commandAgnosticConnectBranches.push(collapse(st.expression.getText()));
       continue;
     }
-    for (const c of cmds) {
-      const list = rulesByCommand.get(c) ?? [];
-      list.push({ st, r: rule(st) });
-      rulesByCommand.set(c, list);
-    }
+    for (const c of cmds) addRule(c, { st, r: rule(st) });
   }
 
   const commands: Record<string, CommandDispatch> = {};
@@ -364,7 +431,7 @@ export function extractCliDispatch(): CliDispatchShape {
       thinClient = routed.length > 0 ? 'route-then-refuse' : 'refuse';
     } else if (rules.some(({ r }) => r.refusesThinClient)) {
       const refusing = rules.filter(({ r }) => r.refusesThinClient);
-      routed = [...new Set([...refusing.flatMap(({ st }) => thinClientBranchSubcommands(st)), ...(routes[c] ?? [])])];
+      routed = [...new Set([...refusing.flatMap(({ st }) => (st ? thinClientBranchSubcommands(st) : [])), ...(routes[c] ?? [])])];
       thinClient = routed.length > 0 ? 'route-then-refuse' : 'refuse';
     }
     commands[c] = {
@@ -393,6 +460,6 @@ export function extractCliDispatch(): CliDispatchShape {
     commands,
     switchCases,
     switchCaseImports,
-    computedImports: importSpecifiers(sf).computed,
+    computedImports: cliSurfaceFiles().flatMap((rel) => importSpecifiers(parseTs(rel)).computed),
   };
 }
