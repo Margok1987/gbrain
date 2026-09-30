@@ -117,8 +117,11 @@ describe('embed job background parity (D7)', () => {
     expect(surfaceFileSource('jobs', 'src/commands/jobs.ts')).toContain(
       "registerBuiltinJob(worker, engine, 'embed-catch-up', makeEmbedCatchUpHandler(engine))",
     );
+    // The handler must pass the flag INTO runEmbedCore; a span that stops at the
+    // `includeNullSignature?: boolean` type declaration would stay green with the
+    // wiring deleted.
     expect(surfaceFileSource('jobs', 'src/core/minions/handlers/embed-catch-up.ts')).toMatch(
-      /makeEmbedCatchUpHandler[\s\S]{0,900}includeNullSignature/,
+      /makeEmbedCatchUpHandler[\s\S]{0,900}runEmbedCore\(engine, \{[^}]*includeNullSignature: !!data\.includeNullSignature/,
     );
   });
 });
