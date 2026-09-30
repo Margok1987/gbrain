@@ -10,6 +10,44 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.14.0] - 2026-09-30
+
+<!-- Fix wave 4 placeholder: the integrator writes the release headline, the combined table and the remaining lanes. Lane A section below. -->
+
+**Managed syncs stop wedging on big request tables and stop spending a permanent write ID on the same unchanged files every run.**
+
+On a managed brain with a large write history, a sync could process every file and then never commit: the last check (did every page of this run commit?) scanned the whole `persistence_requests` table, ran past the 5-second limit, and was retried forever ahead of every other write to that source. The check now reads three small indexes, and if it still runs out of time it fails once with `checkpoint_validation_timeout` and tells you exactly what to run. Working-tree syncs also stopped re-admitting unchanged legacy files on every run, and a commit-driven sync overtaken by a working-tree sync now finishes instead of refusing forever.
+
+| Managed brain, test fixtures | Before | After |
+| --- | --- | --- |
+| Checkpoint check on a 512k-row request table (Postgres) | sequential scan of the whole table | three index scans |
+| Checkpoint check that runs out of time | retried forever as `database_contention`, blocking the source | fails once as `checkpoint_validation_timeout` with the fix command |
+| Admissions per working-tree run for an unchanged legacy file with no contextual mode, or with non-UTF-8 bytes | 1 every run | 0 |
+| Resume of a commit-driven sync after a working-tree sync imported the same new files | `page_identity_changed` every run | completes |
+
+### To take advantage of v0.60.14.0 (lane A)
+
+1. **Let migration 179 finish.** On Postgres it builds two request indexes `CONCURRENTLY` and prints `building <index> on ~N rows; this can take minutes; it is safe to leave running`. On a request table the size of the #5762 report expect about a minute.
+2. **Check doctor:** `gbrain doctor` shows `persistence_request_indexes` (both indexes valid) and `persistence_request_growth` (request rows, the 7-day admission rate and the date lifetime IDs would run out).
+3. **If a sync printed `checkpoint_validation_timeout`,** run the commands it printed: `gbrain repair request-indexes --apply` when an index is missing or INVALID, then the printed `gbrain sync --source <id> --no-pull --retry-failed …`.
+4. **If a working-tree sync prints `legacy file(s) skipped … no contextual retrieval mode`,** preview and apply `gbrain repair contextual-mode`.
+
+### Itemized changes
+
+#### Request-table growth and sync wedges (#5762, #5751, #5522)
+
+- **#5762: the sync checkpoint check is index-backed.** Two partial indexes, `persistence_requests_sync_run_open` and `persistence_requests_sync_run_committed`, serve the check as three probes that find exactly what the old query found (pinned for complete, incomplete, recovering, cancelled, failed and conflict receipts on PGLite and Postgres). Postgres builds them in migration 179, `CONCURRENTLY`, one at a time, after dropping an INVALID leftover, with a bounded lock wait; the Postgres schema blob never builds them. PGLite and a new request table build them inline. On a 512k-row table every probe is an index scan.
+- **#5762: `checkpoint_validation_timeout`.** Only a statement timeout of this one check becomes the typed, terminal failure; a lock timeout stays transient contention. The hint reads the indexes after the failure and says one of three things (still building: wait; missing or INVALID: `gbrain repair request-indexes --apply`; valid: retry once, then report with doctor output), followed by the filled retry with the run's saved flags. `gbrain write-request <id>` and MCP `get_write_request` rebuild the same hint later. A blocking incomplete receipt is named by its request id.
+- **#5762: `gbrain repair request-indexes`** builds a missing index or rebuilds an INVALID one on a brain whose schema is already current, concurrently on Postgres. It changes no user data, takes no request ID, and runs first under `--all` and doctor remediation.
+- **New doctor checks.** `persistence_request_indexes` (missing, INVALID or still-building indexes, with the rebuild command) and `persistence_request_growth` (rows, 7-day rate, lifetime IDs against `persistence.limits.*`, projected exhaustion; warns under 90 days with the `gbrain config set` value).
+- **#5751: unchanged legacy working-tree files take no admission.** A managed working-tree sync used to admit, every run, an unchanged file whose page was embedded before it had a contextual retrieval mode, or whose bytes are not valid UTF-8, because the no-op publication could never resolve either reason. Those two reasons are now waived for managed working-tree imports only; every other check still runs and every other writer is unchanged. The summary counts the skipped files and names `gbrain repair contextual-mode`.
+- **#5522: an overtaken commit-driven sync finishes.** When a working-tree sync imports a new file that a sliced commit-driven sync already queued, the resume re-freezes that entry against the page when it is live, holds exactly that origin and already has identical content, and its checkpoint commits when the source already sits at the same target. A foreign edit, a soft-deleted page, or a pinned page deleted and recreated still refuses.
+
+#### Behavior changes (lane A)
+
+- Managed working-tree sync skips an unchanged legacy file whose page has no contextual retrieval mode, or whose bytes are not valid UTF-8, without an admission. Opt out by fixing the file: `gbrain repair contextual-mode --apply`, or re-save the file as UTF-8.
+- A checkpoint validation that times out now fails terminally instead of retrying. Rerun the printed retry command after fixing the named index state.
+
 ## [0.60.13.0] - 2026-09-30
 
 **Two things: your agent can now ask search for the whole conversation, section or page around each hit in the same call (off by default until a matched study shows it helps), and seven correctness fixes land, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**
