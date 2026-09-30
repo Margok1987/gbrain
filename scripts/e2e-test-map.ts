@@ -527,7 +527,11 @@ E2E_TEST_MAP["src/core/engine-sql/**"] = [
       "src/core/pglite-engine/**",
     ].flatMap((key) => E2E_TEST_MAP[key] ?? []),
   ),
-  // C9 executor contract: dialect adapters' prepare mode and row normalizer.
+  // Executor contract on both backends: prepare mode, row normalizer,
+  // capabilities, RLS scope brands and per-domain transaction rollback.
   "test/e2e/engine-sql-prepare-parity.test.ts",
   "test/e2e/engine-sql-normalize-parity.test.ts",
+  "test/e2e/engine-sql-capabilities-parity.test.ts",
+  "test/e2e/engine-sql-rls-scope.test.ts",
+  "test/e2e/engine-sql-transaction-parity.test.ts",
 ];
