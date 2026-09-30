@@ -159,7 +159,25 @@ function facadeExpansion(p: string): string[] {
   }
   // Refactor wave 1 subcommand tables for jobs/autopilot (cut-line) land in
   // same-named command dirs; empty until those peels happen.
-  if (rel === 'src/commands/jobs.ts') return collect(join(ROOT, 'src/commands/jobs'));
+  if (rel === 'src/commands/jobs.ts') {
+    // The built-in handler bodies registerBuiltinHandlers used to hold inline
+    // moved to src/core/minions/handlers/ (W4 jobs). Only those modules: the
+    // directory's pre-existing handlers (shell, subagent, ...) were always
+    // ordinary deps, so globbing it would widen jobs' surface.
+    const peeledHandlers = [
+      'autopilot-cycle.ts', 'autopilot-global-maintenance.ts', 'backlinks.ts', 'chronicle-extract.ts',
+      'cycle-phase.ts', 'embed-catch-up.ts', 'embed.ts', 'enrich.ts', 'extract-atoms-drain.ts',
+      'extract-conversation-facts.ts', 'extract-ner.ts', 'extract-takes-from-pages.ts',
+      'extract-timeline-from-meetings.ts', 'extract.ts', 'facts-absorb.ts', 'import.ts',
+      'integrity-auto.ts', 'integrity.ts', 'job-pull.ts', 'lint-fix.ts', 'lint.ts', 'loops-extract.ts',
+      'orphans.ts', 'purge.ts', 'reindex.ts', 'repair-jsonb.ts', 'sync-retry-failed.ts', 'sync.ts',
+      'unify-types.ts',
+    ];
+    return [
+      ...peeledHandlers.map(f => join(ROOT, 'src/core/minions/handlers', f)).filter(p => existsSync(p)),
+      ...collect(join(ROOT, 'src/commands/jobs')),
+    ];
+  }
   if (rel === 'src/commands/autopilot.ts') return collect(join(ROOT, 'src/commands/autopilot'));
   return [];
 }

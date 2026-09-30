@@ -5,11 +5,6 @@ import { authorizeLegacyJobs, parseLegacyJobIds } from '../core/minions/authoriz
  */
 
 import type { BrainEngine } from '../core/engine.ts';
-import type { FactsBackstopResult } from '../core/facts/backstop.ts';
-// Leaf module (no flag surface of its own) — see that file for why this
-// isn't imported from extract-conversation-facts.ts directly (#4135).
-import { ALLOWED_TYPES, type AllowedType } from '../core/facts/conversation-types.ts';
-import { assertEmbedNotStalled } from '../core/embed-stall.ts';
 import { assertEmbedBackfillQueueAdmission } from '../core/minions/embed-backfill-admission.ts';
 import { isProtectedJobName } from '../core/minions/protected-names.ts';
 import { MinionQueue, deriveWedgeSignal } from '../core/minions/queue.ts';
@@ -25,11 +20,43 @@ import { checkWorkerStartup, reportInlineWorkerConfiguration, reportWorkerConfig
 import { withFactsAbsorbHaltCooldown } from '../core/minions/llm-halt-cooldown.ts';
 import { runChildJobEntry, writeChildBootstrapError } from '../core/minions/run-child.ts';
 import type { MinionHandler, MinionJob, MinionJobStatus } from '../core/minions/types.ts';
-import type { PaceKeyOverrides } from '../core/pace-mode.ts';
-import { loadConfig, loadConfigWithEngine, isThinClient } from '../core/config.ts';
+import { loadConfig, isThinClient } from '../core/config.ts';
 import { callRemoteTool, unpackToolResult } from '../core/mcp-client.ts';
 import { parseNiceValue, applyNiceness, getEffectiveNiceness, formatNice } from '../core/minions/niceness.ts';
 import { defaultTimeoutMsFor, defaultLockDurationMsFor, clampLockDurationMs } from '../core/minions/handler-timeouts.ts';
+import { makeAutopilotCycleHandler } from '../core/minions/handlers/autopilot-cycle.ts';
+import { makeAutopilotGlobalMaintenanceHandler } from '../core/minions/handlers/autopilot-global-maintenance.ts';
+import { makeBacklinksHandler } from '../core/minions/handlers/backlinks.ts';
+import { makeChronicleExtractHandler } from '../core/minions/handlers/chronicle-extract.ts';
+import { makeCyclePhaseHandler } from '../core/minions/handlers/cycle-phase.ts';
+import { makeEmbedCatchUpHandler } from '../core/minions/handlers/embed-catch-up.ts';
+import { makeEmbedHandler } from '../core/minions/handlers/embed.ts';
+import { makeEnrichHandler } from '../core/minions/handlers/enrich.ts';
+import { makeExtractAtomsDrainHandler } from '../core/minions/handlers/extract-atoms-drain.ts';
+import { makeExtractConversationFactsHandler } from '../core/minions/handlers/extract-conversation-facts.ts';
+import { makeExtractNerHandler } from '../core/minions/handlers/extract-ner.ts';
+import { makeExtractTakesFromPagesHandler } from '../core/minions/handlers/extract-takes-from-pages.ts';
+import { makeExtractTimelineFromMeetingsHandler } from '../core/minions/handlers/extract-timeline-from-meetings.ts';
+import { makeExtractHandler } from '../core/minions/handlers/extract.ts';
+import { makeFactsAbsorbHandler } from '../core/minions/handlers/facts-absorb.ts';
+import { makeImportHandler } from '../core/minions/handlers/import.ts';
+import { integrityAutoHandler } from '../core/minions/handlers/integrity-auto.ts';
+import { integrityHandler } from '../core/minions/handlers/integrity.ts';
+import { makeLintFixHandler } from '../core/minions/handlers/lint-fix.ts';
+import { makeLintHandler } from '../core/minions/handlers/lint.ts';
+import { makeLoopsExtractHandler } from '../core/minions/handlers/loops-extract.ts';
+import { makeOrphansHandler } from '../core/minions/handlers/orphans.ts';
+import { makePurgeHandler } from '../core/minions/handlers/purge.ts';
+import { makeReindexHandler } from '../core/minions/handlers/reindex.ts';
+import { repairJsonbHandler } from '../core/minions/handlers/repair-jsonb.ts';
+import { makeSyncRetryFailedHandler } from '../core/minions/handlers/sync-retry-failed.ts';
+import { makeSyncHandler } from '../core/minions/handlers/sync.ts';
+import { makeUnifyTypesHandler } from '../core/minions/handlers/unify-types.ts';
+
+
+// Moved to src/core/minions/handlers/ (refactor wave 1); re-exported so importers keep this path.
+export { resolveJobPull } from '../core/minions/handlers/job-pull.ts';
+export { factsAbsorbShouldRetry, factsAbsorbUnavailable } from '../core/minions/handlers/facts-absorb.ts';
 
 function parseFlag(args: string[], flag: string): string | undefined {
   const idx = args.indexOf(flag);
@@ -38,16 +65,6 @@ function parseFlag(args: string[], flag: string): string | undefined {
 
 function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
-}
-
-/**
- * Resolve the canonical positive-polarity pull flag while preserving queued
- * jobs that still carry the legacy inverse `noPull` key.
- */
-export function resolveJobPull(data: Record<string, unknown>): boolean {
-  if (typeof data.pull === 'boolean') return data.pull;
-  if (typeof data.noPull === 'boolean') return !data.noPull;
-  return true;
 }
 
 /**
@@ -72,30 +89,6 @@ export async function refreshGatewayForJob(engine: BrainEngine): Promise<void> {
   const { refreshGatewayEnvFromFilePlane, reconfigureGatewayWithEngine } = await import('../core/ai/gateway.ts');
   refreshGatewayEnvFromFilePlane();
   await reconfigureGatewayWithEngine(engine);
-}
-
-/** Shared predicate: an inline result reporting execution-time unavailability. */
-export function factsAbsorbUnavailable(result: FactsBackstopResult): boolean {
-  return (
-    result.mode === 'inline' &&
-    (result.skipped === 'extraction_unavailable' || result.skipped_reason === 'chat_unavailable')
-  );
-}
-
-/**
- * The facts-absorb retry decision (@internal exported for tests). A job that
- * finds chat unavailable at EXECUTION in a KEYED worker is config drift — it
- * must throw (retry/backoff → visible, re-runnable failure), never return
- * success and silently consume the job. A KEYLESS worker executing a job
- * enqueued by some other process is the steady expected state — completing
- * as a calm skip (the execution-time gate already printed the keyless note)
- * beats a retry loop that parks every page write as a failed job.
- */
-export function factsAbsorbShouldRetry(
-  result: FactsBackstopResult,
-  classification: 'keyed' | 'keyless',
-): boolean {
-  return classification === 'keyed' && factsAbsorbUnavailable(result);
 }
 
 // Job names whose handlers call the LLM gateway: registerBuiltinJob wraps
@@ -2208,492 +2201,21 @@ export async function registerBuiltinHandlers(
   // terminal with "shell handler registered…" lines. The real `jobs work` path
   // omits opts and prints as before.
   const quiet = opts?.quiet === true;
-  worker.register('sync', async (job) => {
-    const { performSync } = await import('./sync.ts');
-    const { explicitSyncProcessing } = await import('../core/persistence/sync-authority.ts');
-    const repoPath = typeof job.data.repoPath === 'string' ? job.data.repoPath : undefined;
-    const noPull = !resolveJobPull(job.data);
-    // noEmbed defaults to true (embed is a separate job — submit `embed --stale`
-    // after sync, OR run via the autopilot cycle which has its own embed phase).
-    // Caller can opt in by passing { noEmbed: false } in job params.
-    const noEmbed = job.data.noEmbed !== false;
-    // v0.22.13 (PR #490 CODEX-1): resolve sourceId from job param OR by looking
-    // up the sources row for repoPath. Mirrors cycle.ts:480 — without this, a
-    // multi-source brain reads the global config.sync.last_commit anchor
-    // instead of sources.last_commit, which on a regularly-GC'd repo can drop
-    // out of git history and trigger 30-min full reimports every cycle.
-    let sourceId: string | undefined =
-      typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-    if (!sourceId && repoPath) {
-      try {
-        const rows = await engine.executeRaw<{ id: string }>(
-          `SELECT id FROM sources WHERE local_path = $1 LIMIT 1`,
-          [repoPath],
-        );
-        sourceId = rows[0]?.id;
-      } catch {
-        // sources table may not exist on very old brains — fall through to
-        // global config.sync.* anchor in performSync.
-      }
-    }
-    // v0.22.13 (PR #490 CODEX-4): route concurrency through the shared
-    // autoConcurrency helper instead of hardcoded 4. PGLite engines stay
-    // serial (forced 1); explicit job param wins; auto path defaults are
-    // applied inside performSync against the resolved file count.
-    const concurrencyOverride = typeof job.data.concurrency === 'number'
-      ? job.data.concurrency
-      : undefined;
-    // v0.36+ codex #5 fix: standalone `sync` handler now passes
-    // noExtract:true so doctor's remediation plan [sync, extract] doesn't
-    // double-extract (performSync inline-extract + standalone extract job).
-    // Pre-fix, runPhaseSync in cycle.ts passed noExtract:true but the
-    // standalone handler dropped it. Callers that want inline extract can
-    // pass { noExtract: false } in job params explicitly.
-    const noExtract = job.data.noExtract !== false;
-    // v0.46: github-kind single-item refresh (webhook path). The payload
-    // carries {repo, number, kind} and sync refreshes exactly that item.
-    const githubItem =
-      job.data.github_item && typeof job.data.github_item === 'object'
-        ? {
-            repo: String((job.data.github_item as Record<string, unknown>).repo),
-            number: Number((job.data.github_item as Record<string, unknown>).number),
-            kind: (job.data.github_item as Record<string, unknown>).kind === 'pr' ? 'pr' as const : 'issue' as const,
-            deleted: (job.data.github_item as Record<string, unknown>).deleted === true,
-          }
-        : undefined;
-    let result;
-    try {
-      result = await performSync(engine, {
-        repoPath, sourceId, noPull, noEmbed, noExtract, signal: job.signal,
-        explicitProcessing: explicitSyncProcessing(job.data),
-        concurrency: concurrencyOverride,
-        ...(githubItem ? { githubItem } : {}),
-      });
-    } catch (err) {
-      // v0.42.x (#1794, Part B): single-flight backpressure. A concurrent
-      // sync (manual run, sibling autopilot tick) holds the per-source lock.
-      // SKIP cleanly — mark the job done, NOT failed — so the holder finishes
-      // without this tick polluting the failed-jobs count + supervisor crash
-      // metrics. The next scheduled tick resumes against the (by then
-      // advanced) anchor.
-      const { SyncLockBusyError } = await import('./sync.ts');
-      if (err instanceof SyncLockBusyError) {
-        console.error(
-          `[sync] skipped: sync already in progress for ${sourceId ?? 'default'} ` +
-          `(lock ${err.lockKey} held).`,
-        );
-        return { skipped: true, reason: 'sync_in_progress', source_id: sourceId ?? 'default' };
-      }
-      throw err;
-    }
+  worker.register('sync', makeSyncHandler(engine));
+  registerBuiltinJob(worker, engine, 'embed', makeEmbedHandler(engine));
+  worker.register('lint', makeLintHandler(engine));
+  registerBuiltinJob(worker, engine, 'extract-conversation-facts', makeExtractConversationFactsHandler(engine));
+  registerBuiltinJob(worker, engine, 'chronicle_extract', makeChronicleExtractHandler(engine));
+  registerBuiltinJob(worker, engine, 'loops_extract', makeLoopsExtractHandler(engine));
+  registerBuiltinJob(worker, engine, 'enrich', makeEnrichHandler(engine));
+  worker.register('lint-fix', makeLintFixHandler(engine));
+  worker.register('integrity-auto', integrityAutoHandler);
+  worker.register('sync-retry-failed', makeSyncRetryFailedHandler(engine));
+  worker.register('import', makeImportHandler(engine));
+  worker.register('extract', makeExtractHandler(engine));
+  worker.register('backlinks', makeBacklinksHandler(engine));
+  registerBuiltinJob(worker, engine, 'facts-absorb', withFactsAbsorbHaltCooldown(makeFactsAbsorbHandler(engine)));
 
-    // A cancelled durable job must not complete or schedule follow-up work,
-    // even when a direct sync interruption has a resumable partial result.
-    if (job.signal?.aborted) throw job.signal.reason ?? new Error('Sync job cancelled');
-
-    // v0.40 D22: auto_embed_backfill defaults TRUE when sourceId is set AND
-    // the feature flag is enabled. Submits a child embed-backfill job
-    // (fire-and-forget — D15.1) so stale chunks get embedded async without
-    // the sync handler waiting on the embed pipeline.
-    const autoEmbed = job.data.auto_embed_backfill !== false;
-    let embedJobId: number | null = null;
-    let embedSkipReason: string | null = null;
-    const { syncProducedEmbeddableContent } = await import('../core/sync-embed-backfill.ts');
-    if (autoEmbed && sourceId && result.status !== 'up_to_date' && result.status !== 'dry_run' && syncProducedEmbeddableContent(result)) {
-      try {
-        const { isFederatedV2Enabled } = await import('../core/feature-flags.ts');
-        if (await isFederatedV2Enabled(engine)) {
-          const { submitEmbedBackfill } = await import('../core/embed-backfill-submit.ts');
-          const submission = await submitEmbedBackfill(engine, sourceId, {
-            reason: typeof job.data.embed_reason === 'string'
-              ? (job.data.embed_reason as string)
-              : 'sync_handler',
-          });
-          if (submission.status === 'submitted') {
-            embedJobId = submission.jobId;
-          } else if (submission.status === 'cooldown' || submission.status === 'spend_capped' || submission.status === 'no_worker_surface') {
-            embedSkipReason = submission.status;
-          } else {
-            submission satisfies never;
-          }
-        } else {
-          embedSkipReason = 'feature_flag_disabled';
-        }
-      } catch (err) {
-        // Embed-backfill submission failure must NOT fail the sync job.
-        embedSkipReason = `submit_error:${err instanceof Error ? err.message : String(err)}`;
-      }
-    } else if (!sourceId) {
-      embedSkipReason = 'no_source_id';
-    } else if (!autoEmbed) {
-      embedSkipReason = 'auto_embed_disabled';
-    } else if (result.status !== 'up_to_date' && result.status !== 'dry_run') {
-      // #4786 x #2139: a sweep-only `synced` run wrote nothing to embed — a backfill here would only arm the cooldown.
-      embedSkipReason = 'no_new_content';
-    }
-
-    return { ...result, embed_job_id: embedJobId, embed_skip_reason: embedSkipReason };
-  });
-
-  registerBuiltinJob(worker, engine, 'embed', async (job) => {
-    const { runEmbedCore } = await import('./embed.ts');
-    // Primary Minion progress channel is job.updateProgress (DB-backed,
-    // readable via `gbrain jobs get <id>`). Stderr from the worker daemon
-    // only emits coarse job-start / job-done lines; per-page detail lives
-    // in the DB. Per Codex review #20.
-    const embedResult = await runEmbedCore(engine, {
-      slug: typeof job.data.slug === 'string' ? job.data.slug : undefined,
-      slugs: Array.isArray(job.data.slugs) ? (job.data.slugs as string[]) : undefined,
-      all: !!job.data.all,
-      stale: job.data.all ? false : (job.data.stale !== false),
-      // `embed --background` serializes dryRun into the payload (embed.ts's
-      // job-args builder). Not reading it back here meant a backgrounded
-      // preview embedded for real: API spend and NULL->vector writes from an
-      // invocation whose whole point was to do neither.
-      dryRun: !!job.data.dryRun,
-      sourceId: typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined,
-      // Background parity (D7): the doc-recommended recovery
-      // `embed --stale --catch-up --include-null-signature --background`
-      // used to silently DEGRADE — the payload dropped these four, so the
-      // job ran as a plain 30-min-budget stale pass with the grandfather
-      // clause intact. Serialize + read them like every other embed knob.
-      catchUp: !!job.data.catchUp,
-      includeNullSignature: !!job.data.includeNullSignature,
-      batchSize: typeof job.data.batchSize === 'number' ? job.data.batchSize : undefined,
-      priority: job.data.priority === 'recent' ? 'recent' : undefined,
-      // CX1+CX5: pace overrides ride in the job payload as explicit overrides
-      // only; runEmbedCore re-resolves env > config > bundle at execution so
-      // GBRAIN_PACE_* still wins during an incident.
-      ...(job.data.pace && typeof job.data.pace === 'object'
-        ? {
-            pace: job.data.pace as { perCallMode?: string; perCall?: PaceKeyOverrides },
-            // Serialized from the queued payload → config tier so GBRAIN_PACE_*
-            // on the worker still wins at execution (Codex P2 escape hatch).
-            paceFromBackground: true,
-          }
-        : {}),
-      onProgress: (done, total, embedded) => {
-        // Fire-and-forget: progress updates are best-effort and must not
-        // block the worker loop.
-        job.updateProgress({ done, total, embedded, phase: 'embed.pages' }).catch(() => {});
-      },
-    });
-    // #4599 (X6): a stall-watchdog abort is an error RESULT from core; the
-    // handler layer converts it to a FAILED JOB (throw) — never process.exit.
-    assertEmbedNotStalled(embedResult);
-    // Report what happened, not a constant. `embedded: true` claimed a dry run
-    // had embedded, which is the same lie in miniature: `gbrain jobs get`
-    // showed it. `embedded` stays the key it always was and stays truthy on a
-    // real run (it is now the count, 0 on a dry run).
-    return {
-      embedded: embedResult.embedded,
-      dry_run: !!embedResult.dryRun,
-      would_embed: embedResult.would_embed,
-      failures: embedResult.failures,
-    };
-  });
-
-  worker.register('lint', async (job) => {
-    const { runLintCore } = await import('./lint.ts');
-    const target = typeof job.data.dir === 'string' ? job.data.dir : '.';
-    // issue #1678: reuse the worker's live engine for lint's content-sanity
-    // DB lift so it doesn't create + disconnect a competing engine.
-    const result = await runLintCore({ target, fix: !!job.data.fix, dryRun: !!job.data.dryRun, engine, signal: job.signal });
-    return result;
-  });
-
-  // v0.41.11.0 — extract-conversation-facts. NOT in PROTECTED_JOB_NAMES
-  // because per-call cost is bounded by `data.max_cost_usd` (default
-  // DEFAULT_MAX_COST_USD = $5) and the handler re-creates the
-  // BudgetTracker inside its own process. BudgetExhausted is caught at
-  // the core level and returned as `result.budget_exhausted: true` (NOT
-  // a job failure) so the user can resume with a higher cap.
-  registerBuiltinJob(worker, engine, 'extract-conversation-facts', async (job) => {
-    const { runExtractConversationFactsCore } = await import('./extract-conversation-facts.ts');
-    const sourceId = typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-    if (!sourceId) {
-      // Multi-source iteration not supported in the Minion-handler path;
-      // the CLI wrapper does multi-source loops. A background submission
-      // SHOULD pin to one source per call (job_id is per-call).
-      throw new Error('extract-conversation-facts Minion job requires data.sourceId');
-    }
-    // ALLOWED_TYPES is the single source of truth for the conversation-facts
-    // type allowlist (see src/core/facts/conversation-types.ts).
-    const types = Array.isArray(job.data.types)
-      ? (job.data.types as string[]).filter(
-          (t): t is AllowedType => (ALLOWED_TYPES as readonly string[]).includes(t),
-        )
-      : undefined;
-    const result = await runExtractConversationFactsCore(engine, {
-      sourceId,
-      types,
-      slug: typeof job.data.slug === 'string' ? job.data.slug : undefined,
-      dryRun: !!job.data.dryRun,
-      limit: typeof job.data.limit === 'number' ? job.data.limit : undefined,
-      sinceIso: typeof job.data.sinceIso === 'string' ? job.data.sinceIso : undefined,
-      force: !!job.data.force,
-      sleepMs: typeof job.data.sleepMs === 'number' ? job.data.sleepMs : undefined,
-      segmentLimit: typeof job.data.segmentLimit === 'number' ? job.data.segmentLimit : undefined,
-      maxCostUsd: typeof job.data.maxCostUsd === 'number' ? job.data.maxCostUsd : undefined,
-      overrideDisabled: !!job.data.overrideDisabled,
-      // v0.41.15.0 (D9): round-trip --workers via job.data.workers so
-      // `gbrain extract-conversation-facts --background --workers 20`
-      // works end-to-end.
-      workers: typeof job.data.workers === 'number' ? job.data.workers : undefined,
-    });
-    return result;
-  });
-
-  // v0.42.x (#2390) — Life Chronicle event extraction. NOT protected (bounded
-  // LLM spend per page; no shell). Enqueued by the put_page chronicle backstop
-  // and by `gbrain chronicle backfill`. Idempotent (content-addressed event
-  // slugs + projection upsert), so a retry re-runs to the same state.
-  // #3387: registered via registerBuiltinJob (gateway-refresh wrap) — the
-  // judge is a gateway chat call, so a stale worker gateway meant silent
-  // no_events for every extraction.
-  registerBuiltinJob(worker, engine, 'chronicle_extract', async (job) => {
-    const slug = typeof job.data.slug === 'string' ? job.data.slug : undefined;
-    if (!slug) throw new Error('chronicle_extract job requires data.slug');
-    const sourceId = typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-    const { runChronicleExtract } = await import('../core/chronicle/extract-events.ts');
-    const { chronicleTz } = await import('../core/chronicle/config.ts');
-    const tz = await chronicleTz(engine);
-    return await runChronicleExtract(engine, {
-      slug,
-      sourceId,
-      tz,
-      signal: (job as { signal?: AbortSignal }).signal,
-    });
-  });
-
-  // Open-loop commitment/decision extraction over google-source email pages
-  // (src/core/google/loops-extract.ts). Enqueued by runGoogleSync on trickle
-  // threads within the recent window, idempotency-keyed per page revision,
-  // capped per sweep. Kill switch: config loops.extraction_enabled.
-  registerBuiltinJob(worker, engine, 'loops_extract', async (job) => {
-    const slug = typeof job.data.slug === 'string' ? job.data.slug : undefined;
-    const sourceId = typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-    if (!slug || !sourceId) throw new Error('loops_extract job requires data.slug and data.sourceId');
-    const threadId = typeof job.data.threadId === 'string' ? job.data.threadId : undefined;
-    const { runLoopsExtract } = await import('../core/google/loops-extract.ts');
-    return await runLoopsExtract(engine, { slug, sourceId, ...(threadId ? { threadId } : {}) });
-  });
-
-  // v0.41.39 (#1700) — enrich. NOT in PROTECTED_JOB_NAMES: per-call cost is
-  // bounded by data.maxCostUsd (default DEFAULT_MAX_COST_USD) and the handler
-  // re-creates the BudgetTracker in its own process. BudgetExhausted is caught
-  // at the core level and returned as result.budget_exhausted (NOT a failure).
-  // Strict per-source: the CLI fans out one job per source when --source is
-  // omitted, so a job ALWAYS carries data.sourceId.
-  registerBuiltinJob(worker, engine, 'enrich', async (job) => {
-    const { runEnrichCore } = await import('./enrich.ts');
-    const sourceId = typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-    if (!sourceId) {
-      throw new Error('enrich Minion job requires data.sourceId (CLI fans out one job per source)');
-    }
-    const types = Array.isArray(job.data.types)
-      ? (job.data.types as string[])
-      : undefined;
-    const order = typeof job.data.order === 'string' ? job.data.order : undefined;
-    const result = await runEnrichCore(engine, {
-      sourceId,
-      types: types as import('../core/types.ts').PageType[] | undefined,
-      order: order as ('inbound-links' | 'salience' | 'updated') | undefined,
-      limit: typeof job.data.limit === 'number' ? job.data.limit : undefined,
-      workers: typeof job.data.workers === 'number' ? job.data.workers : undefined,
-      model: typeof job.data.model === 'string' ? job.data.model : undefined,
-      maxCostUsd: typeof job.data.maxCostUsd === 'number' ? job.data.maxCostUsd : undefined,
-      minContextChars: typeof job.data.minContextChars === 'number' ? job.data.minContextChars : undefined,
-      thinThreshold: typeof job.data.thinThreshold === 'number' ? job.data.thinThreshold : undefined,
-      reenrichAfterMs: typeof job.data.reenrichAfterMs === 'number' ? job.data.reenrichAfterMs : undefined,
-      dryRun: !!job.data.dryRun,
-      force: !!job.data.force,
-    });
-    return result;
-  });
-
-  // v0.40.3.0 T8b: RemediationStep consumer handlers. Thin wrappers
-  // around already-shipping CLI commands so doctor --remediate can
-  // submit them as Minion jobs. NOT in PROTECTED_JOB_NAMES (no shell
-  // exec, no cost spike, MCP-safe).
-  worker.register('lint-fix', async (job) => {
-    const { runLintCore } = await import('./lint.ts');
-    const target = typeof job.data.dir === 'string' ? job.data.dir : '.';
-    // issue #1678: reuse the worker's live engine (see 'lint' handler).
-    return await runLintCore({ target, fix: true, dryRun: false, engine, signal: job.signal });
-  });
-
-  worker.register('integrity-auto', async () => {
-    const { runIntegrity } = await import('./integrity.ts');
-    await runIntegrity(['auto']);
-    return { ok: true };
-  });
-
-  worker.register('sync-retry-failed', async () => {
-    const { runSync } = await import('./sync.ts');
-    await runSync(engine, ['--retry-failed']);
-    return { ok: true };
-  });
-
-  worker.register('import', async (job) => {
-    // import.ts Core extraction deferred (import has parallel workers +
-    // checkpointing; the typed-API split lands in W7 of the fix-wave).
-    // W0 (Tier-1 #5): runImport no longer contains ANY process.exit — all
-    // five preflight sites throw typed ImportAbortError, which this
-    // handler's catch converts to a normal failJob. No worker-kill risk.
-    const { runImport } = await import('./import.ts');
-    const importArgs: string[] = [];
-    if (job.data.dir) importArgs.push(String(job.data.dir));
-    if (job.data.noEmbed) importArgs.push('--no-embed');
-    const result = await runImport(engine, importArgs, { signal: job.signal, sourceId: typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined });
-    if (result.errors > 0) {
-      throw new Error(`Import failed for ${result.errors} file(s); fix rejected documents and retry the job.`);
-    }
-    return { imported: true };
-  });
-
-  worker.register('extract', async (job) => {
-    const { runExtractCore, extractStaleFromDB, STALE_TIME_BUDGET_MS } = await import('./extract.ts');
-    // #2849: stale mode — the durable follow-up for extraction deferred by
-    // performSync's size gate (totalChanges > 100). Runs the same DB-source
-    // watermark sweep as `gbrain extract --stale`, scoped to the source the
-    // sync that deferred it was scoped to (job.data.sourceId; absent =
-    // unscoped, matching what the CLI hint tells a default-brain operator
-    // to run). The sweep is checkout-less + idempotent, so retries and
-    // overlapping submissions converge.
-    if (job.data.stale === true) {
-      const sourceIdFilter = typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-      const r = await extractStaleFromDB(engine, {
-        dryRun: !!job.data.dryRun,
-        jsonMode: false,
-        sourceIdFilter,
-        catchUp: false,
-      });
-      // Internal 30-min budget hit with work remaining → chain a
-      // continuation job so a very large deferred backlog converges without
-      // waiting for the next sync. Forward-progress guard (pagesProcessed >
-      // 0) prevents an infinite chain if the sweep can't advance.
-      if (!job.data.dryRun && r.staleRemaining > 0 && r.pagesProcessed > 0) {
-        try {
-          const queue = new MinionQueue(engine);
-          // NO maxWaiting: with an unscoped (NULL-sourceId) payload the
-          // coalesce filter matches ANY waiting 'extract' job and would
-          // swallow the continuation. Each completed sweep chains at most
-          // one continuation and the sweep is an idempotent watermark scan,
-          // so there is no pile-up to guard against.
-          await queue.add(
-            'extract',
-            { ...job.data, continuation_of: job.id },
-            { timeout_ms: STALE_TIME_BUDGET_MS + 5 * 60 * 1000 },
-          );
-        } catch { /* best-effort: next sync/manual sweep picks up the rest */ }
-      }
-      return { stale: true, source_id: sourceIdFilter ?? null, ...r };
-    }
-    const mode = (typeof job.data.mode === 'string' && ['links', 'timeline', 'all'].includes(job.data.mode))
-      ? (job.data.mode as 'links' | 'timeline' | 'all')
-      : 'all';
-    const dir = typeof job.data.dir === 'string'
-      ? job.data.dir
-      : (await engine.getConfig('sync.repo_path')) ?? '.';
-    // #3957: thread the job's source id into the fs-walk extractors. Without
-    // it the batch rows default to source_id='default' and the pages JOIN
-    // drops every row on a non-'default' brain (silent "created 0"), and the
-    // full-walk watermark stamp targets the wrong source.
-    const sourceId = typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-    return await runExtractCore(engine, { mode, dir, dryRun: !!job.data.dryRun, sourceId });
-  });
-
-  worker.register('backlinks', async (job) => {
-    const { runBacklinksCore } = await import('./backlinks.ts');
-    // Default to 'check', not 'fix': backlinks jobs submitted with an empty
-    // payload (e.g. the sync→embed→backlinks chains enqueued after ingestion)
-    // must never rewrite tracked brain pages with generated "Referenced in"
-    // timeline bullets. Mirrors the documented intent in src/core/cycle.ts
-    // (runPhaseBacklinks). The filesystem fixer stays available explicitly
-    // via '{"action":"fix"}' or `gbrain check-backlinks fix`.
-    const action: 'check' | 'fix' = job.data.action === 'fix' ? 'fix' : 'check';
-    const dir = typeof job.data.dir === 'string'
-      ? job.data.dir
-      : (await engine.getConfig('sync.repo_path')) ?? '.';
-    return await runBacklinksCore({ action, dir, dryRun: !!job.data.dryRun });
-  });
-
-  // Local patch 2026-06-11: durable facts:absorb. One-shot CLI processes
-  // (capture/put/sync) can't finish the extraction chat before their exit
-  // drain aborts it, so backstop.ts submits this job instead and the
-  // long-lived worker does the LLM work here. Inline mode: errors throw, so
-  // minion retry/backoff handles transient failures and real ones stay visible
-  // in `gbrain jobs list --status failed`. In the gateway-refresh set (model
-  // config re-stamped per job). #4310: wrapped in the provider-halt cooldown
-  // (llm-halt-cooldown.ts) — a globally-broken provider defers the queue.
-  registerBuiltinJob(worker, engine, 'facts-absorb', withFactsAbsorbHaltCooldown(async (job) => {
-    const slug = typeof job.data.slug === 'string' ? job.data.slug : '';
-    if (!slug) throw new Error('facts-absorb job requires data.slug');
-    const sourceId = typeof job.data.sourceId === 'string' ? job.data.sourceId : 'default';
-    const { readFactsBackstopJobPage } = await import('../core/persistence/effect-facts.ts');
-    const input = await readFactsBackstopJobPage(engine, job.data);
-    if ('skipped' in input) return { skipped: input.skipped, slug, sourceId };
-    const page = input.page;
-    const { runFactsBackstop, coerceNotabilityFilter } = await import('../core/facts/backstop.ts');
-    const KNOWN_SOURCES = ['sync:import', 'mcp:put_page', 'mcp:extract_facts', 'file_upload', 'code_import', 'hook:writeback'] as const;
-    const source = (KNOWN_SOURCES as readonly string[]).includes(job.data.source as string)
-      ? (job.data.source as typeof KNOWN_SOURCES[number])
-      : 'mcp:put_page';
-    const result = await runFactsBackstop(
-      {
-        slug: page.slug,
-        type: page.type,
-        compiled_truth: page.compiled_truth,
-        frontmatter: (page.frontmatter ?? {}) as Record<string, unknown>,
-      },
-      {
-        engine, config: await loadConfigWithEngine(engine, loadConfig() ?? { engine: engine.kind }) ?? { engine: engine.kind },
-        sourceId,
-        sessionId: typeof job.data.sessionId === 'string' ? job.data.sessionId : null,
-        persistenceRequestId: typeof job.data.persistence_request_id === 'string' ? job.data.persistence_request_id : undefined,
-        source,
-        mode: 'inline',
-        notabilityFilter: coerceNotabilityFilter(job.data.notabilityFilter),
-        visibility: job.data.visibility === 'world' ? 'world' : 'private',
-        ...(typeof job.data.model === 'string' && job.data.model ? { model: job.data.model } : {}),
-      },
-    ).catch(async (err: unknown) => {
-      const { writeFactsAbsorbFailure } = await import('../core/facts/absorb-log.ts');
-      await writeFactsAbsorbFailure(engine, slug, err, sourceId);
-      throw err;
-    });
-    // Execution-time chat_unavailable in a KEYED worker is config drift —
-    // throw (typed) so minion retry/backoff parks it as a VISIBLE, re-runnable
-    // failure instead of consuming the job and silently losing the facts. A
-    // KEYLESS worker completes the job as a calm skip (its execution-time gate
-    // already printed the keyless note; a retry loop would turn every page
-    // write into failed-job noise). The retry conversion lives HERE, not in
-    // the shared pipeline — the same pipeline serves the extract_facts op,
-    // which must return its keyless envelope instead of throwing. The
-    // classification runs in the WORKER process (the submitting hook
-    // subprocess may have a deliberately neutered env).
-    if (factsAbsorbUnavailable(result)) {
-      const { classifyUnavailable } = await import('../core/facts/backstop.ts');
-      const jobModel = typeof job.data.model === 'string' && job.data.model ? job.data.model : undefined;
-      if (factsAbsorbShouldRetry(result, await classifyUnavailable(jobModel))) {
-        const { FactsExtractionError } = await import('../core/facts/extract.ts');
-        throw new FactsExtractionError('chat_unavailable', jobModel);
-      }
-    }
-    return result;
-  }));
-
-  // Autopilot-cycle handler: delegates to runCycle. Shares the exact same
-  // phase set and ordering as `gbrain dream` and autopilot's inline path —
-  // one source of truth for what the brain does overnight.
-  //
-  // Yields the event loop between phases so the worker's lock-renewal
-  // timer (src/core/minions/worker.ts) can fire. Without this the v0.14
-  // stall-death regression returns: long CPU-bound phases starve the
-  // renewal callback and the stalled-sweeper kills the job.
-  //
-  // Phase failures surface as report.status='partial' (via runCycle's
   // v0.40.3.0: per-page contextual retrieval re-embed handler. PROTECTED
   // name (src/core/minions/protected-names.ts) — MCP/OAuth callers can't
   // submit; only trusted local callers (config.ts mode-switch hook,
@@ -2707,219 +2229,8 @@ export async function registerBuiltinHandlers(
     registerBuiltinJob(worker, engine, 'contextual_reindex_per_chunk', makeContextualReindexHandler({ engine }));
   }
 
-  // derivation); the handler returns { partial, status, report } so
-  // `gbrain jobs get <id>` shows the full structured report. Does NOT
-  // throw on partial: a flaky phase must not block every future cycle.
-  registerBuiltinJob(worker, engine, 'autopilot-cycle', async (job) => {
-    const { runCycle } = await import('../core/cycle.ts');
-    // v0.41.30 (T2): fall back to null (NOT cwd '.') when no repo is configured.
-    // The queued cycle is the same primitive `gbrain dream` uses; a checkout-less
-    // postgres brain should skip filesystem phases (no_brain_dir) and run the
-    // DB-only phases (resolve_symbol_edges, embed, ...) — not silently lint/sync
-    // against whatever directory the worker happens to be running in.
-    const repoPath: string | null = typeof job.data.repoPath === 'string'
-      ? job.data.repoPath
-      : (await engine.getConfig('sync.repo_path')) ?? null;
-
-    // v0.38 (codex r1 P1-2 + P1-5): per-source dispatch threading.
-    //   - source_id: when set, runCycle uses the per-source lock ID and
-    //     writes last_full_cycle_at on success. Validated at handler entry
-    //     so queue replays with malformed source_id dead-letter instead of
-    //     reaching cycle code.
-    //   - pull: when set, overrides the legacy hardcoded `true` so
-    //     per-source dispatch can disable pull for local-only sources.
-    //     Missing/undefined keeps the legacy `true` for back-compat.
-    //   - Archive recheck: if source_id is set but the source was
-    //     archived between fan-out and worker claim, skip cleanly.
-    const rawSourceId = job.data.source_id;
-    let sourceId: string | undefined;
-    // issue #2227/#2194 (TODOS:634, codex #8): a per-source cycle must run its
-    // FILESYSTEM phases (sync/lint/extract) against the SOURCE's own checkout,
-    // not the global brain's. Pre-fix it inherited `repoPath` (the default
-    // checkout) while writing DB freshness for `source_id` — mixed scope that
-    // made cooldown/freshness attribute to the wrong source. We resolve the
-    // source's `local_path` here and use it as the cycle's brainDir below.
-    let sourceLocalPath: string | null = null;
-    if (rawSourceId !== undefined && rawSourceId !== null) {
-      if (typeof rawSourceId !== 'string') {
-        throw new Error(`autopilot-cycle: invalid source_id (not a string): ${JSON.stringify(rawSourceId)}`);
-      }
-      const { isValidSourceId } = await import('../core/source-id.ts');
-      if (!isValidSourceId(rawSourceId)) {
-        // Dead-letter early — malformed source_id from queue replay shouldn't
-        // reach cycle code. TS narrowing via isValidSourceId boolean shape
-        // (assertValidSourceId would require static-import per TS2775).
-        throw new Error(`autopilot-cycle: invalid source_id (regex): ${JSON.stringify(rawSourceId)}`);
-      }
-      // Archive recheck (codex r1 P1-5): cheap pre-cycle lookup. Returns
-      // immediately if source is gone or archived; runCycle never even
-      // acquires a lock. Also fetches local_path so FS phases bind to the
-      // source's own checkout (the #2227/#2194 mixed-scope fix).
-      const rows = await engine.executeRaw<{ archived: boolean | null; local_path: string | null }>(
-        `SELECT archived, local_path FROM sources WHERE id = $1`,
-        [rawSourceId],
-      );
-      if (rows.length === 0) {
-        return {
-          partial: false,
-          status: 'skipped',
-          report: { reason: 'source_not_found', source_id: rawSourceId },
-        };
-      }
-      if (rows[0].archived === true) {
-        return {
-          partial: false,
-          status: 'skipped',
-          report: { reason: 'source_archived', source_id: rawSourceId },
-        };
-      }
-      sourceId = rawSourceId;
-      sourceLocalPath = typeof rows[0].local_path === 'string' && rows[0].local_path.length > 0
-        ? rows[0].local_path
-        : null;
-    }
-
-    // Effective checkout for FS phases. For a per-source cycle, bind to the
-    // SOURCE's local_path (or null → skip FS phases for a pure-DB source);
-    // NEVER fall through to the global repoPath, which would run sync/lint
-    // against the wrong tree. Legacy (no source_id) keeps the global repoPath.
-    const effectiveBrainDir: string | null = sourceId ? sourceLocalPath : repoPath;
-
-    // Allow callers to select phases via job data (e.g. skip embed for
-    // fast cycles). Validates against ALL_PHASES to prevent injection, then
-    // normalizes per-source payloads to the freshness set (queue payloads
-    // are machine-authored; see normalizeQueuedSourcePhases in cycle.ts).
-    const { ALL_PHASES, normalizeQueuedSourcePhases } = await import('../core/cycle.ts');
-    const validPhases = new Set(ALL_PHASES);
-    const requestedPhases = Array.isArray(job.data.phases)
-      ? (job.data.phases as string[]).filter(p => validPhases.has(p as any))
-      : undefined;
-    const { phases: effectivePhases, rejected: phasesRejectedByNormalization } =
-      normalizeQueuedSourcePhases(requestedPhases as any, sourceId);
-    // An explicitly-empty phase list (arrived empty, or emptied by the
-    // normalization) is a no-op — NOT an implicit run. The reason string is
-    // honest about WHICH of the two happened.
-    if (effectivePhases !== undefined && effectivePhases.length === 0) {
-      return {
-        partial: false,
-        status: 'skipped',
-        report: {
-          reason: phasesRejectedByNormalization.length > 0
-            ? 'all_phases_rejected_by_normalization'
-            : 'empty_phase_list',
-          ...(sourceId ? { source_id: sourceId } : {}),
-          phases_rejected_by_normalization: phasesRejectedByNormalization,
-        },
-      };
-    }
-
-    const pull = resolveJobPull(job.data);
-
-    // #2194 fix #2 / codex #5 (D4): claim-time cooldown guard. A job already
-    // queued or retrying (max_attempts:2) can reach the worker after the
-    // dispatch gate decided to back this source off. Skip it here as a NO-OP
-    // (status 'skipped', NOT a failure — a failure would re-arm the cooldown).
-    if (sourceId) {
-      const { isSourceInCooldown } = await import('./autopilot-fanout.ts');
-      if (await isSourceInCooldown(engine, sourceId)) {
-        return {
-          partial: false,
-          status: 'skipped',
-          report: { reason: 'source_in_cooldown', source_id: sourceId },
-        };
-      }
-    }
-
-    const report = await runCycle(engine, {
-      brainDir: effectiveBrainDir,
-      pull,
-      signal: job.signal, // propagate abort so cycle bails on timeout/cancel
-      deadlineAtMs: job.deadlineAtMs, // #2781: phases budget sub-work from remaining time
-      privateQueueOwnerJobId: job.id,
-      ...(sourceId ? { sourceId } : {}),
-      ...(effectivePhases !== undefined ? { phases: effectivePhases as any } : {}),
-      yieldBetweenPhases: async () => {
-        // Yield to the event loop so worker lock-renewal can fire.
-        await new Promise<void>(r => setImmediate(r));
-      },
-    });
-
-    return {
-      partial: report.status === 'partial' || report.status === 'failed',
-      status: report.status,
-      report,
-      // Surfaced so operators can see the queue-boundary normalization at
-      // work in job results (runCycle never sees rejected phases, so its
-      // excludedPhases skip-reporting cannot cover them).
-      ...(phasesRejectedByNormalization.length > 0
-        ? { phases_rejected_by_normalization: phasesRejectedByNormalization }
-        : {}),
-    };
-  });
-
-  // Brain-wide maintenance. Runs mixed + global phases ONCE per window instead
-  // of repeating cross-source transcript/reflection reads in every source.
-  // No source_id → uses the legacy global cycle lock; stamps autopilot.last_global_at
-  // on success so the dispatch gate backs off.
-  worker.register('autopilot-global-maintenance', async (job) => {
-    const { runCycle, MAINTENANCE_PHASES, LAST_GLOBAL_AT_KEY } = await import('../core/cycle.ts');
-    const repoPath: string | null = typeof job.data.repoPath === 'string'
-      ? job.data.repoPath
-      : (await engine.getConfig('sync.repo_path')) ?? null;
-
-    // #4250: queued maintenance payloads are machine-authored too — intersect
-    // with MAINTENANCE_PHASES so a stale (or remote-submitted) payload can't
-    // run source-scoped phases through the global lane, symmetric with the
-    // per-source normalization in the autopilot-cycle handler.
-    const maintenanceSet = new Set<string>(MAINTENANCE_PHASES);
-    const requested = Array.isArray(job.data.phases)
-      ? (job.data.phases as string[]).filter((p) => maintenanceSet.has(p))
-      : MAINTENANCE_PHASES;
-    const phases = (requested.length > 0 ? requested : MAINTENANCE_PHASES) as typeof MAINTENANCE_PHASES;
-
-    const report = await runCycle(engine, {
-      brainDir: repoPath,
-      pull: false, // brain-wide DB/maintenance work never git-pulls
-      signal: job.signal,
-      deadlineAtMs: job.deadlineAtMs, // #2781: phases budget sub-work from remaining time
-      // The maintenance lane is where synthesize/patterns actually run on
-      // multi-source brains (per-source payloads normalize down to the
-      // freshness phases) — without the owner id its private queues would be
-      // owner-less and recovery would degrade to lease-expiry only.
-      privateQueueOwnerJobId: job.id,
-      phases,
-      forceGlobalOrphans: true,
-      yieldBetweenPhases: async () => { await new Promise<void>((r) => setImmediate(r)); },
-    });
-
-    if ((report.status === 'ok' || report.status === 'clean' || report.status === 'partial')
-      && !report.phases.some(phase => {
-        if (phase.status === 'fail') return true;
-        if (phase.phase !== 'synthesize' && phase.phase !== 'patterns') return false;
-        if (phase.details.reason === 'insufficient_cycle_budget') return true;
-        if (phase.phase === 'patterns') {
-          return typeof phase.details.child_outcome === 'string' && phase.details.child_outcome !== 'completed';
-        }
-        const synthesis = phase.details.synthesis as { non_completed_jobs?: number } | undefined;
-        const triage = phase.details.triage as { deferred?: number } | undefined;
-        return (synthesis?.non_completed_jobs ?? 0) > 0
-          || (triage?.deferred ?? 0) > 0
-          || (Array.isArray(phase.details.budget_deferred_transcripts) && phase.details.budget_deferred_transcripts.length > 0);
-      })
-      && report.reason !== 'aborted' && report.reason !== 'lock_stolen') {
-      try {
-        await engine.setConfig(LAST_GLOBAL_AT_KEY, new Date().toISOString());
-      } catch (e) {
-        console.warn(`[autopilot-global-maintenance] failed to stamp last_global_at: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    }
-
-    return {
-      partial: report.status === 'partial' || report.status === 'failed',
-      status: report.status,
-      report,
-    };
-  });
+  registerBuiltinJob(worker, engine, 'autopilot-cycle', makeAutopilotCycleHandler(engine));
+  worker.register('autopilot-global-maintenance', makeAutopilotGlobalMaintenanceHandler(engine));
 
   // Shell handler is always registered. Runtime guard lives inside the handler
   // so claimed jobs emit a clear rejection log on workers started without
@@ -2972,149 +2283,22 @@ export async function registerBuiltinHandlers(
   // recompute_emotional_weight.
   // ============================================================
 
-  worker.register('reindex', async (job) => {
-    const { runReindex } = await import('./reindex.ts');
-    const args: string[] = ['--markdown'];
-    if (typeof job.data.limit === 'number') args.push('--limit', String(job.data.limit));
-    if (job.data.dryRun) args.push('--dry-run');
-    if (job.data.noEmbed) args.push('--no-embed');
-    if (typeof job.data.repoPath === 'string') args.push('--repo', job.data.repoPath);
-    const result = await runReindex(engine, args);
-    return { ...result, ran: 'reindex' };
-  });
-
-  worker.register('repair-jsonb', async (job) => {
-    const { repairJsonb } = await import('./repair-jsonb.ts');
-    const dryRun = !!job.data.dryRun;
-    const result = await repairJsonb({ dryRun });
-    return result;
-  });
-
-  worker.register('orphans', async (_job) => {
-    const result = await engine.findOrphanPages();
-    return { count: result.length, orphans: result };
-  });
-
-  worker.register('integrity', async (job) => {
-    const { runIntegrity } = await import('./integrity.ts');
-    const args: string[] = [];
-    args.push(job.data.mode === 'auto' ? 'auto' : 'check');
-    if (typeof job.data.confidence === 'number') args.push('--confidence', String(job.data.confidence));
-    if (job.data.dryRun) args.push('--dry-run');
-    await runIntegrity(args);
-    return { ran: 'integrity', mode: args[0] };
-  });
-
-  worker.register('purge', async (job) => {
-    const scope = (typeof job.data.scope === 'string' && ['pages', 'sources', 'all'].includes(job.data.scope))
-      ? (job.data.scope as 'pages' | 'sources' | 'all')
-      : 'all';
-    const olderThanHours = typeof job.data.olderThanHours === 'number' ? job.data.olderThanHours : 72;
-    const dryRun = !!job.data.dryRun;
-    let pagesPurged = 0;
-    let pagesBlocked: Array<{ source_id: string; slug: string; reason: string }> = [];
-    let pagesError: string | undefined;
-    let sourcesPurged: string[] = [];
-    if (scope === 'pages' || scope === 'all') {
-      const result = await (await import('../core/persistence/purge-deleted.ts')).purgeDeletedPagesCoordinated(engine, olderThanHours);
-      pagesPurged = result.count; pagesBlocked = result.blocked; pagesError = result.error?.message;
-    }
-    let sourcesBlocked: Array<{ id: string; reason: string }> = [];
-    if (scope === 'sources' || scope === 'all') {
-      const { purgeExpiredSources } = await import('../core/destructive-guard.ts');
-      const purgeResult = await purgeExpiredSources(engine);
-      sourcesPurged = purgeResult.purged;
-      sourcesBlocked = purgeResult.blocked;
-    }
-    // GC stale op_checkpoints rows (folded scope item +C from review).
-    const { purgeStaleCheckpoints } = await import('../core/op-checkpoint.ts');
-    const checkpointsPurged = await purgeStaleCheckpoints(engine, 7);
-    // #5405: a coordinated purge failure fails the job after the other purges ran.
-    if (pagesError) throw new Error(pagesError);
-    return { pagesPurged, pagesBlocked, sourcesPurged, sourcesBlocked, checkpointsPurged, dryRun };
-  });
-
-  // Phase-wrapper handlers — each delegates to runCycle({ phases: [name] }).
-  // Cycle owns the lock + abort signal + progress reporter per D10.
-  // Smaller diff than full standalone phase extraction; cycle.ts remains
-  // the single source of truth for phase semantics.
-  const makePhaseHandler = (phase: string) => async (job: any) => {
-    const { runCycle } = await import('../core/cycle.ts');
-    // v0.41.38 (codex P2 review): fall back to null (NOT cwd '.') when no repo
-    // is configured, matching the autopilot-cycle handler + `gbrain dream`. On a
-    // checkout-less postgres brain a filesystem phase (synthesize/patterns/...)
-    // skips with reason 'no_brain_dir' instead of running against the worker cwd;
-    // DB-only phases (resolve_symbol_edges/embed/...) ignore brainDir either way.
-    const repoPath: string | null = typeof job.data.repoPath === 'string'
-      ? job.data.repoPath
-      : ((await engine.getConfig('sync.repo_path')) ?? null);
-    const report = await runCycle(engine, {
-      brainDir: repoPath,
-      phases: [phase as any],
-      signal: job.signal,
-      deadlineAtMs: job.deadlineAtMs, // #2781: phases budget sub-work from remaining time
-      privateQueueOwnerJobId: job.id,
-    });
-    return { phase, status: report.status, report };
-  };
+  worker.register('reindex', makeReindexHandler(engine));
+  worker.register('repair-jsonb', repairJsonbHandler);
+  worker.register('orphans', makeOrphansHandler(engine));
+  worker.register('integrity', integrityHandler);
+  worker.register('purge', makePurgeHandler(engine));
 
   // PROTECTED — internally spawn subagent children
-  registerBuiltinJob(worker, engine, 'synthesize', makePhaseHandler('synthesize'));
-  registerBuiltinJob(worker, engine, 'patterns', makePhaseHandler('patterns'));
-  registerBuiltinJob(worker, engine, 'consolidate', makePhaseHandler('consolidate'));
+  registerBuiltinJob(worker, engine, 'synthesize', makeCyclePhaseHandler(engine, 'synthesize'));
+  registerBuiltinJob(worker, engine, 'patterns', makeCyclePhaseHandler(engine, 'patterns'));
+  registerBuiltinJob(worker, engine, 'consolidate', makeCyclePhaseHandler(engine, 'consolidate'));
 
   // Open — DB writes only, no LLM spend
-  registerBuiltinJob(worker, engine, 'extract_facts', makePhaseHandler('extract_facts'));
-  worker.register('resolve_symbol_edges', makePhaseHandler('resolve_symbol_edges'));
-  worker.register('recompute_emotional_weight', makePhaseHandler('recompute_emotional_weight'));
-
-  // v0.42.x (#1685 GAP D) — PROTECTED bounded extract_atoms backlog drain.
-  // Thin wrapper over the shared helper (DECISION 5A) so the CLI `--drain`
-  // path, this handler, and autopilot's auto-drain can't diverge on lock id /
-  // window / defer behavior. On LockUnavailableError (the routine cycle holds
-  // the per-source lock) the job completes `{ deferred: true }` and retries
-  // next tick instead of failing — cooperative interleave (CODEX accepted).
-  registerBuiltinJob(worker, engine, 'extract-atoms-drain', async (job) => {
-    if (job.data.retryRequestId !== undefined) {
-      if (typeof job.data.retryRequestId !== 'string' || typeof job.data.sourceId !== 'string') throw new Error('Atom retry requires sourceId and retryRequestId strings.');
-      const { retryManagedAtomBatch } = await import('../core/persistence/atom-retry.ts');
-      return retryManagedAtomBatch(engine, job.data.sourceId, job.data.retryRequestId, `job:${job.id}`);
-    }
-    const { formatDrainProviderFailure, runExtractAtomsDrainForSource } =
-      await import('../core/cycle/extract-atoms-drain.ts');
-    const { LockUnavailableError } = await import('../core/db-lock.ts');
-    const sourceId = typeof job.data.sourceId === 'string' ? job.data.sourceId : undefined;
-    const windowSeconds =
-      typeof job.data.window === 'number' && job.data.window > 0 ? job.data.window : 120;
-    const repoPath =
-      typeof job.data.repoPath === 'string'
-        ? job.data.repoPath
-        : ((await engine.getConfig('sync.repo_path')) ?? undefined);
-    try {
-      const result = await runExtractAtomsDrainForSource(engine, {
-        sourceId,
-        windowSeconds,
-        brainDir: repoPath,
-      });
-      // issue #3218: every item the drain attempted failed (0 succeeded, >=1
-      // provider error) — completing this job normally would mark the
-      // durable job done while the backlog sits untouched, and no retry
-      // policy would ever fire on it again. Throw so the worker's ordinary
-      // failJob path (attempt+backoff, or dead-letter once exhausted) takes
-      // over instead — matching the existing behavior for every other
-      // handler failure. Partial success (>=1 item extracted) keeps
-      // completing normally, unchanged.
-      if (result.status === 'provider_failure') {
-        throw new Error(formatDrainProviderFailure(result));
-      }
-      return result;
-    } catch (e) {
-      if (e instanceof LockUnavailableError) {
-        return { phase: 'extract_atoms', status: 'skipped', deferred: true, reason: 'cycle_already_running' };
-      }
-      throw e;
-    }
-  });
+  registerBuiltinJob(worker, engine, 'extract_facts', makeCyclePhaseHandler(engine, 'extract_facts'));
+  worker.register('resolve_symbol_edges', makeCyclePhaseHandler(engine, 'resolve_symbol_edges'));
+  worker.register('recompute_emotional_weight', makeCyclePhaseHandler(engine, 'recompute_emotional_weight'));
+  registerBuiltinJob(worker, engine, 'extract-atoms-drain', makeExtractAtomsDrainHandler(engine));
 
   // v0.40 Federated Sync v2 — embed-backfill: per-source decoupled embed.
   // Cost-bounded via D6 ($10/job BudgetTracker) + D19 (source-level cooldown
@@ -3132,108 +2316,11 @@ export async function registerBuiltinHandlers(
     return await makeConnectorSyncHandler(engine)(job);
   });
 
-  // v0.41.18.0 (A10, T7): extract-ner handler for the gbrain onboard
-  // remediation pipeline. Wraps extractNerLinks; emits typed_ner kind
-  // alongside the by-mention 'plain' kind. NOT in PROTECTED_JOB_NAMES
-  // (regex-only, no LLM spend).
-  worker.register('extract-ner', async (job) => {
-    const { extractNerLinks } = await import('../core/extract-ner.ts');
-    const data = (job.data ?? {}) as { sourceId?: string };
-    return await extractNerLinks(engine, {
-      sourceIdFilter: data.sourceId,
-    });
-  });
-
-  // v0.41.18.0 (A12, T9): extract-takes-from-pages handler. PROTECTED
-  // (LLM-bearing). Two-gate consent enforced at the handler boundary:
-  // refuses to run unless takes.bootstrap_enabled config is true, even
-  // when allowProtectedSubmit was set at queue.add time.
-  registerBuiltinJob(worker, engine, 'extract-takes-from-pages', async (job) => {
-    const { extractTakesFromPages } = await import('../core/extract-takes-from-pages.ts');
-    const data = (job.data ?? {}) as { sourceId?: string; maxPages?: number };
-    const bootstrapCfg = await engine.getConfig('takes.bootstrap_enabled');
-    const bootstrapEnabled = bootstrapCfg === 'true' || bootstrapCfg === '1';
-    return await extractTakesFromPages(engine, {
-      bootstrapEnabled,
-      sourceIdFilter: data.sourceId,
-      maxPages: data.maxPages,
-    });
-  });
-
-  // v0.41.18.0 (A11, T8): extract-timeline-from-meetings handler. Wraps
-  // extractTimelineFromMeetings. NOT in PROTECTED_JOB_NAMES (pure SQL + string
-  // scan, no LLM spend).
-  worker.register('extract-timeline-from-meetings', async (job) => {
-    const { extractTimelineFromMeetings } = await import('../core/extract-timeline-from-meetings.ts');
-    const data = (job.data ?? {}) as { sourceId?: string };
-    return await extractTimelineFromMeetings(engine, {
-      sourceIdFilter: data.sourceId,
-    });
-  });
-
-  // v0.41.18.0 (A13): embed-catch-up handler for the gbrain onboard
-  // remediation pipeline. Wraps runEmbedCore with stale + catchUp + the
-  // priority/batchSize the recommendation supplies. NOT in
-  // PROTECTED_JOB_NAMES (embedding spend only).
-  registerBuiltinJob(worker, engine, 'embed-catch-up', async (job) => {
-    const { runEmbedCore } = await import('./embed.ts');
-    const data = (job.data ?? {}) as {
-      sourceId?: string;
-      batchSize?: number;
-      priority?: 'recent';
-      includeNullSignature?: boolean;
-    };
-    const catchUpResult = await runEmbedCore(engine, {
-      stale: true,
-      catchUp: true,
-      batchSize: data.batchSize,
-      priority: data.priority,
-      sourceId: data.sourceId,
-      // D7/D12: submitters that detected a NULL-signature cohort thread the
-      // widening through; absent = grandfather clause stays (unchanged).
-      includeNullSignature: !!data.includeNullSignature,
-    });
-    // #4599 (X6): stall abort → failed job (throw), same as the embed handler.
-    assertEmbedNotStalled(catchUpResult);
-    return catchUpResult;
-  });
-
-  // v0.42 type-unification (T10): unify-types PROTECTED handler. Pack-upgrade
-  // migration that retypes 25K+ pages, creates alias rows, converts edge-
-  // shaped pages to link rows, AND flips the active pack at end of run.
-  // manual_only via src/core/onboard/render.ts:MANUAL_ONLY_PROTECTED_JOBS.
-  // Dry-run preview: `gbrain jobs submit unify-types --allow-protected
-  // --params '{"target_pack":"gbrain-base-v2"}'`; apply with
-  // '{"target_pack":"gbrain-base-v2","apply":true}'.
-  worker.register('unify-types', async (job) => {
-    const { runUnifyTypes } = await import('../core/schema-pack/unify-types-handler.ts');
-    const data = (job.data ?? {}) as {
-      target_pack?: string;
-      apply?: boolean;
-      sourceId?: string;
-    };
-    if (!data.target_pack) {
-      throw new Error(`unify-types: missing required 'target_pack' parameter`);
-    }
-    const ctx = {
-      engine,
-      cfg: null,
-      remote: false,
-    } as unknown as import('../core/operations.ts').OperationContext;
-    return await runUnifyTypes(ctx, {
-      target_pack: data.target_pack,
-      // #1575: default matches the handler interface's "Default false
-      // (dry-run)" — a destructive one-shot migration must be opted into
-      // with apply:true (the onboard remediation + the printed migration
-      // command both carry it explicitly).
-      apply: data.apply ?? false,
-      sourceId: data.sourceId,
-      onProgress: (msg: string) => {
-        job.updateProgress({ phase: 'unify-types', message: msg }).catch(() => {});
-        process.stderr.write(msg + '\n');
-      },
-    });
-  });
+  worker.register('extract-ner', makeExtractNerHandler(engine));
+  registerBuiltinJob(worker, engine, 'extract-takes-from-pages', makeExtractTakesFromPagesHandler(engine));
+  worker.register('extract-timeline-from-meetings', makeExtractTimelineFromMeetingsHandler(engine));
+  registerBuiltinJob(worker, engine, 'embed-catch-up', makeEmbedCatchUpHandler(engine));
+  worker.register('unify-types', makeUnifyTypesHandler(engine));
 
   // v0.42.0.0 SkillOpt Minion handler — for --background CLI invocations.
   // PROTECTED by name so MCP submission rejects (only trusted CLI can
