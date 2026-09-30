@@ -192,9 +192,12 @@ describe('PGLite upgrade replay (EO3)', () => {
   });
 
   test('before boot, the pinned brain matches the E4 fresh-install golden', () => {
-    expect(existsSync(join(GOLDENS_DIR, `${FRESH_GOLDEN}.json`))).toBe(true);
+    expect(existsSync(join(GOLDENS_DIR, 'pglite-upgrade-replay/catalog-before-boot.json'))).toBe(true);
     expect(requirePhase('beforeBoot').version).toBe(manifest.schema_version);
-    expect(describeCatalogGoldenDrift(FRESH_GOLDEN, requirePhase('beforeBoot').catalog)).toBe('');
+    // The fresh-install golden of the schema generation that built the fixture
+    // (a copy of catalog/pglite-engine-init-default at that version); the live
+    // fresh-install golden moves with every later schema change.
+    expect(describeCatalogGoldenDrift('pglite-upgrade-replay/catalog-before-boot', requirePhase('beforeBoot').catalog)).toBe('');
   });
 
   test('upgrade boot succeeds; its catalog is pinned and differs from a fresh install only by function whitespace', async () => {

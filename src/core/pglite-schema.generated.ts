@@ -1051,6 +1051,7 @@ CREATE OR REPLACE FUNCTION gbrain_advance_tag_revision() RETURNS trigger LANGUAG
 DROP TRIGGER IF EXISTS tags_knowledge_revision ON tags;
 CREATE TRIGGER tags_knowledge_revision AFTER INSERT OR DELETE OR UPDATE ON tags
     FOR EACH ROW EXECUTE FUNCTION gbrain_advance_tag_revision();
+ALTER TABLE page_versions ADD COLUMN IF NOT EXISTS source_path TEXT;
 CREATE TABLE IF NOT EXISTS extract_atoms_page_state (
   source_incarnation UUID NOT NULL REFERENCES sources(incarnation) ON DELETE CASCADE,
   page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,

@@ -56,7 +56,9 @@ of making a duplicate.
 | <a id="embedding_zero_norm"></a>`zero_norm`, `non_finite` or `empty_input` | `embedding_zero_norm` | The embedding provider returned a vector with no direction (all zeros, NaN or infinity) for a chunk, or the chunk text was empty. A vector index silently skips such a row, so gbrain refuses to store it. Only that chunk is refused: the page text and every other chunk's vector are saved, and the page is left for `gbrain embed --stale`. It is never retried as a rate limit or network error. | Inspect the named page's chunk text (empty, whitespace- or symbol-only chunks are the usual cause) or the embedding provider, fix it, then run `gbrain embed <slug>` (add `--source <source>` for a non-default source). If normal text also returns zero vectors, the provider or model is broken; check it with `gbrain doctor`. |
 | `targets_parked` (doctor: `parked_effects`) | effect `error_code` | A Git backup or withdrawal target failed five times in a row and was set aside so the other pages keep committing. The page write itself committed; its Git backup or withdrawal is incomplete. Contention, dependency waits, shutdown and transient database errors never count toward the five. | `gbrain sources writer status <source>`, fix the cause it names, preview with `gbrain sources writer retry-effects <source> --request-id <id> --dry-run`, then run it without `--dry-run`. Each run grants one more attempt per parked target; a target that fails again parks again. |
 | <a id="writer_admin_locked"></a>`writer_admin_locked` | `writer_admin_locked` | The operator set the brain's writer admin lock (`gbrain sources writer lock`), so writer claim, activate, transfer prepare and transfer accept refuse for every caller. Ordinary writes are not affected. | Agents: stop and ask the operator; do not unlock it yourself. The operator runs, on the brain host, `gbrain sources writer unlock`, re-reads `gbrain sources writer status <source> --json`, administers, then `gbrain sources writer lock` again. See the [writer admin lock](../architecture/topologies.md#writer-admin-lock). |
-| <a id="writer_not_quiesced"></a>`writer_not_quiesced` | `writer_not_quiesced` | Activation found an older writer, a legacy lock, or queued, running or recovering work. When work blocks it, the message names the blocking effect id, kind, source, page and request id. | Stop the writers named in the [claim and activate runbook](../architecture/topologies.md#claim-and-activate-runbook), inspect the named work with `gbrain sources writer status <source> --json`, let it finish, then retry. A committed write whose queued embedding effect is never claimed cannot be cleared by a command yet; see [stale queued embedding effects](repair.md#stale-queued-embedding-effects). |
+| <a id="writer_not_quiesced"></a>`writer_not_quiesced` | `writer_not_quiesced` | Activation found an older writer, a legacy lock, or queued, running or recovering work. When work blocks it, the message names the blocking effect id, kind, source, page and request id. | Stop the writers named in the [claim and activate runbook](../architecture/topologies.md#claim-and-activate-runbook), inspect the named work with `gbrain sources writer status <source> --json`, let it finish, then retry. A committed write whose embedding effect is stuck queued or failed is settled by `gbrain repair embedding-effects --source <source>` (preview), then the same command with `--apply`; see [stale queued embedding effects](repair.md#stale-queued-embedding-effects). |
+| <a id="migrations_running"></a>`migrations_running` | `migrations_running` (exit 75) | `gbrain apply-migrations` (or the post-upgrade step of `gbrain upgrade`) found another runner holding the brain's orchestration lock and stopped before touching the migration ledger, so migrations never run twice in parallel. The message names the holder's host and pid. A holder that died is taken over automatically on the next run. `gbrain upgrade` reports this as `Migrations: running`, not as a failed upgrade. | Wait for the other run to finish; `gbrain doctor` shows migration progress. Then `gbrain apply-migrations --yes` confirms everything is applied. |
+| <a id="writer_deactivate"></a>`writer_deactivate` blockers | `writer_not_quiesced`, `writer_admin_locked`, `writer_admin_state_changed`, `writer_lock_unavailable` | `gbrain sources writer deactivate` found pending work (a queued, running or recovering write, a topology change or effect that is not settled, or a live connector or maintenance lease), the writer admin lock, a changed admin state, or a local process holding a worktree lock. Nothing changed. The suggestion names each blocker and its exit. | Run `gbrain sources writer deactivate --dry-run` for the full list, run each named exit (`gbrain cancel-write-request <request_id>`, `gbrain sync --source <id> --no-pull --retry-failed`, `gbrain repair embedding-effects --source <id>`, `gbrain sources writer retry-effects <source> --request-id <id> --dry-run`, `gbrain sources writer unlock`), then deactivate again with a fresh `--expected-state` from `gbrain sources writer status --json`. See the [deactivate runbook](../architecture/topologies.md#deactivate-runbook). |
 | unknown option (repair) | `invalid_params` | `gbrain repair` refuses any option it does not list, so a mistyped flag or `--max-usd` never runs a repair silently without it. | Fix the option (`gbrain repair --help`). To cap paid repair work, run `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. |
 
 `gbrain doctor` reports parked targets as the `parked_effects` check with the
@@ -72,7 +74,7 @@ A source with a checkout path (`local_path`, or `sync.repo_path` for the
 that checkout, through the source's canonical owner. PGLite claims that owner
 automatically on the first write. Postgres does not, because several hosts can
 share one Postgres brain and only one of them may own the files. Until someone
-binds the source, `put_page`, `capture` and `delete_page` to it refuse with
+binds the source, page writes to it refuse with
 `owner_unavailable` and `detail: unbound_source`. The suggestion names both
 ways out with the real source filled in:
 
@@ -85,17 +87,23 @@ ways out with the real source filled in:
 2. **Allow database-only writes** with
    `gbrain config set persistence.unbound_write database_only` (the default is
    `refuse`; no other value is accepted, and the key can only be set on the
-   brain host). A `put_page` to a new page, or to a page that is already
-   database-only, then writes to the database only. Its result says
+   brain host). Every page write to a page with no recorded canonical file
+   (a new page, or one with no stored source path) then writes to the
+   database only: `put_page`, `capture`, `delete_page`, `restore_page`,
+   `revert_version`, `add_tag`, `remove_tag`, `add_timeline_entry` and the
+   `takes_*` writes. Its result says
    `write_through: { written: false, skipped: "unbound_source" }` with a
    warning. Pages written this way stay database-only: binding the source
    later does not materialize them into canonical files, later writes keep
-   them database-only, and sync never deletes or overwrites them.
+   them database-only, and sync never deletes or overwrites them. To restore
+   the refusal, run `gbrain config unset persistence.unbound_write`.
 
 The opt-in never applies to a page that came from a canonical file (it has a
 stored source path). An edit there could be lost on the owner's next sync, so
-it keeps refusing with only the bind option. `capture` and `delete_page` also
-keep refusing.
+it keeps refusing with only the bind option. `revert_version` is also judged on
+the version it writes: reverting to a version recorded while the page had a
+canonical file refuses the same way (versions taken before this release did not
+record it and count as file-less).
 
 If the source is bound after a database-only write was accepted but before it
 was published, the write fails with the same reason and nothing is written;

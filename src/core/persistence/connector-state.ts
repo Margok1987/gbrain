@@ -7,6 +7,11 @@
  * recovery disclosure and the last run's counts. The connector session writes
  * it only while it holds the connector sync lease; the upgrade migration seeds
  * `upgrade_recovery`. The 7-day checkpoint purge never touches it.
+ *
+ * `first_attempt_at` (#5673, DX O1) is the autopilot dispatch gate: it is
+ * stamped once, before the first provider call of a validated, non-preview
+ * explicit or scheduled sync of a managed or unmanaged connector source, even
+ * when that run later fails.
  */
 import type { BrainEngine } from '../engine.ts';
 import { digest } from './digest.ts';
@@ -58,7 +63,7 @@ export interface ConnectorState {
 }
 
 export const emptyConnectorState = (): ConnectorState => ({ version: 1, account: null, pinned_at: null, continuity_unverified: false,
-  pending: [], upgrade_recovery: 'none', resumed_from: null, last_run: null });
+  pending: [], upgrade_recovery: 'none', resumed_from: null, last_run: null, first_attempt_at: null });
 
 export function connectorStateKey(sourceId: string, incarnation: string): string {
   return digest({ sourceId, incarnation });
@@ -89,25 +94,28 @@ export async function writeManagedConnectorState(engine: Pick<BrainEngine, 'exec
 }
 
 /**
- * Records the source's first sync attempt once (idempotent). Called before any
- * provider call, on managed brains while the connector sync lease is held.
+ * Records the source's first sync attempt once (idempotent, one statement: an
+ * existing stamp and every other state field are kept, so it never races the
+ * lease holder's state write). Returns false when the source does not exist.
  */
-export async function recordConnectorSyncAttempt(engine: Pick<BrainEngine, 'executeRaw'>, sourceId: string, at = new Date().toISOString()): Promise<void> {
+export async function recordConnectorSyncAttempt(engine: Pick<BrainEngine, 'executeRaw'>, sourceId: string, at = new Date().toISOString()): Promise<boolean> {
   const [source] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation::text AS incarnation FROM sources WHERE id=$1', [sourceId]);
-  if (!source) return;
-  const state = await readManagedConnectorState(engine, sourceId, source.incarnation);
-  if (state.first_attempt_at) return;
-  await writeManagedConnectorState(engine, sourceId, source.incarnation, { ...state, first_attempt_at: at });
+  if (!source) return false;
+  await engine.executeRaw(`INSERT INTO op_checkpoints(op,fingerprint,completed_keys) VALUES($1,$2,$3::text::jsonb)
+    ON CONFLICT(op,fingerprint) DO UPDATE SET completed_keys=jsonb_set(op_checkpoints.completed_keys, ARRAY['0','first_attempt_at'], to_jsonb($4::text), true), updated_at=now()
+    WHERE op_checkpoints.completed_keys->0->>'first_attempt_at' IS NULL`,
+  [CONNECTOR_STATE_OP, connectorStateKey(sourceId, source.incarnation), JSON.stringify([{ ...emptyConnectorState(), first_attempt_at: at }]), at]);
+  return true;
 }
 
 /**
  * v181 (fix wave 4): records an attempt for every connector source the
- * pre-upgrade freshness loop dispatched (non-null local_path and not
+ * pre-upgrade freshness loop dispatched (active, non-null local_path and not
  * `syncEnabled=false`), so the new gate idles no source autopilot synced.
  */
 export async function seedConnectorDispatchAttempts(engine: Pick<BrainEngine, 'executeRaw'>): Promise<number> {
   const rows = await engine.executeRaw<{ id: string; config: unknown }>(`SELECT id,config FROM sources
-    WHERE config->>'kind' IN ('google','github') AND local_path IS NOT NULL`);
+    WHERE config->>'kind' IN ('google','github') AND local_path IS NOT NULL AND archived IS NOT TRUE`);
   let seeded = 0;
   const at = new Date().toISOString();
   for (const row of rows) {
@@ -122,11 +130,14 @@ export async function seedConnectorDispatchAttempts(engine: Pick<BrainEngine, 'e
 
 /** Connector source ids (google, github) with a recorded sync attempt: the autopilot dispatch gate. */
 export async function attemptedConnectorSourceIds(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Set<string>> {
-  const rows = await engine.executeRaw<{ id: string; incarnation: string }>(
+  const sources = await engine.executeRaw<{ id: string; incarnation: string }>(
     "SELECT id,incarnation::text AS incarnation FROM sources WHERE config->>'kind' IN ('google','github')");
-  const attempted = new Set<string>();
-  for (const row of rows) if ((await readManagedConnectorState(engine, row.id, row.incarnation)).first_attempt_at) attempted.add(row.id);
-  return attempted;
+  if (sources.length === 0) return new Set();
+  const keys = new Map(sources.map(source => [connectorStateKey(source.id, source.incarnation), source.id]));
+  const rows = await engine.executeRaw<{ fingerprint: string }>(`SELECT fingerprint FROM op_checkpoints
+    WHERE op=$1 AND fingerprint=ANY($2::text[]) AND completed_keys->0->>'version'='1' AND completed_keys->0->>'first_attempt_at' IS NOT NULL`,
+  [CONNECTOR_STATE_OP, [...keys.keys()]]);
+  return new Set(rows.map(row => keys.get(row.fingerprint)!));
 }
 
 /** Account pins compare the resolved identity only; the recorded display never includes credentials. */

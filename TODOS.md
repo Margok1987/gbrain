@@ -1,5 +1,10 @@
 # TODOS
 
+## Fix wave 4 follow-ups (filed 2026-09-30, follow-up from v0.60.14.0)
+
+- [ ] **P3 — Convert a bound connector's filesystem worktree to database-only operation (#5673).**
+  **What:** `gbrain sources set-path <id> --clear` refuses a connector source that has a live persistence source binding, because its worktree still owns that checkout; that refusal is the interim exit. **Fix:** a supported conversion that retires the connector's worktree binding and leaves it syncing database-only. **Effort:** M. **Priority:** P3.
+
 ## Refactor wave 1 follow-ups (filed 2026-09-30; plan: docs/designs/REFACTOR_WAVE_1.md, review record: docs/designs/refactor-wave-1/)
 
 - [ ] **P2 — Wave 2: decompose the remaining >300-line functions (plan D1).**

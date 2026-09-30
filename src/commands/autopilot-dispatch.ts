@@ -6,7 +6,9 @@
  */
 import type { BrainEngine } from '../core/engine.ts';
 import type { MinionQueue } from '../core/minions/queue.ts';
-import { loadAllSources, sourceConfigHasRemoteUrl, sourceLocalPathSkipWarning } from '../core/sources-load.ts';
+import { loadAllSources, parseSourceConfig, sourceConfigHasRemoteUrl, sourceLocalPathSkipWarning, type SourceRow } from '../core/sources-load.ts';
+import { isConnectorSourceKind } from '../core/persistence/connector-identity.ts';
+import { attemptedConnectorSourceIds } from '../core/persistence/connector-state.ts';
 import { isSyncDisabledConfig } from '../core/sync-policy.ts';
 import { loadActivationPendingSourceIds, skipActivationPendingSync } from '../core/sync-policy.ts';
 import { resolveAutopilotDispatchTimeoutMs } from './autopilot-timeout.ts';
@@ -229,7 +231,7 @@ const connectorNoticePrinted = new Set<string>();
 export function connectorAwaitingFirstSync(src: { id: string; config: unknown }, attempted: Set<string> | null, jsonMode: boolean,
   write: (line: string) => void = (line) => process.stderr.write(line + '\n')): boolean {
   const kind = (src.config as { kind?: unknown } | null)?.kind;
-  if (kind !== 'google' && kind !== 'github') return false;
+  if (!isConnectorSourceKind(kind)) return false;
   if (attempted?.has(src.id)) return false;
   if (!connectorNoticePrinted.has(src.id)) {
     connectorNoticePrinted.add(src.id);
@@ -256,18 +258,17 @@ export async function dispatchFreshnessSyncs(
   try {
     const { isFederatedV2Enabled } = await import('../core/feature-flags.ts');
     if (await isFederatedV2Enabled(engine)) {
-      const { attemptedConnectorSourceIds } = await import('../core/persistence/connector-state.ts');
       const attempted = await attemptedConnectorSourceIds(engine).catch(() => null);
       const sources = await loadAllSources(engine);
       const activationPending = await loadActivationPendingSourceIds(engine);
       const intervalMs = baseInterval * 1000;
       const now = Date.now();
       for (const src of sources) {
+        if (isConnectorSourceKind(parseSourceConfig(src.config).kind)) {
+          await dispatchConnectorFreshnessSync(queue, src, attempted, activationPending, { intervalMs, now, slot, timeoutMs, jsonMode });
+          continue;
+        }
         if (!src.local_path) continue;
-        // DX O1 (fix wave 4): automatic capture is opt-in, so a Google or
-        // GitHub source is dispatched only after its first recorded sync
-        // attempt (one explicit `gbrain sync --source <id>`).
-        if (connectorAwaitingFirstSync(src, attempted, jsonMode)) continue;
         // #4399: config.syncEnabled=false excludes a source from AUTOMATIC
         // sync (this loop, the full-cycle fan-out, `sync --all`); an
         // explicit `gbrain sync --source <id>` is unaffected.
@@ -322,6 +323,40 @@ export async function dispatchFreshnessSyncs(
     }
   } catch (e) {
     logError('dispatch.freshness-gate', e);
+  }
+}
+
+/**
+ * #5673: a connector source (google, github) syncs from its provider, so its
+ * `local_path` is irrelevant and its sync job carries no repoPath. Automatic
+ * capture is opt-in: the DX O1 gate (`connectorAwaitingFirstSync`) keeps a
+ * connector with no recorded sync attempt idle and prints the enable command once.
+ */
+async function dispatchConnectorFreshnessSync(
+  queue: MinionQueue,
+  src: SourceRow,
+  attempted: Set<string> | null,
+  activationPending: Awaited<ReturnType<typeof loadActivationPendingSourceIds>>,
+  { intervalMs, now, slot, timeoutMs, jsonMode }: { intervalMs: number; now: number; slot: string; timeoutMs: number; jsonMode: boolean },
+): Promise<void> {
+  if (isSyncDisabledConfig(src.config)) return;
+  if (skipActivationPendingSync(activationPending, src.id, 'freshness_sync_skipped', jsonMode, (l) => process.stderr.write(l + '\n'))) return;
+  if (connectorAwaitingFirstSync(src, attempted, jsonMode)) return;
+  const ageMs = now - (src.last_sync_at ? new Date(src.last_sync_at).getTime() : 0);
+  if (ageMs < intervalMs) return;
+  try {
+    const job = await queue.add(
+      'sync',
+      { sourceId: src.id, pull: sourceConfigHasRemoteUrl(src.config), auto_embed_backfill: true, embed_reason: 'autopilot_freshness' },
+      { queue: 'default', idempotency_key: `autopilot-sync:${src.id}:${slot}`, max_attempts: 2, timeout_ms: timeoutMs, maxWaiting: 1 },
+    );
+    if (jsonMode) {
+      process.stderr.write(JSON.stringify({ event: 'dispatched', job_id: job.id, mode: 'freshness', source_id: src.id, age_ms: ageMs }) + '\n');
+    } else {
+      console.log(`[dispatch] job #${job.id} sync (freshness: ${src.id}; age=${Math.floor(ageMs / 60000)}min)`);
+    }
+  } catch (e) {
+    logError('dispatch.freshness', e);
   }
 }
 

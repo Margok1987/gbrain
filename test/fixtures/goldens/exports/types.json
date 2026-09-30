@@ -928,6 +928,7 @@
           "knowledge_revision?: string | null | undefined",
           "page_id: number",
           "snapshot_at: Date",
+          "source_path?: string | null | undefined",
           "tags?: string[] | null | undefined",
           "timeline?: string | null | undefined",
           "title?: string | null | undefined",
@@ -5917,6 +5918,13 @@
       },
       {
         "kind": "function",
+        "name": "getPgliteMigrationLockPath",
+        "signature": [
+          "(dataDir: string) => string"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "inspectLockHolder",
         "signature": [
           "(dataDir: string | undefined) => LockHolderInfo"
@@ -7657,6 +7665,7 @@
           "knowledge_revision?: string | null | undefined",
           "page_id: number",
           "snapshot_at: Date",
+          "source_path?: string | null | undefined",
           "tags?: string[] | null | undefined",
           "timeline?: string | null | undefined",
           "title?: string | null | undefined",
