@@ -33,3 +33,26 @@ reproduce byte for byte. Each file is written by `test/helpers/golden.ts` as
 - `postgres-engine-gauge/*.json` (`test/postgres-engine-gauge-golden.test.ts`):
   checkoutGauge snapshots over a fixed in-flight op sequence, and gauge acquires per
   W1 domain case.
+
+## Doctor and hybrid goldens (EO11 / T-G10 / A13)
+
+- `doctor/registry-build-checks.json`, `doctor/registry-report-remote.json`
+  (`test/doctor-registry-golden.test.ts`, `doctor-registry-v1`): ordered check names +
+  categories reachable from `buildChecks` / `doctorReportRemote`, extracted by AST
+  (`test/helpers/doctor-registry-ast.ts`), plus `early_returns_after`. The same test
+  cross-checks that every runtime doctor golden below emits registry names in registry
+  order.
+- `doctor/json-*.json` (`test/doctor-json-golden.test.ts`, `doctor-json-v1`; Postgres:
+  `test/e2e/doctor-json-golden.test.ts`, `doctor-json-pg-v1`): real `gbrain doctor --json`
+  CLI children in a hermetic temp home (`test/helpers/doctor-json-golden.ts`: fixture
+  skills dir, reduced PATH, keyless, `fetch` refused and logged by
+  `test/helpers/no-network-preload.ts`). Variants: PGLite fresh / `--fast` / degraded
+  embedding config, no config, unreachable Postgres (+`--fast`), fresh Postgres in a
+  scratch database.
+- `doctor/early-stop-*.json` (`test/doctor-early-stop-golden.serial.test.ts`,
+  `doctor-checks-v1`): `buildChecks` null-engine, `--fast`, connect-error and
+  getStats-failure early stops.
+- `hybrid/ranked-results.json` (`test/hybrid-golden.test.ts`, `hybrid-ranked-v1`,
+  identity): exact `(source, slug, page id, chunk id, chunk index, score)` for 8 queries
+  through `hybridSearch` and `hybridSearchCached` cold + warm, hash stub embedder via
+  `queryEmbedFn`, pinned clock.

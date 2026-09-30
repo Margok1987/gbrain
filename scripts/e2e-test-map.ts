@@ -406,9 +406,9 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   // Autopilot linux install/uninstall lifecycle (PATH-shimmed crontab +
   // systemctl; the ubuntu CI runner's only behavioral pin on those arms).
   "src/commands/autopilot.ts": ["test/e2e/autopilot-linux-lifecycle.serial.test.ts", "test/e2e/worker-readiness-cli.test.ts"],
-  "src/commands/doctor.ts": ["test/e2e/doctor-progress.test.ts"],
+  "src/commands/doctor.ts": ["test/e2e/doctor-progress.test.ts", "test/e2e/doctor-json-golden.test.ts"],
   // Doctor check modules peeled from doctor.ts feed the same e2e surface.
-  "src/commands/doctor/**": ["test/e2e/doctor-progress.test.ts", "test/e2e/recovery-layer.test.ts", "test/e2e/fix-wave-3-integration.test.ts"],
+  "src/commands/doctor/**": ["test/e2e/doctor-progress.test.ts", "test/e2e/recovery-layer.test.ts", "test/e2e/fix-wave-3-integration.test.ts", "test/e2e/doctor-json-golden.test.ts"],
   // Knowledge graph layer feeds graph-quality.
   "src/core/link-extraction.ts": ["test/e2e/graph-quality.test.ts", "test/e2e/attendance-retrieval-postgres.test.ts"],
   "src/core/attendance-repair.ts": ["test/e2e/attendance-repair-postgres.test.ts"],
