@@ -2128,9 +2128,9 @@ async function routeEngineFreeSubcommands(command: string, args: string[]): Prom
   // explicitly via its grace-tick exit path (PGLite exitCode-hijack guard).
   if (command === 'eval' && args[0] === 'brainbench') {
     const { runEvalBrainBench } = await import('./commands/eval-brainbench.ts');
-    if (args.includes('--llm') && !args.includes('--help') && !args.includes('-h')) {
-      // --llm is the one mode that talks to a provider; mirror the
-      // longmemeval gateway bootstrap so extraction calls are priced.
+    if ((args.includes('--llm') || args.some((a) => a === '--decide' || a.startsWith('--decide='))) && !args.includes('--help') && !args.includes('-h')) {
+      // --llm and --decide arms talk to a provider; mirror the longmemeval
+      // gateway bootstrap so extraction and decide calls are keyed and priced.
       const config = loadConfig() ?? ({} as GBrainConfig);
       const { configureGateway } = await import('./core/ai/gateway.ts');
       configureGateway(buildGatewayConfig(config));

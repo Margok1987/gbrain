@@ -82,8 +82,11 @@ EOF
   s-decide)
     R=(--retrieval-only)
     run_arm s_s2       s-eval-half "$S" $L -- "${R[@]}" --reranker on --decide intent=on --decide-threshold intent=0.98
-    run_arm s_s3       s-eval-half "$S" $L -- "${R[@]}" --reranker on --decide evidence=on --decide-calibration "$CAL/s3-evidence.json" --decide-dataset "$DS/s3-evidence.jsonl"
-    run_arm s_s3s5     s-eval-half "$S" $L -- "${R[@]}" --reranker on --decide evidence=on --decide injection=on --decide-calibration "$CAL/s3s5-evidence.json" --decide-threshold injection=0.5 --decide-dataset "$DS/s3-evidence.jsonl"
+    # S3's calibrated threshold (recall >= 0.98 on the calibrate half) is 0.02, which never prunes under the 0.05
+    # margin; 0.08 is the lowest acting threshold (family lb 0.869 on the eval half, below the 0.90 gate), so the
+    # acting arms run it with force_on to measure what pruning costs and saves.
+    run_arm s_s3       s-eval-half "$S" $L -- "${R[@]}" --reranker on --decide evidence=on --decide-threshold evidence=0.08 --decide-force-on evidence
+    run_arm s_s3s5     s-eval-half "$S" $L -- "${R[@]}" --reranker on --decide evidence=on --decide injection=on --decide-threshold evidence=0.08 --decide-threshold injection=0.65 --decide-force-on evidence
     ;;
   m-retrieval)
     R=(--retrieval-only)
@@ -96,9 +99,7 @@ EOF
   s-judged)
     J=(--model anthropic:claude-haiku-4-5 --judge --judge-model openai:gpt-4o --max-usd 4 --yes --include-abstention)
     run_arm j_voy30    s-eval-judged-100 "$S" $L -- "${J[@]}" --reranker on
-    run_arm j_jev100   s-eval-judged-100 "$S" $L -- "${J[@]}" "${JEV[@]}" --eval-pool-depth 100
-    run_arm j_s3       s-eval-judged-100 "$S" $L -- "${J[@]}" --reranker on --decide evidence=on --decide-calibration "$CAL/s3-evidence.json" --decide-dataset "$DS/s3-evidence.jsonl"
-    run_arm j_s4       s-eval-judged-100 "$S" $L -- "${J[@]}" --reranker on --decide answerable=on --decide-calibration "$CAL/s4-answerable.json" --decide-force-on answerable
+    run_arm j_jev30    s-eval-judged-100 "$S" $L -- "${J[@]}" "${JEV[@]}" --search-pin search.reranker.top_n_in=30
     ;;
   *) echo "usage: $0 data|s-retrieval|s-decide|m-retrieval|s-judged"; exit 2 ;;
 esac

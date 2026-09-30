@@ -69,7 +69,9 @@ const worker = async () => {
       const perItem = new Map<string, Array<{ v: number | null; a: unknown }>>();
       for (const q of req.questions) {
         const a = r.answers[q.id];
-        const id = req.itemFor[q.id]!.id;
+        const target = req.itemFor[q.id];
+        if (!target) continue;
+        const id = target.id;
         perItem.set(id, [...(perItem.get(id) ?? []), { v: a ? thresholdValue(a) : null, a }]);
       }
       for (const it of fam) {
