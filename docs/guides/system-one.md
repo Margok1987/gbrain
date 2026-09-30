@@ -121,7 +121,7 @@ candidate text, as it is for Voyage. Details, scoring rubric and caveats:
 ### query routing (`intent`)
 
 One choice question per query, asked at the start of search and waited on
-for at most `decide.slots.intent.wait_ms` (150 ms). A confident answer
+for at most `decide.slots.intent.wait_ms` (250 ms). A confident answer
 replaces the regex intent, which drives the existing intent weights and
 detail level. `think` asks a second question (`temporal`,
 `knowledge_update`, `other`) that gates trajectory injection. A late or

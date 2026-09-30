@@ -169,7 +169,7 @@ decide.calibrate.retest_n    50  (items re-asked 3 times to measure retest_sd an
 decide.slots.<slot>.min_action_precision  0.90  (harmful-direction slots)
 decide.slots.<slot>.shadow_sample  1.0
 decide.slots.<slot>.shadow_wait    off  (on: await shadow under on deadlines)
-decide.slots.intent.wait_ms  150
+decide.slots.intent.wait_ms  150   (2026-09-30: default raised to 250; 39% of live Jev intent answers arrived after 150 ms, 3% after 250 ms, see docs/eval/system-one/)
 decide.slots.recall_needed.suppress_below  0.05   (2026-09-30: default raised to 0.10; with the 0.05 margin floor, 0.05 could never suppress)
 decide.egress.typesafe.<class>  deny | allow  (class: query, candidates, facts, conversation; written by
                              `decide enable` after it shows what leaves the machine)

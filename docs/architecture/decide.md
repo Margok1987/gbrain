@@ -244,7 +244,7 @@ acceptance never run for a remote caller.
 | S8 source windows / coverage floor | 3 per claim; 0.25 of the claim's content words | no (`GROUNDING_MAX_WINDOWS`, `GROUNDING_KEYWORD_FLOOR`) |
 | S8 deadlines | 30 s per page, 10 min per dream phase | no |
 | S4 k | per slot lane | documented with each slot |
-| S2 wait for the intent answer | 150 ms | `decide.slots.intent.wait_ms` |
+| S2 wait for the intent answer | 250 ms (measured: 39% of live Jev answers arrive after 150 ms, 3% after 250 ms; docs/eval/system-one/) | `decide.slots.intent.wait_ms` |
 | S4 k | min(10, evidence count), shrunk to fit 32k | no (`ANSWERABLE_MAX_K`) |
 | S5 demotion floor | the S3 `min_keep` cut (default 3) | via `decide.slots.evidence.min_keep` |
 | S6 budgets, S8 window count, S7 window size/cap | per slot lane | documented with each slot |

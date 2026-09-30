@@ -45,7 +45,7 @@ describe('S2 intent reducer', () => {
     expect(req.questions[0]!.kind).toBe('choice');
   });
   test('wait bound defaults to 150 ms and is configurable', () => {
-    expect(readDecideConfig(null).intentWaitMs).toBe(150);
+    expect(readDecideConfig(null).intentWaitMs).toBe(250);
     expect(readDecideConfig({ 'decide.slots.intent.wait_ms': '40' }).intentWaitMs).toBe(40);
   });
 });
