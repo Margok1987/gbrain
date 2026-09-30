@@ -262,9 +262,9 @@ async function embedPage(engine: BrainEngine, config: GBrainConfig, effect: Pers
       return installed;
     });
     if (installed && refused) {
-      // Terminal, never retried: the same input would return the same vector. A scan parks the page and
-      // moves on, so the refusal stays on the effect (targets_parked) instead of disappearing.
-      if (targetedWithdrawalEffect(effect) || effect.data.source_scan) await parkEffectTarget(engine, effect, EMBEDDING_ZERO_NORM, snapshot.page.slug);
+      // Terminal, never retried: the same input would return the same vector. A scan moves on to its next
+      // page; the page keeps no signature, so `gbrain embed --stale` finds it.
+      if (targetedWithdrawalEffect(effect) || effect.data.source_scan) await finishPage(engine, effect, snapshot);
       else await failEffect(engine, effect, EMBEDDING_ZERO_NORM);
       return;
     }
