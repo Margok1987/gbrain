@@ -97,6 +97,12 @@ describe('#5673 connector dispatch gate', () => {
     expect((await jobs()).map(job => [job.name, job.data.sourceId])).toEqual([['sync', 'gh-abort']]);
   });
 
+  test('a dry run does not open the dispatch gate', async () => {
+    await addSource('gh-preview', { kind: 'github' });
+    await withConnectorSync(engine, 'gh-preview', 'github', {}, { dryRun: true } as never, async () => null);
+    expect((await readConnectorDispatchStates(engine)).get('gh-preview')?.attempted).toBe(false);
+  });
+
   test('the fan-out runs only database phases for an attempted connector, with no brain directory', async () => {
     await addSource('notes', {}, dir);
     await addSource('gmail-stale', { kind: 'google' }, join(dir, 'missing-checkout'));

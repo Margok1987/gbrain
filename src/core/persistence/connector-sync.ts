@@ -193,17 +193,20 @@ export async function withConnectorSync<T>(engine: BrainEngine, sourceId: string
   if (!brain?.enabled) {
     if (opts.resetCheckpoint) throw new OperationError('invalid_params', '--reset-checkpoint applies to managed connector sources.',
       `This brain does not use managed persistence; re-walk this connector with: gbrain sync --source ${sourceId} --full`);
-    await recordConnectorSyncAttempt(engine, sourceId);
+    // A preview never opens the autopilot dispatch gate (#5673).
+    if (!opts.dryRun) await recordConnectorSyncAttempt(engine, sourceId);
     return work(null, opts);
   }
   opts.signal?.throwIfAborted();
   return withRefreshingLock(engine, syncLockId(sourceId), async (signal, handle) => {
     const combined = opts.signal ? AbortSignal.any([opts.signal, signal]) : signal;
     const options = { ...opts, signal: combined };
-    // Stamped before the session loads its state row, so the session's own writes keep it.
-    await recordConnectorSyncAttempt(engine, sourceId);
     const session = await beginConnectorSync(engine, sourceId, connector, config, options, { handle, signal: combined });
     if (!session) throw new OperationError('source_changed', 'The managed connector mode changed before the sweep.');
+    // Only a validated, authorized sweep opens the autopilot dispatch gate (#5673); the
+    // session keeps the stamp in the state row it writes back.
+    await recordConnectorSyncAttempt(engine, sourceId);
+    session.markSyncAttempted();
     let result: T;
     try {
       result = await work(session, options);
@@ -590,6 +593,10 @@ export class ManagedConnectorSync {
       page_admissions: this.counts.page_admissions, skipped_unchanged: this.counts.skipped_unchanged, pending: pending.length,
       checkpoint_admissions: this.counts.checkpoint_admissions, stopped_on_wait_budget: this.stopped, dropped_upstream: this.counts.dropped_upstream, finished_at: now } };
     await this.writeState();
+  }
+  /** #5673: keep the dispatch-gate stamp in the state this session writes back. */
+  markSyncAttempted(): void {
+    this.connectorState = { ...this.connectorState, first_attempt_at: this.connectorState.first_attempt_at ?? new Date().toISOString() };
   }
   /** One statement: the state row changes only while this run still holds the connector sync lease. */
   private async writeState(): Promise<void> {
