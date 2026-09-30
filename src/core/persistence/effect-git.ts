@@ -5,55 +5,41 @@ import { OperationError } from '../ops/contract.ts';
 import { persistenceHome } from './identity.ts';
 import { nativeFileTarget } from './native-file-target.ts';
 
-/** A foreign index lock younger than this is contention; an older one is reported as a stale lock. */
-const FOREIGN_INDEX_LOCK_GRACE_MS = 10 * 60 * 1000;
-
-/** `.git/index.lock` of a checkout whose `.git` is a directory; null for other layouts. */
-function indexLockPath(root: string): string | null {
-  try { return statSync(join(root, '.git')).isDirectory() ? join(root, '.git', 'index.lock') : null; } catch { return null; }
-}
+/** An index lock younger than this is contention; an older one is reported as stale. */
+const INDEX_LOCK_GRACE_MS = 10 * 60 * 1000;
+const INDEX_LOCK_REFUSAL = /Unable to create '([^']*index\.lock)': File exists/;
 
 /**
- * A bounded git run that is killed (abort or deadline) gets SIGKILL, which skips git's own lock cleanup, so an
- * index lock it took stays behind and fails every later attempt. The persistence owner runs this checkout's git
- * under its native worktree lock, so a lock created since this run started is this run's and is removed.
+ * Git refused because another process holds the index lock (the path comes from git's own message, so
+ * linked worktrees resolve too). The lock is never removed here: its holder may be a live git of the user
+ * or of this owner, and a timestamp cannot prove otherwise. A fresh lock is contention; one older than the
+ * grace, or dated in the future, is `git_index_stale`, which counts toward parking and names the lock.
  */
-function releaseKilledRunIndexLock(root: string, startedMs: number): void {
-  const lock = indexLockPath(root);
-  if (!lock) return;
-  try { if (statSync(lock).mtimeMs >= startedMs - 1000) rmSync(lock, { force: true }); } catch { /* no lock */ }
-}
-
-/** An index lock held by another process: contention while fresh, a named stale lock after the grace. */
-function foreignIndexLockError(root: string): OperationError | null {
-  const lock = indexLockPath(root);
+function indexLockError(stderr: string): OperationError | null {
+  const lock = INDEX_LOCK_REFUSAL.exec(stderr)?.[1];
   if (!lock) return null;
   let age: number;
   try { age = Date.now() - statSync(lock).mtimeMs; } catch { return null; }
-  if (age < FOREIGN_INDEX_LOCK_GRACE_MS) {
+  if (age >= 0 && age < INDEX_LOCK_GRACE_MS) {
     return new OperationError('git_index_locked', 'Another Git process holds the canonical checkout index lock.', 'The effect is retried shortly.');
   }
-  return new OperationError('git_unavailable', `A stale Git index lock blocks the canonical checkout: ${lock}.`,
-    `If no git command is running in that checkout, remove ${lock}; the effect then retries.`);
+  return new OperationError('git_index_stale', `A Git index lock older than 10 minutes blocks the canonical checkout: ${lock}.`,
+    `If no git command is running in that checkout, remove ${lock}, then retry the effect with gbrain sources writer retry-effects <source> --request-id <id>.`);
 }
 
 async function git(root: string, hooks: string, args: string[], signal?: AbortSignal): Promise<{ stdout: string; code: number }> {
-  const startedMs = Date.now();
-  const { error, stdout } = await execFileBounded('git', ['--literal-pathspecs', '-C', root, '-c', `core.hooksPath=${hooks}`, '-c', 'commit.gpgsign=false', ...args], {
+  const { error, stdout, stderr } = await execFileBounded('git', ['--literal-pathspecs', '-C', root, '-c', `core.hooksPath=${hooks}`, '-c', 'commit.gpgsign=false', ...args], {
     timeout: 20_000, maxBuffer: 1024 * 1024, signal,
     env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never',
       GIT_GLOB_PATHSPECS: '0', GIT_NOGLOB_PATHSPECS: '0', GIT_ICASE_PATHSPECS: '0' },
   });
-  if (error && (error.killed || typeof error.code !== 'number')) {
-    if (error.killed) releaseKilledRunIndexLock(root, startedMs);
-    throw new OperationError('git_unavailable', 'Git execution did not finish within its bounded attempt.');
-  }
+  if (error && (error.killed || typeof error.code !== 'number')) throw new OperationError('git_unavailable', 'Git execution did not finish within its bounded attempt.');
   const code = error?.code as number ?? 0;
-  if (code === 128) { const locked = foreignIndexLockError(root); if (locked) throw locked; }
+  if (code !== 0) { const locked = indexLockError(stderr); if (locked) throw locked; }
   return { stdout, code };
 }
 
-export const __gitIndexLockForTests = { releaseKilledRunIndexLock, foreignIndexLockError, FOREIGN_INDEX_LOCK_GRACE_MS };
+export const INDEX_LOCK_GRACE_FOR_TESTS = INDEX_LOCK_GRACE_MS;
 
 type GitOutcome = { git: string; reason?: string; push?: string };
 
