@@ -386,8 +386,12 @@ whole page and leaves every other hit its ranked chunk; with no conversation
 hit, or with `chunk`, the stage does not run and responses are byte-identical. The measured motivation: on 400 held-out
 LongMemEval questions whole sessions answered 361 against 253 for top-5
 chunks, while neighbor windows reached only 285–292, so `auto` gives
-conversations exactly the `page` unit (the earlier failed lexical excerpt
-selector is in `docs/eval/ANSWER_PACKET_RESULTS.md`). Contract, algorithms and latency:
+conversations exactly the `page` unit. `auto` itself answered 445 of 500
+LongMemEval-S questions against 312 for chunks (development data), and the
+preregistered sealed check was inconclusive at a ceiling (149 against 147 of
+150); see `docs/evidence-delivery.md` for the numbers and the token cost. The
+earlier failed lexical excerpt selector is in
+`docs/eval/ANSWER_PACKET_RESULTS.md`. Contract, algorithms and latency:
 [`docs/evidence-delivery.md`](../evidence-delivery.md).
 
 ## How to verify on your own brain

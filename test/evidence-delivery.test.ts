@@ -234,7 +234,7 @@ describe('allocation and boundary properties', () => {
         const h = hitFor(p, Math.floor(r() * p.chunks.length));
         if (!hits.some(x => x.chunk_id === h.chunk_id)) hits.push(h);
       }
-      const budget = [40, 200, 800, 3000, 16000][Math.floor(r() * 5)];
+      const budget = [40, 200, 800, 3000, 24000][Math.floor(r() * 5)];
       const snapshot = JSON.stringify(hits);
       const engine = fakeEngine(pages);
       const { results, delivery } = await deliverEvidence(engine, hits, planOf('auto', budget), {});
@@ -449,7 +449,7 @@ describe('ops', () => {
     lastMeta = null;
     const chunk = await op('search').handler(ctxOf(), { query: 'narwhal', return_unit: 'chunk' }) as SearchResult[];
     const rows = await op('search').handler(ctxOf(), { query: 'narwhal' }) as SearchResult[];
-    expect(lastMeta!.delivery).toMatchObject({ requested_unit: 'auto', applied_unit: 'auto', budget_tokens: 16000 });
+    expect(lastMeta!.delivery).toMatchObject({ requested_unit: 'auto', applied_unit: 'auto', budget_tokens: 24000 });
     const chat = rows.find(r => r.slug === 'chat/session-1')!;
     expect(chat.delivered).toMatchObject({ unit: 'page', reason: 'conversation_slug', truncated: false });
     const [page] = await engine.executeRaw<{ compiled_truth: string; timeline: string }>('SELECT compiled_truth, timeline FROM pages WHERE id = $1', [chat.page_id]);

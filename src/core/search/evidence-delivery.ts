@@ -45,8 +45,8 @@ export const RETURN_BUDGET_DEFAULT_KEY = 'search.return_budget_default';
 export const RETURN_BUDGET_MAX_REMOTE_KEY = 'search.return_budget_max_remote';
 export const RETURN_BUDGET_CONVERSATION_KEY = 'search.return_budget_conversation';
 export const DEFAULT_RETURN_BUDGET = 6000;
-/** `auto`'s default budget: whole chat sessions run about 15K tokens. */
-export const DEFAULT_CONVERSATION_BUDGET = 16000;
+/** `auto`'s default budget: whole chat sessions run about 15K tokens, and 16K still trimmed some sessions. */
+export const DEFAULT_CONVERSATION_BUDGET = 24000;
 export const DEFAULT_REMOTE_BUDGET_MAX = 32000;
 export const EVIDENCE_BLOCK_CHAR_CAP = 60_000;
 export const EVIDENCE_OMISSION = '\n\n[…]\n\n';

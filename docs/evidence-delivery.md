@@ -1,13 +1,21 @@
 # Evidence delivery (`return_unit`)
 
-> Status: the default is `auto` (v0.60.18.0): conversation pages come back
-> whole, every other hit is its unchanged ranked chunk. In the gbrain-evals
-> study, whole sessions answered 361/400 held-out LongMemEval questions against
-> 253/400 for top-5 chunks, while neighbor windows reached only 285–292. `auto`
-> matches `page` on conversation pages by construction and is unchanged
-> elsewhere; a preregistered measurement of `auto` itself is pending. Earlier
-> history: an earlier lexical excerpt selector lost 53/60 → 48/60, see
-> [`docs/eval/ANSWER_PACKET_RESULTS.md`](eval/ANSWER_PACKET_RESULTS.md).
+> Status: the default is `auto` (v0.60.23.0): conversation pages come back
+> whole, every other hit is its unchanged ranked chunk. On LongMemEval-S
+> (500 questions, development data) `auto` at a 16,000-token budget answered
+> 445 against 312 for chunks (+145 / −12, p = 4e-30) and 457 for whole pages,
+> at about 15,100 reader tokens per question against about 3,500. The
+> preregistered sealed confirmation set (150 new questions) returned `fail` at
+> a ceiling: chunks 147, `auto` 149 (+2 / −0), because its chats are short. It
+> showed no benefit and no harm. `auto` ships on the development-data evidence
+> while a harder sealed set is built. The default budget was then raised to
+> 24,000 tokens to cut session trimming (81 of 500 questions were trimmed at
+> 16,000), and a follow-up check measures it. Report:
+> [gbrain-evals PR #49](https://github.com/garrytan/gbrain-evals/pull/49)
+> (`docs/benchmarks/2026-09-30-evidence-auto-v2.md`). Earlier history: whole
+> sessions beat chunks 361/400 against 253/400 while neighbor windows reached
+> only 285–292, and a lexical excerpt selector lost 53/60 → 48/60 (see
+> [`docs/eval/ANSWER_PACKET_RESULTS.md`](eval/ANSWER_PACKET_RESULTS.md)).
 
 Search returns ranked **chunks**. An agent that needs the surrounding
 conversation or section has to call `get_page` for each hit. Evidence delivery
@@ -46,11 +54,11 @@ gbrain recall --query "renewal terms" --return-unit section --budget-tokens 4000
 
 | `return_unit` | What each result's `chunk_text` holds | Typical cost |
 |---|---|---|
-| `chunk` | The ranked chunk only (the pre-0.60.18 default). | ~300–450 tokens per result |
+| `chunk` | The ranked chunk only (the pre-0.60.23 default). | ~300–450 tokens per result |
 | `window` | The hit chunk plus `return_window` (1–3, default 1) neighbor chunks on each side, same page. Overlapping windows merge. | ~3× chunk per result |
 | `section` | The enclosing markdown section (by ATX heading). On conversation pages: the user→assistant rounds that overlap the hit. No structure → falls back to `window`. | varies |
 | `page` | The whole page or session, capped at 60,000 characters and by the budget. | whole page |
-| `auto` (default) | Per hit: `page` for conversation pages, the unchanged ranked chunk for everything else. Each result's `delivered.unit` and `delivered.reason` say which, and why. | whole sessions, 16,000-token default budget |
+| `auto` (default) | Per hit: `page` for conversation pages, the unchanged ranked chunk for everything else. Each result's `delivered.unit` and `delivered.reason` say which, and why. | whole sessions, 24,000-token default budget |
 
 Use `page` for multi-session / temporal questions where the answer depends on
 the whole conversation. Use `window` when you only need local context.
@@ -65,7 +73,8 @@ Per-call params on `search`, `query`, `recall`:
   Used by `window` (and by the `section` fallback to `window`).
 - Budget: `token_budget` on `search` / `query`, `budget_tokens` on `recall`.
   When no budget is given, `auto` uses `search.return_budget_conversation`
-  (default 16,000: chat sessions run about 15K tokens) and the other units use
+  (default 24,000: chat sessions run about 15K tokens, and at 16,000 some
+  long sessions were still trimmed) and the other units use
   `search.return_budget_default` (default 6,000). Remote callers are clamped to
   `search.return_budget_max_remote` (default 32,000); the clamp is reported in
   `delivery.budget_clamped` and `delivery.fallbacks`, never raised.
