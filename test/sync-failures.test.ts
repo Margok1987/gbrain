@@ -174,7 +174,7 @@ describe('Bug 9 — sync.ts CLI flag wiring', () => {
     // runSync so the flag means "ack whatever is currently flagged".
     // v0.42.42.0 (#2139, D13C): the pre-ack is now scoped PER SOURCE — `--all`
     // acks every source, single-source acks only its own.
-    const source = surfaceFileSource('sync', 'src/commands/sync.ts');
+    const source = surfaceFileSource('sync', 'src/commands/sync/run.ts');
     expect(source).toMatch(/if \(skipFailed\) \{[\s\S]*?syncAll \? acknowledgeFailures\(\) : acknowledgeFailures\(sourceId\)/);
   });
 

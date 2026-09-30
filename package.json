@@ -135,6 +135,7 @@
     "check:engine-sql-ratchet": "bun scripts/check-engine-sql-ratchet.ts",
     "check:engine-sql-dynamic": "bun scripts/check-engine-sql-dynamic.ts",
     "check:engine-sql-brands": "bun scripts/check-engine-sql-brands.ts",
+    "check:sync-run-state": "bun scripts/check-sync-run-state.ts",
     "check:schema-migrations": "bash scripts/check-schema-migrations-fresh.sh",
     "check:schema-fresh": "bash scripts/check-schema-fresh.sh",
     "check:schema-migration-order": "bun scripts/check-schema-migration-order.ts",

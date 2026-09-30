@@ -208,7 +208,7 @@ describe('doctor checkFactsEmbeddingWidthConsistency wiring (T6)', () => {
   // Containment greps read the whole doctor surface; the ordering assertion
   // stays pinned to the single file that holds both call sites.
   const DOC_ALL = doctorSource();
-  const DOC_TS = doctorFileSource('doctor.ts');
+  const DOC_TS = doctorFileSource('doctor/checks/sync-search.ts');
 
   test('doctor.ts exports the new check function', () => {
     expect(DOC_ALL).toMatch(

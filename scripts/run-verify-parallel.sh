@@ -140,6 +140,9 @@ CHECKS=(
   # EO4 (refactor wave 1): RLS read brands stay unforgeable; brand factories
   # importable only from their allowlists (never src/core/ops/**).
   "check:engine-sql-brands"
+  # A17 (refactor wave 1, W4 sync): SyncRun mutable fields are read/written
+  # only as run.<field> over src/commands/sync/ (no destructuring or aliasing).
+  "check:sync-run-state"
   "check:schema-migrations"
   "check:schema-fresh"
   "check:schema-migration-order"

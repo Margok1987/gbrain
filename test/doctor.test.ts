@@ -17,7 +17,7 @@ afterEach(() => resetGateway());
 
 describe('doctor command', () => {
   test('dimension recovery previews existing brains without recommending reinitialization', () => {
-    const source = doctorFileSource('doctor.ts');
+    const source = doctorFileSource('doctor/checks/embedding-health.ts');
     const start = source.indexOf('if (totalChunks > 0)');
     const end = source.indexOf('surfacedUnconfiguredDrift = true;', start);
     expect(start).toBeGreaterThan(-1);
@@ -27,7 +27,7 @@ describe('doctor command', () => {
     expect(hint).toContain('--yes --max-cost-usd <approved-total>');
     expect(hint).toContain('docs/guides/embedding-migration.md#recovery');
     expect(hint).not.toContain('init --force');
-    expect(source).not.toContain('manual ALTER recipe');
+    expect(doctorSource()).not.toContain('manual ALTER recipe');
   });
 
   test('CLI registers doctor command', async () => {
@@ -493,7 +493,7 @@ describe('doctor command', () => {
     const doctorAll = doctorSource();
     expect(doctorAll).toContain('facts_extraction_health');
     // The check must group by source_id, not hardcode 'default'.
-    const doctorTs = doctorFileSource('doctor.ts');
+    const doctorTs = doctorFileSource('doctor/checks/knowledge-health.ts');
     const block = doctorTs.slice(
       doctorTs.indexOf('// 11a-bis-2. facts_extraction_health'),
       doctorTs.indexOf('// 11a-2. effective_date_health'),
@@ -516,7 +516,7 @@ describe('doctor command', () => {
   // These are structural assertions on the source string so a silent revert
   // of the severity or the IN-filter removal fails loudly without a live DB.
   test('RLS check scans ALL public tables (no hardcoded tablename IN list near the RLS block)', async () => {
-    const source = doctorFileSource('doctor.ts');
+    const source = doctorFileSource('doctor/checks/schema-health.ts');
     const rlsBlock = source.slice(
       source.indexOf('// 5. RLS'),
       source.indexOf('// 6. Schema version'),
@@ -530,7 +530,7 @@ describe('doctor command', () => {
   });
 
   test('RLS check raises status=fail with quoted-identifier remediation SQL', async () => {
-    const source = doctorFileSource('doctor.ts');
+    const source = doctorFileSource('doctor/checks/schema-health.ts');
     const rlsBlock = source.slice(
       source.indexOf('// 5. RLS'),
       source.indexOf('// 6. Schema version'),
@@ -544,7 +544,7 @@ describe('doctor command', () => {
   });
 
   test('RLS check skips on PGLite (no PostgREST, not applicable)', async () => {
-    const source = doctorFileSource('doctor.ts');
+    const source = doctorFileSource('doctor/checks/schema-health.ts');
     const rlsBlock = source.slice(
       source.indexOf('// 5. RLS'),
       source.indexOf('// 6. Schema version'),
@@ -554,7 +554,7 @@ describe('doctor command', () => {
   });
 
   test('RLS check reads pg_description and recognizes the GBRAIN:RLS_EXEMPT escape hatch', async () => {
-    const source = doctorFileSource('doctor.ts');
+    const source = doctorFileSource('doctor/checks/schema-health.ts');
     const rlsBlock = source.slice(
       source.indexOf('// 5. RLS'),
       source.indexOf('// 6. Schema version'),
@@ -570,7 +570,7 @@ describe('doctor command', () => {
   // Lives AFTER `// 6. Schema version` so the existing `// 5. RLS` slice
   // tests stay intact (codex correction).
   test('rls_event_trigger check exists, scoped after schema_version, healthy on (O,A) only', async () => {
-    const source = doctorFileSource('doctor.ts');
+    const source = doctorFileSource('doctor/checks/schema-health.ts');
     const idx7 = source.indexOf('// 7. RLS event trigger');
     const idx8 = source.indexOf('// 8. Embedding health');
     expect(idx7).toBeGreaterThan(0);
@@ -766,7 +766,7 @@ describe('v0.31.8 — wedge migration force-retry hint (D19)', () => {
     expect(doctorAll).toContain('WEDGED MIGRATION(s)');
     expect(doctorAll).toContain('MINIONS HALF-INSTALLED');
     expect(doctorAll).toContain('--force-retry');
-    const doctorTs = doctorFileSource('doctor.ts');
+    const doctorTs = doctorFileSource('doctor/checks/local-runtime.ts');
     expect(doctorTs).toMatch(/MINIONS HALF-INSTALLED[\s\S]{0,400}--yes/);
   });
 

@@ -113,7 +113,7 @@ The incremental walker handles two cases sync misses:
 ## Doctor reader
 
 ```ts
-// src/commands/doctor.ts:frontmatter_integrity (Phase 2 shape)
+// src/commands/doctor/checks/content-quality.ts:frontmatter_integrity (Phase 2 shape)
 const rows = await engine.executeRaw<{ source_id: string; issues: number }>(
   `SELECT source_id, count(*) FILTER (WHERE jsonb_array_length(codes) > 0)::int AS issues
    FROM frontmatter_scan_state

@@ -203,4 +203,25 @@ describe('check-function-size.ts rules', () => {
     expect(runGuard(root, ['--transfer']).out).toContain('skip: src/old.ts\tbig (0 identical candidates)');
     expect(runGuard(root).code).toBe(1);
   });
+
+  test('--transfer sees through an added `export` and re-relativized specifiers, but not a retargeted one', () => {
+    const fn = (spec: string, exported: boolean) =>
+      `${exported ? 'export ' : ''}async function big(total: number) {\n  await import('${spec}');\n${body(9, '  ')}\n  return total;\n}\n`;
+    const root = makeTree({ 'src/cmd/old.ts': fn('../core/x.ts', false) }, ['src/cmd/old.ts\tbig\t14\tseed']);
+    const git = (...args: string[]) => spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+    git('init', '-q');
+    git('config', 'user.email', 'fixture@example.com');
+    git('config', 'user.name', 't');
+    git('add', '-A');
+    git('commit', '-qm', 'base');
+    rmSync(join(root, 'src/cmd/old.ts'));
+    mkdirSync(join(root, 'src/cmd/old'), { recursive: true });
+    writeFileSync(join(root, 'src/cmd/old/moved.ts'), fn('../../core/y.ts', true));
+    expect(runGuard(root, ['--transfer']).out).toContain('skip: src/cmd/old.ts\tbig (0 identical candidates)');
+    writeFileSync(join(root, 'src/cmd/old/moved.ts'), fn('../../core/x.ts', true));
+    const moved = runGuard(root, ['--transfer']);
+    expect(moved.code).toBe(0);
+    expect(readFileSync(join(root, 'scripts/function-size-baseline.tsv'), 'utf8')).toContain('src/cmd/old/moved.ts\tbig\t14\tseed');
+    expect(runGuard(root).code).toBe(0);
+  });
 });

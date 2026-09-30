@@ -31,7 +31,8 @@
  * Baseline identity transfer: a move-only commit changes a function's key.
  * `bun scripts/check-function-size.ts --transfer` rewrites a missing row to
  * the one unbaselined over-limit function whose whitespace-normalized text is
- * identical to the old function at the base ref (default HEAD; `--from <ref>`),
+ * identical to the old function at the base ref (default HEAD; `--from <ref>`)
+ * apart from an added leading `export` and re-relativized module specifiers,
  * keeping lines and justification. Anything that is not a verified identical
  * move is left for review.
  *
@@ -44,7 +45,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';
 
 const FIXTURE_ROOT = process.env.GBRAIN_GUARD_ROOT;
@@ -255,6 +256,19 @@ function baseBaselineText(): { text: string | null; source: string } {
 const keyOf = (path: string, name: string) => `${path}\t${name}`;
 const normalized = (s: string) => s.replace(/\s+/g, ' ').trim();
 
+/**
+ * Move-normalized text for --transfer: a move into another module may add a
+ * leading `export` and must re-relativize module specifiers (`import('../x.ts')`
+ * becomes `import('../../x.ts')` one directory down). Specifier-shaped string
+ * literals are resolved against their own file, so they compare equal only
+ * when both sides name the same module.
+ */
+function moveNormalized(text: string, path: string): string {
+  const resolved = text.replace(/(['"])(\.\.?\/[^'"\n]*)\1/g, (_m, q: string, spec: string) =>
+    `${q}@${relative(ROOT, resolve(dirname(join(ROOT, path)), spec))}${q}`);
+  return normalized(resolved).replace(/^export /, '');
+}
+
 function formatBaseline(rows: Omit<BaselineRow, 'lineNo'>[], preamble: string): string {
   const sorted = [...rows].sort((a, b) => (a.path === b.path ? (a.name < b.name ? -1 : a.name > b.name ? 1 : 0) : a.path < b.path ? -1 : 1));
   return preamble + [HEADER, ...sorted.map((r) => `${r.path}\t${r.name}\t${r.lines}\t${r.justification}`)].join('\n') + '\n';
@@ -301,7 +315,7 @@ function main(): number {
       if (byKey.has(keyOf(r.path, r.name))) return r;
       const old = gitOut(['show', `${ref}:${r.path}`], ROOT);
       const oldFn = old ? measureSource(r.path, old).find((m) => m.name === r.name) : undefined;
-      const matches = oldFn ? candidates.filter((c) => normalized(c.text) === normalized(oldFn.text)) : [];
+      const matches = oldFn ? candidates.filter((c) => moveNormalized(c.text, c.path) === moveNormalized(oldFn.text, r.path)) : [];
       if (matches.length !== 1) {
         console.log(`skip: ${r.path}\t${r.name} (${oldFn ? `${matches.length} identical candidates` : `not found at ${ref}`})`);
         return r;
