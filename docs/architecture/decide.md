@@ -159,6 +159,37 @@ Every slot may also record `error` or `skipped`, with `error_reason` from
 (problem, cause, exact fix, docs anchor). `test/decide/docs-sync.test.ts`
 pins this table to the code.
 
+## Retrieval slots (S2, S4, S5)
+
+- **S2 intent.** Search: launched as soon as hybridSearch resolves its decide
+  context (alongside the regex classifier), awaited at most
+  `decide.slots.intent.wait_ms`; an `override` (above threshold, a known label
+  that differs from and does not tie the regex label) replaces the
+  `QueryIntent` before weights, detail and search options are derived, through
+  the same code the regex path uses. Everything else keeps the regex label
+  (`fallback_regex`; a late answer's receipt lands later with reason `late`).
+  The search question always keys on call site `search`. Think: its own
+  question (`temporal | knowledge_update | other`, call site `think`) replaces
+  `classifyIntent` for trajectory gating; think asks the search question once
+  and hands the answer to gather.
+- **S4 answerable.** Always its own request (`pack_shape` unpacked). `query`
+  op: over the pre-S3 top-k, concurrent with the S3/S5 request, diagnostic
+  only (`meta.answerability { p, threshold, verdict, k_used }`; results never
+  change). `think`: over the final gathered pages and sendable takes after
+  gather; abstains (lists the nearest pages, skips synthesis) only on
+  `abstain`, which needs complete coverage (no k shrink, nothing withheld by
+  egress, no private take, no trajectory block) and no deterministic signal
+  (identity hit, strong CRAG grade without S3's input). Harmful: `on` needs a
+  qualified calibration or `force_on`.
+- **S5 injection.** Rides the S3-shaped request. `on` stamps `injection_p`,
+  flags candidates at threshold that the protection predicate does not
+  protect (`injection_suspected`), moves them below the clean candidates of
+  their `classifyEvidence` class without crossing the S3 `min_keep` cut, and
+  `think` adds an `injection_suspected` line to the flagged page's untrusted
+  wrapper. Never drops content, never gates a write, never a security
+  boundary. Datasets: `--from injection-fixtures` (#5178's known cases,
+  credited to dsandrade).
+
 ## Egress (one contract for every path)
 
 `egress.ts` `checkEgress`: a third-party provider receives a data class only
@@ -172,6 +203,17 @@ the #5525 derived-origin rule), facts by their own visibility (default
 private), conversation text is private. Refused questions are answered by
 `decide.egress_fallback` (an `llm:` route) as their own sub-decision, else take
 the fail direction. `llm:` follows today's chat egress rules.
+
+**Jev reranker and denied sources (owner decision, 2026-09-30).** When the
+Jev reranker is active (`search.reranker.model typesafe:*`, reranking
+enabled) and any rerank candidate (the `top_n_in` head) comes from a source in
+`decide.egress.deny_sources`, the query skips reranking and keeps fused (RRF)
+order. The skip is stamped `degraded: reranker_skipped (egress_denied)` (an
+`--explain` line on every query); with `decide.slots.rerank.mode` not off it
+also writes `skipped` receipts with reason `egress_denied` and a
+`decide rerank: on (inactive: egress_denied)` line. Partial reranking of the
+allowed candidates is not attempted: it would reorder denied candidates by
+omission.
 
 ## Trust
 
@@ -202,6 +244,10 @@ acceptance never run for a remote caller.
 | S8 source windows / coverage floor | 3 per claim; 0.25 of the claim's content words | no (`GROUNDING_MAX_WINDOWS`, `GROUNDING_KEYWORD_FLOOR`) |
 | S8 deadlines | 30 s per page, 10 min per dream phase | no |
 | S4 k | per slot lane | documented with each slot |
+| S2 wait for the intent answer | 150 ms | `decide.slots.intent.wait_ms` |
+| S4 k | min(10, evidence count), shrunk to fit 32k | no (`ANSWERABLE_MAX_K`) |
+| S5 demotion floor | the S3 `min_keep` cut (default 3) | via `decide.slots.evidence.min_keep` |
+| S6 budgets, S8 window count, S7 window size/cap | per slot lane | documented with each slot |
 
 ## Extension points for slot lanes
 
@@ -209,8 +255,14 @@ acceptance never run for a remote caller.
   call site with tests; unwired slots are refused (`slot_unavailable`).
 - `registerEvidenceCoPack(handler)` (`src/core/search/decide-stage.ts`): add
   questions to the S3 packed request (S5): `questions(query, candidates,
-  policy)` with ids prefixed `<slot>:`, and `apply(pool, result, policy, ctx)`
-  returning the pool (never below the S3 `min_keep` cut) and receipt outcomes.
+  policy)` with ids prefixed `<slot>:` (index i asks about candidate i), and
+  `apply(pool, result, policy, ctx, judged)` returning the pool (never below
+  the S3 `min_keep` cut), receipt outcomes and an optional skip reason
+  (drift). A co-packed slot always rides the S3-shaped request, one
+  `pack_shape`: when S3 is off or inactive, the request still carries the S3
+  questions (S3 records and applies nothing) so a co-packed slot's
+  calibration stays valid; a co-packed slot `on` makes the request
+  synchronous even when S3 is shadow.
 - `registerDatasetAdapter(adapter)` / `registerDatasetBuilder(source, builder)`
   (`dataset.ts`): production-shaped requests, harmful-action reducers, and
   `gbrain decide dataset --from <source>` builders.

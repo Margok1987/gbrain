@@ -26,7 +26,8 @@ import { writeReceipts } from '../ai/decide/receipts.ts';
 import { rerankQuestions } from '../ai/decide/rerank-adapter.ts';
 import { createQueryBudget, runShadow, sampled, stageDeadlineMs, type DecideQueryBudget } from '../ai/decide/runtime.ts';
 import { listCalibrations, pageSubject, recentResolvedModels, type CalibrationRow } from '../ai/decide/store.ts';
-import { DecideError, type DecideMode, type DecideQuestion, type DecideResult, type DecideSlot, type EvidenceItem } from '../ai/decide/types.ts';
+import { DecideError, type DecideMode, type DecideQuestion, type DecideResult, type DecideSlot } from '../ai/decide/types.ts';
+import { candidateItem, injectionCoPack, launchSearchIntent, startQueryAnswerability, type AnswerabilityVerdict, type IntentAsk } from './decide-retrieval.ts';
 import { capRerankDoc } from './rerank.ts';
 
 export interface DecideSlotMeta {
@@ -42,7 +43,12 @@ export interface DecideSlotMeta {
   latency_ms?: number;
   /** S1 shadow: agreement between today's order and Jev's. */
   agreement?: { top1: boolean; kendall_tau: number };
+  /** One-line answer summary (S2 label, S4 probability and verdict). */
+  answer?: string;
 }
+
+/** S4 on the query op: `meta.answerability` (diagnostic only; shadow shows it only when awaited). */
+export type AnswerabilityMeta = AnswerabilityVerdict;
 
 export type DecideSearchMeta = Partial<Record<DecideSlot, DecideSlotMeta>>;
 
@@ -57,6 +63,10 @@ export interface DecideSearchContext {
   policies: Partial<Record<DecideSlot, SlotPolicy>>;
   meta: DecideSearchMeta;
   sourceId?: string;
+  /** S2: the in-flight search question (launched at hybridSearch entry, or think's precomputed one). */
+  intentAsk?: IntentAsk;
+  /** S4 query-op verdict for `meta.answerability`. */
+  answerability?: AnswerabilityMeta;
 }
 
 /** Hybrid opts the op layer passes (remote spend accounting; crag re-runs turn S2-S5 off). */
@@ -69,6 +79,10 @@ export interface DecideSearchOpts {
   off?: boolean;
   /** S6 fire retrieval (turn context): take the keyword-only return path, no embedding call. */
   keywordOnly?: boolean;
+  /** S2: think's one precomputed search-intent answer, shared by its gather legs. */
+  intent?: IntentAsk;
+  /** S4: the `query` op asks answerability over the pre-S3 top-k (diagnostic only). */
+  answerability?: boolean;
 }
 
 /** Max candidates the S3 request judges (fixed by design; the unjudged tail is kept). */
@@ -82,8 +96,8 @@ export interface EvidenceCoPackHandler {
   slot: DecideSlot;
   /** Question ids must be prefixed with `${slot}:`. */
   questions(query: string, candidates: readonly SearchResult[], policy: SlotPolicy): DecideQuestion[];
-  /** Apply answers (never below the S3 min_keep cut); returns receipt outcomes by question id. */
-  apply(pool: SearchResult[], result: DecideResult, policy: SlotPolicy, ctx: DecideSearchContext): { pool: SearchResult[]; outcomes: Record<string, string> };
+  /** Apply answers (never below the S3 min_keep cut); `judged[i]` is the candidate question index i asked about. Returns receipt outcomes by question id, or a skip reason (drift). */
+  apply(pool: SearchResult[], result: DecideResult, policy: SlotPolicy, ctx: DecideSearchContext, judged: readonly SearchResult[]): { pool: SearchResult[]; outcomes: Record<string, string>; reason?: string };
 }
 
 const coPackHandlers: EvidenceCoPackHandler[] = [];
@@ -104,6 +118,7 @@ export function evidenceCoPackedSlots(cfg: DecideConfig): DecideSlot[] {
 const CACHE_MS = 60_000;
 let calibrationCache = new WeakMap<BrainEngine, { at: number; rows: CalibrationRow[]; resolved: Record<string, string> }>();
 
+/** Calibration rows and last resolved models, cached per engine for 60 s (search and think share it). */
 export async function calibrationState(engine: BrainEngine): Promise<{ rows: CalibrationRow[]; resolved: Record<string, string> }> {
   const hit = calibrationCache.get(engine);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit;
@@ -142,19 +157,37 @@ export async function resolveDecideSearchContext(
   if (cfg.slots.rerank.mode !== 'off') {
     policies.rerank = resolveSlotPolicy({ cfg, slot: 'rerank', callSite, packShape: packShape('rerank'), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey, rerankerModel });
   }
+  // Co-packed slots (S5) always ride the S3-shaped request, whether or not S3 itself is on.
+  const coPacked = evidenceCoPackedSlots(cfg);
   if (cfg.slots.evidence.mode !== 'off') {
-    const coPacked = evidenceCoPackedSlots(cfg);
     policies.evidence = resolveSlotPolicy({ cfg, slot: 'evidence', callSite, packShape: packShape('evidence', coPacked), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey });
-    for (const h of coPackHandlers) {
-      if (cfg.slots[h.slot].mode === 'off') continue;
-      policies[h.slot] = resolveSlotPolicy({ cfg, slot: h.slot, callSite, packShape: packShape('evidence', coPacked), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey });
-    }
+  }
+  for (const slot of coPacked) {
+    policies[slot] = resolveSlotPolicy({ cfg, slot, callSite, packShape: packShape('evidence', coPacked), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey });
+  }
+  // S2's search question keys on call site `search` even inside think's gather.
+  if (cfg.slots.intent.mode !== 'off') {
+    policies.intent = resolveSlotPolicy({ cfg, slot: 'intent', callSite: 'search', packShape: packShape('intent'), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey });
+  }
+  if (cfg.slots.answerable.mode !== 'off' && opts.decide?.answerability) {
+    policies.answerable = resolveSlotPolicy({ cfg, slot: 'answerable', callSite: 'query', packShape: packShape('answerable', [], { unpacked: true }), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey });
   }
   const explain = getCliOptions().explain === true;
   return {
     engine, cfg, budget: createQueryBudget(cfg.queryBudgetMs), remote: opts.decide?.remote === true, callSite, explain,
     policies, meta: {}, ...(opts.sourceId ? { sourceId: opts.sourceId } : {}),
   };
+}
+
+/** Resolve the context and launch S2 at once (hybridSearch entry). */
+export async function resolveAndLaunchDecide(
+  engine: BrainEngine,
+  snapshot: Record<string, string> | null | undefined,
+  query: string,
+  opts: { rerankerModel?: string; rerankerEnabled: boolean; decide?: DecideSearchOpts; sourceId?: string },
+): Promise<DecideSearchContext | undefined> {
+  const ctx = await resolveDecideSearchContext(engine, snapshot, opts);
+  return ctx ? launchSearchIntent(ctx, query, opts.decide?.intent) : undefined;
 }
 
 /**
@@ -183,98 +216,143 @@ const tally = (outcomes: Record<string, string>): Record<string, number> => {
   return out;
 };
 
-function candidateItem(r: SearchResult): EvidenceItem {
-  const text = capRerankDoc([r.title, r.chunk_text].filter(Boolean).join('\n'));
-  return { text, class: 'candidates', slug: r.slug, source_id: r.source_id ?? 'default' };
-}
-
 // ---------------------------------------------------------------------------
 // S3 evidence gate
 // ---------------------------------------------------------------------------
 
+/**
+ * S3 evidence gate plus everything that rides its position: the S3/S5 packed
+ * request and, on the `query` op, the concurrent S4 request over the pre-S3
+ * pool. No-op when every slot here is off.
+ */
 export async function applyEvidenceGate(ctx: DecideSearchContext | undefined, query: string, pool: SearchResult[]): Promise<SearchResult[]> {
-  const policy = ctx?.policies.evidence;
-  if (!ctx || !policy || policy.requested === 'off' || pool.length === 0) return pool;
+  if (!ctx || pool.length === 0) return pool;
+  const answerability = startQueryAnswerability(ctx, query, pool);
+  try {
+    return await evidenceStage(ctx, query, pool);
+  } finally {
+    if (answerability) await answerability;
+  }
+}
+
+async function evidenceStage(ctx: DecideSearchContext, query: string, pool: SearchResult[]): Promise<SearchResult[]> {
+  const policy = ctx.policies.evidence;
+  const s3Requested = policy !== undefined && policy.requested !== 'off';
+  const coRequested = coPackHandlers.filter((h) => ctx.policies[h.slot] && ctx.policies[h.slot]!.requested !== 'off');
+  if (!s3Requested && coRequested.length === 0) return pool;
   const judged = pool.slice(0, EVIDENCE_MAX_CANDIDATES);
   const questions = judged.map((r, i) => evidenceQuestion(`evidence:${i}`, i, candidateItem(r), isProtectedResult(r)));
-  const subjects = Object.fromEntries(judged.map((r, i) => [`evidence:${i}`, pageSubject(r.source_id, r.slug)]));
+  const subjectFor = (q: DecideQuestion): [string, string] => [q.id, pageSubject(judged[q.rank!]!.source_id, judged[q.rank!]!.slug)];
+  const subjects = Object.fromEntries(questions.map(subjectFor));
   const state = { query: { text: query, class: 'query' as const } };
-  const receiptBase = { slot: 'evidence' as const, callSite: ctx.callSite, lane: 'hot' as const, provider: policy.provider, policy, questions, state, subjects, sourceId: ctx.sourceId ?? null, remote: ctx.remote };
+  const receiptBase = { slot: 'evidence' as const, callSite: ctx.callSite, lane: 'hot' as const, provider: policy?.provider ?? '', policy, questions, state, subjects, sourceId: ctx.sourceId ?? null, remote: ctx.remote };
+  const coQuestions = new Map(coRequested.map((h) => [h.slot, h.questions(query, judged, ctx.policies[h.slot]!)]));
+  const coBase = (h: EvidenceCoPackHandler) => {
+    const hp = ctx.policies[h.slot]!;
+    const qs = coQuestions.get(h.slot)!;
+    return { slot: h.slot, callSite: ctx.callSite, lane: 'hot' as const, provider: hp.provider, policy: hp, questions: qs, state, subjects: Object.fromEntries(qs.map(subjectFor)), sourceId: ctx.sourceId ?? null, remote: ctx.remote };
+  };
+  const modeOf = (p: SlotPolicy): 'on' | 'shadow' => (p.effective === 'shadow' || (p.effective === 'off' && p.requested === 'shadow') ? 'shadow' : 'on');
 
-  if (policy.effective === 'off') {
+  // Inactive slots (on (inactive: reason)) record the reason and take off behavior.
+  if (s3Requested && policy.effective === 'off') {
     ctx.meta.evidence = { mode: policy.requested, effective: 'off', skipped: policy.inactive };
-    void writeReceipts(ctx.engine, { ...receiptBase, mode: policy.requested === 'shadow' ? 'shadow' : 'on', outcomes: {}, fallbackOutcome: 'skipped', reason: policy.inactive });
-    return pool;
+    void writeReceipts(ctx.engine, { ...receiptBase, mode: modeOf(policy), outcomes: {}, fallbackOutcome: 'skipped', reason: policy.inactive });
   }
-  const coPacked = coPackHandlers.filter((h) => ctx.policies[h.slot] && ctx.policies[h.slot]!.effective !== 'off');
-  const extra = coPacked.flatMap((h) => h.questions(query, judged, ctx.policies[h.slot]!));
+  for (const h of coRequested) {
+    const hp = ctx.policies[h.slot]!;
+    if (hp.effective !== 'off') continue;
+    ctx.meta[h.slot] = { mode: hp.requested, effective: 'off', skipped: hp.inactive };
+    void writeReceipts(ctx.engine, { ...coBase(h), mode: modeOf(hp), outcomes: {}, fallbackOutcome: 'skipped', reason: hp.inactive });
+  }
+  const s3Runs = s3Requested && policy.effective !== 'off';
+  const coPacked = coRequested.filter((h) => ctx.policies[h.slot]!.effective !== 'off');
+  if (!s3Runs && coPacked.length === 0) return pool;
+  const lead = s3Runs ? policy : ctx.policies[coPacked[0]!.slot]!;
+  const extra = coPacked.flatMap((h) => coQuestions.get(h.slot)!);
+
   const run = async (visible: boolean): Promise<{ pool: SearchResult[] }> => {
-    const deadline = stageDeadlineMs(ctx.budget, ctx.cfg.timeoutMs);
-    const mode = policy.effective === 'shadow' ? 'shadow' : 'on';
-    if (deadline === null) {
-      if (visible) ctx.meta.evidence = { mode: policy.requested, effective: 'off', skipped: 'late' };
-      void writeReceipts(ctx.engine, { ...receiptBase, mode, outcomes: {}, fallbackOutcome: 'skipped', reason: 'late' });
+    const seen = (p: SlotPolicy) => visible && (p.effective === 'on' || ctx.explain || p.shadowWait);
+    const failAll = (reason: string, outcome: 'skipped' | 'error') => {
+      if (s3Runs) {
+        if (seen(policy)) ctx.meta.evidence = { mode: policy.requested, effective: 'off', provider: policy.provider, skipped: reason };
+        void writeReceipts(ctx.engine, { ...receiptBase, mode: modeOf(policy), outcomes: {}, fallbackOutcome: outcome, reason });
+      }
+      for (const h of coPacked) {
+        const hp = ctx.policies[h.slot]!;
+        if (seen(hp)) ctx.meta[h.slot] = { mode: hp.requested, effective: 'off', provider: hp.provider, skipped: reason };
+        void writeReceipts(ctx.engine, { ...coBase(h), mode: modeOf(hp), outcomes: {}, fallbackOutcome: outcome, reason });
+      }
       return { pool };
-    }
+    };
+    const deadline = stageDeadlineMs(ctx.budget, ctx.cfg.timeoutMs);
+    if (deadline === null) return failAll('late', 'skipped');
     let result: DecideResult;
     try {
       result = await runDecide({
         slot: 'evidence', callSite: ctx.callSite, state, questions: [...questions, ...extra], deadlineMs: deadline,
-        provider: policy.provider, remote: ctx.remote, coPacked: coPacked.map((h) => h.slot),
+        provider: lead.provider, remote: ctx.remote, coPacked: coPacked.map((h) => h.slot),
       }, { engine: ctx.engine, config: ctx.cfg, sourceId: ctx.sourceId });
     } catch (err) {
-      const reason = err instanceof DecideError ? err.reason : 'provider_error';
-      if (visible) ctx.meta.evidence = { mode: policy.requested, effective: 'off', provider: policy.provider, skipped: reason };
-      void writeReceipts(ctx.engine, { ...receiptBase, mode, outcomes: {}, fallbackOutcome: 'error', reason });
-      return { pool };
+      return failAll(err instanceof DecideError ? err.reason : 'provider_error', 'error');
     }
-    const drift = driftReason(policy, result.model_resolved);
-    const judgements = questions.map((q) => {
-      const a = result.answers[q.id];
-      return { id: q.id, rank: q.rank!, p: a && a.kind === 'noul' ? a.p : null, protected: q.protected === true };
-    });
-    const outcomes: Record<string, EvidenceOutcome> = reduceEvidence(judgements, { threshold: policy.threshold!, margin: policy.margin, minKeep: policy.minKeep });
-    const acting = mode === 'on' && !drift;
-    void writeReceipts(ctx.engine, {
-      ...receiptBase, mode, result, outcomes: drift ? {} : outcomes, fallbackOutcome: 'skipped', ...(drift ? { reason: drift } : {}),
-    });
-    if (visible) ctx.meta.evidence = {
-      mode: policy.requested, effective: acting ? 'on' : mode === 'shadow' ? 'shadow' : 'off', provider: result.provider,
-      model_resolved: result.model_resolved, threshold: policy.threshold, judged: questions.length,
-      outcomes: tally(outcomes), latency_ms: result.latency_ms, ...(drift ? { skipped: drift } : {}),
-    };
     let next = pool;
-    if (acting) {
-      const keep = new Set<number>();
-      judged.forEach((r, i) => {
-        const p = judgements[i]!.p;
-        if (p !== null) r.decide_evidence = { p, clears: p >= policy.threshold! };
-        if (outcomes[`evidence:${i}`] !== 'pruned') keep.add(i);
+    if (s3Runs) {
+      const mode = modeOf(policy);
+      const drift = driftReason(policy, result.model_resolved);
+      const judgements = questions.map((q) => {
+        const a = result.answers[q.id];
+        return { id: q.id, rank: q.rank!, p: a && a.kind === 'noul' ? a.p : null, protected: q.protected === true };
       });
-      next = pool.filter((_, i) => i >= judged.length || keep.has(i));
+      const outcomes: Record<string, EvidenceOutcome> = reduceEvidence(judgements, { threshold: policy.threshold!, margin: policy.margin, minKeep: policy.minKeep });
+      const acting = mode === 'on' && !drift;
+      void writeReceipts(ctx.engine, {
+        ...receiptBase, mode, result, outcomes: drift ? {} : outcomes, fallbackOutcome: 'skipped', ...(drift ? { reason: drift } : {}),
+      });
+      if (seen(policy)) ctx.meta.evidence = {
+        mode: policy.requested, effective: acting ? 'on' : mode === 'shadow' ? 'shadow' : 'off', provider: result.provider,
+        model_resolved: result.model_resolved, threshold: policy.threshold, judged: questions.length,
+        outcomes: tally(outcomes), latency_ms: result.latency_ms, ...(drift ? { skipped: drift } : {}),
+      };
+      if (acting) {
+        const keep = new Set<number>();
+        judged.forEach((r, i) => {
+          const p = judgements[i]!.p;
+          if (p !== null) r.decide_evidence = { p, clears: p >= policy.threshold! };
+          if (outcomes[`evidence:${i}`] !== 'pruned') keep.add(i);
+        });
+        next = pool.filter((_, i) => i >= judged.length || keep.has(i));
+      }
     }
     for (const h of coPacked) {
       const hp = ctx.policies[h.slot]!;
-      const applied = h.apply(next, result, hp, ctx);
+      const applied = h.apply(next, result, hp, ctx, judged);
       next = applied.pool;
       void writeReceipts(ctx.engine, {
-        slot: h.slot, callSite: ctx.callSite, lane: 'hot', provider: hp.provider, policy: hp, result, state,
-        questions: extra.filter((q) => q.slot === h.slot), mode: hp.effective === 'shadow' ? 'shadow' : 'on',
-        outcomes: applied.outcomes, sourceId: ctx.sourceId ?? null, remote: ctx.remote,
+        ...coBase(h), result, mode: modeOf(hp), outcomes: applied.outcomes, fallbackOutcome: 'skipped', ...(applied.reason ? { reason: applied.reason } : {}),
       });
+      if (seen(hp)) ctx.meta[h.slot] = {
+        mode: hp.requested, effective: applied.reason ? 'off' : hp.effective, provider: result.provider, model_resolved: result.model_resolved,
+        threshold: hp.threshold, judged: coQuestions.get(h.slot)!.length, outcomes: tally(applied.outcomes), latency_ms: result.latency_ms,
+        ...(applied.reason ? { skipped: applied.reason } : {}),
+      };
     }
     return { pool: next };
   };
 
-  if (policy.effective === 'shadow') {
-    if (!sampled(policy.shadowSample)) return pool;
-    if (ctx.explain || policy.shadowWait) {
+  const acting = (s3Runs && policy.effective === 'on') || coPacked.some((h) => ctx.policies[h.slot]!.effective === 'on');
+  if (!acting) {
+    // Every running slot is shadow: sampled, and detached unless awaited (--explain / shadow_wait).
+    if (!sampled(lead.shadowSample)) return pool;
+    if (ctx.explain || [lead, ...coPacked.map((h) => ctx.policies[h.slot]!)].some((p) => p.shadowWait)) {
       await run(true);
       return pool;
     }
-    // Async shadow adds no meta and no latency.
     const started = runShadow(async () => { await run(false); });
-    if (!started) void writeReceipts(ctx.engine, { ...receiptBase, mode: 'shadow', outcomes: {}, fallbackOutcome: 'skipped', reason: 'shadow_queue_full' });
+    if (!started) {
+      if (s3Runs) void writeReceipts(ctx.engine, { ...receiptBase, mode: 'shadow', outcomes: {}, fallbackOutcome: 'skipped', reason: 'shadow_queue_full' });
+      for (const h of coPacked) void writeReceipts(ctx.engine, { ...coBase(h), mode: 'shadow', outcomes: {}, fallbackOutcome: 'skipped', reason: 'shadow_queue_full' });
+    }
     return pool;
   }
   return (await run(true)).pool;
@@ -323,7 +401,7 @@ export function recordRerankReceipts(
   const skip = policy.effective === 'off' ? policy.inactive : failure ?? (meta ? undefined : 'provider_error');
   if (skip) {
     ctx.meta.rerank = { mode: policy.requested, effective: 'off', skipped: skip };
-    void writeReceipts(ctx.engine, { ...base, outcomes: {}, fallbackOutcome: policy.effective === 'off' ? 'skipped' : 'error', reason: skip });
+    void writeReceipts(ctx.engine, { ...base, outcomes: {}, fallbackOutcome: policy.effective === 'off' || skip === 'egress_denied' ? 'skipped' : 'error', reason: skip });
     return;
   }
   const result: DecideResult = {
@@ -392,3 +470,6 @@ export function startRerankShadow(ctx: DecideSearchContext | undefined, query: s
   if (visible) return finish;
   return (finalOrder) => { runShadow(() => finish(finalOrder)); return Promise.resolve(); };
 }
+
+// S5 rides the S3 request (src/core/search/decide-retrieval.ts).
+registerEvidenceCoPack(injectionCoPack);

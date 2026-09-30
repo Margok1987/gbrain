@@ -17,6 +17,7 @@ import { type RelationalRerankPinDecision, pinRelationalRows } from '../relation
 import { type RerankFailedReason, type RerankPassThroughReason, type RerankSkipReason, applyReranker } from '../rerank.ts';
 import type { RerankMeta } from '../../ai/gateway.ts';
 import { applyEvidenceGate, recordRerankReceipts, startRerankShadow } from '../decide-stage.ts';
+import { rerankEgressDenied } from '../decide-retrieval.ts';
 import type { SearchResult } from '../../types.ts';
 import { applyAliasHop } from '../alias-hop.ts';
 import { effectiveRrfK } from '../intent-weights.ts';
@@ -266,7 +267,11 @@ export async function rerankAndPin(
   const s1Shadow = startRerankShadow(req.decide, query, deduped.slice(0, rerankerOpts.enabled ? rerankerOpts.topNIn : resolvedMode.reranker_top_n_in), rerankerOpts.timeoutMs ?? resolvedMode.reranker_timeout_ms);
   let s1Failure: string | undefined;
   let s1Meta: RerankMeta | undefined;
-  const reranked = rerankerOpts.enabled
+  // Owner decision: the Jev reranker never receives a candidate from a source in
+  // decide.egress.deny_sources; such a query keeps fused order (egress_denied).
+  const egressDenied = rerankerOpts.enabled && rerankEgressDenied(req.modeInput.decide, rerankerOpts.model ?? resolvedMode.reranker_model, deduped.slice(0, rerankerOpts.topNIn));
+  if (egressDenied) { s1Failure = 'egress_denied'; pushDegraded(degraded, 'reranker_skipped', 'egress_denied'); }
+  const reranked = rerankerOpts.enabled && !egressDenied
     ? await applyReranker(query, deduped, {
         ...(rerankerOpts as any),
         ...(s1?.effective === 'on' ? { timeoutMs: Math.max(1, Math.min(rerankerOpts.timeoutMs ?? resolvedMode.reranker_timeout_ms, req.decide!.budget.remaining())) } : {}),
