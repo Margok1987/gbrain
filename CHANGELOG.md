@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.16.0] - 2026-09-30
+## [0.60.18.0] - 2026-09-30
 
 **Search now returns whole conversations by default. A hit on a session, transcript, meeting or chat log comes back as the full page, while every other hit stays exactly the chunk it was. Also fixed: two evidence-delivery bugs where a page whose best hit was fenced code got that code chunk instead of the page, and the code chunker's synthesized header line leaked into delivered text.**
 
@@ -26,7 +26,7 @@ identifiers and attribution are available in the pre-removal Git revision
 
 Things to watch: responses that include conversation hits are larger (up to the 16,000-token default). Pass `return_unit: "chunk"`, or run `gbrain config set search.return_unit chunk` (and `think.return_unit chunk` for `think`), to get the old behavior everywhere. Old knobs keep their meaning: `query`'s `token_budget` and `recall`'s `budget_tokens` or `budget_policy` with no `return_unit` still work on chunks, and subagent snippet caps still keep subagent searches on chunks. Expansion still never shows more than `get_page` shows the same caller.
 
-### To take advantage of v0.60.16.0
+### To take advantage of v0.60.18.0
 
 `gbrain upgrade`. There is no migration. To see what `auto` decided for each result:
 
@@ -56,6 +56,30 @@ The detection rules, budget sharing and fallback codes are in `docs/evidence-del
 #### Tests
 - The leak suite's "subset of `get_page`" invariant now runs `search`, `query`, `recall` and `assemble_evidence` for every unit plus the implied default. Besides ranked hits, it uses frozen hits naming every chunk of every page, including fenced code, and a conversation page with its own protected rows. Whole-page blocks must be made of whole `get_page` lines, and `page` requests must not fall back. The old invariant compared only ranked `search` page-unit hits on a corpus with no fenced code, so ranking never reached the header case.
 - The off-path golden now pins `chunk` (explicit and config) to the pre-feature fixture. On a corpus without conversations the implied `auto` must match `chunk` byte for byte, and on the full corpus every non-conversation row must equal its frozen chunk row. The parity suite checks the default against `assemble_evidence` with `auto` on both engines.
+
+## [0.60.16.0] - 2026-09-30
+
+**Long-running brains stop getting stuck waiting on a `git` check that already finished.**
+
+Before GBrain publishes a page to your brain's git repo, it runs two quick `git` commands to confirm the repo is safe to write to. On the Bun versions GBrain runs on today, Bun can miss the signal that one of those commands has finished. GBrain then waited forever. The write queue stalled, and shutting down the owner process hung behind it. In our test suite this hit roughly one run in sixty under load and showed up as whole test files timing out after "killed 1 dangling process".
+
+Now every one of those `git` calls has its own deadline. If the command hasn't reported back in time, GBrain stops it and moves on, with the same "git unavailable" result a slow `git` already produced. The worst case is a 10 to 20 second delay instead of a hang.
+
+| Under load (16 parallel test workers) | Before | After |
+| --- | --- | --- |
+| Runs that hung | 4 of 250 | 0 of 320 |
+| Worst-case wait on a lost `git` exit | forever | 10 s (durability check), 20 s (page publish) |
+
+Nothing to configure and nothing to run after upgrading.
+
+### To take advantage of v0.60.16.0
+
+`gbrain upgrade` is all you need. There is no migration. To confirm, run `gbrain doctor`.
+
+### Itemized changes
+
+- `execFileBounded` in `src/core/brain-repo-durability.ts` settles from its own timer at the deadline or on abort and SIGKILLs the child, so a lost exit or pipe event (Bun 1.3.x, oven-sh/bun#30301) can no longer strand the caller. The durability probe (10 s) and the persistence effect `git` runner (20 s) use it; the staged topology clone's exit wait also returns once its deadline kill fires.
+- New `test/bounded-child-exec.test.ts` reproduces the lost exit event deterministically and pins deadline, abort, exit code and stdout behavior.
 
 ## [0.60.15.0] - 2026-09-30
 

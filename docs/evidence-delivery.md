@@ -1,6 +1,6 @@
 # Evidence delivery (`return_unit`)
 
-> Status: the default is `auto` (v0.60.16.0): conversation pages come back
+> Status: the default is `auto` (v0.60.18.0): conversation pages come back
 > whole, every other hit is its unchanged ranked chunk. In the gbrain-evals
 > study, whole sessions answered 361/400 held-out LongMemEval questions against
 > 253/400 for top-5 chunks, while neighbor windows reached only 285–292. `auto`
@@ -46,7 +46,7 @@ gbrain recall --query "renewal terms" --return-unit section --budget-tokens 4000
 
 | `return_unit` | What each result's `chunk_text` holds | Typical cost |
 |---|---|---|
-| `chunk` | The ranked chunk only (the pre-0.60.16 default). | ~300–450 tokens per result |
+| `chunk` | The ranked chunk only (the pre-0.60.18 default). | ~300–450 tokens per result |
 | `window` | The hit chunk plus `return_window` (1–3, default 1) neighbor chunks on each side, same page. Overlapping windows merge. | ~3× chunk per result |
 | `section` | The enclosing markdown section (by ATX heading). On conversation pages: the user→assistant rounds that overlap the hit. No structure → falls back to `window`. | varies |
 | `page` | The whole page or session, capped at 60,000 characters and by the budget. | whole page |
