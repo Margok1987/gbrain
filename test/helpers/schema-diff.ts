@@ -183,7 +183,7 @@ export function isCleanIndexDiff(diff: IndexDiff): boolean {
 export function formatIndexDiffForFailure(diff: IndexDiff): string {
   const lines: string[] = [];
   if (diff.pgOnly.length > 0) {
-    lines.push(`Indexes in Postgres but MISSING in PGLite (mirror in src/core/pglite-schema.ts):`);
+    lines.push(`Indexes in Postgres but MISSING in PGLite (the PGLite bootstrap is generated from src/schema.sql by bun run build:schema; check the PGLite rules in scripts/build-schema.ts):`);
     for (const i of diff.pgOnly) {
       lines.push(`  - ${i.indexName} on ${i.tableName}: ${i.columns}`);
     }
@@ -322,7 +322,8 @@ export function diffSnapshots(
 /**
  * Build the failure message used in test assertions. Names every issue with
  * a copy-paste-ready hint so a future contributor can paste the fix straight
- * into pglite-schema.ts (or into a migration sqlFor.pglite branch).
+ * into src/schema.sql / a TS schema fragment (then `bun run build:schema`), a
+ * PGLite capability rule in scripts/build-schema.ts, or a migration sqlFor.pglite branch.
  */
 export function formatDiffForFailure(diff: SchemaDiff): string {
   const lines: string[] = [];
@@ -331,7 +332,7 @@ export function formatDiffForFailure(diff: SchemaDiff): string {
     lines.push('Tables present on Postgres but missing from PGLite end-state:');
     for (const t of diff.tablesMissingInPGLite) {
       lines.push(`  - ${t}`);
-      lines.push(`    Hint: add CREATE TABLE for "${t}" to src/core/pglite-schema.ts, or add it to the allowlist if intentionally Postgres-only.`);
+      lines.push(`    Hint: add CREATE TABLE for "${t}" to src/schema.sql (or its TS schema fragment) and run bun run build:schema; if it is dropped for PGLite by a rule in scripts/build-schema.ts, fix the rule, or add it to the allowlist if intentionally Postgres-only.`);
     }
   }
 
@@ -340,7 +341,7 @@ export function formatDiffForFailure(diff: SchemaDiff): string {
     for (const { table, columns } of diff.columnsMissingInPGLite) {
       for (const col of columns) {
         lines.push(`  - ${table}.${col}`);
-        lines.push(`    Hint: add "${col}" to the ${table} CREATE TABLE in src/core/pglite-schema.ts, or add a sqlFor.pglite branch in the relevant migration.`);
+        lines.push(`    Hint: add "${col}" to the ${table} CREATE TABLE in src/schema.sql (or its TS schema fragment) and run bun run build:schema (check the PGLite rules in scripts/build-schema.ts), or add a sqlFor.pglite branch in the relevant migration.`);
       }
     }
   }
@@ -350,7 +351,7 @@ export function formatDiffForFailure(diff: SchemaDiff): string {
     for (const { table, columns } of diff.columnsMissingInPostgres) {
       for (const col of columns) {
         lines.push(`  - ${table}.${col}`);
-        lines.push(`    Hint: either add "${col}" to ${table} in src/schema.sql + the migrations chain, or remove it from src/core/pglite-schema.ts.`);
+        lines.push(`    Hint: either add "${col}" to ${table} in src/schema.sql + the migrations chain, or drop it for PGLite with a rule in scripts/build-schema.ts (then bun run build:schema).`);
       }
     }
   }

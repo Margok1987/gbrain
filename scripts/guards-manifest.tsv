@@ -63,10 +63,13 @@ check-bootstrap-tag.sh	repostate	exempt	VERSION stamp drift check
 check-cli-executable.sh	repostate	exempt	file-mode check
 check-no-tracked-symlinks.sh	repostate	exempt	git index state check
 check-grok-pin.sh	repostate	exempt	pin-stamp drift check (GROK-CLI-PIN.md stamps vs heavy-tests grok-door env); own bun guard tests in test/check-bootstrap-guards.test.ts
-check-module-size.sh	scanner	yes	committed per-file line ceilings (module-size-limits.tsv); growth + stale-ceiling + missing-row + new-file cap; region-exempt policy for migrate.ts
+check-module-size.sh	scanner	yes	committed per-file line ceilings (module-size-limits.tsv); growth + stale-ceiling + missing-row + new-file cap
 check-function-size.ts	scanner	yes	W5 per-function line ratchet (TS compiler API): new >300-line function, growth, shrink-below-limit, stale slack, missing row, raise without issue/TODO id; baseline scripts/function-size-baseline.tsv keyed by path + name path; --transfer for verified move-only commits
 check-sync-run-state.ts	scanner	yes	A17 (W4 sync): SyncRun mutable fields (non-readonly members of interface SyncRun) are never destructured or aliased into locals under src/commands/sync/; @checkpoint fields are assigned only in sync-run.ts (single owner); fixtures cover destructuring, aliasing, a parameter pattern in a nested dir, and an out-of-owner checkpoint write
 check-layering.ts	scanner	yes	EO10 layering (TS AST, every import form): src/core/engine-sql/** imports no engine façade; src/core/schema-migrations/** imports no migrate.ts
+check-schema-migrations-fresh.sh	buildfresh	exempt	regenerates src/core/schema-migrations/registry.generated.ts + diffs; generator enforces filename/version/name cross-check and duplicate versions (unit: test/scripts/build-schema-migrations.test.ts)
+check-schema-fresh.sh	buildfresh	exempt	W2: regenerates the schema chain (fragments -> schema.sql regions -> schema-embedded -> PGLite template) into a temp dir and diffs every output; names the source to edit (unit: test/scripts/build-schema.test.ts)
+check-schema-migration-order.ts	repostate	exempt	EO10: a migration origin/master lacks must be numbered above its latest version; reads the base ref from git (unit: test/scripts/build-schema-migrations.test.ts)
 check-structural-manifest.sh	buildfresh	exempt	regenerate+diff of structural-suites.tsv (classify-tests.ts); the diff IS the self-test
 check-opencode-pin.sh	repostate	exempt	pin-stamp drift check (OPENCODE-CLI-PIN.md stamps vs heavy-tests opencode-door env); own bun guard tests in test/check-bootstrap-guards.test.ts
 check-pin-doc-privacy.sh	repostate	exempt	PIN-doc placeholder discipline (no operator paths/key material/emails in docs/mcp/*-CLI-PIN.md); own bun guard tests in test/check-bootstrap-guards.test.ts

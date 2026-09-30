@@ -377,6 +377,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   // Schema source of truth: any change must pass the cross-engine drift gate.
   "src/schema.sql": ["test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
   "src/core/pglite-schema.ts": ["test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
+  "src/core/pglite-schema.generated.ts": ["test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
   "src/core/migrate.ts": [
     "test/e2e/migration-vector-replay-postgres.test.ts",
     "test/e2e/schema-drift.test.ts",
@@ -384,6 +385,15 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/schema-catalog-golden.test.ts",
     "test/e2e/migrate-chain.test.ts",
     "test/e2e/link-source-check-repair-postgres.test.ts",
+    // Refactor wave 1 W3: replay the split registry from checkpoints.
+    "test/e2e/schema-migrations-replay.test.ts",
+  ],
+  "src/core/schema-migrations/**": [
+    "test/e2e/migration-vector-replay-postgres.test.ts",
+    "test/e2e/schema-drift.test.ts",
+    "test/e2e/schema-catalog-golden.test.ts",
+    "test/e2e/migrate-chain.test.ts",
+    "test/e2e/schema-migrations-replay.test.ts",
   ],
   // #4613: the links_link_source_check self-heal must use migration v114's
   // two-phase DDL (DROP + ADD NOT VALID, then VALIDATE outside the txn) on real
@@ -438,7 +448,18 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/serve-http-registration.ts": ["test/e2e/serve-http-consent.test.ts"],
   "src/commands/serve-http-admin-limits.ts": ["test/e2e/serve-http-consent.test.ts"],
   "src/core/harness/client-setup.ts": ["test/e2e/serve-http-consent.test.ts"],
-  "src/commands/serve-http-oauth.ts": ["test/e2e/serve-http-consent.test.ts"],
+  "src/commands/serve-http-oauth.ts": ["test/e2e/serve-http-consent.test.ts", "test/e2e/serve-http-oauth.test.ts"],
+  // Refactor wave 1 split runServeHttp into these modules; each keeps the
+  // façade's e2e claims for the code it took.
+  "src/commands/serve-http-admin-api.ts": ["test/e2e/serve-http-consent.test.ts", "test/e2e/serve-http-oauth.test.ts"],
+  "src/commands/serve-http-metrics.ts": ["test/e2e/serve-http-oauth.test.ts"],
+  "src/commands/serve-http-spa.ts": ["test/e2e/serve-http-consent.test.ts"],
+  "src/commands/serve-http-webhooks.ts": ["test/e2e/serve-http-ingest-webhook.test.ts"],
+  "src/commands/serve-http-mcp.ts": [
+    "test/e2e/serve-http-oauth.test.ts",
+    "test/e2e/harness-access.test.ts",
+    "test/e2e/serve-http-source-grant.test.ts",
+  ],
   "src/commands/serve-http.ts": [
     "test/e2e/serve-http-consent.test.ts",
     "test/e2e/serve-http-ingest-webhook.test.ts",

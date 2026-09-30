@@ -176,7 +176,8 @@ describe('formatDiffForFailure', () => {
     const diff = diffSnapshots(pg, pglite, NO_ALLOWLIST);
     const out = formatDiffForFailure(diff);
     expect(out).toContain('oauth_clients.token_ttl');
-    expect(out).toContain('src/core/pglite-schema.ts');
+    expect(out).toContain('src/schema.sql');
+    expect(out).toContain('bun run build:schema');
   });
 
   test('udt mismatch shows both sides', () => {

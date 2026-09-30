@@ -70,6 +70,12 @@ reproduce byte for byte. Each file is written by `test/helpers/golden.ts` as
 - `serve-http/routes.json` (`test/serve-http-route-golden.test.ts`,
   `serve-http-routes-v1`): the ordered Express registration stack from `runServeHttp`
   by AST, following mount functions that receive the app.
+- `serve-http/routes-runtime.json` (`test/serve-http-route-runtime-golden.test.ts`,
+  `serve-http-routes-runtime-v1`): the Express 5 `app.router.stack` of an app built
+  by `buildServeHttpApp` on in-memory PGLite (default and `--enable-dcr`), with the
+  SDK auth router's nested routes and `#<n>` ordinals for handler objects shared
+  across routes. Captured at the move-only extraction commit; the same test proves
+  it describes the registrations in `serve-http/routes.json`.
 - `exports/runtime.json`, `exports/types.json` (`test/export-surface-golden.test.ts`,
   `export-runtime-v1` / `export-types-v1`): runtime export names per package.json
   subpath, engine prototype-chain methods, and a checker-printed type surface.

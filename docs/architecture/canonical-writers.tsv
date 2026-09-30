@@ -66,7 +66,6 @@ src/core/google/google-source.ts	3	coordinator	Managed connector imports, deleti
 src/core/google/loops-extract.ts	1	coordinator	Managed loop extraction checks the managed fact authority and owner before model calls and publishes its commitment fact through writeSingleFact's coordinator path; the provenance-tagged loop edge is not a guarded canonical table.
 src/core/import-file.ts	19	coordinator	Prepared import applies under journal publication and revision CAS; direct managed imports refuse early, legacy source-path repair follows revision validation inside a savepoint, and a moved file's page is renamed only on the direct (unmanaged) path. Frontmatter tag reconciliation deletes only import-owned tag rows inside the same guarded import transaction. Direct importFromContent calls without prepare refuse on managed brains before any write (assertUnmanagedCanonicalWriter).
 src/core/last-retrieved.ts	1	projection	Derived indexing, retrieval telemetry, or source settings; canonical fields remain guarded by SQL triggers.
-src/core/migrate.ts	13	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
 src/core/minions/handlers/ingest-capture.ts	3	engine_guard	Canonical table SQL trigger requires coordinator capability; legacy calls fail before canonical DB publication. Direct importFromContent calls without prepare refuse on managed brains before any write (assertUnmanagedCanonicalWriter).
 src/core/onboard/checks.ts	2	projection	Derived indexing, retrieval telemetry, or source settings; canonical fields remain guarded by SQL triggers.
 src/core/ops/extraction.ts	2	engine_guard	Canonical table SQL trigger requires coordinator capability; legacy calls fail before canonical DB publication.
@@ -176,3 +175,13 @@ src/commands/reindex.ts	1	early_refusal	Legacy direct content import. Direct imp
 src/eval/brainbench/metrics/write-back.ts	1	isolated_eval	Explicit isolated evaluation database only; never opened against the active managed brain.
 src/eval/longmemeval/diagnostics.ts	1	isolated_eval	Explicit isolated evaluation database only; never opened against the active managed brain.
 src/core/persistence/effects.ts	1	coordinator	The embedding effect clears only the page embedding signature, inside its claimed, source-guarded installation transaction, when #4616 refused a chunk, so embed --stale finds the page; no canonical content column changes.
+src/core/schema-migrations/v002-slugify-existing-pages.ts	2	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v009-timeline-dedup-index.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v020-sources-table-additive.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v028-cathedral-ii-chunk-fts-backfill.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v034-destructive-guard-columns.ts	2	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v043-takes-resolved-quality-and-drift-decisions.ts	2	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v048-takes-weight-round-to-grid.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v123-configurable-fts-language.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v142-takes-embedding-dimension-matches-config.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/schema-migrations/v144-open-loops.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
