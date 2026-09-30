@@ -177,10 +177,6 @@ const DREAM_VERDICTS_PROBES: readonly Probe[] = [
   ['dream_verdicts_expires_at_exists', 'dream_verdicts', 'expires_at'],
 ];
 
-const OAUTH_CLIENT_GRANT_COLUMNS = [
-  'allowed_operations', 'delegated_slug_prefixes', 'delegated_namespace', 'grant_profile', 'grant_revision', 'grant_repair_reasons',
-];
-
 /** The single-round-trip probe statement for one dialect. */
 export function forwardReferenceProbeSql(dialect: ForwardReferenceBootstrapDialect): string {
   const schema = dialect.probeSchema;
@@ -189,9 +185,9 @@ export function forwardReferenceProbeSql(dialect: ForwardReferenceBootstrapDiale
             WHERE table_schema = ${schema} AND table_name = '${table}' AND column_name = '${column}') AS ${alias}`
     : `EXISTS (SELECT 1 FROM information_schema.tables
             WHERE table_schema = ${schema} AND table_name = '${table}') AS ${alias}`;
-  const grants = `(SELECT COUNT(*) = ${OAUTH_CLIENT_GRANT_COLUMNS.length} FROM information_schema.columns
+  const grants = `(SELECT COUNT(*) = 6 FROM information_schema.columns
       WHERE table_schema = ${schema} AND table_name = 'oauth_clients'
-        AND column_name IN (${OAUTH_CLIENT_GRANT_COLUMNS.map((c) => `'${c}'`).join(', ')})) AS oauth_client_grants_exist`;
+        AND column_name IN ('allowed_operations', 'delegated_slug_prefixes', 'delegated_namespace', 'grant_profile', 'grant_revision', 'grant_repair_reasons')) AS oauth_client_grants_exist`;
   const probes = dialect.dreamVerdictsForwardReference
     ? [...FORWARD_REFERENCE_PROBES, ...DREAM_VERDICTS_PROBES]
     : FORWARD_REFERENCE_PROBES;
