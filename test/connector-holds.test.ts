@@ -394,3 +394,42 @@ test('#5581: a delta over the pending cap keeps its anchor, walks the window acr
     } finally { gmailPendingCap.ids = 1_000; }
   }
 }), 120_000);
+
+test('a facts fence below the timeline sentinel of a connector page refuses the re-render with connector_fence_below_timeline; connector-fences repairs it', async () => withEnv(env, async () => {
+  const { resolveRepairScope, runRepair } = await import('../src/core/repair/core.ts');
+  const { connectorFencesRepair } = await import('../src/core/repair/connector-fences.ts');
+  const fence = '<!--- gbrain:facts:begin -->\n| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |\n'
+    + '|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|\n'
+    + '| 1 | Ships weekly | fact | 1.0 | world | high | 2026-01-01 |  | remember |  |\n<!--- gbrain:facts:end -->';
+  for (const engine of engines) {
+    const f = await githubSource(engine, true);
+    const fx = fakeGitHub();
+    fx.issues = [{ number: 1, title: 'Synthetic issue 1', body: 'Body 1', updated_at: issueAt(1) }];
+    const run = () => runGitHubSync(engine, f.id, f.cfg, options, githubHoldsFetch(fx));
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+    await engine.executeRaw(`UPDATE pages SET timeline=COALESCE(timeline,'') || $2 WHERE source_id=$1 AND slug='gh/acme-example/app/1'`, [f.id, `\n\n${fence}\n`]);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+    fx.issues[0] = { ...fx.issues[0], body: 'Body 1 edited upstream', updated_at: issueAt(4) };
+    await expect(run()).rejects.toMatchObject({ code: 'connector_fence_below_timeline',
+      suggestion: expect.stringContaining(`gbrain repair connector-fences --source ${f.id}`) });
+    await disposePersistenceConsumer(engine);
+    const [stored] = await engine.executeRaw<{ timeline: string; compiled_truth: string }>(`SELECT timeline,compiled_truth FROM pages WHERE source_id=$1 AND slug='gh/acme-example/app/1'`, [f.id]);
+    expect(stored.timeline).toContain('Ships weekly');
+    const ctx = { engine, config: { engine: engine.kind }, remote: false, logger: console } as never;
+    const scope = await resolveRepairScope(engine, f.id);
+    expect((await runRepair(ctx, connectorFencesRepair, scope, { apply: false })).affected).toBe(1);
+    expect((await runRepair(ctx, connectorFencesRepair, scope, { apply: true })).applied).toBe(1);
+    await disposePersistenceConsumer(engine);
+    const [moved] = await engine.executeRaw<{ timeline: string; compiled_truth: string }>(`SELECT timeline,compiled_truth FROM pages WHERE source_id=$1 AND slug='gh/acme-example/app/1'`, [f.id]);
+    expect(moved.compiled_truth).toContain('Ships weekly');
+    expect(moved.timeline ?? '').not.toContain('gbrain:facts');
+    // The re-render now carries the fence verbatim.
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    const [rendered] = await engine.executeRaw<{ compiled_truth: string }>(`SELECT compiled_truth FROM pages WHERE source_id=$1 AND slug='gh/acme-example/app/1'`, [f.id]);
+    expect(rendered.compiled_truth).toContain('Body 1 edited upstream');
+    expect(rendered.compiled_truth).toContain('Ships weekly');
+  }
+}), 240_000);

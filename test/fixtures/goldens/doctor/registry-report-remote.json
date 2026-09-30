@@ -203,6 +203,10 @@
       },
       {
         "category": "brain",
+        "name": "connector_held_items"
+      },
+      {
+        "category": "brain",
         "name": "unbound_source"
       },
       {

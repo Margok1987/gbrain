@@ -30,7 +30,7 @@ import { LockStolenError, syncLockId, withRefreshingLock, type DbLockHandle } fr
 import { ownedGoogleReceipts, prepareGoogleReceiptPatch, type GoogleReceipts } from './connector-google-receipts.ts';
 import { connectorCheckpointKey, connectorIdentity, type ConnectorIdentity, type ConnectorKind } from './connector-identity.ts';
 import { readManagedConnectorState, recordConnectorSyncAttempt, sameConnectorAccount, writeManagedConnectorState, type ConnectorAccount, type ConnectorPendingEntry, type ConnectorRunCounts, type ConnectorState } from './connector-state.ts';
-import { connectorAccountChanged, CONNECTOR_INTENT_OUTDATED_OLD_HOST, CONNECTOR_INTENT_OUTDATED_PRE_UPGRADE } from './connector-errors.ts';
+import { connectorAccountChanged, connectorFenceHint, docsAnchor, CONNECTOR_INTENT_OUTDATED_OLD_HOST, CONNECTOR_INTENT_OUTDATED_PRE_UPGRADE } from './connector-errors.ts';
 import { inspectUnchanged, screeningRequest } from './noop-kernel.ts';
 import { conceptPreservationHold, preserveCanonicalFences } from '../cycle/concept-publication.ts';
 import { FACTS_FENCE_BEGIN } from '../facts-fence.ts';
@@ -904,8 +904,13 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
   // carry them over verbatim so a re-render does not expire those facts. A render that brings its own fence
   // (a provider body that contains one) owns it, and ambiguous stored fences are left to the existing path.
   const hasFence = (text: string | null | undefined) => [FACTS_FENCE_BEGIN, TAKES_FENCE_BEGIN].some(begin => (text ?? '').includes(begin));
-  const fenced = snapshot && hasFence(snapshot.page.compiled_truth) && !hasFence(parsed.compiled_truth) && !conceptPreservationHold(snapshot.page)
-    ? preserveCanonicalFences(snapshot.page, parsed.compiled_truth) : parsed.compiled_truth;
+  // Fix wave 4: a stored fence the render cannot carry verbatim (below the timeline sentinel, duplicated,
+  // unbalanced or unparseable) is refused instead of silently expiring its rows on re-render.
+  const storedFence = snapshot && !hasFence(parsed.compiled_truth) && (hasFence(snapshot.page.compiled_truth) || hasFence(snapshot.page.timeline));
+  const hold = storedFence ? conceptPreservationHold(snapshot!.page) : null;
+  if (hold) throw connectorFenceRefusal(row.source_id, row.slug, hold);
+  const fenced = storedFence && hasFence(snapshot!.page.compiled_truth)
+    ? preserveCanonicalFences(snapshot!.page, parsed.compiled_truth) : parsed.compiled_truth;
   const content = (carried.materialized || fenced !== parsed.compiled_truth) && snapshot
     ? serializePageToMarkdown({ ...snapshot.page, ...parsed, compiled_truth: fenced, timeline: carried.timeline, type: parsed.typeExplicit ? parsed.type : snapshot.page.type }, parsed.tags)
     : p.content;
@@ -946,6 +951,15 @@ export async function prepareOutdatedConnectorMutation(engine: BrainEngine, row:
   const cutoff = await readConnectorV2Cutoff(engine);
   const preUpgrade = cutoff !== null && new Date(row.created_at).getTime() < new Date(cutoff).getTime();
   throw new OperationError('connector_intent_outdated', preUpgrade ? CONNECTOR_INTENT_OUTDATED_PRE_UPGRADE : CONNECTOR_INTENT_OUTDATED_OLD_HOST);
+}
+
+/** `connector_fence_below_timeline`: the item is counted toward a hold; the repair moves the fence above the sentinel. */
+export function connectorFenceRefusal(sourceId: string, slug: string, hold: string): OperationError {
+  const error = new OperationError('connector_fence_below_timeline',
+    `The stored page ${slug} has a facts or takes fence the connector render cannot carry (${hold}); refusing instead of expiring its rows.`,
+    connectorFenceHint(sourceId), docsAnchor('connector_fence_below_timeline'));
+  error.detail = 'fence_not_carried';
+  return error;
 }
 
 export function rethrowConnectorWriteError(error: unknown): void {

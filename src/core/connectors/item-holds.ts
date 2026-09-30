@@ -329,7 +329,7 @@ export function holdsExhaustedError(sourceId: string): OperationError {
   const error = new OperationError('connector_holds_exhausted',
     `Source "${sourceId}" already holds ${HOLD_CAP} items; this run did not advance its cursor.`,
     `Review the held items with: gbrain sources status ${sourceId}; re-attempt them with: gbrain sources retry-held ${sourceId}`,
-    'docs/guides/write-refusals.md#connector_holds_exhausted');
+    'docs/guides/write-refusals.md#connector-holds-exhausted');
   error.writeError = 'connector_holds_exhausted';
   return error;
 }
