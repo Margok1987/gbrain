@@ -86,3 +86,46 @@ export async function runManagedMigrationChain(databaseUrl: string | undefined, 
     await fixture.close();
   }
 }
+
+/**
+ * Eng capacity split: with the migration writer's permanent request IDs
+ * exhausted, schema migrations still complete (they admit nothing), the
+ * first admission-requiring backfill refuses up front with queue_capacity
+ * and the filled capacity command before it mutates anything, and after the
+ * limit is raised the same runner completes the chain.
+ */
+export async function runExhaustedCapacityChain(databaseUrl: string | undefined, expect: typeof bunExpect): Promise<void> {
+  const key = 'persistence.limits.principal_lifetime_ids';
+  const fixture = await managedChainFixture(databaseUrl, { config: { [key]: '0' } });
+  const transcript = (run: ChainRun) => `exit=${run.exitCode}\n${run.stdout}\n${run.stderr}`;
+  try {
+    let engine = await fixture.open();
+    const before = await brainState(engine);
+    await engine.disconnect();
+
+    const refused = await fixture.applyMigrations();
+    expect(refused.exitCode, transcript(refused)).toBe(1);
+    const ledger = fixture.ledger();
+    expect(ledger.filter(e => e.status !== 'complete').map(e => e.version)).toEqual(['0.13.1']);
+    const detail = phaseDetail(ledger, '0.13.1', 'grandfather');
+    expect(detail).toStartWith('queue_capacity: Write capacity exhausted: principal permanent request IDs (0 used of 0).');
+    expect(detail).toContain(`gbrain config set ${key} `);
+
+    engine = await fixture.open();
+    try {
+      const { LATEST_VERSION } = await import('../../src/core/migrate.ts');
+      expect(Number(await engine.getConfig('version'))).toBe(LATEST_VERSION);
+      expect(await engine.executeRaw('SELECT id FROM persistence_requests')).toEqual([]);
+      expect(await brainState(engine)).toEqual(before);
+      await engine.setConfig(key, '250000');
+    } finally { await engine.disconnect(); }
+
+    const raised = await fixture.applyMigrations();
+    expect(raised.exitCode, transcript(raised)).toBe(0);
+    const after = fixture.ledger();
+    for (const migration of migrations) expect(after.filter(e => e.version === migration.version).at(-1)?.status).toBe('complete');
+    expect(phaseDetail(after, '0.32.2', 'fence_facts')).toContain('scanned=3 fenced=3 pages=2');
+  } finally {
+    await fixture.close();
+  }
+}

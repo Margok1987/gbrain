@@ -12,8 +12,12 @@
  * data phase silently does nothing, or adoption duplicates or loses rows.
  */
 import { expect, test } from 'bun:test';
-import { runManagedMigrationChain } from './helpers/managed-migration-chain-contract.ts';
+import { runExhaustedCapacityChain, runManagedMigrationChain } from './helpers/managed-migration-chain-contract.ts';
 
 test('pglite: the managed migration chain completes from v0.11.0 and a rerun is idempotent', async () => {
   await runManagedMigrationChain(undefined, expect);
+}, 900_000);
+
+test('pglite: exhausted request IDs refuse the first backfill up front, and raising the limit completes the chain', async () => {
+  await runExhaustedCapacityChain(undefined, expect);
 }, 900_000);

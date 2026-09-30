@@ -95,4 +95,22 @@ for (const backend of testBackends()) {
       expect(readFileSync(join(root, `${LEGACY_FILE_SLUG}.md`), 'utf8')).toBe(file);
     }, { databaseUrl, setup: async ({ engine, root }) => { seed = await seedLegacyManagedContent(engine, root); } });
   }, 120_000);
+
+  test(`${backend}: exhausted request IDs refuse the adoption up front with the capacity command`, async () => {
+    let seed!: LegacySeed;
+    await managedBrain(async ({ engine, root }) => {
+      const before = await factRows(engine, [...seed.legacyFactIds, ...seed.dbOnlyFactIds]);
+      const file = readFileSync(join(root, `${LEGACY_FILE_SLUG}.md`), 'utf8');
+      const phase = await __testing.phaseBFenceFacts(engine, OPTS);
+      expect(phase).toMatchObject({ name: 'fence_facts', status: 'failed' });
+      expect(phase.detail).toStartWith('queue_capacity: Write capacity exhausted: principal permanent request IDs (0 used of 0).');
+      expect(phase.detail).toContain('gbrain config set persistence.limits.principal_lifetime_ids ');
+      expect(await factRows(engine, [...seed.legacyFactIds, ...seed.dbOnlyFactIds])).toEqual(before);
+      expect(readFileSync(join(root, `${LEGACY_FILE_SLUG}.md`), 'utf8')).toBe(file);
+      expect(await engine.executeRaw("SELECT id FROM persistence_requests WHERE operation='submit_job'")).toEqual([]);
+    }, { databaseUrl, setup: async ({ engine, root }) => {
+      seed = await seedLegacyManagedContent(engine, root);
+      await engine.setConfig('persistence.limits.principal_lifetime_ids', '0');
+    } });
+  }, 120_000);
 }

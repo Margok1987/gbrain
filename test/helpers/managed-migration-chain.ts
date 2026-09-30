@@ -39,7 +39,7 @@ export interface ManagedChainFixture {
  * checkout claimed as the default source's canonical worktree, and a real
  * activation. The seed engine is closed before any runner starts.
  */
-export async function managedChainFixture(databaseUrl?: string): Promise<ManagedChainFixture> {
+export async function managedChainFixture(databaseUrl?: string, opts: { config?: Record<string, string> } = {}): Promise<ManagedChainFixture> {
   const home = realpathSync.native(mkdtempSync(join(tmpdir(), 'gbrain-managed-chain-')));
   const root = join(home, 'content');
   const bin = join(home, 'bin');
@@ -89,6 +89,7 @@ export async function managedChainFixture(databaseUrl?: string): Promise<Managed
         durableGitRepo(root, [`${LEGACY_FILE_SLUG}.md`, 'gbrain.yml']);
         await claimWorktree(engine, 'default', root);
         await activateSharedSkillPersistence(engine, { confirmQuiesced: true });
+        for (const [key, value] of Object.entries(opts.config ?? {})) await engine.setConfig(key, value);
       } finally {
         await disposePersistenceConsumer(engine);
         await engine.disconnect();

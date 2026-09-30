@@ -46,6 +46,8 @@ import { parseFactsFence, renderFactsTable, replaceOrInsertFactsFence } from '..
 import { resolvePageWriteTarget } from '../../core/write-through.ts';
 import { serializePageToMarkdown } from '../../core/markdown.ts';
 import { managedPersistenceEnabled } from '../../core/persistence/ownership.ts';
+import { assertLifetimeIdHeadroom } from '../../core/persistence/journal.ts';
+import { OperationError } from '../../core/ops/contract.ts';
 import { maintenancePreflight, submitFactFenceAdoption, type MaintenanceAuthority } from '../../core/persistence/prepared-maintenance.ts';
 
 let testEngineOverride: BrainEngine | null = null;
@@ -235,11 +237,18 @@ async function planFence(engine: BrainEngine, sourceId: string, entitySlug: stri
  */
 async function fenceFactsManaged(engine: BrainEngine, groups: Map<string, LegacyFactRow[]>, outcome: PhaseBOutcome): Promise<void> {
   const authorities = new Map<string, MaintenanceAuthority>();
+  for (const key of groups.keys()) {
+    const sourceId = key.split('\0')[0];
+    if (!authorities.has(sourceId)) authorities.set(sourceId, (await maintenancePreflight(engine, sourceId))!);
+  }
+  // One admission per page: refuse up front, before any page publishes,
+  // when the permanent request-ID caps cannot cover them all.
+  const [first] = authorities.values();
+  if (first) await assertLifetimeIdHeadroom(engine, first.writer.principal, groups.size);
   for (const [key, group] of groups) {
     const [sourceId, entitySlug] = key.split('\0');
     try {
-      const authority = authorities.get(sourceId) ?? (await maintenancePreflight(engine, sourceId))!;
-      authorities.set(sourceId, authority);
+      const authority = authorities.get(sourceId)!;
       const snapshot = await engine.readPageSnapshot(entitySlug, { sourceId });
       if (!snapshot) { outcome.skipped_no_page += group.length; continue; }
       const plan = await planFence(engine, sourceId, entitySlug, serializePageToMarkdown(snapshot.page, snapshot.tags), group);
@@ -347,7 +356,11 @@ async function phaseBFenceFacts(
     }
 
     if (managed) {
-      await fenceFactsManaged(engine, groups, outcome);
+      try { await fenceFactsManaged(engine, groups, outcome); }
+      catch (error) {
+        if (!(error instanceof OperationError) || error.code !== 'queue_capacity') throw error;
+        return { name: 'fence_facts', status: 'failed', detail: `queue_capacity: ${error.message} ${error.suggestion ?? ''}`.trim() };
+      }
       return fenceFactsResult(outcome);
     }
 

@@ -43,7 +43,7 @@ import { loadConfig, toEngineConfig, gbrainPath } from '../../core/config.ts';
 import { createEngine } from '../../core/engine-factory.ts';
 import type { BrainEngine } from '../../core/engine.ts';
 import { managedPersistenceEnabled } from '../../core/persistence/ownership.ts';
-import { admitCanonicalGrandfather } from '../../core/persistence/grandfather.ts';
+import { admitCanonicalGrandfather, assertGrandfatherCapacity } from '../../core/persistence/grandfather.ts';
 import { OperationError } from '../../core/ops/contract.ts';
 // Bug 3 — ledger writes moved to the runner (apply-migrations.ts).
 
@@ -152,6 +152,13 @@ export async function phaseCGrandfather(
     );
     const ids = idRows.map(r => Number(r.id));
     const managed = await managedPersistenceEnabled(engine);
+    if (managed) {
+      try { await assertGrandfatherCapacity(engine, ids.length); }
+      catch (error) {
+        if (!(error instanceof OperationError) || error.code !== 'queue_capacity') throw error;
+        return { result: { name: 'grandfather', status: 'failed', detail: `queue_capacity: ${error.message} ${error.suggestion ?? ''}`.trim() }, detail: gf };
+      }
+    }
 
     for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
       const chunk = ids.slice(i, i + CHUNK_SIZE);
