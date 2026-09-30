@@ -57,6 +57,29 @@ The detection rules, budget sharing and fallback codes are in `docs/evidence-del
 - The leak suite's "subset of `get_page`" invariant now runs `search`, `query`, `recall` and `assemble_evidence` for every unit plus the implied default. Besides ranked hits, it uses frozen hits naming every chunk of every page, including fenced code, and a conversation page with its own protected rows. Whole-page blocks must be made of whole `get_page` lines, and `page` requests must not fall back. The old invariant compared only ranked `search` page-unit hits on a corpus with no fenced code, so ranking never reached the header case.
 - The off-path golden now pins `chunk` (explicit and config) to the pre-feature fixture. On a corpus without conversations the implied `auto` must match `chunk` byte for byte, and on the full corpus every non-conversation row must equal its frozen chunk row. The parity suite checks the default against `assemble_evidence` with `auto` on both engines.
 
+## [0.60.17.0] - 2026-09-30
+
+**The Windows native lock checks stop timing out on pull requests. They download the pinned Zig compiler from a fast mirror, cache it, and fail within minutes with every source named if all downloads stall.**
+
+Every recent pull request that bumps the version got its `native-locks / win32-x64` and `win32-arm64` cells cancelled at the 15-minute job limit, which failed `test-status`. The cause was not a runner change or a test. The first build step downloads the pinned Zig archive from ziglang.org, which throttles automated downloads (about 180 KB/s measured). The Windows archive is 82 MB, so that step alone ran past 14 minutes, and on good runs it still took about 4 minutes. The Zig project asks CI to use its community mirrors instead. CI speed change #5727 (v0.60.8.0) did not touch this job's timeout or runners. It keeps these cells on any pull request that changes `package.json`, which every release bump does, so the slow download now showed up on every such PR.
+
+| Zig archive download (82 MB Windows zip) | Before | After |
+| --- | --- | --- |
+| Source | ziglang.org (throttled) | community mirrors in order, ziglang.org last |
+| Measured time | 4 to 14+ minutes | about 3 seconds from a mirror; seconds from the cache |
+| A stalled source | hangs until the 15-minute job limit | abandoned after 30 s without bytes (4 minutes per source at most) |
+| Integrity | pinned sha256 | the same pinned sha256, checked for every source before use |
+
+### To take advantage of v0.60.17.0
+
+Nothing to do: this changes CI only. `bun scripts/native/setup-toolchain.ts` downloads from the mirrors for local native builds too.
+
+### Itemized changes
+
+- `scripts/native/setup-toolchain.ts` streams the pinned archive from five community mirrors in order, with ziglang.org as the last resort. Each attempt aborts after 30 s without bytes or 4 minutes in total. An archive is kept only when its sha256 matches the pinned value, so a mirror can fail but cannot substitute bytes. When every source fails, the error lists each source and why it failed. A cached archive is re-verified before reuse, and a corrupt one is discarded.
+- `native-locks.yml` caches the archive per runner OS and architecture, keyed on `scripts/native/toolchain.json`, in the native and musl jobs. `timeout-minutes` is unchanged.
+- `scripts/native/toolchain.json` is unchanged, so the native build input digest and the committed prebuilds do not move.
+
 ## [0.60.16.0] - 2026-09-30
 
 **Long-running brains stop getting stuck waiting on a `git` check that already finished.**
