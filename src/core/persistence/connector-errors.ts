@@ -11,6 +11,7 @@ import { describeConnectorAccount, type ConnectorAccount } from './connector-sta
 import type { ConnectorConfig, ConnectorKind } from './connector-identity.ts';
 import type { GitHubSourceConfig } from '../github-source.ts';
 import type { GoogleSourceConfig } from '../google/types.ts';
+import { UNBOUND_PUBLICATION_MESSAGE, UNBOUND_SOURCE_DOCS, unboundPublicationHint } from './unbound-source.ts';
 
 export const REFUSAL_DOCS = 'docs/guides/write-refusals.md';
 export const docsAnchor = (code: string) => `${REFUSAL_DOCS}#${code.replaceAll('_', '-')}`;
@@ -50,7 +51,11 @@ export function connectorAccountChanged(sourceId: string, kind: ConnectorKind, c
 export const CONNECTOR_INTENT_OUTDATED_PRE_UPGRADE = 'The connector request was admitted before this upgrade in the retired intent format.';
 export const CONNECTOR_INTENT_OUTDATED_OLD_HOST = 'A connector host older than this release admitted the request in the retired intent format.';
 
-/** Rebuilds the suggestion, detail and docs pointer for a code delivered through a stored receipt. */
+/**
+ * Rebuilds the suggestion, detail and docs pointer for a code delivered through
+ * a stored receipt: connector codes, the #5254 unbound-source publication
+ * refusal, and the per-item embedding refusal.
+ */
 export function receiptDeliveredHint(receipt: { error_code?: string | null; error_message?: string | null; source_id?: string; intent?: Record<string, unknown> | null }):
   { suggestion: string; detail?: string; docs: string } | null {
   const source = receipt.source_id ?? '<source>';
@@ -69,6 +74,9 @@ export function receiptDeliveredHint(receipt: { error_code?: string | null; erro
       return { detail: 'consumer_upgrade_required', docs: docsAnchor('unsupported_mutation_protocol'),
         suggestion: `The persistence consumer that owns ${source} runs a gbrain older than this connector. Run gbrain upgrade on every consumer and worktree-owner host, then gbrain sync --source ${source}.` };
     }
+    case 'owner_unavailable':
+      if (receipt.error_message !== UNBOUND_PUBLICATION_MESSAGE) return null;
+      return { detail: 'unbound_source', docs: UNBOUND_SOURCE_DOCS, suggestion: unboundPublicationHint(source) };
     default:
       return null;
   }

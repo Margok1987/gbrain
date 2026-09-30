@@ -627,14 +627,20 @@ consolidation uses a single source-scoped take/fact transaction. A retired or
 resolved matching take is skipped, not silently reopened. Only world-visible
 facts backed by live non-private evidence are eligible for public consolidation;
 this is no guarantee that private facts will be consolidated. Remote maintenance
-authority is not added. Legacy fence reconciliation (`dream --phase
-extract_facts`), bulk `extract-conversation-facts`,
-`conversation_facts_backfill`, and `loops_extract` remain unsupported under
-managed persistence, including preview paths that could spend. Their preflight
-refuses with `writer_coordinator_required`; writer status and activation preview
-list them in `unsupported_maintenance`. The restored `extract_facts` operation
-and page backstop are separate from the legacy cycle fence reconciler. Do not
-infer that every dream or job writer is restored from the named lanes above.
+authority is not added. Fence reconciliation (`dream --phase extract_facts`,
+including its expiry of deleted pages' facts), bulk `extract-conversation-facts`
+and `conversation_facts_backfill` run on managed brains: their database-only
+fact rows commit inside the coordinator's source capability under the page key,
+like derived links, without a persistence request per page. The phantom redirect
+publishes as two maintenance requests (`managed_maintenance_phantom_merge` on
+the canonical page, which moves the phantom's rows by id, then
+`managed_maintenance_phantom_delete` on the phantom). Direct fence writes,
+`loops_extract` commitments and other `writeSingleFact` callers publish through
+the `managed_facts_entity` intent. Each checks its local writer authority (and,
+for file publication, the canonical owner) before model calls. Receipt pages
+for these runs stay unmanaged-only. `unsupported_maintenance` in writer status
+and activation preview is now empty. Do not infer that every dream or job
+writer is restored from the named lanes above.
 
 Google and GitHub API sources route through managed connector checkpoints,
 not a Git cursor. A deliberately unbound API source uses reviewed

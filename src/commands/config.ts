@@ -855,6 +855,13 @@ export async function runConfig(engine: BrainEngine, args: string[]) {
       catch (error) { console.error(`[config] ${(error as Error).message}`); process.exit(1); }
     }
 
+    // #5254: an unknown value would silently keep refusing unbound writes.
+    const { UNBOUND_WRITE_KEY, parseUnboundWriteValue } = await import('../core/persistence/unbound-source.ts');
+    if (key === UNBOUND_WRITE_KEY) {
+      try { parseUnboundWriteValue(value); }
+      catch (error) { console.error(`[config] ${(error as Error).message}`); process.exit(1); }
+    }
+
     // #4348: validate cycle.timezone at set time — resolveCycleDate falls
     // back loudly at run time, but the typo should be rejected here, at the
     // moment the operator can fix it.

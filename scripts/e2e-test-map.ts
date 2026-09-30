@@ -111,7 +111,8 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/openclaw-plugin-load-real.test.ts",
   ],
   // dream.ts is a thin alias over runCycle in cycle.ts.
-  "src/core/cycle.ts": ["test/e2e/cycle.test.ts", "test/e2e/dream.test.ts"],
+  "src/core/cycle.ts": ["test/e2e/cycle.test.ts", "test/e2e/dream.test.ts", "test/e2e/managed-phase-matrix.test.ts"],
+  "src/core/cycle/phase-*.ts": ["test/e2e/managed-phase-matrix.test.ts"],
   // Multi-source sync writes share the per-source bookmark anchor.
   "src/core/sync.ts": ["test/e2e/sync.test.ts", "test/e2e/multi-source.test.ts", "test/e2e/sync-reconcile-postgres.test.ts", "test/e2e/sync-lock-overlap-postgres.test.ts"],
   // F7: real SIGKILL mid-sync on live Postgres — checkpoint banking
@@ -157,11 +158,14 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   ],
   // #3390: runSchemaTransition's DDL path + the stale predicates behave
   // differently on real pgvector than on PGLite.
-  "src/core/embedding-migration*.ts": ["test/e2e/migrate-embeddings-postgres.test.ts", "test/e2e/embedding-recovery-parity.test.ts", "test/e2e/memory-safety-wave-postgres.test.ts", ...MIGRATION_WAVE_TESTS],
+  "src/core/embedding-migration*.ts": ["test/e2e/migrate-embeddings-postgres.test.ts", "test/e2e/embedding-recovery-parity.test.ts", "test/e2e/memory-safety-wave-postgres.test.ts", "test/e2e/embedding-migration-settle-postgres.test.ts", ...MIGRATION_WAVE_TESTS],
+  // #5680: the per-request ceilings the migration reserves and settles under FOR UPDATE.
+  "src/core/ai/embed-batch-plan.ts": ["test/e2e/embedding-migration-settle-postgres.test.ts"],
   "src/core/embedding-readiness.ts": ["test/e2e/embedding-recovery-parity.test.ts"],
   "src/core/facts/embedding-identity.ts": ["test/e2e/embedding-recovery-parity.test.ts", "test/e2e/fact-embedding-backfill-parity.test.ts"],
   "src/core/stored-embedding-identity.ts": ["test/e2e/unsupported-embedding-identity-postgres.test.ts"],
-  "src/commands/extract.ts": ["test/e2e/multi-source-bug-class.test.ts", "test/e2e/attendance-retrieval-postgres.test.ts", "test/e2e/extract-timeline-attendance-postgres.test.ts", "test/e2e/w5-persistence-postgres.test.ts"],
+  "src/commands/extract.ts": ["test/e2e/multi-source-bug-class.test.ts", "test/e2e/attendance-retrieval-postgres.test.ts", "test/e2e/extract-timeline-attendance-postgres.test.ts", "test/e2e/w5-persistence-postgres.test.ts", "test/e2e/managed-phase-matrix.test.ts"],
+  "src/commands/lint.ts": ["test/e2e/managed-phase-matrix.test.ts"],
   "src/commands/extract-attendance-repair.ts": ["test/e2e/attendance-repair-postgres.test.ts"],
   "src/commands/migrate-engine.ts": [
     "test/e2e/multi-source-bug-class.test.ts",
@@ -223,6 +227,10 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/managed-atom-regressions.test.ts",
     "test/e2e/managed-atom-compaction.test.ts",
     "test/e2e/managed-maintenance.test.ts",
+    "test/e2e/managed-writers-w3.test.ts",
+    "test/e2e/managed-facts-writers.test.ts",
+    "test/e2e/unbound-source-postgres.test.ts",
+    "test/e2e/managed-phase-matrix.test.ts",
     "test/e2e/managed-synthesis-postprocess.test.ts",
     "test/e2e/persistence-embedding-effects.test.ts",
     "test/e2e/withdrawal-bounded-safety-postgres.test.ts",
@@ -249,7 +257,11 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/timeline-marker.ts": ["test/e2e/timeline-materialize.test.ts"],
   "src/commands/source-reconcile.ts": ["test/e2e/reconcile-crash.test.ts", "test/e2e/reconcile-crash-unactivated.test.ts", "test/e2e/reconcile-pgbouncer.test.ts"],
   "src/core/cycle/extract-atoms.ts": ["test/e2e/extract-atoms-page-state.test.ts", "test/e2e/cycle.test.ts", "test/e2e/dream.test.ts", "test/e2e/multi-source-bug-class.test.ts", "test/e2e/managed-extract-atoms.test.ts", "test/e2e/managed-atom-regressions.test.ts", "test/e2e/managed-atom-compaction.test.ts"],
-  "src/core/cycle/synthesize*.ts": ["test/e2e/managed-maintenance.test.ts", "test/e2e/managed-synthesis-postprocess.test.ts"],
+  "src/core/cycle/synthesize*.ts": ["test/e2e/managed-maintenance.test.ts", "test/e2e/managed-synthesis-postprocess.test.ts", "test/e2e/managed-writers-w3.test.ts"],
+  "src/core/cycle/concept-publication.ts": ["test/e2e/managed-writers-w3.test.ts"],
+  "src/core/chronicle/extract-events.ts": ["test/e2e/managed-writers-w3.test.ts"],
+  "src/commands/enrich.ts": ["test/e2e/managed-writers-w3.test.ts"],
+  "src/core/ops/links.ts": ["test/e2e/managed-writers-w3.test.ts"],
   "src/core/cycle/extract-atoms-page-state.ts": ["test/e2e/extract-atoms-page-state.test.ts", "test/e2e/reconcile-crash.test.ts", "test/e2e/reconcile-crash-unactivated.test.ts", "test/e2e/reconcile-pgbouncer.test.ts"],
   "src/commands/migrations/v0_13_1.ts": ["test/e2e/grandfather-projection-postgres.test.ts"],
   "src/core/pool-budget.ts": ["test/e2e/persistence-runtime-matrix.test.ts"],

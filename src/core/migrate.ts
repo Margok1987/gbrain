@@ -6789,6 +6789,20 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     handler: async engine => { await migrateConnectorCheckpoints(engine); },
   },
   {
+    // #5254: a page written database-only while its filesystem source had no
+    // canonical owner (persistence.unbound_write=database_only) is stamped
+    // 'unbound_source', so writes and sync after binding keep it database-only
+    // instead of materializing or overwriting it. Nullable, no backfill (no
+    // earlier binary could write such a page), no index (read per page; the
+    // doctor count scans only non-NULL rows; bootstrap-coverage: column-only).
+    // Keep in sync with src/schema.sql (regenerate schema-embedded.ts via
+    // build:schema) and src/core/pglite-schema.ts.
+    version: 182,
+    name: 'pages_database_only_reason',
+    idempotent: true,
+    sql: `ALTER TABLE pages ADD COLUMN IF NOT EXISTS database_only_reason TEXT;`,
+  },
+  {
     // Writer-version stamps: each request records the binary version and host
     // that admitted it and the ones that published it, so doctor's
     // writer_version advisory can name an older writer still on the brain.

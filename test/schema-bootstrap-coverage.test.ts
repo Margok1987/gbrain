@@ -1001,6 +1001,10 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   'persistence_requests.consumer_host_id',
   'persistence_requests.published_at',
   'persistence_brain.writer_version_cutoff',
+  // #5254 (migration v182) — unbound-source page classification. Column-only
+  // and nullable; no index in either schema blob references it, and every
+  // reader treats NULL as an ordinary page.
+  'pages.database_only_reason',
 ]);
 
 test('every ALTER TABLE ADD COLUMN in MIGRATIONS is covered by applyForwardReferenceBootstrap (column-only class)', async () => {

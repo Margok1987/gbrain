@@ -26,6 +26,7 @@ import { loadActivePackForEngine, checkApprovedSchemaForEngine } from '../schema
 import type { CompanyBrainPlan } from '../company-brain/types.ts';
 import { companyBrainProfile } from '../company-brain/profile.ts';
 import { companyBrainPolicyFingerprint } from '../company-brain/policy.ts';
+import { isUnboundSourcePage, UNBOUND_COLLISION_MESSAGE } from './unbound-source.ts';
 
 export interface SyncIntent extends Record<string, unknown> {
   companyApproval?: { schema: NonNullable<CompanyBrainPlan['schema']>; planDigest: string; extractorVersion: string; policyFingerprint: string };
@@ -146,6 +147,9 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   const recordedOrigin = moved?.slug === row.slug ? moved.sourcePath : p.sourcePath!;
   if ((snapshot?.page.id ?? null) !== row.page_id || (snapshot?.page.source_path != null && !sameSyncOrigin(snapshot.page.source_path, recordedOrigin, originScope, snapshot.page.slug))) {
     throw new OperationError('page_identity_changed', 'The imported path no longer names the accepted page.');
+  }
+  if (snapshot && snapshot.page.source_path == null && await isUnboundSourcePage(engine, row.source_id, row.slug)) {
+    throw new OperationError('source_changed', UNBOUND_COLLISION_MESSAGE);
   }
   if (p.kind === 'managed_sync_delete') return { observedRevision: snapshot?.revision ?? null, noop: !snapshot || snapshot.page.deleted_at != null,
     validate, apply: async tx => {

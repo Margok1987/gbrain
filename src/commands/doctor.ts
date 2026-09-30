@@ -27,6 +27,7 @@ import { zeroTotalContradictionsCheck } from '../core/eval-contradictions/run-he
 import { checkProjectionReadiness } from './doctor/checks/projection-readiness.ts';
 import { checkPersistenceCapacity } from './doctor/checks/persistence-capacity.ts';
 import { checkParkedEffects } from './doctor/checks/parked-effects.ts';
+import { checkUnboundSource } from './doctor/checks/unbound-source.ts';
 import { checkPostgresCancellationDriver } from './doctor/checks/postgres-cancellation.ts';
 export { checkPostgresCancellationDriver } from './doctor/checks/postgres-cancellation.ts';
 export { checkProjectionReadiness } from './doctor/checks/projection-readiness.ts';
@@ -1900,7 +1901,7 @@ export async function buildChecks(
 
   // 4a-bis. Managed write capacity (#5470) and parked postcommit effects (#5612).
   progress.heartbeat('persistence_capacity');
-  checks.push(await checkPersistenceCapacity(engine), await checkParkedEffects(engine));
+  checks.push(await checkPersistenceCapacity(engine), await checkParkedEffects(engine), await checkUnboundSource(engine));
 
   // 4a-ter. #4613: links_link_source_check shape — a ledger-current brain
   // whose CHECK reverted to the pre-v114 allowlist rejects every kebab
