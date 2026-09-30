@@ -413,7 +413,8 @@ describe('S7 shadow and inactive on', () => {
 
   test('on without a calibration runs today\'s path and records the inactive cause', async () => {
     const { ['decide.slots.triage.threshold']: _t, ...rest } = S7_ON;
-    await setConfig(rest);
+    // A pinned model with no shipped reference calibration (jev-1.13.0 has one).
+    await setConfig({ ...rest, 'decide.provider': 'typesafe:jev-1.99.0' });
     transport(() => 0.9);
     const out = await pass([routine()]);
     expect(judgeCalls).toBe(1);

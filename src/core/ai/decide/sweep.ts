@@ -71,7 +71,11 @@ function newSweepId(now: number): string {
   return `${new Date(now).toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
 }
 
-/** Proposal floor: the operator's decide.slots.conflict.proposal_floor, else the calibration's floor, else the default. */
+/**
+ * Proposal floor: the operator's decide.slots.conflict.proposal_floor, else the calibration's floor (only when the
+ * duplicate threshold also comes from that calibration: the floor was fitted on the pairs its threshold leaves), else
+ * the default.
+ */
 export function proposalFloor(snapshot: Record<string, string> | null, calibrated?: number): number {
   const raw = snapshot?.['decide.slots.conflict.proposal_floor'];
   const n = raw === undefined ? NaN : Number(raw);
@@ -240,7 +244,7 @@ export async function runConflictSweep(engine: BrainEngine, opts: ConflictSweepO
   }
   const start = opts.since ?? stored!;
   const ctx: SweepContext = {
-    engine, cfg, policy, floor: proposalFloor(snapshot, policy.calibration?.proposal_floor), sweepId: result.sweep_id, sourceId, salt: await receiptSalt(engine),
+    engine, cfg, policy, floor: proposalFloor(snapshot, policy.thresholdSource === 'override' ? undefined : policy.calibration?.proposal_floor), sweepId: result.sweep_id, sourceId, salt: await receiptSalt(engine),
     judged: new Set(), pairIndex: 0, deadlineMs: opts.deadlineMs ?? SWEEP_REQUEST_DEADLINE_MS, now, result, receipts: [], signal: opts.signal,
   };
   const max = opts.maxFacts ?? SWEEP_MAX_FACTS;
