@@ -59,20 +59,25 @@ const OBJECT_KINDS = [
   'SEQUENCE', 'TYPE',
 ];
 
+function compileStructure(source: string): RegExp {
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- source is assembled only from the constant keyword and identifier fragments in this file; no input reaches it
+  return new RegExp(source);
+}
+
 function structurePatterns(kw: (word: string) => string): RegExp[] {
   return [
-    new RegExp(String.raw`\b${kw('SELECT')}\b[\s\S]*?\b${kw('FROM')}\s+[("A-Za-z_]`),
-    new RegExp(String.raw`\b${kw('SELECT')}\s+(?:\d|\$\d|[A-Za-z_][\w.]*\s*\()`),
-    new RegExp(String.raw`\b${kw('INSERT')}\s+${kw('INTO')}\s+${IDENT}`),
-    new RegExp(String.raw`\b${kw('UPDATE')}\s+${IDENT}(?:\s+(?:${kw('AS')}\s+)?[A-Za-z_]\w*)?\s+${kw('SET')}\b`),
-    new RegExp(String.raw`\b${kw('DELETE')}\s+${kw('FROM')}\s+${IDENT}`),
-    new RegExp(String.raw`\b${kw('WITH')}\s+(?:${kw('RECURSIVE')}\s+)?[A-Za-z_]\w*(?:\s*\([^)]*\))?\s+${kw('AS')}\s+(?:(?:${kw('NOT')}\s+)?${kw('MATERIALIZED')}\s+)?\(`),
-    new RegExp(String.raw`\b(?:${kw('CREATE')}|${kw('ALTER')}|${kw('DROP')})\s+(?:${kw('OR REPLACE')}\s+)?(?:${kw('TEMPORARY')}\s+|${kw('TEMP')}\s+)?(?:${OBJECT_KINDS.map(kw).join('|')})\b`),
-    new RegExp(String.raw`\b${kw('TRUNCATE')}\s+(?:${kw('TABLE')}\s+)?${IDENT}`),
-    new RegExp(String.raw`\b${kw('SET')}\s+(?:${kw('LOCAL')}|${kw('SESSION')})\s+[A-Za-z_]\w*`),
-    new RegExp(String.raw`\b${kw('LOCK')}\s+${kw('TABLE')}\s+${IDENT}`),
-    new RegExp(String.raw`\b${kw('ON CONFLICT')}\s*[(A-Za-z]`),
-    new RegExp(String.raw`\b${kw('WHERE')}\b[\s\S]*?\b(?:${kw('ORDER BY')}|${kw('GROUP BY')}|${kw('LIMIT')})\b`),
+    compileStructure(String.raw`\b${kw('SELECT')}\b[\s\S]*?\b${kw('FROM')}\s+[("A-Za-z_]`),
+    compileStructure(String.raw`\b${kw('SELECT')}\s+(?:\d|\$\d|[A-Za-z_][\w.]*\s*\()`),
+    compileStructure(String.raw`\b${kw('INSERT')}\s+${kw('INTO')}\s+${IDENT}`),
+    compileStructure(String.raw`\b${kw('UPDATE')}\s+${IDENT}(?:\s+(?:${kw('AS')}\s+)?[A-Za-z_]\w*)?\s+${kw('SET')}\b`),
+    compileStructure(String.raw`\b${kw('DELETE')}\s+${kw('FROM')}\s+${IDENT}`),
+    compileStructure(String.raw`\b${kw('WITH')}\s+(?:${kw('RECURSIVE')}\s+)?[A-Za-z_]\w*(?:\s*\([^)]*\))?\s+${kw('AS')}\s+(?:(?:${kw('NOT')}\s+)?${kw('MATERIALIZED')}\s+)?\(`),
+    compileStructure(String.raw`\b(?:${kw('CREATE')}|${kw('ALTER')}|${kw('DROP')})\s+(?:${kw('OR REPLACE')}\s+)?(?:${kw('TEMPORARY')}\s+|${kw('TEMP')}\s+)?(?:${OBJECT_KINDS.map(kw).join('|')})\b`),
+    compileStructure(String.raw`\b${kw('TRUNCATE')}\s+(?:${kw('TABLE')}\s+)?${IDENT}`),
+    compileStructure(String.raw`\b${kw('SET')}\s+(?:${kw('LOCAL')}|${kw('SESSION')})\s+[A-Za-z_]\w*`),
+    compileStructure(String.raw`\b${kw('LOCK')}\s+${kw('TABLE')}\s+${IDENT}`),
+    compileStructure(String.raw`\b${kw('ON CONFLICT')}\s*[(A-Za-z]`),
+    compileStructure(String.raw`\b${kw('WHERE')}\b[\s\S]*?\b(?:${kw('ORDER BY')}|${kw('GROUP BY')}|${kw('LIMIT')})\b`),
   ];
 }
 
@@ -274,7 +279,7 @@ if (import.meta.main) {
     const reason = !unit ? 'no longer exists' : unit.marker ? 'now carries an engine-sql-ok marker' : unit.sqlLine === null ? 'is no longer SQL-bearing' : null;
     if (reason) {
       stale.add(row.lineNo);
-      violations.push(`FAIL: ${where} stale row: ${row.key.replace('\t', ' ')} ${reason}\n      Fix:  delete this line; rows only shrink (or: bun scripts/check-engine-sql-ratchet.ts --prune)`);
+      violations.push(`FAIL: ${where} stale row: ${row.key.replaceAll('\t', ' ')} ${reason}\n      Fix:  delete this line; rows only shrink (or: bun scripts/check-engine-sql-ratchet.ts --prune)`);
     }
   }
 

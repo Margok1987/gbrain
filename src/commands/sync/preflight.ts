@@ -295,6 +295,7 @@ async function resolveSyncRepo(engine: BrainEngine, opts: SyncOpts): Promise<{ d
   await validateSourceRepoState(engine, opts, repoPath);
 
   const gitContextRoot = await discoverSyncGitRoot(engine, opts, company, repoPath);
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- srcSubpath is the local operator's --src-subpath flag (sync is localOnly); the realpath'd result is proven inside the realpath'd git root by the isWithinRoot guard below before any git op
   const rawScopeRoot = opts.srcSubpath ? join(repoPath, opts.srcSubpath) : repoPath;
   if (!existsSync(rawScopeRoot)) {
     throw new Error(`Sync scope does not exist: ${rawScopeRoot}`);
@@ -495,6 +496,7 @@ async function discoverSyncGitRoot(
     }
     if (reprobedRoot !== null) {
       gitContextRoot = realpathSync(reprobedRoot);
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- repoPath is the operator-configured local sync repo (sync is localOnly) and '.git' is a constant name
     } else if (existsSync(join(repoPath, '.git'))) {
       throw err;
     } else {

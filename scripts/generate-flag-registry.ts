@@ -143,6 +143,7 @@ function facadeExpansion(p: string): string[] {
   // page's `--url` / `--oauth-request` hint) used to live in serve-http.ts.
   if (rel === 'src/commands/serve-http.ts') {
     return ['oauth', 'metrics', 'admin-api', 'spa', 'mcp', 'webhooks']
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- build-time generator over this repository's own source tree; every joined segment is a constant module name or a path the generator itself discovered under ROOT
       .map(m => join(ROOT, `src/commands/serve-http-${m}.ts`))
       .filter(p => existsSync(p));
   }
@@ -168,6 +169,7 @@ function facadeExpansion(p: string): string[] {
     // Refactor wave 1 moves sync's phases into src/commands/sync/; that dir's
     // text is sync.ts's own text, so it joins the surface from its first file.
     return [
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- build-time generator over this repository's own source tree; every joined segment is a constant module name or a path the generator itself discovered under ROOT
       ...peeled.map(f => join(ROOT, 'src/core', f)).filter(p => existsSync(p)),
       ...collect(join(ROOT, 'src/commands/sync')),
     ];
@@ -189,6 +191,7 @@ function facadeExpansion(p: string): string[] {
       'unify-types.ts',
     ];
     return [
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- build-time generator over this repository's own source tree; every joined segment is a constant module name or a path the generator itself discovered under ROOT
       ...peeledHandlers.map(f => join(ROOT, 'src/core/minions/handlers', f)).filter(p => existsSync(p)),
       ...collect(join(ROOT, 'src/commands/jobs')),
     ];
@@ -200,6 +203,7 @@ function facadeExpansion(p: string): string[] {
     // ordinary deps, so a glob would widen the surface.
     const peeled = ['autopilot-daemon.ts', 'autopilot-dispatch.ts', 'autopilot-probes.ts'];
     return [
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- build-time generator over this repository's own source tree; every joined segment is a constant module name or a path the generator itself discovered under ROOT
       ...peeled.map(f => join(ROOT, 'src/commands', f)).filter(p => existsSync(p)),
       ...collect(join(ROOT, 'src/commands/autopilot')),
     ];
@@ -345,10 +349,12 @@ export function buildFlagRegistry(root: string = ROOT): Record<string, string[]>
   const addBlock = (label: string, text: string, dir: string) => blocks.set(label, [...(blocks.get(label) ?? []), { text, dir }]);
   const pipeline = flattenCliPipeline(parseSource(root, 'src/cli.ts'));
   for (const fn of [pipeline.entry, ...pipeline.stages]) {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- build-time generator over this repository's own source tree; every joined segment is a constant module name or a path the generator itself discovered under ROOT
     for (const [label, text] of segmentDispatchBlocks(fn.getText())) addBlock(label, text, join(root, 'src'));
   }
   for (const record of records) {
     const mod = record.loadSpecifier ? readCommandModule(root, record.loadSpecifier) : null;
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- mod.path comes from the repo's own command table literal import specifiers; build-time only
     if (mod) addBlock(record.name, stripComments(readSrc(join(root, mod.path))), dirname(join(root, mod.path)));
   }
 
@@ -392,9 +398,11 @@ export function buildFlagRegistry(root: string = ROOT): Record<string, string[]>
     // `command === 'agent' && args[0] === 'register'` head became a marker.
     // A flag a block consumes through a core helper is already a literal in
     // the block's own text (depth zero); the helper's prose adds nothing.
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- build-time generator over this repository's own source tree; every joined segment is a constant module name or a path the generator itself discovered under ROOT
     const commandsDir = join(root, 'src', 'commands');
     const commandModules = parts.flatMap(({ text, dir }) => [...text.matchAll(/import\('(\.\.?\/[^']+\.ts)'\)/g)]
       .filter(mm => !isValueOnlyImport(text, mm.index ?? 0))
+// nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- resolves literal relative import specifiers found in this repo's own source; results are filtered to src/commands below
       .map(mm => resolvePath(dir, mm[1])))
       .filter(p => p.startsWith(commandsDir + sep) && existsSync(p) && !isExcludedModule(p));
     for (const modPath of commandModules) {

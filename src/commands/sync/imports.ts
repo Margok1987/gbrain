@@ -243,6 +243,7 @@ function startStallWatchdog(
 async function importOnePath(run: SyncRun, ctx: ImportContext, eng: BrainEngine, path: string): Promise<void> {
   const { failedFiles, succeededPaths, pagesAffected, deletedSlugs } = run;
   const { opts, company, gitContextRoot, syncRepoPath, syncActivePack, noEmbed, pacer, progressAt, progress } = ctx;
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- `path` is a git-diff path from the synced repo (repo content can be hostile), but the joined path is checked by isPathSafe(filePath, gitContextRoot) realpath containment below before any read
   const filePath = join(syncRepoPath, path);
   if (!company && !existsSync(filePath)) {
     // v0.42.x (#1794, Codex #3): the diff is against the PINNED target, but

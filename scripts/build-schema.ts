@@ -319,6 +319,7 @@ interface Rule {
 
 function replaceOnce(from: string | RegExp, to: string): Rewrite {
   return (text) => {
+    // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- `from` is a constant capability-rule pattern defined in this script; the copy only forces the global flag for counting
     const hits = typeof from === 'string' ? text.split(from).length - 1 : (text.match(new RegExp(from.source, `${from.flags.replace('g', '')}g`)) ?? []).length;
     if (hits !== 1) throw new SchemaBuildError(`PGLite rule expected exactly one match of ${String(from)}, found ${hits}`);
     return text.replace(from, to);
@@ -326,6 +327,7 @@ function replaceOnce(from: string | RegExp, to: string): Rewrite {
 }
 
 function columnLineIndex(lines: string[], column: string): number {
+  // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp -- `column` is a constant column name from this script's capability rules, never external input
   const idx = lines.map((l, i) => (new RegExp(`^\\s+${column}\\s`).test(l) ? i : -1)).filter((i) => i >= 0);
   if (idx.length !== 1) throw new SchemaBuildError(`PGLite rule expected one column line for ${column}, found ${idx.length}`);
   return idx[0]!;

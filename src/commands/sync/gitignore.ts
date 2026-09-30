@@ -78,6 +78,7 @@ export function manageGitignore(
   // absorbed-submodule case from `git submodule absorbgitdirs`.
   // Malformed `.git` file (no `gitdir:` prefix, unreadable) → MANAGE (fail-closed
   // toward managing, preserving the pre-#889 catch{} behavior).
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- repoPath is the operator-configured local sync repo (CLI --repo or sources.local_path; sync is localOnly) and '.git' is a constant name
   const dotGit = join(repoPath, '.git');
   if (existsSync(dotGit)) {
     try {
@@ -144,6 +145,7 @@ export function manageGitignore(
     );
   }
 
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- repoPath is the operator-configured local sync repo (sync is localOnly) and '.gitignore' is a constant name
   const gitignorePath = join(repoPath, '.gitignore');
   let gitignoreContent = '';
 
