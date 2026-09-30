@@ -78,9 +78,10 @@ Per-file detail is in `docs/architecture/KEY_FILES.md`.
   imports use static top-level imports. Besides the snapshot loader's lazy
   `require()` cluster in `pglite-engine.ts:tryLoadSnapshot` (fs/crypto + one
   gateway shape lookup — lazy so production builds without the test-fixture
-  path don't eager-load; the snapshot hash reads migrate.ts/pglite-schema.ts
-  FILE BYTES, never the loaded modules, so coverage instrumentation can't
-  skew it; the guard now matches `require()` calls too), the only
+  path don't eager-load; the snapshot hash reads the FILE BYTES of the schema
+  import closure (`src/core/snapshot-schema-inputs.ts`), never the loaded
+  modules, so coverage instrumentation can't skew it; the guard now matches
+  `require()` calls too), the only
   dynamic-`import()` exceptions
   are the four `ai/gateway.ts` lookups in both engines'
   `initSchema()` and `_upsertChunksOnce()` methods; each remains lazy inside a
@@ -98,8 +99,8 @@ Per-file detail is in `docs/architecture/KEY_FILES.md`.
 - **Contract-first.** `src/core/operations.ts` is the single source; CLI + MCP are generated
   from it. Every op carries `scope: 'read'|'write'|'admin'` + optional `localOnly`. HTTP
   dispatch enforces scope/localOnly before the handler runs.
-- **Migrations.** Schema DDL lives in the `MIGRATIONS` array in `src/core/migrate.ts`.
-  `CREATE INDEX CONCURRENTLY` needs `transaction: false` (pre-drop invalid remnants on
+- **Migrations.** One file per schema migration in `src/core/schema-migrations/`
+  (`bun run new:migration <name>`; `migrate.ts` is the runner). `CREATE INDEX CONCURRENTLY` needs `transaction: false` (pre-drop invalid remnants on
   Postgres; plain `CREATE INDEX` on PGLite via `sqlFor.pglite`).
 - **Multi-source.** Slug uniqueness is `(source_id, slug)`, not slug. Key batch ops and
   reverse-writes on the composite key; `validateSourceId` before any `source_id` path join.
@@ -116,8 +117,7 @@ Per-file detail is in `docs/architecture/KEY_FILES.md`.
   (`check:module-size` in verify): growth over a ceiling, >50 lines of stale slack after a
   shrink, a row for a deleted file, and any UNLISTED src file over 1,500 lines all fail.
   Raise a ceiling only via a reviewer-visible TSV edit in the same commit; lower it in the
-  same commit as any peel. migrate.ts is `region-exempt` (the MIGRATIONS array grows freely;
-  the runner logic around it is ratcheted).
+  same commit as any peel.
 - **Peeled façades keep their surface.** operations.ts (`src/core/ops/*`), doctor.ts
   (`src/commands/doctor/*`), sync.ts (`src/core/sync-*`), skillpack.ts
   (`src/commands/skillpack/*`), and both engines

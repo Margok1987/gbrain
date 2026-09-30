@@ -25,6 +25,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { getPGLiteSchema } from '../../src/core/pglite-schema.ts';
+import { runMigrations } from '../../src/core/migrate.ts';
 import { configureGateway, getEmbeddingDimensions, getEmbeddingModel, resetGateway } from '../../src/core/ai/gateway.ts';
 import { resetFtsLanguageCache } from '../../src/core/fts-language.ts';
 import { withEnv } from './with-env.ts';
@@ -125,6 +126,26 @@ export async function capturePgliteFreshInstall(): Promise<{ catalog: CatalogSna
 /** Fresh in-memory PGLite, cold (no GBRAIN_PGLITE_SNAPSHOT), full `initSchema()`. */
 export async function capturePgliteEngineCatalog(): Promise<CatalogSnapshot> {
   return (await capturePgliteFreshInstall()).catalog;
+}
+
+/**
+ * Fresh in-memory PGLite, cold, full `initSchema()`, then the recorded
+ * schema_version is rewound to `checkpoint` and `runMigrations` replays every
+ * later migration (W3 replay-from-checkpoint arm).
+ */
+export async function capturePgliteReplayCatalog(checkpoint: number): Promise<{ catalog: CatalogSnapshot; applied: number; current: number }> {
+  return withColdPglite(async () => {
+    const engine = new PGLiteEngine();
+    try {
+      await engine.connect({});
+      await engine.initSchema();
+      await engine.setConfig('version', String(checkpoint));
+      const { applied, current } = await runMigrations(engine);
+      return { catalog: await snapshotCatalog(pgliteCatalogQuery(engine)), applied, current };
+    } finally {
+      await engine.disconnect();
+    }
+  });
 }
 
 /**
