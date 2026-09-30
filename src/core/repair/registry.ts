@@ -22,6 +22,7 @@ import { safeChunksRepair } from './safe-chunks.ts';
 import { contextualModeRepair } from './contextual-mode.ts';
 import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
 import { orphanBindingsRepair } from './orphan-bindings.ts';
+import { embeddingEffectsRepair } from './embedding-effects.ts';
 
 export interface RepairKindSpec {
   kind: RepairKind;
@@ -62,6 +63,12 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     handler: orphanBindingsRepair, embeds: 'none', checks: ['orphan_persistence_bindings'],
     summary: 'Delete persistence source bindings whose source or source incarnation no longer exists (#5732), so a source re-added under the same id can be claimed again. '
       + 'Bookkeeping only; no journal admission. A binding a pending request still references is kept. Brain-wide.',
+  },
+  'embedding-effects': {
+    handler: embeddingEffectsRepair, embeds: 'effect', checks: ['stale_embedding_effects'],
+    summary: 'Settle stale queued or failed embedding effects of committed writes (#5629, #5734), which block receipt compaction and activation. '
+      + 'Each effect is reconciled (current vectors pass the effect verifier), superseded (page deleted, or a newer revision owns its own effect), '
+      + 'retry_queued for its owner (paid; a consumed retry allowance gets one new bounded cycle per explicit run) or blocked with the reason. Never drops an obligation.',
   },
 };
 

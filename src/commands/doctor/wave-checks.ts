@@ -123,10 +123,9 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     run: async engine => (await import('./checks/self-capture.ts')).selfCaptureCheck(engine),
   },
   {
-    id: 'stale_embedding_effects', resolution: 'unsupported', registration: 'wave',
+    id: 'stale_embedding_effects', resolution: 'repair', registration: 'wave',
     count: d => Number(d.stale_effects ?? 0),
-    impact: 'A committed write still has a queued embedding effect that no command can clear yet',
-    instruction: 'Inspect it with `gbrain sources writer status <source> --json`; inspection cannot clear it (see docs/guides/repair.md#stale-queued-embedding-effects).',
+    impact: 'A committed write still has a stale queued or failed embedding effect that blocks compaction and activation',
     run: async (engine, scope) => (await import('./checks/stale-embedding-effects.ts')).staleEmbeddingEffectsCheck(engine, scope.sourceIds),
   },
 ];
