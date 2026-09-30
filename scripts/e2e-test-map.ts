@@ -515,4 +515,7 @@ E2E_TEST_MAP["src/core/engine-sql/**"] = [
       "src/core/pglite-engine/**",
     ].flatMap((key) => E2E_TEST_MAP[key] ?? []),
   ),
+  // C9 executor contract: dialect adapters' prepare mode and row normalizer.
+  "test/e2e/engine-sql-prepare-parity.test.ts",
+  "test/e2e/engine-sql-normalize-parity.test.ts",
 ];
