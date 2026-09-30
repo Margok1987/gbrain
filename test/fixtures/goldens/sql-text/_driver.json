@@ -95,6 +95,30 @@
           }
         ]
       },
+      "getChunkWindows": {
+        "default": [
+          {
+            "paramCount": 8,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "scopedPrivateSafe": [
+          {
+            "paramCount": 9,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
       "getChunks": {
         "default": [
           {

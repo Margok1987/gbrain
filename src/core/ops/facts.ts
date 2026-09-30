@@ -1,4 +1,5 @@
 import { WRITE_REQUEST_PARAM } from '../persistence/params.ts';
+import { deliverEvidence, resolveEvidencePlan, type DeliveryMeta, type EvidencePlan } from '../search/evidence-delivery.ts';
 import { randomUUID } from 'node:crypto';
 import { readHolders } from './context.ts';
 /**
@@ -15,7 +16,7 @@ import { readHolders } from './context.ts';
  * from '../operations.ts' here (cycle).
  */
 
-import type { Operation } from './contract.ts';
+import type { Operation, OperationContext } from './contract.ts';
 import { OperationError, verbError } from './contract.ts';
 import { assertExplicitSourceLive, federatedSearchScope, parseSourceIdParam, sourceScopeOpts, stampEvidenceSafe } from './context.ts';
 import { markKeywordHits } from '../search/evidence.ts';
@@ -176,6 +177,19 @@ const extract_facts: Operation = {
   },
 };
 
+/** One arm of recall's budget_packing accounting. */
+function packingArm<T>(candidates: T[], kept: T[], cost: (item: T) => number) {
+  return { candidates: candidates.length, kept: kept.length, dropped: candidates.length - kept.length, used: kept.reduce((sum, r) => sum + cost(r), 0) };
+}
+
+/** recall's evidence plan: budget_tokens budgets the delivered blocks before recall's own packing. */
+function recallEvidencePlan(ctx: OperationContext, p: Record<string, unknown>): Promise<EvidencePlan | null> {
+  return resolveEvidencePlan(ctx.engine, {
+    remote: ctx.remote, viaSubagent: ctx.viaSubagent, returnUnit: p.return_unit, returnWindow: p.return_window,
+    budget: p.budget_tokens, snippetChars: undefined, snippetCap: 0, op: 'recall',
+  });
+}
+
 const recall: Operation = {
   name: 'recall',
   description:
@@ -193,6 +207,8 @@ const recall: Operation = {
     limit: { type: 'number', description: 'Per-arm cap: max fact rows AND max search results. Default 50, cap 100.' },
     grep: { type: 'string', description: 'Substring filter on fact text (case-insensitive). Applied in SQL before the limit, so matches on high-cardinality entities are found even outside the newest-N window.' },
     include_pending: { type: 'boolean', description: 'v0.32: when true, response includes pending_consolidation_count (facts not yet promoted to takes by the dream-cycle consolidate phase). One round trip; backward-compatible (field omitted when false).' },
+    return_unit: { type: 'string', enum: ['chunk', 'window', 'section', 'page', 'auto'], description: "Evidence unit for the results[] arm (needs `query`; default config search.return_unit = 'chunk'). 'window' adds neighbor chunks, 'section' the enclosing section or conversation rounds, 'page' the whole page/session (best for multi-session questions), 'auto' picks per page. Non-chunk units return one result per page with `delivered` metadata and a top-level `delivery` block; the evidence is budgeted by budget_tokens (default 6000) and then packed by recall's usual rules." },
+    return_window: { type: 'number', description: "Neighbor chunks on each side for return_unit 'window' (integer 1-3, default 1)." },
   },
   scope: 'read',
   verb: true,
@@ -404,6 +420,8 @@ const recall: Operation = {
 
     let searchResults: SearchResult[] = [];
     let searchDegraded: string | undefined;
+    let delivery: DeliveryMeta | undefined;
+    const evidencePlan = queryText ? await recallEvidencePlan(ctx, p) : null;
     if (queryText) {
       // #3242 parity (#4707): the page-search arm widens an unqualified
       // no-grant caller across the transport-computed federated set, exactly
@@ -434,6 +452,7 @@ const recall: Operation = {
         });
       }
       bumpLastRetrievedAt(ctx.engine, searchResults.map(r => r.page_id));
+      if (evidencePlan) ({ results: searchResults, delivery } = await deliverEvidence(ctx.engine, searchResults, evidencePlan, { ...searchScope, excludePrivate, requireSafeChunks: ctx.remote !== false }));
     }
 
     let packedFacts = rows;
@@ -476,18 +495,8 @@ const recall: Operation = {
                 : rows.length + searchResults.length === 0 ? 'no_candidates'
                   : packedFacts.length + packedResults.length === 0 ? 'first_items_exceed_budget'
                     : 'packed',
-          facts: {
-            candidates: rows.length,
-            kept: packedFacts.length,
-            dropped: rows.length - packedFacts.length,
-            used: packedFacts.reduce((sum, r) => sum + estimateTokens(r.fact), 0),
-          },
-          results: {
-            candidates: searchResults.length,
-            kept: packedResults.length,
-            dropped: searchResults.length - packedResults.length,
-            used: packedResults.reduce((sum, r) => sum + resultTokens(r), 0),
-          },
+          facts: packingArm(rows, packedFacts, r => estimateTokens(r.fact)),
+          results: packingArm(searchResults, packedResults, resultTokens),
         }
       : undefined;
 
@@ -535,6 +544,7 @@ const recall: Operation = {
               evidence: r.evidence,
               create_safety: r.create_safety,
               provenance: r.slug,
+              ...(r.delivered ? { delivered: r.delivered } : {}),
             })),
             ...(searchDegraded ? { search_degraded: searchDegraded } : {}),
           }
@@ -543,6 +553,7 @@ const recall: Operation = {
         ? { budget_tokens: budgetTokens, budget_used: budgetUsed, dropped_count: droppedCount }
         : {}),
       ...(budgetPacking ? { budget_packing: budgetPacking } : {}),
+      ...(delivery ? { delivery } : {}),
     };
   },
 };

@@ -125,6 +125,7 @@ import * as linksImpl from './engine-sql/links.ts';
 import * as timelineImpl from './engine-sql/timeline.ts';
 import * as sourcesImpl from './engine-sql/sources.ts';
 import * as filesImpl from './engine-sql/files.ts';
+import type { ChunkWindowRequest, ChunkWindowOpts, ChunkWindowPage } from './search/chunk-windows.ts';
 import * as chunksImpl from './engine-sql/chunks.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './engine-sql/cjk-search.ts';
@@ -1730,6 +1731,10 @@ export class PostgresEngine implements BrainEngine {
       lockPageKeys: (keys) => this.lockPageKeys(keys),
       readPageSnapshot: (pageSlug, snapshotOpts) => this.readPageSnapshot(pageSlug, snapshotOpts),
     }, slug, chunks, opts);
+  }
+
+  getChunkWindows(requests: ChunkWindowRequest[], opts: ChunkWindowOpts): Promise<ChunkWindowPage[]> {
+    return this.withScopedReadTransaction(opts.sourceIds?.length ? opts.sourceIds : undefined, opts.sourceIds?.length ? undefined : opts.sourceId, tx => chunksImpl.getChunkWindows(scopedRead(this.engineSqlOn(tx)), requests, opts));
   }
 
   async getChunks(slug: string, opts?: { sourceId?: string; sourceIds?: string[]; includeEmbedding?: boolean; excludePrivate?: boolean; requireSafeChunks?: boolean; includeUnsealed?: boolean }): Promise<Chunk[]> {

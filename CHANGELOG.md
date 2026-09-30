@@ -10,6 +10,56 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.13.0] - 2026-09-30
+
+**Your agent can now ask search for the whole conversation, section or page around each hit, in the same call, instead of a 300-word chunk. It is off by default until a matched study shows it helps.**
+
+When an agent searches your brain it gets ranked chunks. For questions that span several conversations, or ask when something changed, the answer often sits in the text around the chunk. In a fixed 100-question LongMemEval-S study (reranker off), the same reader answered 89 correctly from the full retrieved sessions and 65 from the top five chunks. Until now the agent had to call `get_page` once per hit to close that gap.
+
+`search`, `query` and `recall` now take `return_unit`: `window` (the hit plus neighbor chunks), `section` (the enclosing section, or the conversation rounds around the hit), `page` (the whole page or session) or `auto` (page for conversations and short pages, section or window for long notes). The evidence arrives in each result's existing `chunk_text`, packed into your `token_budget` (default 6,000 tokens), with a `delivered` block saying which unit applied, where the hits sit in the text and what was cut. `think` gets the same through its own `think.return_unit` setting.
+
+| | Before | After (opt-in) |
+| --- | --- | --- |
+| Surrounding conversation for a hit | one `get_page` call per hit | the same `search` / `query` / `recall` call |
+| Budget | chunks skipped past `token_budget` | whole evidence packed into `token_budget`, each page keeps its matching span |
+| Extra latency, 10K-page brain (warm p95) | — | 10–23 ms per request on PGLite and Postgres |
+| Default responses | — | byte-identical (pinned against the previous release) |
+
+The default stays `chunk`: nothing changes unless you or your agent ask. An earlier attempt to cut sessions down to "relevant" rounds lost answers (53/60 to 48/60, `docs/eval/ANSWER_PACKET_RESULTS.md`), so the default only flips if the gbrain-evals study shows a real gain; if only `page` helps, `page` stays an opt-in at its full token cost.
+
+Things to watch: expansion never shows more than `get_page` would show the same caller. It removes takes, private fact rows and withdrawn facts from the whole page before cutting evidence, even on your own machine (use `get_page` for those), and it never includes page frontmatter. A page that became private, was deleted, or left your grant between the search and the expansion is dropped, not served from the old hit.
+
+### To take advantage of v0.60.13.0
+
+`gbrain upgrade`. There is no migration. Try it on one question:
+
+```bash
+gbrain query "when did the launch move?" --return-unit page --token-budget 6000
+gbrain search "acme-example renewal" --return-unit window --return-window 2
+```
+
+**Say to your agent:** *"Search my brain for what we decided about the acme-example renewal and read the whole conversations, not just snippets."*
+
+The contract, the fallback codes and the benchmark are in `docs/evidence-delivery.md`. To make an expanded unit the default for search (not recommended until the study lands): `gbrain config set search.return_unit auto`; `gbrain config set search.return_unit chunk` turns it off again.
+
+### Itemized changes
+
+#### Evidence delivery
+- New `src/core/search/evidence-delivery.ts`: one assembler shared by `search`, `query`, `recall` and `think`. It groups hits by page, reads each page's authorization, body and the hit chunks in one batched query keyed by page id (`getChunkWindows`, SQL once in `engine-sql/chunks.ts` for both engines), sanitizes the whole body before slicing, locates the hits in it so chunk overlap never duplicates text, cuts the requested unit, and packs blocks by rank with a per-page floor. `page` evidence is byte-identical to the page body minus frontmatter and protected content.
+- Params `return_unit` and `return_window` on `search`, `query`, `recall`; `token_budget` declared on `search` and `query` (on `query` it budgets the delivered evidence when a non-chunk unit applies). Config keys `search.return_unit`, `search.return_window`, `search.return_budget_default` (6,000), `search.return_budget_max_remote` (32,000) and `think.return_unit`.
+- Additive `delivered` per result (`unit`, `chunk_ids`, `match_spans` as UTF-16 offsets, `tokens`, `truncated`, `revision`, `unmapped_chunk_ids`, `fallback_reason`) and a `delivery` meta block (`_meta.retrieval.delivery` over MCP, top-level on `recall`). `gbrain search --explain` prints an evidence line.
+- Tokens are counted with cl100k per line (CJK-correct), after secret redaction. Blocks are capped at 60,000 characters so large pages are cut, not replaced by the output-limit marker. Remote budgets are clamped and the clamp is reported.
+- An explicit `snippet_chars` still wins; an explicit `return_unit` skips the subagent snippet default; a config-level unit never overrides the subagent default.
+- Bad `return_unit` / `return_window` values fail with `invalid_params` naming the allowed values and an example call. A thin client whose server ignores `return_unit` prints one warning naming the minimum server version.
+- New read op `assemble_evidence` and library call `assembleEvidenceForHits` return exactly the evidence `query` returns for a frozen ordered hit list, with `evidenceFingerprint`, exported as `gbrain/search/evidence-delivery` for gbrain-evals.
+
+#### Safety
+- Every delivered page is re-authorized under the caller's current scope (source grant, private pages, deleted, quarantined, archived sources, current text revision); stale or cached hits are dropped, never served from hit text. Leak canaries (private facts, takes, withdrawn facts, malformed protected tails, timeline facts, private pages, derived atoms, same-slug pages in another source, grant revocation, a page turning private, an edit mid-flight) pass on PGLite and Postgres through local ops, MCP stdio and MCP HTTP, with public presence controls.
+
+#### Tests and tooling
+- `test/evidence-delivery.test.ts` (stitching round trip, allocation and boundary properties, units, errors, snippet precedence, recall and think wiring), `test/evidence-delivery-golden.test.ts` (default output byte-identical to v0.60.12.0), `test/e2e/evidence-delivery-leak.test.ts`, `test/e2e/evidence-delivery-parity.test.ts` (engine parity and query/assemble parity).
+- `scripts/bench-evidence-delivery.ts` measures the stage's added latency per unit (cold, warm, large pages, CJK, 8-way concurrency) on PGLite and Postgres.
+
 ## [0.60.12.0] - 2026-09-30
 
 **Nothing you use changes. Under the hood, GBrain's storage code is now written once instead of twice, and its biggest files are split into pieces a person can read, so fixes stop landing on one database and missing the other.**

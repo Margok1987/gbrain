@@ -145,6 +145,7 @@ import * as linksImpl from './engine-sql/links.ts';
 import * as timelineImpl from './engine-sql/timeline.ts';
 import * as sourcesImpl from './engine-sql/sources.ts';
 import * as filesImpl from './engine-sql/files.ts';
+import type { ChunkWindowRequest, ChunkWindowOpts, ChunkWindowPage } from './search/chunk-windows.ts';
 import * as chunksImpl from './engine-sql/chunks.ts';
 import { searchKeywordCJK } from './engine-sql/cjk-search.ts';
 import { applyForwardReferenceBootstrap, pgliteBootstrapTarget } from './engine-sql/bootstrap.ts';
@@ -1981,6 +1982,8 @@ export class PGLiteEngine implements BrainEngine {
       readPageSnapshot: (pageSlug, snapshotOpts) => this.readPageSnapshot(pageSlug, snapshotOpts),
     }, slug, chunks, opts);
   }
+
+  getChunkWindows(requests: ChunkWindowRequest[], opts: ChunkWindowOpts): Promise<ChunkWindowPage[]> { return chunksImpl.getChunkWindows(scopedRead(this.engineSql), requests, opts); }
 
   async getChunks(slug: string, opts?: { sourceId?: string; sourceIds?: string[]; includeEmbedding?: boolean; excludePrivate?: boolean; requireSafeChunks?: boolean; includeUnsealed?: boolean }): Promise<Chunk[]> {
     const sourceIds = opts?.sourceIds && opts.sourceIds.length > 0 ? opts.sourceIds : undefined;
