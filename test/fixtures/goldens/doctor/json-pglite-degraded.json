@@ -359,13 +359,13 @@
         },
         {
           "category": "meta",
-          "message": "Version 178 (latest: 178)",
+          "message": "Version 181 (latest: 181)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "707 column(s) verified against live schema",
+          "message": "800 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -819,6 +819,12 @@
         },
         {
           "category": "ops",
+          "message": "System One is off (every decide slot is off; nothing is sent).",
+          "name": "decide_health",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
           "message": "Mode: conservative (no per-key overrides — mode bundle is canonical).",
           "name": "search_mode",
           "status": "ok"
@@ -839,7 +845,7 @@
         },
         {
           "category": "brain",
-          "message": "No retrieval-affecting files changed in working tree.",
+          "message": "1 retrieval-affecting file(s) changed since HEAD: src/core/search/hybrid/rank.ts. Re-run `gbrain eval run-all` after committing these changes.",
           "name": "eval_drift",
           "status": "ok"
         },

@@ -37,6 +37,8 @@ const HELP_WITHOUT_BRAIN = [
   'agent',
   // wave-2 repair core: runRepairCommand prints REPAIR_HELP before the engine.
   'repair',
+  // System One: the decide dispatch module prints its help before connecting.
+  'decide',
 ];
 
 /**

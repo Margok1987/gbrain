@@ -280,7 +280,7 @@ export async function rerankAndPin(
         onMeta: (m: RerankMeta) => { s1Meta = m; req.rerankMeta = { model_resolved: m.model_resolved }; },
       })
     : deduped;
-  if (s1 && rerankerOpts.enabled) recordRerankReceipts(req.decide, query, reranked.slice(0, rerankerOpts.topNIn).filter((r) => r.rerank_score !== undefined), s1Meta, s1Failure);
+  if (s1 && rerankerOpts.enabled) recordRerankReceipts(req.decide, query, reranked.slice(0, rerankerOpts.topNIn).filter((r) => s1Failure !== undefined || r.rerank_score !== undefined), s1Meta, s1Failure);
   if (s1Shadow) await s1Shadow(reranked);
 
   // Ranker wave (R1 receipt) — relational-arm rows bypass reranker DEMOTION:

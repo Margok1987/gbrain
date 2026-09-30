@@ -98,14 +98,16 @@ export async function rerankViaDecide(input: RerankInput, deps: RerankViaDecideD
       }
       let json: unknown;
       try { json = await response.json(); } catch { inputTokens += batch.estimatedInputTokens; throw new RerankError('TypeSafe rerank: malformed JSON', 'unknown'); }
+      // The API bills input tokens even when the answers fail validation: settle what it reported first.
+      const usage = (json as { usage?: { input_tokens?: unknown; output_tokens?: unknown } } | null)?.usage;
+      const reported = typeof usage?.input_tokens === 'number' && Number.isSafeInteger(usage.input_tokens) && usage.input_tokens >= 0 ? usage.input_tokens : undefined;
+      inputTokens += reported ?? batch.estimatedInputTokens;
+      outputTokens += typeof usage?.output_tokens === 'number' ? usage.output_tokens : 0;
       const batchQuestions = batch.indices.map((j) => questions[j]!);
       let parsed;
       try { parsed = parseTypeSafeResponse(json, batchQuestions); } catch (err) {
-        inputTokens += batch.estimatedInputTokens;
         throw new RerankError(`TypeSafe rerank: ${err instanceof Error ? err.message : 'malformed answers'}`, 'unknown');
       }
-      inputTokens += parsed.inputTokens ?? batch.estimatedInputTokens;
-      outputTokens += parsed.outputTokens ?? 0;
       models.add(parsed.model);
       for (const q of batchQuestions) {
         const answer = parsed.answers[q.id]!;

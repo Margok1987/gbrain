@@ -2096,6 +2096,7 @@ command line still runs it (the runner keeps provider keys):
 | `test/e2e/openrouter-deepseek-subagent-replay.live.test.ts` | `OPENROUTER_API_KEY` | `OPENROUTER_API_KEY=... bash scripts/run-e2e.sh test/e2e/openrouter-deepseek-subagent-replay.live.test.ts` |
 | `test/e2e/voyage-rerank-live.test.ts` | `VOYAGE_API_KEY` | `VOYAGE_API_KEY=... bash scripts/run-e2e.sh test/e2e/voyage-rerank-live.test.ts` |
 | `test/e2e/voyage-multimodal.test.ts` | `VOYAGE_API_KEY` | `VOYAGE_API_KEY=... bash scripts/run-e2e.sh test/e2e/voyage-multimodal.test.ts` |
+| `test/live/decide-typesafe.live.test.ts` | `TYPESAFE_API_KEY` (or `JEV_TYPESAFE_API_KEY`) + `GBRAIN_LIVE_TYPESAFE=1` | `GBRAIN_TEST_KEEP_PROVIDER_KEYS=1 GBRAIN_LIVE_TYPESAFE=1 TYPESAFE_API_KEY=... bun test test/live/decide-typesafe.live.test.ts` |
 
 ### E2E test DB lifecycle (ALWAYS follow this)
 
