@@ -210,8 +210,11 @@ export class ItemHoldsRun {
   private readonly retryKeys: ReadonlySet<string>;
 
   constructor(stored: unknown, private readonly opts: { now?: () => number; full?: boolean; retryKeys?: Iterable<string> } = {}) {
-    this.state = opts.full ? emptyItemHolds() : normalizeHolds(stored);
-    this.retryKeys = new Set(opts.retryKeys ?? []);
+    this.state = normalizeHolds(stored);
+    // `sync --full` resets the holds by re-attempting every held item once: a success clears it, a
+    // failure starts counting again from one. Forgetting the records instead would leave an item the
+    // cursor already passed unimported and invisible.
+    this.retryKeys = new Set([...(opts.retryKeys ?? []), ...(opts.full ? this.heldKeys() : [])]);
   }
 
   private now(): number { return this.opts.now ? this.opts.now() : Date.now(); }
@@ -300,6 +303,10 @@ export class ItemHoldsRun {
       const base = { key, code: failure.classified.code, class: failure.classified.class, message: failure.classified.message.slice(0, 500),
         upstream_version: failure.version ?? previous?.upstream_version ?? null, last_failed_at: nowIso, meta,
         slug: failure.slug ?? previous?.slug ?? null, request_id: failure.requestId ?? previous?.request_id ?? null, ref: failure.ref ?? previous?.ref ?? null, legacy: false };
+      if (previous?.state === 'held' && this.opts.full) {
+        state.items[key] = { ...base, state: 'failing', first_failed_at: nowIso, attempts: 1, held_at: null, next_attempt_at: null, reconsiderations: 0 };
+        continue;
+      }
       if (previous?.state === 'held') {
         const reconsiderations = previous.reconsiderations + 1;
         const heldAt = Date.parse(previous.held_at ?? nowIso);

@@ -186,12 +186,19 @@ describe('ItemHoldsRun counting', () => {
     expect(retried.state.items.a.state).toBe('held');
   });
 
-  test('sync --full starts from no holds', () => {
+  test('sync --full resets holds by re-attempting every held item: success clears, failure counts from one', () => {
     const c = clock();
     let state = emptyItemHolds();
-    for (let i = 0; i < 3; i++) state = run(state, c.now, ['a'], new Set(['a'])).state;
-    expect(new ItemHoldsRun(state, { now: c.now, full: true }).shouldAttempt('a')).toBe(true);
-    expect(new ItemHoldsRun(state, { now: c.now, full: true }).finish().state.items).toEqual({});
+    for (let i = 0; i < 3; i++) state = run(state, c.now, ['a', 'b'], new Set(['a', 'b']), contentError).state;
+    const full = new ItemHoldsRun(state, { now: c.now, full: true });
+    expect(full.shouldAttempt('a') && full.shouldAttempt('b')).toBe(true);
+    full.succeed('a');
+    full.fail('b', contentError());
+    const after = full.finish().state;
+    expect(after.items.a).toBeUndefined();
+    expect(after.items.b).toMatchObject({ state: 'failing', attempts: 1 });
+    // A --full run that never reached a held item keeps it held and visible.
+    expect(new ItemHoldsRun(state, { now: c.now, full: true }).finish().state.items.a.state).toBe('held');
   });
 
   test(`the ${HOLD_CAP + 1}st hold is refused: the run reports exhausted and keeps the item counting`, () => {

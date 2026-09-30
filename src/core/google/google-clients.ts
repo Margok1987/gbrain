@@ -337,8 +337,10 @@ export class GmailClient extends GoogleApiClient {
   async listHistoryThreadIds(
     startHistoryId: string,
     opts: { signal?: AbortSignal; maxThreads?: number } = {},
-  ): Promise<{ threadIds: string[]; newHistoryId: string | null; truncated: boolean }> {
+  ): Promise<{ threadIds: string[]; newHistoryId: string | null; truncated: boolean; versions: Map<string, string> }> {
     const threadIds = new Set<string>();
+    // The latest history record touching each thread: its upstream version for the item holds.
+    const versions = new Map<string, string>();
     let newHistoryId: string | null = null;
     let lastRecordId: string | null = null;
     let truncated = false;
@@ -363,7 +365,10 @@ export class GmailClient extends GoogleApiClient {
             return { items: [], nextPageToken: null };
           }
           for (const tid of fresh) threadIds.add(tid);
-          if (recordId) lastRecordId = recordId;
+          if (recordId) {
+            lastRecordId = recordId;
+            for (const tid of touched) versions.set(tid, recordId);
+          }
         }
         if (typeof body.historyId === 'string') newHistoryId = body.historyId;
         return { items: [], nextPageToken: (body.nextPageToken as string | undefined) ?? null };
@@ -371,7 +376,7 @@ export class GmailClient extends GoogleApiClient {
       'gmail',
       opts,
     );
-    return { threadIds: [...threadIds], newHistoryId: truncated ? lastRecordId : newHistoryId, truncated };
+    return { threadIds: [...threadIds], newHistoryId: truncated ? lastRecordId : newHistoryId, truncated, versions };
   }
 
   async getThread(

@@ -503,3 +503,88 @@ test('a due transient reconsideration of a managed held write is admitted under 
     expect(page.compiled_truth).toContain('Body 2 edited upstream');
   }
 }), 240_000);
+
+test('Codex cycle 2: --full re-attempts held Gmail threads the cursor already passed; unrelated mail never resets a count', async () => withEnv(env, async () => {
+  for (const engine of engines) {
+    // (a) --full: a held backfill thread behind the floor is re-attempted and imported.
+    const f = await gmailSource(engine, false);
+    const fx = fakeGmail(account);
+    addThread(fx, thread('1001'), Date.now() - 2 * 3_600_000);
+    fx.failThreads.set(thread('1001'), 400);
+    const run = (extra: Record<string, unknown> = {}) => runGoogleSync(engine, f.id, f.cfg, { ...options, ...extra }, withGoogleAccount(gmailFetch(fx), account));
+    for (let i = 0; i < 4; i++) await run();
+    expect((await sourceHolds(engine, f.id)).map(h => h.key)).toEqual([thread('1001')]);
+    fx.failThreads.delete(thread('1001'));
+    fx.fetched.length = 0;
+    await run({ full: true });
+    expect(fx.fetched).toContain(thread('1001'));
+    expect(await sourceHolds(engine, f.id)).toEqual([]);
+    // (b) a delta thread that keeps failing reaches its hold while unrelated threads keep arriving.
+    const g = await gmailSource(engine, false);
+    const gx = fakeGmail(account);
+    const runG = () => runGoogleSync(engine, g.id, g.cfg, options, withGoogleAccount(gmailFetch(gx), account));
+    await runG();
+    addThread(gx, thread('2001'), Date.now() - 3_600_000);
+    gx.failThreads.set(thread('2001'), 400);
+    gx.history = [thread('2001')];
+    for (let i = 0; i < 3; i++) {
+      const other = thread(`30${i}0`);
+      addThread(gx, other, Date.now() - 60_000);
+      gx.history = [thread('2001'), ...gx.history.slice(1), other];
+      gx.historyResponseId = String(200 + i);
+      await runG();
+    }
+    expect((await sourceHolds(engine, g.id)).map(h => h.key)).toEqual([thread('2001')]);
+  }
+}), 120_000);
+
+test('Codex cycle 2: a bounded batch of deleted threads still advances the managed anchor, and a full pending set is not current', async () => withEnv(env, async () => {
+  const { gmailPendingCap, readGoogleState } = await import('../src/core/google/google-source.ts');
+  for (const engine of engines) {
+    const f = await gmailSource(engine, true);
+    const fx = fakeGmail(account);
+    const run = () => runGoogleSync(engine, f.id, f.cfg, options, withGoogleAccount(gmailFetch(fx), account));
+    await run();
+    await disposePersistenceConsumer(engine);
+    gmailPendingCap.ids = 3;
+    try {
+      // Three deleted threads (404), then two real ones.
+      fx.history = [thread('4001'), thread('4002'), thread('4003'), thread('4004'), thread('4005')];
+      addThread(fx, thread('4004'), Date.now() - 60_000);
+      addThread(fx, thread('4005'), Date.now() - 60_000);
+      fx.historyResponseId = '300';
+      await run();
+      await disposePersistenceConsumer(engine);
+      const cursor = (await sourceCheckpoint(engine, f.id) as any[])[0].completed_keys[0].state;
+      expect(cursor.gmail_history_id).toBe('103');
+      await run();
+      await disposePersistenceConsumer(engine);
+      const pages = await engine.executeRaw<{ n: number }>("SELECT count(*)::int AS n FROM pages WHERE source_id=$1 AND slug LIKE 'emails/%'", [f.id]);
+      expect(pages[0].n).toBe(2);
+    } finally { gmailPendingCap.ids = 1_000; }
+    // Unmanaged: a pending set at the cap drains without listing history, so the run is not current.
+    const u = await gmailSource(engine, false);
+    const ux = fakeGmail(account);
+    const runU = () => runGoogleSync(engine, u.id, u.cfg, options, withGoogleAccount(gmailFetch(ux), account));
+    await runU();
+    const { writeFileSync } = await import('node:fs');
+    const { googleStateFile } = await import('../src/core/google/google-source.ts');
+    gmailPendingCap.ids = 2;
+    try {
+      addThread(ux, thread('5001'), Date.now() - 60_000);
+      addThread(ux, thread('5002'), Date.now() - 60_000);
+      addThread(ux, thread('5003'), Date.now() - 30_000);
+      writeFileSync(googleStateFile(u.dir), JSON.stringify({ ...readGoogleState(u.dir), gmail_pending_thread_ids: [thread('5001'), thread('5002')] }));
+      ux.history = [thread('5003')];
+      ux.historyResponseId = '400';
+      await engine.executeRaw("UPDATE sources SET last_sync_at='2000-01-01T00:00:00Z' WHERE id=$1", [u.id]);
+      ux.fetched.length = 0;
+      await runU();
+      expect(ux.fetched).not.toContain(thread('5003'));
+      const [row] = await engine.executeRaw<{ last_sync_at: string }>('SELECT last_sync_at::text FROM sources WHERE id=$1', [u.id]);
+      expect(row.last_sync_at.startsWith('2000-01-01')).toBe(true);
+      await runU();
+      expect(ux.fetched).toContain(thread('5003'));
+    } finally { gmailPendingCap.ids = 1_000; }
+  }
+}), 120_000);

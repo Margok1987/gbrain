@@ -19,7 +19,7 @@
       "readExistingEmbeddingShape": "16d92d7cd52d8ebd7e89982f02e1bbdd8e8d08a6712a4ce57fbcf0952b7a6ca5",
       "repairLegacyClientGrants": "c1dc6b1d0c4933c041583aa1c4eacaefc0ff0ae2a67f56cfad7534f87a5ab309",
       "repairLegacyTimelineSourceRows": "405d4ae158482c020b029b93aff1ae4ac6854e6948cafaf82dbef473e6e5552e",
-      "seedConnectorDispatchAttempts": "d8c83f4cba96e21bf4e7cd30eee0cc97f807490913f5fa2198f271938099349c",
+      "seedConnectorDispatchAttempts": "63bbf59873a5fd780bc625ac74f45b0af11bb88559f7cf6f92aefb384240a012",
       "slugifyPath": "401dbca23580865d8b168dd8d84db4a6c708c6610d7cb61abafc7d0ee9809063",
       "verifyProjectionStatistics": "59d9ccfea1c53384d8607874a51209a9c2dfd51b2b85a2cb6269fa4120faf1f3"
     },

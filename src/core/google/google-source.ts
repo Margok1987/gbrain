@@ -856,12 +856,13 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
   let threadIds: string[] = [];
   let newHistoryId: string | null = null;
   let truncated = false;
+  let versions = new Map<string, string>();
   const parked = state.gmail_pending_thread_ids ?? [];
   // Room left under the pending cap; a full pending set drains before any new history is listed.
   const room = gmailPendingCap.ids - parked.length;
   if (room > 0) {
     try {
-      ({ threadIds, newHistoryId, truncated } = await gmail.listHistoryThreadIds(state.gmail_history_id!, {
+      ({ threadIds, newHistoryId, truncated, versions } = await gmail.listHistoryThreadIds(state.gmail_history_id!, {
         maxThreads: room, ...(deps.opts.signal ? { signal: deps.opts.signal } : {}),
       }));
     } catch (e) {
@@ -877,6 +878,9 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
       state.gmail_history_id = profile.historyId;
       await saveGoogleState(deps, state);
     }
+  } else {
+    // A full pending set drains before any new history is listed: current mail is not yet checked.
+    truncated = true;
   }
   if (truncated) deps.log(`[google] history delta over the ${gmailPendingCap.ids}-thread pending cap; draining it in bounded batches`);
   let merged = [...new Set([...parked, ...threadIds])];
@@ -899,13 +903,14 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
   // checkpoint, so a failed drain leaves the cursor where it was.
   let failed = 0;
   let landedSinceCheckpoint = deps.managed ? BACKFILL_BATCH_THREADS - 1 : 0;
-  const deltaVersion = newHistoryId ? `history:${newHistoryId}` : null;
   for (const tid of merged) {
     if (deps.opts.signal?.aborted) {
       if (!deps.managed) await checkpoint();
       return 'aborted';
     }
-    const outcome = await attemptThread(g, tid, fromHistory.has(tid) ? deltaVersion : null);
+    // Thread-specific version (the latest history record touching it), so unrelated mail never resets a count.
+    const version = fromHistory.has(tid) && versions.get(tid) ? `history:${versions.get(tid)}` : null;
+    const outcome = await attemptThread(g, tid, version);
     if (outcome.kind === 'failed' || outcome.kind === 'rate_limited') {
       failed++;
       // Per-user quota: the remaining threads would burn the client's retry
@@ -928,6 +933,10 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
   // landed — a partial drain re-lists the same window next run (idempotent).
   // A managed sweep that landed a thread already advanced it, parking the rest.
   if (failed === 0 && newHistoryId) state.gmail_history_id = newHistoryId;
+  // Bank a clean batch even when nothing landed (every thread gone or held), or a bounded
+  // batch of deleted threads would be re-listed forever on a managed brain. A batch with a
+  // failure keeps the cursor its checkpoints committed.
+  if (deps.managed && failed === 0) await saveGoogleState(deps, state);
   // A bounded batch is not a drained delta: current mail is complete only once the listing is not truncated.
   return failed !== 0 ? 'failed' : truncated ? 'more' : 'done';
 }
