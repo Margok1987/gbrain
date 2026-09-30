@@ -54,12 +54,14 @@ export async function planRepairSteps(engine: BrainEngine, opts: { noEmbed?: boo
   for (const spec of REPAIR_REGISTRY) {
     if (opts.kinds && !opts.kinds.includes(spec.kind)) continue;
     const preview = await runner.run(spec.kind, scope);
-    if (!preview.affected) continue;
+    // contextual-mode stamps only sealed pages; pages the safe-chunks step re-seals become eligible during the run.
+    const unlocked = spec.kind === 'contextual-mode' && steps.some(step => step.kind === 'safe-chunks') ? Number(preview.residuals.unsealed_projection ?? 0) : 0;
+    if (!preview.affected && !unlocked) continue;
     const paid = repairMaySpend(spec, opts.noEmbed) && runner.embeddingModel !== undefined;
-    steps.push({ step: steps.length + 1, id: `repair:${spec.kind}`, kind: spec.kind, affected: preview.affected,
+    steps.push({ step: steps.length + 1, id: `repair:${spec.kind}`, kind: spec.kind, affected: preview.affected + unlocked,
       command: repairApplyCommand(spec.kind, { noEmbed: opts.noEmbed }), requires_user_agreement: true, protected: true, paid, embeds: spec.embeds,
       est_usd_cost: paid ? preview.cost.embedding_usd : 0, lifetime_ids: preview.cost.lifetime_ids, checks: spec.checks,
-      rationale: `${preview.affected} item(s) pending for gbrain repair ${spec.kind}` });
+      rationale: `${preview.affected} item(s) pending for gbrain repair ${spec.kind}${unlocked ? `, plus up to ${unlocked} after safe-chunks re-seals them` : ''}` });
   }
   return steps;
 }

@@ -1,3 +1,4 @@
+import { isConnectorSourceKind } from './connector-identity.ts';
 import type { BrainEngine, NewFact } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
 import type { FactsBackstopCtx } from '../facts/backstop.ts';
@@ -98,8 +99,8 @@ export async function prepareManagedFactsSession(ctx: FactsBackstopCtx,
   const engine = ctx.engine;
   if (!(await managedPersistenceEnabled(engine))) return null;
   assertPersistenceAccepting(engine);
-  const [source] = await engine.executeRaw<{ incarnation: string; archived: boolean; local_path: string | null }>(
-    'SELECT incarnation,archived,local_path FROM sources WHERE id=$1', [ctx.sourceId]);
+  const [source] = await engine.executeRaw<{ incarnation: string; archived: boolean; local_path: string | null; kind: string | null }>(
+    "SELECT incarnation,archived,local_path,config->>'kind' AS kind FROM sources WHERE id=$1", [ctx.sourceId]);
   if (!source || source.archived) throw new OperationError('source_changed', 'The fact extraction source is unavailable.');
   let authority: WriteAuthority;
   let origin: ManagedFactOrigin | null = null;
@@ -150,7 +151,9 @@ export async function prepareManagedFactsSession(ctx: FactsBackstopCtx,
   const binding = await getWorktreeBinding(engine, ctx.sourceId);
   const root = source.local_path || (ctx.sourceId === 'default' ? await engine.getConfig('sync.repo_path') : null);
   const writeThrough = !/^(false|0|off|no)$/i.test(await engine.getConfig('sync.write_through') ?? 'true');
-  if (writeThrough && root && !binding) throw new OperationError('owner_unavailable', 'The fact source has no canonical owner; extraction has not started.');
+  // An unbound connector source is database-only by design (connector_database), like its connector sync.
+  const connectorDatabase = writeThrough && !binding && isConnectorSourceKind(source.kind);
+  if (writeThrough && root && !binding && !connectorDatabase) throw new OperationError('owner_unavailable', 'The fact source has no canonical owner; extraction has not started.');
   if (writeThrough && binding) {
     if (binding.state !== 'active' || !binding.owner_host_id) throw new OperationError('owner_unavailable', 'The canonical fact writer is unavailable; extraction has not started.');
     if (binding.owner_host_id === localHostId()) {
@@ -160,6 +163,7 @@ export async function prepareManagedFactsSession(ctx: FactsBackstopCtx,
     }
   }
   if (!writeThrough) authority.databaseOnlyReason = 'disabled_by_config';
+  else if (connectorDatabase) authority.databaseOnlyReason = 'connector_database';
   else if (!binding) authority.databaseOnlyReason = 'no_repo_configured';
   const inputDigest = digest(ctx.requestIntent ?? { text: sha256(input.turnText), source: ctx.source, sessionId: ctx.sessionId, entityHints: ctx.entityHints ?? [],
     visibility: ctx.visibility ?? null, validFrom: ctx.validFrom?.toISOString() ?? null, sourceSlug: ctx.sourceSlug ?? null,

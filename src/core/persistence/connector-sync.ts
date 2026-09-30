@@ -835,9 +835,11 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
   if (parsed.slug !== row.slug) throw new OperationError('invalid_params', 'The connector content changes its page identity.');
   // #5567: carry materialized and database-only timeline rows forward into the connector render.
   const carried = await materializeTimeline(engine, parsed, row.slug, snapshot, 'preserving');
-  // The provider never renders the page's facts or takes fences (remember, loop extraction); carry them over
-  // verbatim so a re-render does not expire those facts. Ambiguous fences are left to the existing path.
-  const fenced = snapshot && [FACTS_FENCE_BEGIN, TAKES_FENCE_BEGIN].some(begin => (snapshot.page.compiled_truth ?? '').includes(begin)) && !conceptPreservationHold(snapshot.page)
+  // Facts and takes fences added on the brain (remember, loop extraction) are not part of the provider's render;
+  // carry them over verbatim so a re-render does not expire those facts. A render that brings its own fence
+  // (a provider body that contains one) owns it, and ambiguous stored fences are left to the existing path.
+  const hasFence = (text: string | null | undefined) => [FACTS_FENCE_BEGIN, TAKES_FENCE_BEGIN].some(begin => (text ?? '').includes(begin));
+  const fenced = snapshot && hasFence(snapshot.page.compiled_truth) && !hasFence(parsed.compiled_truth) && !conceptPreservationHold(snapshot.page)
     ? preserveCanonicalFences(snapshot.page, parsed.compiled_truth) : parsed.compiled_truth;
   const content = (carried.materialized || fenced !== parsed.compiled_truth) && snapshot
     ? serializePageToMarkdown({ ...snapshot.page, ...parsed, compiled_truth: fenced, timeline: carried.timeline, type: parsed.typeExplicit ? parsed.type : snapshot.page.type }, parsed.tags)

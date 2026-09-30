@@ -6,4 +6,5 @@ await registerPostgresTests(
   () => import('../fix-wave-3-chaos.test.ts'),
   () => import('../fix-wave-3-recovery-run.test.ts'),
   () => import('../fix-wave-3-managed-embedding.serial.test.ts'),
+  () => import('../fix-wave-3-connector-loops.serial.test.ts'),
 );

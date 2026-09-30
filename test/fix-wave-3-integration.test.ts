@@ -55,7 +55,9 @@ import { handleToolCall } from '../src/mcp/server.ts';
 import { ALL_SOURCES } from '../src/core/source-id.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { capture } from './helpers/wave-scenarios.ts';
-import { createConnectorFixture, options, json, googleConfig, contact, withGoogleAccount } from './helpers/connector-fixture.ts';
+import { createConnectorFixture, options, json, googleConfig, githubConfig, issueFixture, githubFetch, contact, withGoogleAccount } from './helpers/connector-fixture.ts';
+import { parseGitHubSourceConfig, runGitHubSync } from '../src/core/github-source.ts';
+import { renderFactsTable } from '../src/core/facts-fence.ts';
 
 const fixture = createConnectorFixture();
 const { engines, env, source, boundSource, home } = fixture;
@@ -180,6 +182,33 @@ test('check 2 (S1): the no-op skip holds across a user timeline entry, a withdra
     await disposePersistenceConsumer(engine);
   }
 }), 300_000);
+
+test('check 2b (S1): a provider render that brings its own facts fence owns it: upstream corrections replace the stored rows', async () => withEnv(env, async () => {
+  const fence = (claim: string) => `## Facts\n\n${renderFactsTable([{ rowNum: 1, claim, kind: 'fact', confidence: 1, visibility: 'world', notability: 'medium', active: true }])}`;
+  for (const engine of engines) {
+    const f = await source(engine, githubConfig);
+    let body = `A useful synthetic issue body.\n\n${fence('Provider claim alpha')}`;
+    let updated = issueFixture.updated_at;
+    const fetcher = async (url: string) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/issues')) return json([{ ...issueFixture, body, updated_at: updated }]);
+      if (path.endsWith('/issues/1')) return json({ ...issueFixture, body, updated_at: updated });
+      return githubFetch()(url);
+    };
+    const run = (extra: object = {}) => runGitHubSync(engine, f.id, parseGitHubSourceConfig(githubConfig, f.dir), { ...options, ...extra }, fetcher);
+    await run();
+    const [page] = await engine.executeRaw<{ slug: string }>("SELECT slug FROM pages WHERE source_id=$1 AND compiled_truth LIKE '%Provider claim alpha%'", [f.id]);
+    expect(page).toBeDefined();
+    body = `A useful synthetic issue body.\n\n${fence('Provider claim beta')}`;
+    updated = '2026-02-01T00:00:00Z';
+    await disposePersistenceConsumer(engine);
+    await run({ resetCheckpoint: true });
+    const current = (await engine.readPageSnapshot(page!.slug, { sourceId: f.id }))!;
+    expect(current.page.compiled_truth).toContain('Provider claim beta');
+    expect(current.page.compiled_truth).not.toContain('Provider claim alpha');
+    await disposePersistenceConsumer(engine);
+  }
+}), 180_000);
 
 test('check 3 (S1): a quiet run over a page with a user timeline entry still stamps freshness, so gbrain waiting stays fresh; a provider outage neither stamps nor loses the entry', async () => withEnv(env, async () => {
   for (const engine of engines) {
@@ -396,16 +425,24 @@ test('check 9: every registered repair kind reaches the remediation plan with it
     // Pending work for Lane C (mode) and Lane A (orphan checkpoint).
     await engine.executeRaw('UPDATE content_chunks SET embedding=$2::text::vector WHERE page_id=(SELECT id FROM pages WHERE source_id=$1 AND slug=$3)', [f.id, VECTOR, 'people/first-example']);
     await engine.executeRaw('UPDATE pages SET contextual_retrieval_mode=NULL WHERE source_id=$1', [f.id]);
+    // A second page is both below the safe-chunk fence and unsealed: contextual-mode can stamp it only after safe-chunks re-seals it.
+    await google(engine, f, people(() => [contact('first', 'First Example'), contact('second', 'Second Example')]), { resetCheckpoint: true });
+    await disposePersistenceConsumer(engine);
+    await engine.executeRaw("UPDATE pages SET contextual_retrieval_mode=NULL,chunker_version=1,text_projection_revision=gen_random_uuid() WHERE source_id=$1 AND slug='people/second-example'", [f.id]);
     await engine.executeRaw("INSERT INTO op_checkpoints(op,fingerprint,completed_keys,updated_at) VALUES('managed-connector',$1,'[]'::jsonb,now()-interval '9 days')", [`orphan-${randomUUID()}`]);
     const kinds = REPAIR_REGISTRY.map(spec => spec.kind);
     expect(kinds).toEqual(['timeline', 'visibility', 'safe-chunks', 'contextual-mode', 'connector-checkpoints']);
     const planned = Object.fromEntries((await planRepairSteps(engine, { noEmbed: true })).map(step => [step.kind, step]));
     expect(planned['contextual-mode']).toMatchObject({ paid: false, embeds: 'inline', command: 'gbrain repair contextual-mode --no-embed --apply' });
     expect(planned['connector-checkpoints']).toMatchObject({ paid: false, embeds: 'none' });
+    expect(planned['safe-chunks']).toBeDefined();
+    expect(planned['contextual-mode'].rationale).toContain('after safe-chunks re-seals them');
     const run = JSON.parse((await capture(() => runRemediate(engine, ['--remediate', '--yes', '--include-repairs', '--no-embed', '--max-usd', '0', '--json']))).out);
     const byKind = Object.fromEntries(run.repairs.map((r: { kind: string }) => [r.kind, r]));
     expect(byKind['contextual-mode']).toMatchObject({ status: 'completed' });
     expect(byKind['connector-checkpoints']).toMatchObject({ status: 'completed' });
+    const modes = await engine.executeRaw<{ slug: string; mode: string | null }>('SELECT slug,contextual_retrieval_mode AS mode FROM pages WHERE source_id=$1 ORDER BY slug', [f.id]);
+    for (const row of modes) expect(row.mode).not.toBeNull();
     const replanned = (await planRepairSteps(engine, { noEmbed: true })).map(step => step.kind);
     expect(replanned).not.toContain('contextual-mode');
     expect(replanned).not.toContain('connector-checkpoints');

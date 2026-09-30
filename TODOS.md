@@ -37,6 +37,12 @@
   **What:** under a delayed consumer each run first waits on its recorded pending set and stops on the wait budget, so new upstream items are not admitted until the backlog drains (measured by `test/fix-wave-3-chaos.test.ts`). Nothing is lost; the items wait upstream. **Fix:** if time-to-searchable under sustained arrivals matters, admit new items up to the outstanding limit while the pending set resolves.
 - [ ] **P3 — User timeline bullets on pages other preserving writers regenerate.**
   **What:** `add_timeline_entry` on a connector page now writes a materialized-marked bullet so the connector re-render keeps it (#5567). Other preserving writers that regenerate an ordinary page still treat an unmarked bullet their new body drops as removed. **Fix:** audit those writers and mark user-added bullets on the pages they own, with a regression per writer.
+- [ ] **P2 — Facts and takes fences below the timeline sentinel on connector pages.**
+  **What:** a connector re-render carries the page's facts and takes fences (so remembered facts are not expired), but only when the stored fences sit in the page body and pass the preservation check. A legacy page with a fence below the timeline sentinel, or an ambiguous fence, still loses those rows on re-render. **Fix:** move such fences above the sentinel in a repair, or refuse the connector publication for that page with a typed hold and a repair command.
+- [ ] **P3 — Row-level ownership for fences in connector renders.**
+  **What:** when the provider's own render carries a facts fence (for example a GitHub issue body), the provider owns the whole fence: upstream corrections win, and rows added on the brain to that fence are not carried. When the provider later drops its fence entirely, the stored fence is carried as brain-added. **Fix:** record which fence rows came from the provider so each side's rows follow its owner.
+- [ ] **P3 — Resume a partially refused embedding without re-embedding its siblings.**
+  **What:** after a #4616 refusal the page signature is cleared so `gbrain embed --stale` finds it; an explicit `retry-effects` then re-embeds the page's other chunks too, and `gbrain embed <slug>` stamps the signature only when it embeds every chunk in one run. **Fix:** judge completion from per-chunk provenance and stamp the page once the stored set is complete.
 
 ### Maintenance writers
 
