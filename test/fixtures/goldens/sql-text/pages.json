@@ -86,10 +86,11 @@
               "string",
               "string",
               "string",
-              "boolean"
+              "boolean",
+              "null"
             ],
-            "sql": "INSERT INTO page_versions (page_id,compiled_truth,frontmatter,knowledge_revision,timeline,title,type,tags,is_deleted) VALUES ($1,$2,$3::text::jsonb,$4::uuid,$5,$6,$7,$8::text::jsonb,$9) RETURNING *",
-            "textSha256": "d1f6b289883fc8dac309b8714b7879467836eee93d34b407e8d60c0532fd57d4"
+            "sql": "INSERT INTO page_versions (page_id,compiled_truth,frontmatter,knowledge_revision,timeline,title,type,tags,is_deleted,source_path) VALUES ($1,$2,$3::text::jsonb,$4::uuid,$5,$6,$7,$8::text::jsonb,$9,$10) RETURNING *",
+            "textSha256": "b2ff46c472f9770ffbf0c2aec78494499be17ecdd7f5661d0c268d3dd6c7e9bb"
           },
           {
             "event": "commit",

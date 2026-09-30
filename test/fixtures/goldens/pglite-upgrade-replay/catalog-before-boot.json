@@ -3,14 +3,35 @@
     "constraints": {
       "access_tokens.access_tokens_pkey": "p PRIMARY KEY (id)",
       "access_tokens.access_tokens_token_hash_key": "u UNIQUE (token_hash)",
+      "budget_ledger.budget_ledger_pkey": "p PRIMARY KEY (scope, resolver_id, local_date)",
+      "budget_reservations.budget_reservations_pkey": "p PRIMARY KEY (reservation_id)",
       "calibration_profiles.calibration_profiles_pkey": "p PRIMARY KEY (id)",
       "calibration_profiles.calibration_profiles_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "chat_usage_log.chat_usage_log_pkey": "p PRIMARY KEY (id)",
+      "code_edges_chunk.code_edges_chunk_from_chunk_id_fkey": "f FOREIGN KEY (from_chunk_id) REFERENCES content_chunks(id) ON DELETE CASCADE",
+      "code_edges_chunk.code_edges_chunk_pkey": "p PRIMARY KEY (id)",
+      "code_edges_chunk.code_edges_chunk_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "code_edges_chunk.code_edges_chunk_to_chunk_id_fkey": "f FOREIGN KEY (to_chunk_id) REFERENCES content_chunks(id) ON DELETE CASCADE",
+      "code_edges_chunk.code_edges_chunk_unique": "u UNIQUE (from_chunk_id, to_chunk_id, edge_type)",
+      "code_edges_symbol.code_edges_symbol_from_chunk_id_fkey": "f FOREIGN KEY (from_chunk_id) REFERENCES content_chunks(id) ON DELETE CASCADE",
+      "code_edges_symbol.code_edges_symbol_pkey": "p PRIMARY KEY (id)",
+      "code_edges_symbol.code_edges_symbol_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "code_edges_symbol.code_edges_symbol_unique": "u UNIQUE (from_chunk_id, to_symbol_qualified, edge_type)",
+      "code_traversal_cache.code_traversal_cache_pkey": "p PRIMARY KEY (id)",
       "config.config_pkey": "p PRIMARY KEY (key)",
       "content_chunks.content_chunks_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "content_chunks.content_chunks_pkey": "p PRIMARY KEY (id)",
       "context_volunteer_events.context_volunteer_events_pkey": "p PRIMARY KEY (id)",
+      "conversation_parser_llm_cache.conversation_parser_llm_cache_call_shape_check": "c CHECK ((call_shape = ANY (ARRAY['polish'::text, 'fallback'::text])))",
+      "conversation_parser_llm_cache.conversation_parser_llm_cache_pkey": "p PRIMARY KEY (content_sha256, model_id, call_shape)",
       "dream_synthesis_completions.dream_synthesis_completions_pkey": "p PRIMARY KEY (source_id, idempotency_key)",
+      "dream_verdicts.dream_verdicts_pkey": "p PRIMARY KEY (file_path, content_hash)",
+      "drift_decisions.drift_decisions_pkey": "p PRIMARY KEY (id)",
+      "drift_decisions.drift_decisions_recommended_weight_check": "c CHECK (((recommended_weight >= (0)::double precision) AND (recommended_weight <= (1)::double precision)))",
+      "drift_decisions.drift_decisions_take_id_fkey": "f FOREIGN KEY (take_id) REFERENCES takes(id) ON DELETE CASCADE",
+      "entity_identities.entity_identities_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
+      "entity_identities.entity_identities_page_uniq": "u UNIQUE (source_id, page_id)",
+      "entity_identities.entity_identities_pkey": "p PRIMARY KEY (id)",
       "eval_candidates.eval_candidates_detail_check": "c CHECK (((detail IS NULL) OR (detail = ANY (ARRAY['low'::text, 'medium'::text, 'high'::text]))))",
       "eval_candidates.eval_candidates_detail_resolved_check": "c CHECK (((detail_resolved IS NULL) OR (detail_resolved = ANY (ARRAY['low'::text, 'medium'::text, 'high'::text]))))",
       "eval_candidates.eval_candidates_pkey": "p PRIMARY KEY (id)",
@@ -28,9 +49,17 @@
       "extract_atoms_page_state.extract_atoms_page_state_pkey": "p PRIMARY KEY (source_incarnation, page_id, content_hash)",
       "extract_atoms_page_state.extract_atoms_page_state_source_incarnation_fkey": "f FOREIGN KEY (source_incarnation) REFERENCES sources(incarnation) ON DELETE CASCADE",
       "extract_atoms_transcript_state.extract_atoms_transcript_state_pkey": "p PRIMARY KEY (source_id, file_path, content_hash)",
+      "extract_rollup_7d.extract_rollup_7d_pkey": "p PRIMARY KEY (kind, source_id, day)",
       "fact_withdrawals.fact_withdrawals_pkey": "p PRIMARY KEY (source_id, visibility, subject, fact_hash)",
       "fact_withdrawals.fact_withdrawals_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "fact_withdrawals.fact_withdrawals_visibility_check": "c CHECK ((visibility = ANY (ARRAY['private'::text, 'world'::text])))",
+      "facts.facts_confidence_check": "c CHECK (((confidence >= (0)::double precision) AND (confidence <= (1)::double precision)))",
+      "facts.facts_kind_check": "c CHECK ((kind = ANY (ARRAY['event'::text, 'preference'::text, 'commitment'::text, 'belief'::text, 'fact'::text, 'idea'::text])))",
+      "facts.facts_notability_check": "c CHECK ((notability = ANY (ARRAY['high'::text, 'medium'::text, 'low'::text])))",
+      "facts.facts_pkey": "p PRIMARY KEY (id)",
+      "facts.facts_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
+      "facts.facts_superseded_by_fkey": "f FOREIGN KEY (superseded_by) REFERENCES facts(id) ON DELETE SET NULL",
+      "facts.facts_visibility_check": "c CHECK ((visibility = ANY (ARRAY['private'::text, 'world'::text])))",
       "files.files_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL",
       "files.files_pkey": "p PRIMARY KEY (id)",
       "files.files_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
@@ -50,6 +79,10 @@
       "loop_suppressions.loop_suppressions_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "loop_suppressions.loop_suppressions_uniq": "u UNIQUE (source_id, kind, value)",
       "mcp_request_log.mcp_request_log_pkey": "p PRIMARY KEY (id)",
+      "mcp_spend_log.mcp_spend_log_pkey": "p PRIMARY KEY (id)",
+      "mcp_spend_reservations.mcp_spend_reservations_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
+      "mcp_spend_reservations.mcp_spend_reservations_pkey": "p PRIMARY KEY (reservation_id)",
+      "mcp_spend_reservations.mcp_spend_reservations_status_check": "c CHECK ((status = ANY (ARRAY['pending'::text, 'settled'::text, 'expired'::text])))",
       "migration_impact_log.migration_impact_log_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "migration_impact_log.migration_impact_log_pkey": "p PRIMARY KEY (id)",
       "minion_attachments.chk_attachment_size": "c CHECK ((size_bytes >= 0))",
@@ -57,6 +90,8 @@
       "minion_attachments.minion_attachments_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE CASCADE",
       "minion_attachments.minion_attachments_pkey": "p PRIMARY KEY (id)",
       "minion_attachments.uniq_minion_attachments_job_filename": "u UNIQUE (job_id, filename)",
+      "minion_budget_log.minion_budget_log_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
+      "minion_budget_log.minion_budget_log_pkey": "p PRIMARY KEY (id)",
       "minion_inbox.minion_inbox_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE CASCADE",
       "minion_inbox.minion_inbox_pkey": "p PRIMARY KEY (id)",
       "minion_jobs.chk_attempts_order": "c CHECK ((attempts_made <= attempts_started))",
@@ -69,9 +104,16 @@
       "minion_jobs.chk_on_child_fail": "c CHECK ((on_child_fail = ANY (ARRAY['fail_parent'::text, 'remove_dep'::text, 'ignore'::text, 'continue'::text])))",
       "minion_jobs.chk_status": "c CHECK ((status = ANY (ARRAY['waiting'::text, 'active'::text, 'completed'::text, 'failed'::text, 'delayed'::text, 'dead'::text, 'cancelled'::text, 'waiting-children'::text, 'paused'::text])))",
       "minion_jobs.chk_timeout_positive": "c CHECK (((timeout_ms IS NULL) OR (timeout_ms > 0)))",
+      "minion_jobs.minion_jobs_budget_owner_job_id_fkey": "f FOREIGN KEY (budget_owner_job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "minion_jobs.minion_jobs_parent_job_id_fkey": "f FOREIGN KEY (parent_job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "minion_jobs.minion_jobs_pkey": "p PRIMARY KEY (id)",
       "minion_jobs.minion_jobs_private_queue_owner_job_id_fkey": "f FOREIGN KEY (private_queue_owner_job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
+      "minion_lease_pressure_log.minion_lease_pressure_log_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
+      "minion_lease_pressure_log.minion_lease_pressure_log_pkey": "p PRIMARY KEY (id)",
+      "minion_self_fix_log.minion_self_fix_log_child_id_fkey": "f FOREIGN KEY (child_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
+      "minion_self_fix_log.minion_self_fix_log_parent_id_fkey": "f FOREIGN KEY (parent_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
+      "minion_self_fix_log.minion_self_fix_log_pkey": "p PRIMARY KEY (id)",
+      "oauth_clients.oauth_clients_complete_agent_grant": "c CHECK (((NOT (COALESCE(scope, ''::text) ~ '(^|[[:space:]])agent([[:space:]]|$)'::text)) OR ((COALESCE(cardinality(bound_tools), 0) > 0) AND (source_id IS NOT NULL) AND (bound_source_id IS NOT NULL) AND (bound_source_id = source_id) AND COALESCE((source_id = ANY (federated_read)), false) AND (((delegated_namespace = 'job'::text) AND (delegated_slug_prefixes IS NULL)) OR ((delegated_namespace = 'prefixes'::text) AND (COALESCE(cardinality(delegated_slug_prefixes), 0) > 0))) AND (bound_max_concurrent > 0))))",
       "oauth_clients.oauth_clients_pkey": "p PRIMARY KEY (client_id)",
       "oauth_clients.oauth_clients_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE RESTRICT",
       "oauth_codes.oauth_codes_client_id_fkey": "f FOREIGN KEY (client_id) REFERENCES oauth_clients(client_id) ON DELETE CASCADE",
@@ -113,9 +155,11 @@
       "persistence_counters.persistence_counters_recovery_bytes_check": "c CHECK ((recovery_bytes >= 0))",
       "persistence_counters.persistence_counters_terminal_bytes_check": "c CHECK ((terminal_bytes >= 0))",
       "persistence_effects.persistence_effects_pkey": "p PRIMARY KEY (id)",
+      "persistence_effects.persistence_effects_recovery_bytes_check": "c CHECK ((recovery_bytes >= 0))",
       "persistence_effects.persistence_effects_request_id_fkey": "f FOREIGN KEY (request_id) REFERENCES persistence_requests(id)",
       "persistence_effects.persistence_effects_request_id_kind_key": "u UNIQUE (request_id, kind)",
       "persistence_effects.persistence_effects_state_check": "c CHECK ((state = ANY (ARRAY['queued'::text, 'running'::text, 'committed'::text, 'failed'::text])))",
+      "persistence_effects.persistence_effects_worktree_id_fkey": "f FOREIGN KEY (worktree_id) REFERENCES persistence_worktrees(id)",
       "persistence_host_bindings.persistence_host_bindings_pkey": "p PRIMARY KEY (worktree_id, host_id)",
       "persistence_host_bindings.persistence_host_bindings_worktree_id_fkey": "f FOREIGN KEY (worktree_id) REFERENCES persistence_worktrees(id)",
       "persistence_local_writers.persistence_local_writers_credential_hash_key": "u UNIQUE (credential_hash)",
@@ -142,9 +186,11 @@
       "persistence_writer_protocols.persistence_writer_protocols_pkey": "p PRIMARY KEY (worktree_id, host_id)",
       "persistence_writer_protocols.persistence_writer_protocols_protocol_version_check": "c CHECK ((protocol_version = 2))",
       "persistence_writer_protocols.persistence_writer_protocols_worktree_id_fkey": "f FOREIGN KEY (worktree_id) REFERENCES persistence_worktrees(id)",
+      "query_cache.query_cache_pkey": "p PRIMARY KEY (id)",
       "raw_data.raw_data_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "raw_data.raw_data_page_id_source_key": "u UNIQUE (page_id, source)",
       "raw_data.raw_data_pkey": "p PRIMARY KEY (id)",
+      "search_telemetry.search_telemetry_pkey": "p PRIMARY KEY (date, mode, intent)",
       "session_context_state.session_context_state_pkey": "p PRIMARY KEY (source_id, client_id, session_id)",
       "shared_skill_delivery_batches.shared_skill_delivery_batches_installation_id_epoch_sequenc_key": "u UNIQUE (installation_id, epoch, sequence)",
       "shared_skill_delivery_batches.shared_skill_delivery_batches_installation_id_fkey": "f FOREIGN KEY (installation_id) REFERENCES shared_skill_members(installation_id) ON DELETE CASCADE",
@@ -195,9 +241,15 @@
       "subagent_tool_executions.subagent_tool_executions_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE CASCADE",
       "subagent_tool_executions.subagent_tool_executions_pkey": "p PRIMARY KEY (id)",
       "subagent_tool_executions.subagent_tool_executions_stable_id": "u UNIQUE (job_id, message_idx, ordinal)",
+      "synthesis_evidence.synthesis_evidence_pkey": "p PRIMARY KEY (synthesis_page_id, take_page_id, take_row_num)",
+      "synthesis_evidence.synthesis_evidence_synthesis_page_id_fkey": "f FOREIGN KEY (synthesis_page_id) REFERENCES pages(id) ON DELETE CASCADE",
+      "synthesis_evidence.synthesis_evidence_take_page_id_take_row_num_fkey": "f FOREIGN KEY (take_page_id, take_row_num) REFERENCES takes(page_id, row_num) ON DELETE CASCADE",
       "tags.tags_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "tags.tags_page_id_tag_key": "u UNIQUE (page_id, tag)",
       "tags.tags_pkey": "p PRIMARY KEY (id)",
+      "take_domain_assignments.take_domain_assignments_confidence_check": "c CHECK (((confidence >= (0)::double precision) AND (confidence <= (1)::double precision)))",
+      "take_domain_assignments.take_domain_assignments_pkey": "p PRIMARY KEY (take_id, domain)",
+      "take_domain_assignments.take_domain_assignments_take_id_fkey": "f FOREIGN KEY (take_id) REFERENCES takes(id) ON DELETE CASCADE",
       "take_grade_cache.take_grade_cache_pkey": "p PRIMARY KEY (take_id, prompt_version, judge_model_id, evidence_signature)",
       "take_grade_cache.take_grade_cache_verdict_check": "c CHECK ((verdict = ANY (ARRAY['correct'::text, 'incorrect'::text, 'partial'::text, 'unresolvable'::text])))",
       "take_nudge_log.take_nudge_log_pkey": "p PRIMARY KEY (id)",
@@ -207,6 +259,12 @@
       "take_proposals.take_proposals_pkey": "p PRIMARY KEY (id)",
       "take_proposals.take_proposals_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "take_proposals.take_proposals_status_check": "c CHECK ((status = ANY (ARRAY['pending'::text, 'accepted'::text, 'rejected'::text, 'superseded'::text])))",
+      "takes.takes_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
+      "takes.takes_page_row_key": "u UNIQUE (page_id, row_num)",
+      "takes.takes_pkey": "p PRIMARY KEY (id)",
+      "takes.takes_resolution_consistency": "c CHECK ((((resolved_quality IS NULL) AND (resolved_outcome IS NULL)) OR ((resolved_quality = 'correct'::text) AND (resolved_outcome = true)) OR ((resolved_quality = 'incorrect'::text) AND (resolved_outcome = false)) OR ((resolved_quality = 'partial'::text) AND (resolved_outcome IS NULL)) OR ((resolved_quality = 'unresolvable'::text) AND (resolved_outcome IS NULL))))",
+      "takes.takes_resolved_quality_values": "c CHECK (((resolved_quality IS NULL) OR (resolved_quality = ANY (ARRAY['correct'::text, 'incorrect'::text, 'partial'::text, 'unresolvable'::text]))))",
+      "takes.takes_weight_check": "c CHECK (((weight >= (0)::double precision) AND (weight <= (1)::double precision)))",
       "think_ab_results.think_ab_results_pkey": "p PRIMARY KEY (id)",
       "think_ab_results.think_ab_results_preferred_check": "c CHECK ((preferred = ANY (ARRAY['baseline'::text, 'with_calibration'::text, 'neither'::text, 'tie'::text])))",
       "think_ab_results.think_ab_results_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
@@ -220,29 +278,50 @@
       "vector"
     ],
     "functions": {
-      "bump_page_generation_clock_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=c40a0a3b86e640b6c8979976173dd93ae92c8c1b9a9e3595cae2af1e265328fe",
-      "bump_page_generation_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=c4135ae3f74177aa71313a6c73f22bda7a298bbf12435a8def390212ae11466a",
+      "bump_page_generation_clock_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=d3359bcd09cccd881585abd9eee81c3dcf4161d935164f7953f2e9fdef73ed3e",
+      "bump_page_generation_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=78059745996cfbb72586a2e0e161635b96a62a5db9d0be5c710f4d437d994431",
       "enforce_minion_queue_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e0b3db944d3b4281b9483ce77aa734e0c9aa5b0d46bb5dcb5284b6469441a1b8",
       "gbrain_advance_page_revision()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=227a4224dc8cfbe73fec58fdee0c3054a96f3dce748598e5491f50627c7f3513",
       "gbrain_advance_tag_revision()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=7807b26b4933148aa63c67fca824a60d3492396728205d04e16c48c81174cbd5",
+      "gbrain_clear_atom_page_state()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=7db0ef05d1220a579e64428b2dd7cf5183191da186fbe64b6496433a7a713d11",
+      "gbrain_fact_fingerprint(claim text)": "RETURNS text kind=f lang=sql volatility=i secdef=false config=[] body_sha256=666cc212d15431ede62a3d1e8932676a950705717852262f86df6d836d526ab4",
+      "gbrain_fact_fingerprint_v1(claim text)": "RETURNS text kind=f lang=sql volatility=i secdef=false config=[] body_sha256=38f7cfc0016f2b34d6f54652f4910cf1dd5240fbec5fd636c782e46fb70a6c7d",
+      "gbrain_fact_normalize(claim text)": "RETURNS text kind=f lang=sql volatility=i secdef=false config=[] body_sha256=5fff22c689f79bb28b4cc66254ca3a42c2fc809be193c6ceaf75c3200a353035",
       "gbrain_guard_effect_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=e8b5589dafd4a355106104daffdf57c7776d34fe18c5b5f5336a27de188688a1",
       "gbrain_guard_protocol_activation()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=f27354966c25d961fcecbffebba0e45747ad3de23575351319f6aee4f9aefd47",
       "gbrain_guard_request_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=12baf1d365a8aa3009ac0fe6605497e6433304e8d5915a3fc0b0b39ad748f6c2",
       "gbrain_guard_skill_publication()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=e854c0d058e75a65c3a90127c5c417380975100e83fc34288f6085e786df10a9",
       "gbrain_lease_shared_skill_delivery()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=5e493c1ac8dce8cb025a736629e563437c4b214744137c302c532c20bf7e7acf",
+      "gbrain_preserve_fact_withdrawal()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=9beb118551a08451a228146373f50f2aa2ce0cfe89937e937d361b33224aa0aa",
       "gbrain_queue_page_projection()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=6c544b9c129b6a17dcabeb5ee8d44a2b0e0af9d02ca3fe47c7d7f22ec313042c",
       "gbrain_require_managed_writer()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=9f7ebd3894599fd125d255f78ada3d945b14b15a114e340a43da0414a3de4208",
       "gbrain_require_persistence_protocol(required integer)": "RETURNS void kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=af07b7fac60dec0a4fe568217931ac449d32f73b3a53a047b3b02a5f59cb5058",
-      "update_page_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=8e2e253471f22c3e70b2fa2e67ba9162ee3d2c764d175cb5b674db2b907d1e9d"
+      "update_chunk_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e12c37d5489202aaf708560db42e6c0c7c8886d198d412e1c5d915c3ae782559",
+      "update_page_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=1ff2515e6d6626907c0a6b660e31bd13bf51fe38fc585f7380d57ed746dc3357"
     },
     "grants": {
       "access_tokens": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "budget_ledger": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "budget_reservations": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "calibration_profiles": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "chat_usage_log": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "code_edges_chunk": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "code_edges_symbol": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "code_traversal_cache": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "config": [
@@ -254,7 +333,19 @@
       "context_volunteer_events": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "conversation_parser_llm_cache": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "dream_synthesis_completions": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "dream_verdicts": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "drift_decisions": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "entity_identities": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "eval_candidates": [
@@ -278,7 +369,13 @@
       "extract_atoms_transcript_state": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "extract_rollup_7d": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "fact_withdrawals": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "facts": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "files": [
@@ -299,16 +396,31 @@
       "mcp_request_log": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "mcp_spend_log": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "mcp_spend_reservations": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "migration_impact_log": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "minion_attachments": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "minion_budget_log": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "minion_inbox": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "minion_jobs": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "minion_lease_pressure_log": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "minion_self_fix_log": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "oauth_clients": [
@@ -383,7 +495,13 @@
       "persistence_writer_protocols": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "query_cache": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "raw_data": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "search_telemetry": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "session_context_state": [
@@ -434,7 +552,13 @@
       "subagent_tool_executions": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "synthesis_evidence": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "tags": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "take_domain_assignments": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "take_grade_cache": [
@@ -444,6 +568,9 @@
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "take_proposals": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "takes": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "think_ab_results": [
@@ -456,18 +583,35 @@
     "indexes": {
       "access_tokens_pkey": "CREATE UNIQUE INDEX access_tokens_pkey ON public.access_tokens USING btree (id)",
       "access_tokens_token_hash_key": "CREATE UNIQUE INDEX access_tokens_token_hash_key ON public.access_tokens USING btree (token_hash)",
+      "budget_ledger_pkey": "CREATE UNIQUE INDEX budget_ledger_pkey ON public.budget_ledger USING btree (scope, resolver_id, local_date)",
+      "budget_reservations_pkey": "CREATE UNIQUE INDEX budget_reservations_pkey ON public.budget_reservations USING btree (reservation_id)",
       "calibration_profiles_bias_tags_gin": "CREATE INDEX calibration_profiles_bias_tags_gin ON public.calibration_profiles USING gin (active_bias_tags)",
       "calibration_profiles_holder_recent_idx": "CREATE INDEX calibration_profiles_holder_recent_idx ON public.calibration_profiles USING btree (source_id, holder, generated_at DESC)",
       "calibration_profiles_pkey": "CREATE UNIQUE INDEX calibration_profiles_pkey ON public.calibration_profiles USING btree (id)",
       "calibration_profiles_published_idx": "CREATE INDEX calibration_profiles_published_idx ON public.calibration_profiles USING btree (source_id, published, holder) WHERE (published = true)",
       "chat_usage_log_pkey": "CREATE UNIQUE INDEX chat_usage_log_pkey ON public.chat_usage_log USING btree (id)",
+      "code_edges_chunk_pkey": "CREATE UNIQUE INDEX code_edges_chunk_pkey ON public.code_edges_chunk USING btree (id)",
+      "code_edges_chunk_unique": "CREATE UNIQUE INDEX code_edges_chunk_unique ON public.code_edges_chunk USING btree (from_chunk_id, to_chunk_id, edge_type)",
+      "code_edges_symbol_pkey": "CREATE UNIQUE INDEX code_edges_symbol_pkey ON public.code_edges_symbol USING btree (id)",
+      "code_edges_symbol_unique": "CREATE UNIQUE INDEX code_edges_symbol_unique ON public.code_edges_symbol USING btree (from_chunk_id, to_symbol_qualified, edge_type)",
+      "code_traversal_cache_key_idx": "CREATE UNIQUE INDEX code_traversal_cache_key_idx ON public.code_traversal_cache USING btree (symbol_qualified, depth, source_id)",
+      "code_traversal_cache_pkey": "CREATE UNIQUE INDEX code_traversal_cache_pkey ON public.code_traversal_cache USING btree (id)",
+      "code_traversal_cache_source_idx": "CREATE INDEX code_traversal_cache_source_idx ON public.code_traversal_cache USING btree (source_id)",
       "config_pkey": "CREATE UNIQUE INDEX config_pkey ON public.config USING btree (key)",
       "content_chunks_pkey": "CREATE UNIQUE INDEX content_chunks_pkey ON public.content_chunks USING btree (id)",
       "content_chunks_stale_idx": "CREATE INDEX content_chunks_stale_idx ON public.content_chunks USING btree (page_id, chunk_index) WHERE (embedding IS NULL)",
       "context_volunteer_events_pkey": "CREATE UNIQUE INDEX context_volunteer_events_pkey ON public.context_volunteer_events USING btree (id)",
       "context_volunteer_events_src_slug_idx": "CREATE INDEX context_volunteer_events_src_slug_idx ON public.context_volunteer_events USING btree (source_id, slug)",
       "context_volunteer_events_src_time_idx": "CREATE INDEX context_volunteer_events_src_time_idx ON public.context_volunteer_events USING btree (source_id, volunteered_at DESC)",
+      "conversation_parser_llm_cache_pkey": "CREATE UNIQUE INDEX conversation_parser_llm_cache_pkey ON public.conversation_parser_llm_cache USING btree (content_sha256, model_id, call_shape)",
       "dream_synthesis_completions_pkey": "CREATE UNIQUE INDEX dream_synthesis_completions_pkey ON public.dream_synthesis_completions USING btree (source_id, idempotency_key)",
+      "dream_verdicts_expires_idx": "CREATE INDEX dream_verdicts_expires_idx ON public.dream_verdicts USING btree (expires_at)",
+      "dream_verdicts_pkey": "CREATE UNIQUE INDEX dream_verdicts_pkey ON public.dream_verdicts USING btree (file_path, content_hash)",
+      "drift_decisions_pkey": "CREATE UNIQUE INDEX drift_decisions_pkey ON public.drift_decisions USING btree (id)",
+      "entity_identities_canonical_uniq": "CREATE UNIQUE INDEX entity_identities_canonical_uniq ON public.entity_identities USING btree (entity_id) WHERE canonical",
+      "entity_identities_entity_idx": "CREATE INDEX entity_identities_entity_idx ON public.entity_identities USING btree (entity_id)",
+      "entity_identities_page_uniq": "CREATE UNIQUE INDEX entity_identities_page_uniq ON public.entity_identities USING btree (source_id, page_id)",
+      "entity_identities_pkey": "CREATE UNIQUE INDEX entity_identities_pkey ON public.entity_identities USING btree (id)",
       "eval_candidates_pkey": "CREATE UNIQUE INDEX eval_candidates_pkey ON public.eval_candidates USING btree (id)",
       "eval_capture_failures_pkey": "CREATE UNIQUE INDEX eval_capture_failures_pkey ON public.eval_capture_failures USING btree (id)",
       "eval_contradictions_cache_expires_idx": "CREATE INDEX eval_contradictions_cache_expires_idx ON public.eval_contradictions_cache USING btree (expires_at)",
@@ -482,22 +626,54 @@
       "extract_atoms_page_state_tombstoned_idx": "CREATE INDEX extract_atoms_page_state_tombstoned_idx ON public.extract_atoms_page_state USING btree (source_incarnation, content_hash, page_id) WHERE tombstoned",
       "extract_atoms_transcript_state_pkey": "CREATE UNIQUE INDEX extract_atoms_transcript_state_pkey ON public.extract_atoms_transcript_state USING btree (source_id, file_path, content_hash)",
       "extract_atoms_transcript_state_tombstoned_idx": "CREATE INDEX extract_atoms_transcript_state_tombstoned_idx ON public.extract_atoms_transcript_state USING btree (source_id, content_hash) WHERE tombstoned",
+      "extract_rollup_7d_pkey": "CREATE UNIQUE INDEX extract_rollup_7d_pkey ON public.extract_rollup_7d USING btree (kind, source_id, day)",
       "fact_withdrawals_pkey": "CREATE UNIQUE INDEX fact_withdrawals_pkey ON public.fact_withdrawals USING btree (source_id, visibility, subject, fact_hash)",
+      "facts_pkey": "CREATE UNIQUE INDEX facts_pkey ON public.facts USING btree (id)",
+      "facts_typed_claim_idx": "CREATE INDEX facts_typed_claim_idx ON public.facts USING btree (entity_slug, claim_metric, valid_from) WHERE (claim_metric IS NOT NULL)",
       "files_pkey": "CREATE UNIQUE INDEX files_pkey ON public.files USING btree (id)",
       "files_storage_path_key": "CREATE UNIQUE INDEX files_storage_path_key ON public.files USING btree (storage_path)",
       "gbrain_cycle_locks_pkey": "CREATE UNIQUE INDEX gbrain_cycle_locks_pkey ON public.gbrain_cycle_locks USING btree (id)",
       "idx_access_tokens_hash": "CREATE INDEX idx_access_tokens_hash ON public.access_tokens USING btree (token_hash) WHERE (revoked_at IS NULL)",
+      "idx_budget_reservations_expires": "CREATE INDEX idx_budget_reservations_expires ON public.budget_reservations USING btree (expires_at) WHERE (status = 'held'::text)",
       "idx_chat_usage_log_created": "CREATE INDEX idx_chat_usage_log_created ON public.chat_usage_log USING btree (created_at)",
       "idx_chat_usage_log_model": "CREATE INDEX idx_chat_usage_log_model ON public.chat_usage_log USING btree (model, created_at)",
       "idx_chunks_embedding": "CREATE INDEX idx_chunks_embedding ON public.content_chunks USING hnsw (embedding vector_cosine_ops)",
       "idx_chunks_embedding_image": "CREATE INDEX idx_chunks_embedding_image ON public.content_chunks USING hnsw (embedding_image vector_cosine_ops) WHERE (embedding_image IS NOT NULL)",
+      "idx_chunks_embedding_null": "CREATE INDEX idx_chunks_embedding_null ON public.content_chunks USING btree (page_id, chunk_index) WHERE (embedding IS NULL)",
       "idx_chunks_language": "CREATE INDEX idx_chunks_language ON public.content_chunks USING btree (language) WHERE (language IS NOT NULL)",
       "idx_chunks_page": "CREATE INDEX idx_chunks_page ON public.content_chunks USING btree (page_id)",
       "idx_chunks_page_index": "CREATE UNIQUE INDEX idx_chunks_page_index ON public.content_chunks USING btree (page_id, chunk_index)",
+      "idx_chunks_search_vector": "CREATE INDEX idx_chunks_search_vector ON public.content_chunks USING gin (search_vector)",
       "idx_chunks_symbol_name": "CREATE INDEX idx_chunks_symbol_name ON public.content_chunks USING btree (symbol_name) WHERE (symbol_name IS NOT NULL)",
+      "idx_chunks_symbol_qualified": "CREATE INDEX idx_chunks_symbol_qualified ON public.content_chunks USING btree (symbol_name_qualified) WHERE (symbol_name_qualified IS NOT NULL)",
+      "idx_code_edges_chunk_from": "CREATE INDEX idx_code_edges_chunk_from ON public.code_edges_chunk USING btree (from_chunk_id, edge_type)",
+      "idx_code_edges_chunk_from_symbol": "CREATE INDEX idx_code_edges_chunk_from_symbol ON public.code_edges_chunk USING btree (from_symbol_qualified)",
+      "idx_code_edges_chunk_to": "CREATE INDEX idx_code_edges_chunk_to ON public.code_edges_chunk USING btree (to_chunk_id, edge_type)",
+      "idx_code_edges_chunk_to_symbol": "CREATE INDEX idx_code_edges_chunk_to_symbol ON public.code_edges_chunk USING btree (to_symbol_qualified, edge_type)",
+      "idx_code_edges_symbol_from": "CREATE INDEX idx_code_edges_symbol_from ON public.code_edges_symbol USING btree (from_chunk_id, edge_type)",
+      "idx_code_edges_symbol_from_symbol": "CREATE INDEX idx_code_edges_symbol_from_symbol ON public.code_edges_symbol USING btree (from_symbol_qualified)",
+      "idx_code_edges_symbol_resolver": "CREATE INDEX idx_code_edges_symbol_resolver ON public.code_edges_symbol USING btree (source_id, to_symbol_qualified)",
+      "idx_code_edges_symbol_to": "CREATE INDEX idx_code_edges_symbol_to ON public.code_edges_symbol USING btree (to_symbol_qualified, edge_type)",
+      "idx_content_chunks_edges_backfill": "CREATE INDEX idx_content_chunks_edges_backfill ON public.content_chunks USING btree (edges_backfilled_at) WHERE (edges_backfilled_at IS NULL)",
+      "idx_content_chunks_symbol_lookup": "CREATE INDEX idx_content_chunks_symbol_lookup ON public.content_chunks USING btree (page_id, symbol_name_qualified) WHERE (symbol_name_qualified IS NOT NULL)",
+      "idx_conversation_parser_llm_cache_created": "CREATE INDEX idx_conversation_parser_llm_cache_created ON public.conversation_parser_llm_cache USING btree (created_at)",
       "idx_cycle_locks_ttl": "CREATE INDEX idx_cycle_locks_ttl ON public.gbrain_cycle_locks USING btree (ttl_expires_at)",
+      "idx_drift_decisions_decided_at": "CREATE INDEX idx_drift_decisions_decided_at ON public.drift_decisions USING btree (decided_at DESC)",
+      "idx_drift_decisions_take": "CREATE INDEX idx_drift_decisions_take ON public.drift_decisions USING btree (take_id)",
       "idx_eval_candidates_created_at": "CREATE INDEX idx_eval_candidates_created_at ON public.eval_candidates USING btree (created_at DESC)",
       "idx_eval_capture_failures_ts": "CREATE INDEX idx_eval_capture_failures_ts ON public.eval_capture_failures USING btree (ts DESC)",
+      "idx_extract_rollup_7d_day": "CREATE INDEX idx_extract_rollup_7d_day ON public.extract_rollup_7d USING btree (day)",
+      "idx_facts_dimension": "CREATE INDEX idx_facts_dimension ON public.facts USING btree (source_id, entity_slug, dimension, valid_from DESC) WHERE ((expired_at IS NULL) AND (dimension IS NOT NULL))",
+      "idx_facts_embedding_hnsw": "CREATE INDEX idx_facts_embedding_hnsw ON public.facts USING hnsw (embedding halfvec_cosine_ops) WHERE ((embedding IS NOT NULL) AND (expired_at IS NULL))",
+      "idx_facts_entity_active": "CREATE INDEX idx_facts_entity_active ON public.facts USING btree (source_id, entity_slug, valid_from DESC) WHERE (expired_at IS NULL)",
+      "idx_facts_extract_conversation_session": "CREATE INDEX idx_facts_extract_conversation_session ON public.facts USING btree (source_id, source_session) WHERE (source ~~ 'cli:extract-conversation-facts%'::text)",
+      "idx_facts_fence_key": "CREATE UNIQUE INDEX idx_facts_fence_key ON public.facts USING btree (source_id, source_markdown_slug, row_num) WHERE (row_num IS NOT NULL)",
+      "idx_facts_ontology_dedup": "CREATE UNIQUE INDEX idx_facts_ontology_dedup ON public.facts USING btree (source_id, entity_slug, dimension, value_hash, source_markdown_slug) WHERE (dimension IS NOT NULL)",
+      "idx_facts_session": "CREATE INDEX idx_facts_session ON public.facts USING btree (source_id, source_session, created_at DESC) WHERE (expired_at IS NULL)",
+      "idx_facts_since": "CREATE INDEX idx_facts_since ON public.facts USING btree (source_id, created_at DESC) WHERE (expired_at IS NULL)",
+      "idx_facts_since_event_time": "CREATE INDEX idx_facts_since_event_time ON public.facts USING btree (source_id, COALESCE(valid_from, created_at) DESC) WHERE (expired_at IS NULL)",
+      "idx_facts_unconsolidated": "CREATE INDEX idx_facts_unconsolidated ON public.facts USING btree (source_id, entity_slug) WHERE ((consolidated_at IS NULL) AND (expired_at IS NULL))",
+      "idx_facts_withdrawal_fingerprint": "CREATE INDEX idx_facts_withdrawal_fingerprint ON public.facts USING btree (source_id, visibility, gbrain_fact_fingerprint(fact))",
       "idx_files_hash": "CREATE INDEX idx_files_hash ON public.files USING btree (content_hash)",
       "idx_files_page": "CREATE INDEX idx_files_page ON public.files USING btree (page_slug)",
       "idx_files_page_id": "CREATE INDEX idx_files_page_id ON public.files USING btree (page_id)",
@@ -509,16 +685,22 @@
       "idx_links_to": "CREATE INDEX idx_links_to ON public.links USING btree (to_page_id)",
       "idx_mcp_log_agent_time": "CREATE INDEX idx_mcp_log_agent_time ON public.mcp_request_log USING btree (agent_name, created_at DESC)",
       "idx_mcp_log_time_agent": "CREATE INDEX idx_mcp_log_time_agent ON public.mcp_request_log USING btree (created_at, token_name)",
+      "idx_mcp_spend_log_client_time": "CREATE INDEX idx_mcp_spend_log_client_time ON public.mcp_spend_log USING btree (client_id, created_at)",
+      "idx_mcp_spend_log_token_time": "CREATE INDEX idx_mcp_spend_log_token_time ON public.mcp_spend_log USING btree (token_name, created_at)",
+      "idx_mcp_spend_reservations_client_time": "CREATE INDEX idx_mcp_spend_reservations_client_time ON public.mcp_spend_reservations USING btree (client_id, created_at)",
+      "idx_mcp_spend_reservations_pending_expires": "CREATE INDEX idx_mcp_spend_reservations_pending_expires ON public.mcp_spend_reservations USING btree (status, expires_at) WHERE (status = 'pending'::text)",
       "idx_minion_attachments_job": "CREATE INDEX idx_minion_attachments_job ON public.minion_attachments USING btree (job_id)",
       "idx_minion_inbox_child_done": "CREATE INDEX idx_minion_inbox_child_done ON public.minion_inbox USING btree (job_id, sent_at) WHERE ((payload ->> 'type'::text) = 'child_done'::text)",
       "idx_minion_inbox_unread": "CREATE INDEX idx_minion_inbox_unread ON public.minion_inbox USING btree (job_id) WHERE (read_at IS NULL)",
       "idx_minion_jobs_claim": "CREATE INDEX idx_minion_jobs_claim ON public.minion_jobs USING btree (queue, priority, created_at) WHERE (status = 'waiting'::text)",
+      "idx_minion_jobs_dead_subagent_finished": "CREATE INDEX idx_minion_jobs_dead_subagent_finished ON public.minion_jobs USING btree (finished_at) WHERE ((name = 'subagent'::text) AND (status = 'dead'::text))",
       "idx_minion_jobs_delayed": "CREATE INDEX idx_minion_jobs_delayed ON public.minion_jobs USING btree (delay_until) WHERE (status = 'delayed'::text)",
       "idx_minion_jobs_parent": "CREATE INDEX idx_minion_jobs_parent ON public.minion_jobs USING btree (parent_job_id)",
       "idx_minion_jobs_parent_status": "CREATE INDEX idx_minion_jobs_parent_status ON public.minion_jobs USING btree (parent_job_id, status) WHERE (parent_job_id IS NOT NULL)",
       "idx_minion_jobs_private_queue_owner": "CREATE INDEX idx_minion_jobs_private_queue_owner ON public.minion_jobs USING btree (private_queue_owner_job_id) WHERE (private_queue_owner_job_id IS NOT NULL)",
       "idx_minion_jobs_private_queue_recovery": "CREATE INDEX idx_minion_jobs_private_queue_recovery ON public.minion_jobs USING btree (queue, private_queue_lease_until) WHERE ((queue ~~ 'dream-inline-%'::text) AND (status = ANY (ARRAY['waiting'::text, 'active'::text, 'delayed'::text, 'waiting-children'::text, 'paused'::text])))",
       "idx_minion_jobs_queue_status_updated": "CREATE INDEX idx_minion_jobs_queue_status_updated ON public.minion_jobs USING btree (queue, status, updated_at)",
+      "idx_minion_jobs_stagger_key": "CREATE INDEX idx_minion_jobs_stagger_key ON public.minion_jobs USING btree (stagger_key) WHERE (stagger_key IS NOT NULL)",
       "idx_minion_jobs_stalled": "CREATE INDEX idx_minion_jobs_stalled ON public.minion_jobs USING btree (lock_until) WHERE (status = 'active'::text)",
       "idx_minion_jobs_status": "CREATE INDEX idx_minion_jobs_status ON public.minion_jobs USING btree (status)",
       "idx_minion_jobs_timeout": "CREATE INDEX idx_minion_jobs_timeout ON public.minion_jobs USING btree (timeout_at) WHERE ((status = 'active'::text) AND (timeout_at IS NOT NULL))",
@@ -528,17 +710,32 @@
       "idx_oauth_tokens_client": "CREATE INDEX idx_oauth_tokens_client ON public.oauth_tokens USING btree (client_id)",
       "idx_oauth_tokens_expiry": "CREATE INDEX idx_oauth_tokens_expiry ON public.oauth_tokens USING btree (expires_at)",
       "idx_pages_frontmatter": "CREATE INDEX idx_pages_frontmatter ON public.pages USING gin (frontmatter)",
+      "idx_pages_projection_pending": "CREATE INDEX idx_pages_projection_pending ON public.pages USING btree (source_id, page_kind, slug) WHERE ((deleted_at IS NULL) AND (text_projection_revision IS DISTINCT FROM knowledge_revision))",
       "idx_pages_search": "CREATE INDEX idx_pages_search ON public.pages USING gin (search_vector)",
       "idx_pages_source_id": "CREATE INDEX idx_pages_source_id ON public.pages USING btree (source_id)",
       "idx_pages_trgm": "CREATE INDEX idx_pages_trgm ON public.pages USING gin (title gin_trgm_ops)",
       "idx_pages_type": "CREATE INDEX idx_pages_type ON public.pages USING btree (type)",
+      "idx_pages_updated_at_desc": "CREATE INDEX idx_pages_updated_at_desc ON public.pages USING btree (updated_at DESC)",
+      "idx_query_cache_embedding_hnsw": "CREATE INDEX idx_query_cache_embedding_hnsw ON public.query_cache USING hnsw (embedding halfvec_cosine_ops) WHERE (embedding IS NOT NULL)",
+      "idx_query_cache_source_created": "CREATE INDEX idx_query_cache_source_created ON public.query_cache USING btree (source_id, created_at DESC)",
+      "idx_query_cache_source_knobs_created": "CREATE INDEX idx_query_cache_source_knobs_created ON public.query_cache USING btree (source_id, knobs_hash, created_at DESC)",
       "idx_rate_leases_key_expires": "CREATE INDEX idx_rate_leases_key_expires ON public.subagent_rate_leases USING btree (key, expires_at)",
       "idx_raw_data_page": "CREATE INDEX idx_raw_data_page ON public.raw_data USING btree (page_id)",
+      "idx_search_telemetry_date": "CREATE INDEX idx_search_telemetry_date ON public.search_telemetry USING btree (date DESC)",
       "idx_subagent_messages_job": "CREATE INDEX idx_subagent_messages_job ON public.subagent_messages USING btree (job_id, message_idx)",
       "idx_subagent_messages_provider": "CREATE INDEX idx_subagent_messages_provider ON public.subagent_messages USING btree (job_id, provider_id)",
       "idx_subagent_tools_job": "CREATE INDEX idx_subagent_tools_job ON public.subagent_tool_executions USING btree (job_id, status)",
+      "idx_synthesis_evidence_take": "CREATE INDEX idx_synthesis_evidence_take ON public.synthesis_evidence USING btree (take_page_id, take_row_num)",
       "idx_tags_page_id": "CREATE INDEX idx_tags_page_id ON public.tags USING btree (page_id)",
       "idx_tags_tag": "CREATE INDEX idx_tags_tag ON public.tags USING btree (tag)",
+      "idx_take_domain_assignments_domain": "CREATE INDEX idx_take_domain_assignments_domain ON public.take_domain_assignments USING btree (domain, take_id)",
+      "idx_takes_embedding_hnsw": "CREATE INDEX idx_takes_embedding_hnsw ON public.takes USING hnsw (embedding vector_cosine_ops) WHERE (active AND (embedding IS NOT NULL))",
+      "idx_takes_holder_active": "CREATE INDEX idx_takes_holder_active ON public.takes USING btree (holder) WHERE active",
+      "idx_takes_kind_active": "CREATE INDEX idx_takes_kind_active ON public.takes USING btree (kind) WHERE active",
+      "idx_takes_page": "CREATE INDEX idx_takes_page ON public.takes USING btree (page_id)",
+      "idx_takes_resolved_at": "CREATE INDEX idx_takes_resolved_at ON public.takes USING btree (resolved_at) WHERE (resolved_at IS NOT NULL)",
+      "idx_takes_scorecard": "CREATE INDEX idx_takes_scorecard ON public.takes USING btree (holder, kind, resolved_quality) WHERE (resolved_quality IS NOT NULL)",
+      "idx_takes_weight_active": "CREATE INDEX idx_takes_weight_active ON public.takes USING btree (weight DESC) WHERE active",
       "idx_timeline_date": "CREATE INDEX idx_timeline_date ON public.timeline_entries USING btree (date)",
       "idx_timeline_dedup": "CREATE UNIQUE INDEX idx_timeline_dedup ON public.timeline_entries USING btree (page_id, date, md5(summary), source)",
       "idx_timeline_event_dedup": "CREATE UNIQUE INDEX idx_timeline_event_dedup ON public.timeline_entries USING btree (event_page_id, date) WHERE (event_page_id IS NOT NULL)",
@@ -551,12 +748,25 @@
       "loop_suppressions_pkey": "CREATE UNIQUE INDEX loop_suppressions_pkey ON public.loop_suppressions USING btree (id)",
       "loop_suppressions_uniq": "CREATE UNIQUE INDEX loop_suppressions_uniq ON public.loop_suppressions USING btree (source_id, kind, value)",
       "mcp_request_log_pkey": "CREATE UNIQUE INDEX mcp_request_log_pkey ON public.mcp_request_log USING btree (id)",
+      "mcp_spend_log_pkey": "CREATE UNIQUE INDEX mcp_spend_log_pkey ON public.mcp_spend_log USING btree (id)",
+      "mcp_spend_reservations_pkey": "CREATE UNIQUE INDEX mcp_spend_reservations_pkey ON public.mcp_spend_reservations USING btree (reservation_id)",
       "migration_impact_log_attribution_idx": "CREATE INDEX migration_impact_log_attribution_idx ON public.migration_impact_log USING btree (job_id, source_id) WHERE (job_id IS NOT NULL)",
       "migration_impact_log_pkey": "CREATE UNIQUE INDEX migration_impact_log_pkey ON public.migration_impact_log USING btree (id)",
       "migration_impact_log_remediation_idx": "CREATE INDEX migration_impact_log_remediation_idx ON public.migration_impact_log USING btree (remediation_id, applied_at DESC)",
       "minion_attachments_pkey": "CREATE UNIQUE INDEX minion_attachments_pkey ON public.minion_attachments USING btree (id)",
+      "minion_budget_log_owner_idx": "CREATE INDEX minion_budget_log_owner_idx ON public.minion_budget_log USING btree (owner_id)",
+      "minion_budget_log_pkey": "CREATE UNIQUE INDEX minion_budget_log_pkey ON public.minion_budget_log USING btree (id)",
+      "minion_budget_log_recent_idx": "CREATE INDEX minion_budget_log_recent_idx ON public.minion_budget_log USING btree (occurred_at DESC)",
       "minion_inbox_pkey": "CREATE UNIQUE INDEX minion_inbox_pkey ON public.minion_inbox USING btree (id)",
+      "minion_jobs_budget_owner_idx": "CREATE INDEX minion_jobs_budget_owner_idx ON public.minion_jobs USING btree (budget_owner_job_id) WHERE (budget_owner_job_id IS NOT NULL)",
+      "minion_jobs_budget_root_owner_idx": "CREATE INDEX minion_jobs_budget_root_owner_idx ON public.minion_jobs USING btree (budget_root_owner_id) WHERE (budget_root_owner_id IS NOT NULL)",
       "minion_jobs_pkey": "CREATE UNIQUE INDEX minion_jobs_pkey ON public.minion_jobs USING btree (id)",
+      "minion_lease_pressure_log_job_idx": "CREATE INDEX minion_lease_pressure_log_job_idx ON public.minion_lease_pressure_log USING btree (job_id)",
+      "minion_lease_pressure_log_pkey": "CREATE UNIQUE INDEX minion_lease_pressure_log_pkey ON public.minion_lease_pressure_log USING btree (id)",
+      "minion_lease_pressure_log_recent_idx": "CREATE INDEX minion_lease_pressure_log_recent_idx ON public.minion_lease_pressure_log USING btree (bounced_at DESC)",
+      "minion_self_fix_log_parent_idx": "CREATE INDEX minion_self_fix_log_parent_idx ON public.minion_self_fix_log USING btree (parent_id)",
+      "minion_self_fix_log_pkey": "CREATE UNIQUE INDEX minion_self_fix_log_pkey ON public.minion_self_fix_log USING btree (id)",
+      "minion_self_fix_log_recent_idx": "CREATE INDEX minion_self_fix_log_recent_idx ON public.minion_self_fix_log USING btree (occurred_at DESC)",
       "oauth_clients_pkey": "CREATE UNIQUE INDEX oauth_clients_pkey ON public.oauth_clients USING btree (client_id)",
       "oauth_codes_pkey": "CREATE UNIQUE INDEX oauth_codes_pkey ON public.oauth_codes USING btree (code_hash)",
       "oauth_grant_audit_pkey": "CREATE UNIQUE INDEX oauth_grant_audit_pkey ON public.oauth_grant_audit USING btree (id)",
@@ -577,15 +787,24 @@
       "page_projection_jobs_pkey": "CREATE UNIQUE INDEX page_projection_jobs_pkey ON public.page_projection_jobs USING btree (source_incarnation, slug)",
       "page_versions_pkey": "CREATE UNIQUE INDEX page_versions_pkey ON public.page_versions USING btree (id)",
       "page_write_guards_pkey": "CREATE UNIQUE INDEX page_write_guards_pkey ON public.page_write_guards USING btree (source_incarnation, slug)",
+      "pages_atom_source_hash_idx": "CREATE INDEX pages_atom_source_hash_idx ON public.pages USING btree (((frontmatter ->> 'source_hash'::text))) WHERE ((type = 'atom'::text) AND (deleted_at IS NULL))",
+      "pages_chunker_version_idx": "CREATE INDEX pages_chunker_version_idx ON public.pages USING btree (chunker_version) WHERE (page_kind = 'markdown'::text)",
       "pages_coalesce_date_idx": "CREATE INDEX pages_coalesce_date_idx ON public.pages USING btree (COALESCE(effective_date, updated_at))",
+      "pages_dedup_idx": "CREATE INDEX pages_dedup_idx ON public.pages USING btree (source_id, content_hash) WHERE (deleted_at IS NULL)",
       "pages_deleted_at_purge_idx": "CREATE INDEX pages_deleted_at_purge_idx ON public.pages USING btree (deleted_at) WHERE (deleted_at IS NOT NULL)",
+      "pages_generation_idx": "CREATE INDEX pages_generation_idx ON public.pages USING btree (generation)",
       "pages_last_retrieved_at_idx": "CREATE INDEX pages_last_retrieved_at_idx ON public.pages USING btree (last_retrieved_at)",
       "pages_links_extracted_at_idx": "CREATE INDEX pages_links_extracted_at_idx ON public.pages USING btree (source_id, links_extracted_at)",
       "pages_pkey": "CREATE UNIQUE INDEX pages_pkey ON public.pages USING btree (id)",
+      "pages_safe_chunk_pending_idx": "CREATE INDEX pages_safe_chunk_pending_idx ON public.pages USING btree (source_id) WHERE (chunker_version < 4)",
+      "pages_source_path_idx": "CREATE INDEX pages_source_path_idx ON public.pages USING btree (source_path) WHERE (source_path IS NOT NULL)",
       "pages_source_slug_key": "CREATE UNIQUE INDEX pages_source_slug_key ON public.pages USING btree (source_id, slug)",
       "persistence_brain_pkey": "CREATE UNIQUE INDEX persistence_brain_pkey ON public.persistence_brain USING btree (singleton)",
       "persistence_counters_pkey": "CREATE UNIQUE INDEX persistence_counters_pkey ON public.persistence_counters USING btree (key)",
+      "persistence_effects_parked": "CREATE INDEX persistence_effects_parked ON public.persistence_effects USING btree (id) WHERE (data ? 'parked'::text)",
+      "persistence_effects_pending": "CREATE INDEX persistence_effects_pending ON public.persistence_effects USING btree (next_attempt_at, id) WHERE (state = ANY (ARRAY['queued'::text, 'running'::text]))",
       "persistence_effects_pkey": "CREATE UNIQUE INDEX persistence_effects_pkey ON public.persistence_effects USING btree (id)",
+      "persistence_effects_recovery": "CREATE INDEX persistence_effects_recovery ON public.persistence_effects USING btree (worktree_id) WHERE (recovery IS NOT NULL)",
       "persistence_effects_request_id_kind_key": "CREATE UNIQUE INDEX persistence_effects_request_id_kind_key ON public.persistence_effects USING btree (request_id, kind)",
       "persistence_host_bindings_pkey": "CREATE UNIQUE INDEX persistence_host_bindings_pkey ON public.persistence_host_bindings USING btree (worktree_id, host_id)",
       "persistence_local_writers_credential_hash_key": "CREATE UNIQUE INDEX persistence_local_writers_credential_hash_key ON public.persistence_local_writers USING btree (credential_hash)",
@@ -603,8 +822,10 @@
       "persistence_topology_recovering": "CREATE INDEX persistence_topology_recovering ON public.persistence_topology_changes USING btree (created_at) WHERE (state = 'recovering'::text)",
       "persistence_worktrees_pkey": "CREATE UNIQUE INDEX persistence_worktrees_pkey ON public.persistence_worktrees USING btree (id)",
       "persistence_writer_protocols_pkey": "CREATE UNIQUE INDEX persistence_writer_protocols_pkey ON public.persistence_writer_protocols USING btree (worktree_id, host_id)",
+      "query_cache_pkey": "CREATE UNIQUE INDEX query_cache_pkey ON public.query_cache USING btree (id)",
       "raw_data_page_id_source_key": "CREATE UNIQUE INDEX raw_data_page_id_source_key ON public.raw_data USING btree (page_id, source)",
       "raw_data_pkey": "CREATE UNIQUE INDEX raw_data_pkey ON public.raw_data USING btree (id)",
+      "search_telemetry_pkey": "CREATE UNIQUE INDEX search_telemetry_pkey ON public.search_telemetry USING btree (date, mode, intent)",
       "session_context_state_pkey": "CREATE UNIQUE INDEX session_context_state_pkey ON public.session_context_state USING btree (source_id, client_id, session_id)",
       "session_context_state_updated_idx": "CREATE INDEX session_context_state_updated_idx ON public.session_context_state USING btree (updated_at)",
       "shared_skill_delivery_batches_installation_id_epoch_sequenc_key": "CREATE UNIQUE INDEX shared_skill_delivery_batches_installation_id_epoch_sequenc_key ON public.shared_skill_delivery_batches USING btree (installation_id, epoch, sequence)",
@@ -642,8 +863,10 @@
       "subagent_rate_leases_pkey": "CREATE UNIQUE INDEX subagent_rate_leases_pkey ON public.subagent_rate_leases USING btree (id)",
       "subagent_tool_executions_pkey": "CREATE UNIQUE INDEX subagent_tool_executions_pkey ON public.subagent_tool_executions USING btree (id)",
       "subagent_tool_executions_stable_id": "CREATE UNIQUE INDEX subagent_tool_executions_stable_id ON public.subagent_tool_executions USING btree (job_id, message_idx, ordinal)",
+      "synthesis_evidence_pkey": "CREATE UNIQUE INDEX synthesis_evidence_pkey ON public.synthesis_evidence USING btree (synthesis_page_id, take_page_id, take_row_num)",
       "tags_page_id_tag_key": "CREATE UNIQUE INDEX tags_page_id_tag_key ON public.tags USING btree (page_id, tag)",
       "tags_pkey": "CREATE UNIQUE INDEX tags_pkey ON public.tags USING btree (id)",
+      "take_domain_assignments_pkey": "CREATE UNIQUE INDEX take_domain_assignments_pkey ON public.take_domain_assignments USING btree (take_id, domain)",
       "take_grade_cache_applied_idx": "CREATE INDEX take_grade_cache_applied_idx ON public.take_grade_cache USING btree (take_id, applied)",
       "take_grade_cache_pkey": "CREATE UNIQUE INDEX take_grade_cache_pkey ON public.take_grade_cache USING btree (take_id, prompt_version, judge_model_id, evidence_signature)",
       "take_grade_cache_wave_idx": "CREATE INDEX take_grade_cache_wave_idx ON public.take_grade_cache USING btree (wave_version, graded_at DESC)",
@@ -655,6 +878,9 @@
       "take_proposals_pending_idx": "CREATE INDEX take_proposals_pending_idx ON public.take_proposals USING btree (source_id, status, proposed_at DESC) WHERE (status = 'pending'::text)",
       "take_proposals_pkey": "CREATE UNIQUE INDEX take_proposals_pkey ON public.take_proposals USING btree (id)",
       "take_proposals_run_id_idx": "CREATE INDEX take_proposals_run_id_idx ON public.take_proposals USING btree (proposal_run_id)",
+      "takes_page_row_key": "CREATE UNIQUE INDEX takes_page_row_key ON public.takes USING btree (page_id, row_num)",
+      "takes_pkey": "CREATE UNIQUE INDEX takes_pkey ON public.takes USING btree (id)",
+      "takes_resolved_at_idx": "CREATE INDEX takes_resolved_at_idx ON public.takes USING btree (resolved_at DESC) WHERE (resolved_at IS NOT NULL)",
       "think_ab_results_pkey": "CREATE UNIQUE INDEX think_ab_results_pkey ON public.think_ab_results USING btree (id)",
       "think_ab_results_recent_idx": "CREATE INDEX think_ab_results_recent_idx ON public.think_ab_results USING btree (source_id, ran_at DESC)",
       "timeline_entries_pkey": "CREATE UNIQUE INDEX timeline_entries_pkey ON public.timeline_entries USING btree (id)",
@@ -666,20 +892,30 @@
     "sequences": {
       "calibration_profiles_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=calibration_profiles.id",
       "chat_usage_log_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=chat_usage_log.id",
+      "code_edges_chunk_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=code_edges_chunk.id",
+      "code_edges_symbol_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=code_edges_symbol.id",
+      "code_traversal_cache_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=code_traversal_cache.id",
       "content_chunks_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=content_chunks.id",
       "context_volunteer_events_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=context_volunteer_events.id",
+      "drift_decisions_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=drift_decisions.id",
+      "entity_identities_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=entity_identities.id",
       "eval_candidates_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=eval_candidates.id",
       "eval_capture_failures_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=eval_capture_failures.id",
       "eval_takes_quality_runs_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=eval_takes_quality_runs.id",
+      "facts_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=facts.id",
       "files_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=files.id",
       "ingest_log_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=ingest_log.id",
       "links_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=links.id",
       "loop_suppressions_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=loop_suppressions.id",
       "mcp_request_log_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=mcp_request_log.id",
+      "mcp_spend_log_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=mcp_spend_log.id",
       "migration_impact_log_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=migration_impact_log.id",
       "minion_attachments_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=minion_attachments.id",
+      "minion_budget_log_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=minion_budget_log.id",
       "minion_inbox_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=minion_inbox.id",
       "minion_jobs_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=minion_jobs.id",
+      "minion_lease_pressure_log_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=minion_lease_pressure_log.id",
+      "minion_self_fix_log_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=minion_self_fix_log.id",
       "oauth_grant_audit_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=oauth_grant_audit.id",
       "open_loops_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=open_loops.id",
       "page_aliases_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=page_aliases.id",
@@ -696,6 +932,7 @@
       "tags_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=tags.id",
       "take_nudge_log_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=take_nudge_log.id",
       "take_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=take_proposals.id",
+      "takes_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=takes.id",
       "think_ab_results_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=think_ab_results.id",
       "timeline_entries_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=timeline_entries.id"
     },
@@ -708,7 +945,34 @@
           "4 scopes ARRAY/_text NULL",
           "5 created_at timestamp with time zone/timestamptz NULL DEFAULT now()",
           "6 last_used_at timestamp with time zone/timestamptz NULL",
-          "7 revoked_at timestamp with time zone/timestamptz NULL"
+          "7 revoked_at timestamp with time zone/timestamptz NULL",
+          "8 permissions jsonb/jsonb NOT NULL DEFAULT '{\"takes_holders\": [\"world\"]}'::jsonb"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "budget_ledger": {
+        "columns": [
+          "1 scope text/text NOT NULL",
+          "2 resolver_id text/text NOT NULL",
+          "3 local_date date/date NOT NULL",
+          "4 reserved_usd numeric/numeric NOT NULL DEFAULT 0",
+          "5 committed_usd numeric/numeric NOT NULL DEFAULT 0",
+          "6 cap_usd numeric/numeric NULL",
+          "7 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "8 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "budget_reservations": {
+        "columns": [
+          "1 reservation_id text/text NOT NULL",
+          "2 scope text/text NOT NULL",
+          "3 resolver_id text/text NOT NULL",
+          "4 local_date date/date NOT NULL",
+          "5 estimate_usd numeric/numeric NOT NULL",
+          "6 reserved_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "7 expires_at timestamp with time zone/timestamptz NOT NULL",
+          "8 status text/text NOT NULL DEFAULT 'held'::text"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -751,6 +1015,47 @@
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
+      "code_edges_chunk": {
+        "columns": [
+          "1 id integer/int4 NOT NULL DEFAULT nextval('code_edges_chunk_id_seq'::regclass)",
+          "2 from_chunk_id integer/int4 NOT NULL",
+          "3 to_chunk_id integer/int4 NOT NULL",
+          "4 from_symbol_qualified text/text NOT NULL",
+          "5 to_symbol_qualified text/text NOT NULL",
+          "6 edge_type text/text NOT NULL",
+          "7 edge_metadata jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
+          "8 source_id text/text NULL",
+          "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "code_edges_symbol": {
+        "columns": [
+          "1 id integer/int4 NOT NULL DEFAULT nextval('code_edges_symbol_id_seq'::regclass)",
+          "2 from_chunk_id integer/int4 NOT NULL",
+          "3 from_symbol_qualified text/text NOT NULL",
+          "4 to_symbol_qualified text/text NOT NULL",
+          "5 edge_type text/text NOT NULL",
+          "6 edge_metadata jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
+          "7 source_id text/text NULL",
+          "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "code_traversal_cache": {
+        "columns": [
+          "1 id integer/int4 NOT NULL DEFAULT nextval('code_traversal_cache_id_seq'::regclass)",
+          "2 symbol_qualified text/text NOT NULL",
+          "3 depth integer/int4 NOT NULL",
+          "4 source_id text/text NOT NULL",
+          "5 response_json jsonb/jsonb NOT NULL",
+          "6 max_chunk_updated_at timestamp with time zone/timestamptz NOT NULL",
+          "7 xmin_max bigint/int8 NOT NULL",
+          "8 cluster_generation bigint/int8 NOT NULL DEFAULT 0",
+          "9 computed_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "config": {
         "columns": [
           "1 key text/text NOT NULL",
@@ -779,7 +1084,12 @@
           "17 end_line integer/int4 NULL",
           "18 modality text/text NOT NULL DEFAULT 'text'::text",
           "19 embedding_image USER-DEFINED/vector NULL",
-          "20 embedding_multimodal USER-DEFINED/vector NULL"
+          "20 embedding_multimodal USER-DEFINED/vector NULL",
+          "21 parent_symbol_path ARRAY/_text NULL",
+          "22 doc_comment text/text NULL",
+          "23 symbol_name_qualified text/text NULL",
+          "24 search_vector tsvector/tsvector NULL",
+          "25 edges_backfilled_at timestamp with time zone/timestamptz NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -798,11 +1108,65 @@
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
+      "conversation_parser_llm_cache": {
+        "columns": [
+          "1 content_sha256 text/text NOT NULL",
+          "2 model_id text/text NOT NULL",
+          "3 call_shape text/text NOT NULL",
+          "4 value_json jsonb/jsonb NOT NULL",
+          "5 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "dream_synthesis_completions": {
         "columns": [
           "1 source_id text/text NOT NULL",
           "2 idempotency_key text/text NOT NULL",
           "3 completed_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "dream_verdicts": {
+        "columns": [
+          "1 file_path text/text NOT NULL",
+          "2 content_hash text/text NOT NULL",
+          "3 worth_processing boolean/bool NOT NULL",
+          "4 reasons jsonb/jsonb NULL",
+          "5 judged_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "6 score double precision/float8 NULL",
+          "7 content_type text/text NULL",
+          "8 segments jsonb/jsonb NULL",
+          "9 entities jsonb/jsonb NULL",
+          "10 model text/text NULL",
+          "11 triage_version integer/int4 NULL",
+          "12 expires_at timestamp with time zone/timestamptz NOT NULL DEFAULT (now() + '30 days'::interval)"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
+      },
+      "drift_decisions": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('drift_decisions_id_seq'::regclass)",
+          "2 take_id bigint/int8 NOT NULL",
+          "3 page_id integer/int4 NOT NULL",
+          "4 row_num integer/int4 NOT NULL",
+          "5 recommended_weight real/float4 NOT NULL",
+          "6 reasoning text/text NULL",
+          "7 decided_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "8 applied_at timestamp with time zone/timestamptz NULL",
+          "9 applied_by text/text NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "entity_identities": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('entity_identities_id_seq'::regclass)",
+          "2 entity_id text/text NOT NULL",
+          "3 source_id text/text NOT NULL",
+          "4 page_id integer/int4 NOT NULL",
+          "5 confidence double precision/float8 NOT NULL DEFAULT 1.0",
+          "6 established_by text/text NOT NULL DEFAULT 'manual'::text",
+          "7 established_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "8 canonical boolean/bool NOT NULL DEFAULT false"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -831,7 +1195,8 @@
           "21 recency_resolved text/text NULL",
           "22 salience_source text/text NULL",
           "23 recency_source text/text NULL",
-          "24 embedding_column text/text NULL"
+          "24 embedding_column text/text NULL",
+          "25 schema_pack_per_source jsonb/jsonb NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -903,7 +1268,7 @@
           "5 tombstoned boolean/bool NOT NULL DEFAULT false",
           "6 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=false force_rls=false"
+        "flags": "relkind=r rls=true force_rls=false"
       },
       "extract_atoms_transcript_state": {
         "columns": [
@@ -916,6 +1281,22 @@
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
+      "extract_rollup_7d": {
+        "columns": [
+          "1 kind text/text NOT NULL",
+          "2 source_id text/text NOT NULL",
+          "3 day date/date NOT NULL",
+          "4 cost_usd real/float4 NOT NULL DEFAULT 0",
+          "5 halt_count integer/int4 NOT NULL DEFAULT 0",
+          "6 eval_fail_count integer/int4 NOT NULL DEFAULT 0",
+          "7 eval_pass_count integer/int4 NOT NULL DEFAULT 0",
+          "8 round_completed_count integer/int4 NOT NULL DEFAULT 0",
+          "9 rollup_write_failures integer/int4 NOT NULL DEFAULT 0",
+          "10 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "11 expected_limit_count integer/int4 NOT NULL DEFAULT 0"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "fact_withdrawals": {
         "columns": [
           "1 source_id text/text NOT NULL",
@@ -923,6 +1304,44 @@
           "3 subject text/text NOT NULL DEFAULT '*'::text",
           "4 fact_hash text/text NOT NULL",
           "5 withdrawn_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "facts": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('facts_id_seq'::regclass)",
+          "2 source_id text/text NOT NULL DEFAULT 'default'::text",
+          "3 entity_slug text/text NULL",
+          "4 fact text/text NOT NULL",
+          "5 kind text/text NOT NULL DEFAULT 'fact'::text",
+          "6 visibility text/text NOT NULL DEFAULT 'private'::text",
+          "7 notability text/text NOT NULL DEFAULT 'medium'::text",
+          "8 context text/text NULL",
+          "9 valid_from timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "10 valid_until timestamp with time zone/timestamptz NULL",
+          "11 expired_at timestamp with time zone/timestamptz NULL",
+          "12 superseded_by bigint/int8 NULL",
+          "13 consolidated_at timestamp with time zone/timestamptz NULL",
+          "14 consolidated_into bigint/int8 NULL",
+          "15 source text/text NOT NULL",
+          "16 source_session text/text NULL",
+          "17 confidence real/float4 NOT NULL DEFAULT 1.0",
+          "18 embedding USER-DEFINED/halfvec NULL",
+          "19 embedded_at timestamp with time zone/timestamptz NULL",
+          "20 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "21 row_num integer/int4 NULL",
+          "22 source_markdown_slug text/text NULL",
+          "23 claim_metric text/text NULL",
+          "24 claim_value double precision/float8 NULL",
+          "25 claim_unit text/text NULL",
+          "26 claim_period text/text NULL",
+          "27 event_type text/text NULL",
+          "28 dimension text/text NULL",
+          "29 value text/text NULL",
+          "30 value_hash text/text NULL",
+          "31 dim_status text/text NULL",
+          "32 embedding_model text/text NULL",
+          "33 embedded_text_hash text/text NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1006,6 +1425,37 @@
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
+      "mcp_spend_log": {
+        "columns": [
+          "1 id integer/int4 NOT NULL DEFAULT nextval('mcp_spend_log_id_seq'::regclass)",
+          "2 client_id text/text NULL",
+          "3 token_name text/text NULL",
+          "4 operation text/text NOT NULL",
+          "5 spend_cents numeric/numeric NOT NULL DEFAULT 0",
+          "6 provider text/text NULL",
+          "7 model text/text NULL",
+          "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "mcp_spend_reservations": {
+        "columns": [
+          "1 reservation_id uuid/uuid NOT NULL",
+          "2 client_id text/text NOT NULL",
+          "3 job_id bigint/int8 NULL",
+          "4 estimated_cents numeric/numeric NOT NULL",
+          "5 actual_cents numeric/numeric NULL",
+          "6 model text/text NOT NULL",
+          "7 provider text/text NOT NULL",
+          "8 status text/text NOT NULL",
+          "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "10 settled_at timestamp with time zone/timestamptz NULL",
+          "11 expires_at timestamp with time zone/timestamptz NOT NULL",
+          "12 estimate_known boolean/bool NOT NULL DEFAULT true",
+          "13 usage_unknown_reason text/text NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "migration_impact_log": {
         "columns": [
           "1 id bigint/int8 NOT NULL DEFAULT nextval('migration_impact_log_id_seq'::regclass)",
@@ -1035,6 +1485,19 @@
           "7 size_bytes integer/int4 NOT NULL",
           "8 sha256 text/text NOT NULL",
           "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "minion_budget_log": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('minion_budget_log_id_seq'::regclass)",
+          "2 job_id bigint/int8 NULL",
+          "3 owner_id bigint/int8 NULL",
+          "4 event_type text/text NOT NULL",
+          "5 cents_delta integer/int4 NOT NULL",
+          "6 turn_index integer/int4 NULL",
+          "7 model text/text NULL",
+          "8 occurred_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1093,7 +1556,41 @@
           "40 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "41 started_at timestamp with time zone/timestamptz NULL",
           "42 finished_at timestamp with time zone/timestamptz NULL",
-          "43 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+          "43 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "44 quiet_hours jsonb/jsonb NULL",
+          "45 stagger_key text/text NULL",
+          "46 budget_remaining_cents integer/int4 NULL",
+          "47 budget_owner_job_id bigint/int8 NULL",
+          "48 budget_root_owner_id bigint/int8 NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "minion_lease_pressure_log": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('minion_lease_pressure_log_id_seq'::regclass)",
+          "2 job_id bigint/int8 NULL",
+          "3 lease_key text/text NOT NULL",
+          "4 active_at_bounce integer/int4 NOT NULL",
+          "5 max_concurrent integer/int4 NOT NULL",
+          "6 bounced_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "7 queue_name text/text NULL",
+          "8 job_name text/text NULL",
+          "9 model text/text NULL",
+          "10 provider text/text NULL",
+          "11 root_owner_id bigint/int8 NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "minion_self_fix_log": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('minion_self_fix_log_id_seq'::regclass)",
+          "2 parent_id bigint/int8 NULL",
+          "3 child_id bigint/int8 NULL",
+          "4 classifier_bucket text/text NOT NULL",
+          "5 chain_depth integer/int4 NOT NULL",
+          "6 policy_applied text/text NULL",
+          "7 outcome text/text NULL",
+          "8 occurred_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1128,7 +1625,7 @@
           "27 grant_repair_reasons ARRAY/_text NOT NULL DEFAULT '{}'::text[]",
           "28 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=false force_rls=false"
+        "flags": "relkind=r rls=true force_rls=false"
       },
       "oauth_codes": {
         "columns": [
@@ -1143,7 +1640,7 @@
           "9 expires_at bigint/int8 NOT NULL",
           "10 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=false force_rls=false"
+        "flags": "relkind=r rls=true force_rls=false"
       },
       "oauth_grant_audit": {
         "columns": [
@@ -1168,7 +1665,7 @@
           "6 resource text/text NULL",
           "7 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=false force_rls=false"
+        "flags": "relkind=r rls=true force_rls=false"
       },
       "op_checkpoint_paths": {
         "columns": [
@@ -1253,8 +1750,7 @@
           "8 title text/text NULL",
           "9 type text/text NULL",
           "10 tags jsonb/jsonb NULL",
-          "11 is_deleted boolean/bool NULL",
-          "12 source_path text/text NULL"
+          "11 is_deleted boolean/bool NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1293,7 +1789,15 @@
           "24 generation bigint/int8 NOT NULL DEFAULT 1",
           "25 search_vector tsvector/tsvector NULL",
           "26 knowledge_revision uuid/uuid NOT NULL DEFAULT gen_random_uuid()",
-          "27 text_projection_revision uuid/uuid NULL"
+          "27 text_projection_revision uuid/uuid NULL",
+          "28 emotional_weight_recomputed_at timestamp with time zone/timestamptz NULL",
+          "29 chunker_version smallint/int2 NOT NULL DEFAULT 1",
+          "30 source_path text/text NULL",
+          "31 ingested_via text/text NULL",
+          "32 ingested_at timestamp with time zone/timestamptz NULL",
+          "33 source_uri text/text NULL",
+          "34 source_kind text/text NULL",
+          "35 embedding_signature text/text NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1304,7 +1808,8 @@
           "3 enabled boolean/bool NOT NULL DEFAULT false",
           "4 activated_at timestamp with time zone/timestamptz NULL",
           "5 writer_protocol_floor integer/int4 NOT NULL DEFAULT 1",
-          "6 skill_bundles_enabled boolean/bool NOT NULL DEFAULT false"
+          "6 skill_bundles_enabled boolean/bool NOT NULL DEFAULT false",
+          "7 writer_version_cutoff timestamp with time zone/timestamptz NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1328,7 +1833,17 @@
           "5 data jsonb/jsonb NOT NULL",
           "6 state text/text NOT NULL DEFAULT 'queued'::text",
           "7 execution_token uuid/uuid NULL",
-          "8 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+          "8 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "9 source_id text/text NULL",
+          "10 source_incarnation uuid/uuid NULL",
+          "11 worktree_id uuid/uuid NULL",
+          "12 claim_expires_at timestamp with time zone/timestamptz NULL",
+          "13 next_attempt_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "14 attempts integer/int4 NOT NULL DEFAULT 0",
+          "15 error_code text/text NULL",
+          "16 outcome jsonb/jsonb NULL",
+          "17 recovery jsonb/jsonb NULL",
+          "18 recovery_bytes bigint/int8 NOT NULL DEFAULT 0"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1386,7 +1901,12 @@
           "30 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "31 completed_at timestamp with time zone/timestamptz NULL",
           "32 target_kind text/text NOT NULL DEFAULT 'page'::text",
-          "33 protocol_version integer/int4 NOT NULL DEFAULT 1"
+          "33 protocol_version integer/int4 NOT NULL DEFAULT 1",
+          "34 admitter_version text/text NULL",
+          "35 admitter_host_id uuid/uuid NULL",
+          "36 consumer_version text/text NULL",
+          "37 consumer_host_id uuid/uuid NULL",
+          "38 published_at timestamp with time zone/timestamptz NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1444,6 +1964,24 @@
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },
+      "query_cache": {
+        "columns": [
+          "1 id text/text NOT NULL",
+          "2 query_text text/text NOT NULL",
+          "3 source_id text/text NOT NULL DEFAULT 'default'::text",
+          "4 embedding USER-DEFINED/halfvec NULL",
+          "5 results jsonb/jsonb NOT NULL DEFAULT '[]'::jsonb",
+          "6 meta jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
+          "7 ttl_seconds integer/int4 NOT NULL DEFAULT 3600",
+          "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "9 hit_count integer/int4 NOT NULL DEFAULT 0",
+          "10 last_hit_at timestamp with time zone/timestamptz NULL",
+          "11 knobs_hash text/text NULL",
+          "12 page_generations jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
+          "13 max_generation_at_store bigint/int8 NOT NULL DEFAULT 0"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "raw_data": {
         "columns": [
           "1 id integer/int4 NOT NULL DEFAULT nextval('raw_data_id_seq'::regclass)",
@@ -1451,6 +1989,27 @@
           "3 source text/text NOT NULL",
           "4 data jsonb/jsonb NOT NULL",
           "5 fetched_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "search_telemetry": {
+        "columns": [
+          "1 date text/text NOT NULL",
+          "2 mode text/text NOT NULL",
+          "3 intent text/text NOT NULL",
+          "4 count integer/int4 NOT NULL DEFAULT 0",
+          "5 sum_results integer/int4 NOT NULL DEFAULT 0",
+          "6 sum_tokens integer/int4 NOT NULL DEFAULT 0",
+          "7 sum_budget_dropped integer/int4 NOT NULL DEFAULT 0",
+          "8 cache_hit integer/int4 NOT NULL DEFAULT 0",
+          "9 cache_miss integer/int4 NOT NULL DEFAULT 0",
+          "10 first_seen timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "11 last_seen timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "12 sum_rank1_score double precision/float8 NOT NULL DEFAULT 0",
+          "13 count_rank1 integer/int4 NOT NULL DEFAULT 0",
+          "14 rank1_lt_solid integer/int4 NOT NULL DEFAULT 0",
+          "15 rank1_solid integer/int4 NOT NULL DEFAULT 0",
+          "16 rank1_high integer/int4 NOT NULL DEFAULT 0"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1642,7 +2201,8 @@
           "11 trust_frontmatter_overrides boolean/bool NOT NULL DEFAULT false",
           "12 newest_content_at timestamp with time zone/timestamptz NULL",
           "13 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
-          "14 incarnation uuid/uuid NOT NULL DEFAULT gen_random_uuid()"
+          "14 incarnation uuid/uuid NOT NULL DEFAULT gen_random_uuid()",
+          "15 chunker_version text/text NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1694,12 +2254,33 @@
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
+      "synthesis_evidence": {
+        "columns": [
+          "1 synthesis_page_id integer/int4 NOT NULL",
+          "2 take_page_id integer/int4 NOT NULL",
+          "3 take_row_num integer/int4 NOT NULL",
+          "4 citation_index integer/int4 NOT NULL",
+          "5 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "tags": {
         "columns": [
           "1 id integer/int4 NOT NULL DEFAULT nextval('tags_id_seq'::regclass)",
           "2 page_id integer/int4 NOT NULL",
           "3 tag text/text NOT NULL",
           "4 tag_source text/text NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
+      "take_domain_assignments": {
+        "columns": [
+          "1 take_id bigint/int8 NOT NULL",
+          "2 domain text/text NOT NULL",
+          "3 pack text/text NOT NULL",
+          "4 source text/text NULL",
+          "5 confidence real/float4 NOT NULL DEFAULT 1.0",
+          "6 assigned_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
@@ -1757,6 +2338,34 @@
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },
+      "takes": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('takes_id_seq'::regclass)",
+          "2 page_id integer/int4 NOT NULL",
+          "3 row_num integer/int4 NOT NULL",
+          "4 claim text/text NOT NULL",
+          "5 kind text/text NOT NULL",
+          "6 holder text/text NOT NULL",
+          "7 weight real/float4 NOT NULL DEFAULT 0.5",
+          "8 since_date text/text NULL",
+          "9 until_date text/text NULL",
+          "10 source text/text NULL",
+          "11 superseded_by integer/int4 NULL",
+          "12 active boolean/bool NOT NULL DEFAULT true",
+          "13 resolved_at timestamp with time zone/timestamptz NULL",
+          "14 resolved_outcome boolean/bool NULL",
+          "15 resolved_value real/float4 NULL",
+          "16 resolved_unit text/text NULL",
+          "17 resolved_source text/text NULL",
+          "18 resolved_by text/text NULL",
+          "19 embedding USER-DEFINED/vector NULL",
+          "20 embedded_at timestamp with time zone/timestamptz NULL",
+          "21 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "22 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "23 resolved_quality text/text NULL"
+        ],
+        "flags": "relkind=r rls=false force_rls=false"
+      },
       "think_ab_results": {
         "columns": [
           "1 id bigint/int8 NOT NULL DEFAULT nextval('think_ab_results_id_seq'::regclass)",
@@ -1787,11 +2396,15 @@
       }
     },
     "triggers": {
+      "content_chunks.chunk_search_vector_trigger": "CREATE TRIGGER chunk_search_vector_trigger BEFORE INSERT OR UPDATE OF chunk_text, doc_comment, symbol_name_qualified ON public.content_chunks FOR EACH ROW EXECUTE FUNCTION update_chunk_search_vector()",
+      "facts.facts_preserve_withdrawal": "CREATE TRIGGER facts_preserve_withdrawal BEFORE INSERT OR UPDATE OF fact, source_id, visibility, entity_slug, expired_at ON public.facts FOR EACH ROW EXECUTE FUNCTION gbrain_preserve_fact_withdrawal()",
+      "facts.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.facts FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
       "minion_jobs.minion_queue_protocol": "CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON public.minion_jobs FOR EACH ROW EXECUTE FUNCTION enforce_minion_queue_protocol()",
       "page_aliases.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.page_aliases FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
       "pages.bump_page_generation_clock_trg": "CREATE TRIGGER bump_page_generation_clock_trg AFTER INSERT OR DELETE OR UPDATE ON public.pages FOR EACH STATEMENT EXECUTE FUNCTION bump_page_generation_clock_fn()",
       "pages.bump_page_generation_trg": "CREATE TRIGGER bump_page_generation_trg BEFORE INSERT OR UPDATE ON public.pages FOR EACH ROW EXECUTE FUNCTION bump_page_generation_fn()",
       "pages.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.pages FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
+      "pages.pages_clear_atom_scan_state": "CREATE TRIGGER pages_clear_atom_scan_state AFTER UPDATE ON public.pages FOR EACH ROW EXECUTE FUNCTION gbrain_clear_atom_page_state()",
       "pages.pages_knowledge_revision": "CREATE TRIGGER pages_knowledge_revision BEFORE UPDATE ON public.pages FOR EACH ROW EXECUTE FUNCTION gbrain_advance_page_revision()",
       "pages.pages_projection_queue": "CREATE TRIGGER pages_projection_queue AFTER INSERT OR DELETE OR UPDATE ON public.pages FOR EACH ROW EXECUTE FUNCTION gbrain_queue_page_projection()",
       "pages.trg_pages_search_vector": "CREATE TRIGGER trg_pages_search_vector BEFORE INSERT OR UPDATE OF title, timeline ON public.pages FOR EACH ROW EXECUTE FUNCTION update_page_search_vector()",
@@ -1806,6 +2419,7 @@
       "sources.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.sources FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
       "tags.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.tags FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
       "tags.tags_knowledge_revision": "CREATE TRIGGER tags_knowledge_revision AFTER INSERT OR DELETE OR UPDATE ON public.tags FOR EACH ROW EXECUTE FUNCTION gbrain_advance_tag_revision()",
+      "takes.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.takes FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
       "timeline_entries.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.timeline_entries FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()"
     },
     "viewColumns": {

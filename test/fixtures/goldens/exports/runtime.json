@@ -708,6 +708,7 @@
         "PgliteBusyError",
         "acquireLock",
         "getPgliteKernelLockPath",
+        "getPgliteMigrationLockPath",
         "inspectLockHolder",
         "isPidReusedByOtherProgram",
         "isProcessAlive",

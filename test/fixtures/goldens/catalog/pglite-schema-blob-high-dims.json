@@ -1247,13 +1247,13 @@
           "3 compiled_truth text/text NOT NULL",
           "4 frontmatter jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
           "5 snapshot_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
-          "6 source_path text/text NULL",
-          "7 knowledge_revision uuid/uuid NULL",
-          "8 timeline text/text NULL",
-          "9 title text/text NULL",
-          "10 type text/text NULL",
-          "11 tags jsonb/jsonb NULL",
-          "12 is_deleted boolean/bool NULL"
+          "6 knowledge_revision uuid/uuid NULL",
+          "7 timeline text/text NULL",
+          "8 title text/text NULL",
+          "9 type text/text NULL",
+          "10 tags jsonb/jsonb NULL",
+          "11 is_deleted boolean/bool NULL",
+          "12 source_path text/text NULL"
         ],
         "flags": "relkind=r rls=false force_rls=false"
       },

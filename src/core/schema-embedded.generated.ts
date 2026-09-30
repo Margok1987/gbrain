@@ -585,10 +585,7 @@ CREATE TABLE IF NOT EXISTS page_versions (
   page_id        INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
   compiled_truth TEXT    NOT NULL,
   frontmatter    JSONB   NOT NULL DEFAULT '{}',
-  snapshot_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  -- #5393 (migration v179): the page's recorded canonical file when the
-  -- version was taken, so a revert is judged on the version it writes.
-  source_path    TEXT
+  snapshot_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_versions_page ON page_versions(page_id);
@@ -1753,6 +1750,10 @@ DROP TRIGGER IF EXISTS tags_knowledge_revision ON tags;
 CREATE TRIGGER tags_knowledge_revision AFTER INSERT OR DELETE OR UPDATE ON tags
     FOR EACH ROW EXECUTE FUNCTION gbrain_advance_tag_revision();
 -- END GENERATED from src/core/page-state/schema.ts (PAGE_STATE_SCHEMA_SQL)
+-- #5393 (migration v179): the page's recorded canonical file when a version
+-- was taken, so a revert is judged on the version it writes. After the
+-- page-state columns so fresh and upgraded brains share its ordinal.
+ALTER TABLE page_versions ADD COLUMN IF NOT EXISTS source_path TEXT;
 CREATE TABLE IF NOT EXISTS extract_atoms_page_state (
   source_incarnation UUID NOT NULL REFERENCES sources(incarnation) ON DELETE CASCADE,
   page_id INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
