@@ -74,6 +74,19 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     run: async engine => (await import('./checks/connector-checkpoints.ts')).checkConnectorCheckpoints(engine),
   },
   {
+    id: 'persistence_request_indexes', resolution: 'repair', registration: 'wave',
+    count: d => Number(d.count ?? 0),
+    impact: 'A managed sync request index is missing or INVALID, so sync checkpoints can time out on a large request table',
+    run: async engine => (await import('./checks/persistence-requests.ts')).requestIndexesCheck(engine),
+  },
+  {
+    id: 'persistence_request_growth', resolution: 'operator', registration: 'wave',
+    count: d => (d.scopes ?? []).filter((scope: { days_to_exhaustion?: number | null }) => scope.days_to_exhaustion != null && scope.days_to_exhaustion < 90).length,
+    impact: 'At its current admission rate a writer exhausts its lifetime request IDs within 90 days',
+    instruction: 'Raise the named limit with the `gbrain config set persistence.limits.<limit> <value>` command doctor prints, on the brain host (docs/guides/repair.md#request-growth).',
+    run: async engine => (await import('./checks/persistence-requests.ts')).requestGrowthCheck(engine),
+  },
+  {
     id: 'unbound_source', resolution: 'operator', registration: 'wave',
     count: d => (d.sources ?? []).filter((source: { bound?: boolean }) => source.bound).reduce((sum: number, source: { pages?: number }) => sum + Number(source.pages ?? 0), 0),
     impact: 'Some pages written database-only while their source was unbound now sit outside canonical files',

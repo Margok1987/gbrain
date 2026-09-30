@@ -200,6 +200,8 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'oauth_confidential_client_health',
   'orphan_clones',
   'persistence_capacity',
+  'persistence_request_growth',
+  'persistence_request_indexes',
   'stale_embedding_effects',
   'writer_version',
   'pgbouncer_prepare',

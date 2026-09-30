@@ -22,6 +22,7 @@ import { refreshProjectionStatistics } from '../search/projection-statistics.ts'
 import { recordManagedSyncFailure, clearManagedSyncFailureAfterSuccess, formatManagedSyncFailure, type ManagedSyncFailure } from './sync-failures.ts';
 import { writeFailureDiagnostic } from './verb-errors.ts';
 import { extractManagedStaleLinks } from './links-maintenance.ts';
+import { CHECKPOINT_VALIDATION_TIMEOUT, checkpointTimeoutHint } from './checkpoint-validation.ts';
 import { isTerminalWriteState, publicWriteReceipt, type WriteReceipt } from './types.ts';
 import type { WriteRequest } from './model.ts';
 
@@ -36,6 +37,8 @@ export interface ManagedSyncWriteDiagnostic {
   write_request: WriteReceipt;
   line_endings?: 'crlf_lf_only';
   ledger_recorded?: boolean;
+  detail?: string;
+  docs?: string;
 }
 
 interface Pending { requestId: string; slug: string; pageId: number | null; intent: SyncIntent; }
@@ -400,9 +403,12 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         request_id: pending.requestId, run_id: cursor.runId, target: cursor.target, cursor_key: key,
         phase: pending.intent.kind === 'managed_sync_checkpoint' ? 'checkpoint' : 'receipt', state: done.state, observation_id: pending.requestId,
         first_seen: new Date(done.completed_at ?? done.updated_at).toISOString() });
+        // #5762: the hint is built after the failed transaction, from a fresh read of the request indexes.
+        const hint = done.error_code === CHECKPOINT_VALIDATION_TIMEOUT && !authority.writer.remote ? await checkpointTimeoutHint(engine,
+          { requestId: pending.requestId, sourceId: cursor.sourceId, processingOptions: pending.intent.processingOptions, workingTree: opts.workingTree === true }) : null;
         return { ...result(cursor, 'blocked_by_failures'), failedFiles: 1,
           failureCodes: [{ code: failure.code, count: 1 }], ...(authority.writer.remote ? {} : { failures: [failure],
-            managedWrite: { ...writeDiagnostic(cursor, pending, done), ledger_recorded: ledgerRecorded } }) };
+            managedWrite: { ...writeDiagnostic(cursor, pending, done), ...hint, ledger_recorded: ledgerRecorded } }) };
       }
       if (pending.intent.kind === 'managed_sync_checkpoint') {
         cursor = (await readCursor(engine, key))!;

@@ -68,3 +68,52 @@ export async function dropInvalidConcurrentIndex(
   }
   return isInvalid;
 }
+
+export type OnlineIndexOutcome = 'present' | 'created' | 'rebuilt' | 'building';
+
+/**
+ * #5762: build one index without blocking writers. PGLite runs the plain
+ * `CREATE INDEX IF NOT EXISTS`. Postgres leaves a valid index alone, reports
+ * one another session is still building, drops an INVALID leftover of an
+ * interrupted concurrent build, then runs `CREATE INDEX CONCURRENTLY IF NOT
+ * EXISTS` on a dedicated connection with a bounded lock wait and no statement
+ * timeout. Callers build one index at a time; a lock timeout leaves an INVALID
+ * index that the next call drops and rebuilds.
+ */
+export async function buildIndexOnline(
+  engine: BrainEngine,
+  version: number,
+  index: { name: string; table: string; sql: string },
+  opts: { lockTimeout?: string; notice?: (line: string) => void } = {},
+): Promise<OnlineIndexOutcome> {
+  if (engine.kind !== 'postgres') {
+    const [row] = await engine.executeRaw<{ present: boolean }>('SELECT to_regclass($1) IS NOT NULL AS present', [index.name]);
+    if (row?.present) return 'present';
+    await engine.runMigration(version, index.sql);
+    return 'created';
+  }
+  const [row] = await engine.executeRaw<{ valid: boolean; building: boolean }>(
+    `SELECT i.indisvalid AS valid, EXISTS (SELECT 1 FROM pg_stat_progress_create_index p
+        WHERE p.relid=i.indrelid AND p.index_relid IN (i.indexrelid, 0)) AS building
+       FROM pg_index i WHERE i.indexrelid = to_regclass($1)`,
+    [index.name],
+  );
+  if (row?.valid) return 'present';
+  if (row?.building) return 'building';
+  if (row) await dropInvalidConcurrentIndex(engine, version, index.name);
+  const [size] = await engine.executeRaw<{ rows: number }>(
+    'SELECT GREATEST(reltuples, 0)::bigint AS rows FROM pg_class WHERE oid = to_regclass($1)', [index.table]);
+  opts.notice?.(`  building ${index.name} on ~${Number(size?.rows ?? 0)} rows; this can take minutes; it is safe to leave running; `
+    + 'if interrupted, gbrain doctor names the rebuild command\n');
+  await engine.withReservedConnection(async conn => {
+    await conn.executeRaw(`SET lock_timeout = '${opts.lockTimeout ?? '60s'}'`);
+    await conn.executeRaw('SET statement_timeout = 0');
+    try {
+      await conn.executeRaw(index.sql.replace('CREATE INDEX', 'CREATE INDEX CONCURRENTLY'));
+    } finally {
+      await conn.executeRaw('RESET lock_timeout');
+      await conn.executeRaw('RESET statement_timeout');
+    }
+  });
+  return row ? 'rebuilt' : 'created';
+}

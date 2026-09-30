@@ -21,6 +21,7 @@ import { visibilityRepair } from './visibility.ts';
 import { safeChunksRepair } from './safe-chunks.ts';
 import { contextualModeRepair } from './contextual-mode.ts';
 import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
+import { requestIndexesRepair } from './request-indexes.ts';
 
 export interface RepairKindSpec {
   kind: RepairKind;
@@ -34,6 +35,11 @@ export interface RepairKindSpec {
 }
 
 const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
+  'request-indexes': {
+    handler: requestIndexesRepair, embeds: 'none', checks: ['persistence_request_indexes'],
+    summary: 'Create a missing managed sync request index, or drop an INVALID one and rebuild it (#5762), so sync checkpoints validate within their '
+      + 'statement budget. Postgres builds CONCURRENTLY, one index at a time. No journal admission and no user data changes. Brain-wide.',
+  },
   timeline: {
     handler: timelineRepair, embeds: 'effect', checks: ['timeline_history'],
     summary: 'Write database-only timeline rows back into their pages as marked bullets (#5567). Rows that cannot round-trip are kept and counted. Each repaired page is re-embedded by its publication.',

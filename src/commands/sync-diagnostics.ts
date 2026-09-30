@@ -11,6 +11,7 @@ export function printManagedSyncDiagnostic(result: SyncResult, sink: NodeJS.Writ
   write(`  Source: ${JSON.stringify(d.source_id)}; slug: ${JSON.stringify(d.slug)}; path: ${JSON.stringify(d.path)}`);
   write(`  Request: ${d.write_request.request_id} (${d.write_request.state})`);
   write(`  Fix: ${d.suggestion}`);
+  if (d.docs) write(`  Docs: ${d.docs}`);
   if (d.ledger_recorded === false) write('  Local failure ledger unavailable; the durable receipt above remains authoritative.');
   return true;
 }

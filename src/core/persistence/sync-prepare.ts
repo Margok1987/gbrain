@@ -27,6 +27,7 @@ import type { CompanyBrainPlan } from '../company-brain/types.ts';
 import { companyBrainProfile } from '../company-brain/profile.ts';
 import { companyBrainPolicyFingerprint } from '../company-brain/policy.ts';
 import { isUnboundSourcePage, UNBOUND_COLLISION_MESSAGE } from './unbound-source.ts';
+import { findIncompleteSyncReceipt } from './checkpoint-validation.ts';
 
 export interface SyncIntent extends Record<string, unknown> {
   companyApproval?: { schema: NonNullable<CompanyBrainPlan['schema']>; planDigest: string; extractorVersion: string; policyFingerprint: string };
@@ -127,12 +128,8 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     }
     const [manifest] = await tx.executeRaw<{ count: number }>("SELECT jsonb_array_length(completed_keys) AS count FROM op_checkpoints WHERE op='managed-sync-manifest' AND fingerprint=$1", [p.runId]);
     if (!manifest || Number(manifest.count) !== p.total) throw new OperationError('storage_error', 'The immutable sync manifest is incomplete.');
-    const [incomplete] = await tx.executeRaw(`SELECT r.id FROM persistence_requests r WHERE r.worktree_id=$1::uuid AND
-      (r.recovery IS NOT NULL OR (r.intent->>'runId'=$2 AND r.intent->>'kind' IN ('managed_sync_import','managed_sync_delete') AND r.state<>'committed'
-        AND (r.state IN ('queued','running','recovering') OR NOT EXISTS (SELECT 1 FROM persistence_requests committed
-          WHERE committed.source_id=r.source_id AND committed.intent->>'runId'=$2 AND committed.intent->>'index'=r.intent->>'index' AND committed.state='committed')))) LIMIT 1`,
-      [row.worktree_id, p.runId]);
-    if (incomplete) throw new OperationError('recovery_required', 'An incomplete page receipt still blocks the sync checkpoint.');
+    const incomplete = await findIncompleteSyncReceipt(tx, row.worktree_id!, p.runId);
+    if (incomplete) throw new OperationError('recovery_required', `An incomplete page receipt (request ${incomplete}) still blocks the sync checkpoint.`);
     const changed = await tx.executeRaw(`UPDATE sources SET last_commit=$3,last_sync_at=now(),config=jsonb_set(${SOURCE_CONFIG_OBJECT_SQL},'{slug_root_mode}',to_jsonb($5::text)),
       newest_content_at=(SELECT MAX(updated_at) FROM pages WHERE source_id=$1 AND deleted_at IS NULL)
       WHERE id=$1 AND incarnation=$2::uuid AND last_commit IS NOT DISTINCT FROM $4
