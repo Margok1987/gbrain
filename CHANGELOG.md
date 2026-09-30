@@ -72,6 +72,35 @@ Now `gbrain doctor --remediation-plan` lists every repair that has work to do, w
 - **`writer_not_quiesced` names what blocks it (#5629).** The refusal and `sources writer status` name the blocking effect id, kind, source, page and request id, plus the inspect command.
 - **Unbound collisions reconcile.** After a source is bound, a database-only page whose canonical file appears at the same path now previews in `gbrain sources reconcile <source> <slug> --preview` with both sides. `--apply` writes the resolution you chose and records the file as the page's origin.
 - **Docs.** [Recover after upgrading](docs/guides/repair.md#recover-after-upgrading-to-this-release), the #5413 quarantine commands, a claim and activate runbook with a quiescence checklist and the admin lock sequence in `docs/architecture/topologies.md`, and new rows in `docs/guides/write-refusals.md`.
+**Managed Google and GitHub connectors stop re-admitting the same pages every hour.**
+
+A managed connector saved its cursor under a key that hashed the whole `sources.config` record, and every maintenance cycle rewrote that record with its "last cycle" timestamp. So every run found no cursor, walked its whole window again and took a new permanent write ID and receipt for each unchanged page. On a slow owner it also stopped after the first write that had not published within five seconds, so the cursor was never saved and the next run started over. Reports put this at about 90% of one brain's writes and 1.3 GB of receipts in 2.5 days; the link between the rotating key and that report is inferred from the code, not reproduced on the reporter's brain.
+
+| Two identical runs of a managed connector (test fixture, both engines) | Before | After |
+| --- | --- | --- |
+| Page admissions on the second run, stable cursor | every window item | 0 |
+| Checkpoint admissions on the second run, stable cursor | 1 | 0 |
+| Checkpoint admissions per quiet run, cursor that changes every run (Calendar, Gmail) | 1 | 1 |
+| Runs that resume their saved cursor after a cycle stamp | none | all |
+
+Most real providers hand out a new cursor on every run, so a quiet source normally costs one checkpoint admission per run and nothing else.
+
+### To take advantage of v0.60.11.0
+
+Run `gbrain upgrade` on every host that runs the persistence consumer or owns a worktree first, then on hosts that run connector jobs. Migration 176 moves each connector's checkpoint to its new key; follow [the upgrade steps](skills/migrations/v0.60.11.0.md). The first run after the upgrade may re-admit a connector's window once; that spike is expected. Check the result with `gbrain sources status --json`: after the second run a quiet connector shows `page_admissions: 0`.
+
+### Itemized changes
+
+- **Stable connector identity.** The checkpoint key, the admission and publication change checks and the attachment-repair preview use the parsed connector settings minus credential-delivery fields. Cycle stamps and other bookkeeping in `sources.config` no longer restart a connector or fail its pending writes with `source_changed`.
+- **Account pinning.** Each connector source pins the account its credential belongs to. Google checks it through every enabled service (Gmail, Calendar or Contacts) before importing; GitHub records the App installation, or the login under `scope: auto`. A different account refuses with `connector_account_changed` and two exact ways out.
+- **Unchanged items take no admission.** Connector sync, managed `gbrain import`, `gbrain sync --working-tree` and company-profile sync run each item through its own publication preparation first and skip it when publishing would change nothing. Pages below the safe-chunk fence, pages whose search projection lags, deleted pages and changed pages are still published. An unchanged connector cursor is not saved again; freshness for `gbrain waiting` is stamped directly.
+- **Accepted writes count as progress.** A connector keeps going when the owner is slow, waits at most 30 seconds in total per run, and records writes still pending; the next run resolves them first and retries failed ones by itself. `extract_atoms` reports a batch the owner accepted but has not published as pending, not failed, and dream no longer halts on it. Managed `gbrain import` reports such a file as pending instead of failed.
+- **`gbrain sync --source <id> --reset-checkpoint`** re-walks one connector's window from scratch. Unchanged pages are not admitted again and the account pin is kept.
+- **`gbrain sources status`** shows each connector's upgrade recovery state and its last run's admissions, skipped pages, pending writes and checkpoint admissions.
+- **Orphan checkpoint cleanup.** `gbrain doctor` counts connector checkpoint rows no source can load (`connector_checkpoints`), and `gbrain repair connector-checkpoints` removes them after you agree.
+- **Mixed-version safety.** Connector writes use a new intent format. An older consumer refuses it with `unsupported_mutation_protocol` and the connector says which hosts to upgrade; an older connector's writes fail `connector_intent_outdated` and are fetched again after the upgrade.
+
+Contributed ideas: the no-op screen before admission builds on the approach in #5581 by @tarush1989, and the diagnosis and test cases for the cycle-stamp key rotation build on #5695 by @thebergerking91.
 
 ## [0.60.10.0] - 2026-09-29
 

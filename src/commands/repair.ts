@@ -30,7 +30,7 @@ export const REPAIR_HELP = `Usage: gbrain repair [<kind>] [--apply] [--source <i
 Repair residual damage that \`gbrain doctor\` reports. Dry run unless --apply.
 
 Kinds:
-${REPAIR_REGISTRY.map(spec => `  ${spec.kind.padEnd(12)} ${wrap(spec.summary, 15)}`).join('\n')}
+${REPAIR_REGISTRY.map(spec => `  ${spec.kind.length < 13 ? spec.kind.padEnd(12) : `${spec.kind}\n${' '.repeat(14)}`} ${wrap(spec.summary, 15)}`).join('\n')}
 
 Options:
   --apply        Write the repair (no prompt). Without it, only preview.

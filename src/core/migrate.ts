@@ -24,6 +24,7 @@ import { FACT_WITHDRAWAL_SCHEMA_SQL, FACT_WITHDRAWAL_BACKFILL_SQL, FACT_WITHDRAW
 import { repairLegacyClientGrants } from './grants/migration.ts';
 import { PROJECTION_STATISTICS_SQL, verifyProjectionStatistics } from './search/projection-statistics.ts';
 import { SHARED_SKILLS_SCHEMA_SQL } from './shared-skills/schema-all.ts';
+import { migrateConnectorCheckpoints } from './persistence/connector-checkpoint-migration.ts';
 
 /**
  * When true, per-migration explanatory notices (e.g. the v123/v124 "here is
@@ -6776,6 +6777,16 @@ CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON minion_jobs
     name: 'tags_tag_source',
     idempotent: true,
     sql: `ALTER TABLE tags ADD COLUMN IF NOT EXISTS tag_source TEXT;`,
+  },
+  {
+    // #5686: connector checkpoints were keyed on the raw sources.config, which
+    // the cycle stamp rewrites after every run. Re-key each source's newest
+    // committed checkpoint receipt to the stable parsed-config identity, seed
+    // its connector state row (resumed or re-walking once), record the cutoff
+    // that classifies retired-format connector intents, and remove orphan
+    // checkpoint rows. Handler-only, statement-at-a-time, rerun-safe.
+    version: 176, name: 'connector_checkpoint_stable_identity', idempotent: true, sql: '',
+    handler: async engine => { await migrateConnectorCheckpoints(engine); },
   },
   {
     // Writer-version stamps: each request records the binary version and host

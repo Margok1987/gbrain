@@ -19,14 +19,15 @@ import { REPAIR_KINDS, runRepair, type RepairHandler, type RepairKind, type Repa
 import { timelineRepair } from './timeline.ts';
 import { visibilityRepair } from './visibility.ts';
 import { safeChunksRepair } from './safe-chunks.ts';
+import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
 
 export interface RepairKindSpec {
   kind: RepairKind;
   handler: RepairHandler;
   /** Help text for `REPAIR_HELP`, wrapped at 80 columns by the caller. */
   summary: string;
-  /** How the kind can spend on embeddings. */
-  embeds: 'effect' | 'inline';
+  /** How the kind can spend on embeddings; `none` for bookkeeping-row kinds. */
+  embeds: 'effect' | 'inline' | 'none';
   /** Doctor check ids whose findings this kind clears. */
   checks: string[];
 }
@@ -45,13 +46,18 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     summary: 'Re-seal pages of every kind (markdown and code) chunked before the safe-chunk fence, which remote/MCP search withholds (#5050, #5247). '
       + 'Projection-only: no page write and no journal admission. Unchanged vectors are kept; the rest are embedded unless --no-embed.',
   },
+  'connector-checkpoints': {
+    handler: connectorCheckpointsRepair, embeds: 'none', checks: ['connector_checkpoints'],
+    summary: 'Delete connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days (#5686). '
+      + 'Cleanup only; no journal admission. Rows a pending write still references are kept. Brain-wide.',
+  },
 };
 
 export const REPAIR_REGISTRY: readonly RepairKindSpec[] = REPAIR_KINDS.map(kind => ({ kind, ...SPECS[kind] }));
 
 /** Whether a kind may spend on embeddings under these flags (before knowing whether a model is configured). */
 export function repairMaySpend(spec: RepairKindSpec, noEmbed?: boolean): boolean {
-  return spec.embeds === 'effect' || !noEmbed;
+  return spec.embeds === 'effect' || (spec.embeds === 'inline' && !noEmbed);
 }
 
 export function repairSpec(kind: RepairKind): RepairKindSpec {

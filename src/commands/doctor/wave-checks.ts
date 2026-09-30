@@ -68,6 +68,12 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     run: async (engine, scope) => (await import('./checks/safe-index.ts')).safeIndexPendingCheck(engine, scope.sourceIds),
   },
   {
+    id: 'connector_checkpoints', resolution: 'repair', registration: 'wave',
+    count: d => Number(d.count ?? 0),
+    impact: 'Some connector checkpoint rows can no longer be loaded by any connector source',
+    run: async engine => (await import('./checks/connector-checkpoints.ts')).checkConnectorCheckpoints(engine),
+  },
+  {
     id: 'persistence_capacity', resolution: 'operator', registration: 'doctor.ts',
     count: d => (d.resources ?? []).length,
     impact: 'A cumulative managed-write limit is at or above 80%',

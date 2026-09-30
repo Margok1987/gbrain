@@ -26,8 +26,8 @@ export interface RepairPlanStep {
   protected: true;
   /** May spend on embeddings (a model is configured and the kind embeds under these flags). */
   paid: boolean;
-  /** `effect`: the persistence consumer embeds after publication, so the estimate is charged against the cap up front. */
-  embeds: 'effect' | 'inline';
+  /** `effect`: the persistence consumer embeds after publication, so the estimate is charged against the cap up front. `none`: never embeds. */
+  embeds: 'effect' | 'inline' | 'none';
   /** USD estimate; null when the step is paid and the model price is unknown. */
   est_usd_cost: number | null;
   lifetime_ids: number;

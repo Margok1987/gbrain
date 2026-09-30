@@ -8472,6 +8472,58 @@ A timeline repair can make pages gain marked bullets. That is the fix: the
 history is now visible in the page and survives later edits. Deleting a marked
 bullet in a save that passes the current `expected_revision` deletes its entry.
 
+<a id="connector-checkpoints"></a>
+### Connector checkpoints and the upgrade to v0.60.11.0
+
+Managed Google and GitHub connector checkpoints are keyed on the parsed
+connector settings minus credential-delivery fields, so the per-cycle
+`last_source_cycle_at` stamp no longer makes every run start over. The
+v0.60.11.0 migration copies each connector source's newest committed
+checkpoint to the new key. A source whose newest checkpoint receipt was
+compacted re-walks its window once; unchanged pages are not admitted again.
+
+**Say to your agent:** *"Did my Gmail connector stop re-importing everything
+every hour?"* The agent runs `gbrain sources status --json` and reads the
+connector block below.
+
+`gbrain sources status --json` adds a `connector` object to each Google or
+GitHub source:
+
+```json
+"connector": {
+  "upgrade_recovery": "resumed",
+  "resumed_from": "2026-09-28 17:04:11.52+00",
+  "account_pinned": true,
+  "continuity_unverified": true,
+  "pending": 0,
+  "last_run": { "page_admissions": 0, "skipped_unchanged": 412, "pending": 0, "checkpoint_admissions": 1,
+                "stopped_on_wait_budget": false, "dropped_upstream": 0, "finished_at": "2026-09-29T21:00:03.114Z" }
+}
+```
+
+- `upgrade_recovery`: `resumed` (the migration copied a pre-upgrade checkpoint
+  from `resumed_from`), `rewalking_once` (until the first post-upgrade run
+  finishes) or `none`. Content selection since `resumed_from` is unverified;
+  if you changed a content setting since then, re-walk once with
+  `gbrain sync --source <id> --reset-checkpoint`.
+- `account_pinned` / `continuity_unverified`: the account the credential
+  resolved to is pinned on the first run. A migrated source is pinned on its
+  first post-upgrade run, so continuity before the upgrade is unverified. The
+  account itself is never printed here.
+- `last_run`: page admissions, unchanged pages skipped without an admission,
+  writes still pending, checkpoint admissions, whether the 30-second wait
+  budget stopped the run, and items dropped because they were deleted
+  upstream. A quiet source shows `page_admissions: 0`; a provider whose
+  cursor changes every run (Calendar sync token, Gmail history id) shows one
+  checkpoint admission per run.
+
+`gbrain sync --source <id> --reset-checkpoint` discards that connector
+source's checkpoint, including Google backfill state, after resolving its
+pending writes, and re-walks the configured window once. Existing pages stay,
+unchanged ones take no admission, and the account pin is kept. It refuses on a
+Git-backed source and while the account differs
+([`connector_account_changed`](write-refusals.md#connector-account-changed)).
+
 ## Resume
 
 Runs are resumable. After each page commits, the position is saved under the
@@ -8733,6 +8785,9 @@ of making a duplicate.
 | `take_row_collision` | `take_row_collision` | A save adds a takes-table row whose row number already belongs to a different take that exists only in the database. The save stops instead of overwriting that take. | Renumber the new takes row, or add the existing take to the page's takes table, then save with the current `expected_revision` and a **new** request ID (the content changed). |
 | `invalid_source_uri` | `invalid_source_uri` | The brain has shared skillpacks, and the page's stored `source_uri` is a `file:` URI that cannot be turned into a local path, so gbrain cannot prove the write stays outside a skillpack. Shared-skill protection stays on. | The source owner inspects the page's stored `source_uri` on the brain host and replaces it with an absolute file URI or clears it; there is no dedicated command yet. Retry with a **new** request ID. |
 | `queue_capacity` | `queue_capacity` | Admission would exceed a write-journal limit. Existing requests keep their place; nothing is evicted. For the cumulative limits (lifetime request IDs and receipt bytes), `detail` names the limit, for example `principal_lifetime_ids`. | For a cumulative limit, run the printed `gbrain config set persistence.limits.<limit> <value>` (sized for about one more year at the current rate), then retry with the **same** request ID. For outstanding-request, queued-byte or recovery-byte limits, let outstanding requests finish and check `gbrain sources writer status`. See [bounded admission and retention](concurrent-writes.md#bounded-admission-and-retention). |
+| <a id="connector-account-changed"></a>`account_changed`, `account_unresolved` | `connector_account_changed` | A managed Google or GitHub connector's credential resolves to a different account than the one pinned for the source (Google email, GitHub App installation or login), or to no account at all. Google checks every enabled service before any service runs. Nothing was imported. No reset flag authorizes an account change. | The suggestion gives two branches with real values. (A) Restore the credential for the pinned account (the configured `g_token_env`, `g_token_command`, vault credential, `gh_token_env` or GitHub App key), then `gbrain sync --source <source>`. (B) For a deliberate change, add a new source for the new account (`gbrain google setup --account <email>`, or `gbrain sources add <new-id> --kind github … --app-install <id>`), then `gbrain sources archive <source>`; existing pages stay under the old source. |
+| <a id="connector-intent-outdated"></a>`pre_upgrade` | `connector_intent_outdated` | A connector write was admitted in the intent format retired in v0.60.11.0. With detail `pre_upgrade` it was admitted before this brain's upgrade; otherwise a connector host older than v0.60.11.0 admitted it. The consumer recovers any file publication in progress first, then fails the request. | `pre_upgrade`: nothing to do; the item is fetched again on the next `gbrain sync --source <source>` under a new request ID. Otherwise: `gbrain upgrade` on the host that runs connector jobs, then `gbrain sync --source <source>`. |
+| <a id="unsupported-mutation-protocol"></a>`consumer_upgrade_required` | `unsupported_mutation_protocol` | A v0.60.11.0 connector sent a `connector_v2_*` write to a persistence consumer older than v0.60.11.0, which does not know the format. Other `permission_denied` refusals on connector receipts are never relabeled as upgrades. | `gbrain upgrade` on every consumer and worktree-owner host, then `gbrain sync --source <source>`. Upgrade those hosts before connector hosts. |
 | `targets_parked` (doctor: `parked_effects`) | effect `error_code` | A Git backup or withdrawal target failed five times in a row and was set aside so the other pages keep committing. The page write itself committed; its Git backup or withdrawal is incomplete. Contention, dependency waits, shutdown and transient database errors never count toward the five. | `gbrain sources writer status <source>`, fix the cause it names, preview with `gbrain sources writer retry-effects <source> --request-id <id> --dry-run`, then run it without `--dry-run`. Each run grants one more attempt per parked target; a target that fails again parks again. |
 | <a id="writer_admin_locked"></a>`writer_admin_locked` | `writer_admin_locked` | The operator set the brain's writer admin lock (`gbrain sources writer lock`), so writer claim, activate, transfer prepare and transfer accept refuse for every caller. Ordinary writes are not affected. | Agents: stop and ask the operator; do not unlock it yourself. The operator runs, on the brain host, `gbrain sources writer unlock`, re-reads `gbrain sources writer status <source> --json`, administers, then `gbrain sources writer lock` again. See the [writer admin lock](../architecture/topologies.md#writer-admin-lock). |
 | <a id="writer_not_quiesced"></a>`writer_not_quiesced` | `writer_not_quiesced` | Activation found an older writer, a legacy lock, or queued, running or recovering work. When work blocks it, the message names the blocking effect id, kind, source, page and request id. | Stop the writers named in the [claim and activate runbook](../architecture/topologies.md#claim-and-activate-runbook), inspect the named work with `gbrain sources writer status <source> --json`, let it finish, then retry. A committed write whose queued embedding effect is never claimed cannot be cleared by a command yet; see [stale queued embedding effects](repair.md#stale-queued-embedding-effects). |
