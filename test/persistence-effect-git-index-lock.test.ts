@@ -73,16 +73,17 @@ test('an aborted git run that held the lock leaves it in place; the next attempt
     writeFileSync(join(bin, 'git'), `#!/bin/sh
 root=""; prev=""
 for a in "$@"; do [ "$prev" = "-C" ] && root="$a"; prev="$a"; done
-for a in "$@"; do if [ "$a" = "add" ]; then : > "$root/.git/index.lock"; exec sleep 30; fi; done
+for a in "$@"; do if [ "$a" = "add" ]; then : > "$root/.git/index.lock"; : > "$root/.git/shim-add-holds-lock"; exec sleep 30; fi; done
 exec ${realGit} "$@"
 `, { mode: 0o755 });
     const lock = join(root, '.git', 'index.lock');
+    const holding = join(root, '.git', 'shim-add-holds-lock');
     const abort = new AbortController();
     const run = withEnv({ PATH: `${bin}:${process.env.PATH}` }, async () => {
       const pending = commitGitTargets(root, ['a.md'], abort.signal);
-      // Abort only once the shim holds the lock.
-      for (let i = 0; i < 1000 && !existsSync(lock); i++) await new Promise(resolve => setTimeout(resolve, 5));
-      expect(existsSync(lock)).toBe(true);
+      // Abort only once the shim's add holds the lock (git status may briefly take and release its own lock first).
+      for (let i = 0; i < 1000 && !existsSync(holding); i++) await new Promise(resolve => setTimeout(resolve, 5));
+      expect(existsSync(holding)).toBe(true);
       abort.abort();
       return pending;
     });

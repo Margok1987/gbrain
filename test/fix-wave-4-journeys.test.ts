@@ -291,7 +291,12 @@ test('journey (c): a checkpoint timeout with a dropped index recovers with the r
 for (const backend of testBackends()) {
   test(`journey (d) ${backend}: deactivate a brain activated for real, with the printed commands`, () => managedBrain(async ({ engine, ctx, root }) => {
     await put(ctx, 'notes/one', 'Body one.');
+    // Quiesce the writer first, as the runbook does: the owner finishes (and clears the recovery of) its last publication.
+    await disposePersistenceConsumer(engine);
     await engine.transaction(async tx => { await declarePersistenceProtocol(tx); await tx.executeRaw("UPDATE persistence_effects SET state='committed'"); });
+    for (let i = 0; i < 100 && (await engine.executeRaw("SELECT 1 FROM persistence_requests WHERE recovery IS NOT NULL OR state IN ('queued','running','recovering')")).length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     expect(existsSync(join(root, '.gbrain-managed'))).toBe(true);
     const j = journey(`deactivate (${backend})`);
     const dry = await j.run(engine, 'gbrain sources writer deactivate --dry-run');
