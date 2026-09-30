@@ -24,13 +24,9 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
-const AUTOPILOT_SRC = readFileSync(
-  join(import.meta.dir, '..', 'src', 'commands', 'autopilot.ts'),
-  'utf8',
-);
+const AUTOPILOT_SRC = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
 
 describe('autopilot.ts ↔ ChildWorkerSupervisor wiring', () => {
   it('imports ChildWorkerSupervisor from the shared core', () => {

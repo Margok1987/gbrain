@@ -17,11 +17,9 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { resolveAutopilotDispatchTimeoutMs } from '../src/commands/autopilot-timeout.ts';
 import { defaultTimeoutMsFor } from '../src/core/minions/handler-timeouts.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
-const AUTOPILOT_SRC = readFileSync(
-  join(import.meta.dir, '..', 'src', 'commands', 'autopilot.ts'),
-  'utf8',
-);
+const AUTOPILOT_SRC = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
 
 const AUTOPILOT_TIMEOUT_SRC = readFileSync(
   join(import.meta.dir, '..', 'src', 'commands', 'autopilot-timeout.ts'),

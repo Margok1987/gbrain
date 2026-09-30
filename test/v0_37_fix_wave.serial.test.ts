@@ -9,9 +9,10 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 // Lane A — defaults sweep
 describe('v0.37 Lane A — defaults sweep', () => {
@@ -269,7 +270,7 @@ describe('v0.37 Lane D.4 — sync --help dispatch', () => {
   test('CDX2-12: sync is in CLI_ONLY_SELF_HELP', async () => {
     // This is a structural test — read the cli.ts source and assert
     // sync appears in the set. Avoids requiring engine wiring.
-    const src = readFileSync(join(__dirname, '..', 'src', 'cli.ts'), 'utf-8');
+    const src = surfaceFileSource('cli', 'src/cli.ts');
     // Match the CLI_ONLY_SELF_HELP set definition.
     const setMatch = src.match(/const CLI_ONLY_SELF_HELP = new Set\(\[([\s\S]*?)\]\)/);
     expect(setMatch).not.toBeNull();
@@ -281,7 +282,7 @@ describe('v0.37 Lane D.4 — sync --help dispatch', () => {
 // Deferred-TODO ship: gbrain reinit-pglite
 describe('v0.37 deferred TODO shipped — gbrain reinit-pglite', () => {
   test('reinit-pglite is registered in CLI_ONLY + CLI_ONLY_SELF_HELP', () => {
-    const src = readFileSync(join(__dirname, '..', 'src', 'cli.ts'), 'utf-8');
+    const src = surfaceFileSource('cli', 'src/cli.ts');
     const onlyMatch = src.match(/const CLI_ONLY = new Set\(\[([\s\S]*?)\]\)/);
     expect(onlyMatch).not.toBeNull();
     expect(onlyMatch![1]).toContain(`'reinit-pglite'`);

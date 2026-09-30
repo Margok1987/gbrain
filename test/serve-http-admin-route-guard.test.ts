@@ -21,8 +21,8 @@
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
-const SRC_PATH = join(import.meta.dir, '..', 'src', 'commands', 'serve-http.ts');
 
 // ---------------------------------------------------------------------------
 // Extractor
@@ -136,7 +136,7 @@ const ALLOWLIST: AllowlistEntry[] = [
 // The scan, run once against the real file
 // ---------------------------------------------------------------------------
 
-const source = readFileSync(SRC_PATH, 'utf-8') + '\n' + ['serve-http-oauth.ts', 'serve-http-grants.ts', 'serve-http-registration.ts', 'serve-http-clients.ts'].map(file => readFileSync(join(import.meta.dir, '..', 'src', 'commands', file), 'utf-8')).join('\n');
+const source = surfaceFileSource('serve-http', 'src/commands/serve-http.ts') + '\n' + ['serve-http-oauth.ts', 'serve-http-grants.ts', 'serve-http-registration.ts', 'serve-http-clients.ts'].map(file => readFileSync(join(import.meta.dir, '..', 'src', 'commands', file), 'utf-8')).join('\n');
 const all = extractRegistrations(source);
 const admin = adminRoutes(all);
 const guarded = admin.filter(r => r.guarded);

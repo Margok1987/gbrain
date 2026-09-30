@@ -244,6 +244,7 @@ import { readFileSync } from 'fs';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 function filteredCatchAllPack(name: string, filterLines: string): string {
   return `api_version: gbrain-schema-pack-v1
@@ -313,7 +314,7 @@ describe('#4651 catch-all retype carries slug_filter/path_filter into synthesize
 
 describe('#1575 unify-types worker dry-run default', () => {
   it('jobs.ts worker registration defaults apply to false, matching the handler contract', () => {
-    const jobsSource = readFileSync(new URL('../src/commands/jobs.ts', import.meta.url), 'utf-8');
+    const jobsSource = surfaceFileSource('jobs', 'src/commands/jobs.ts');
     const workerBlock = jobsSource.slice(jobsSource.indexOf("worker.register('unify-types'"));
     const registration = workerBlock.slice(0, workerBlock.indexOf('});'));
     expect(registration).toContain('apply: data.apply ?? false');

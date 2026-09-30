@@ -17,6 +17,7 @@ import {
 import { inferLinkTypeFromPack } from '../src/core/schema-pack/link-inference.ts';
 import { linkRegexCatastrophicBacktrack } from '../src/core/schema-pack/lint-rules.ts';
 import type { SchemaPackManifest } from '../src/core/schema-pack/manifest-v1.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 describe('#1569 input-length cap', () => {
   test('runRegexBounded throws RegexInputTooLargeError over the cap', () => {
@@ -122,7 +123,7 @@ describe('#1569 star-height lint rule', () => {
 });
 
 describe('#1569 --no-schema-pack + heartbeat wiring (structural)', () => {
-  const SYNC = readFileSync(join(import.meta.dir, '..', 'src', 'commands', 'sync.ts'), 'utf-8');
+  const SYNC = surfaceFileSource('sync', 'src/commands/sync.ts');
 
   test('SyncOpts carries noSchemaPack and it gates loadActivePack', () => {
     expect(SYNC).toContain('noSchemaPack?: boolean');

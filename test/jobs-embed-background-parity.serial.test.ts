@@ -30,6 +30,7 @@ mock.module('../src/core/embedding.ts', () => ({
 import { MinionWorker } from '../src/core/minions/worker.ts';
 import { registerBuiltinHandlers } from '../src/commands/jobs.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 let engine: PGLiteEngine;
 const savedKey = process.env.OPENAI_API_KEY;
@@ -108,7 +109,7 @@ describe('embed job background parity (D7)', () => {
     expect(embedSrc).toMatch(/paramBuilder[\s\S]{0,2500}batchSize/);
     expect(embedSrc).toMatch(/paramBuilder[\s\S]{0,2500}priority/);
 
-    const jobsSrc = readFileSync(join(import.meta.dir, '..', 'src', 'commands', 'jobs.ts'), 'utf-8');
+    const jobsSrc = surfaceFileSource('jobs', 'src/commands/jobs.ts');
     expect(jobsSrc).toContain('catchUp: !!job.data.catchUp');
     expect(jobsSrc).toContain('includeNullSignature: !!job.data.includeNullSignature');
     expect(jobsSrc).toMatch(/'embed-catch-up'[\s\S]{0,900}includeNullSignature/);

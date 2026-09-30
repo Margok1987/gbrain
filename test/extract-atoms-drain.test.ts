@@ -16,6 +16,7 @@ import {
   type ExtractAtomsDrainDeps,
 } from '../src/core/cycle/extract-atoms-drain.ts';
 import { isProtectedJobName, PROTECTED_JOB_NAMES } from '../src/core/minions/protected-names.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 function seq(values: Array<number | null>): () => Promise<number | null> {
   let i = 0;
@@ -222,7 +223,7 @@ describe('protected-names register comment names the real trust mechanism', () =
 // (attempt+backoff / dead-letter) retries the durable job instead of the
 // backlog silently completing untouched.
 describe('extract-atoms-drain Minion handler retries on provider_failure (issue #3218)', () => {
-  const jobsSrc = readFileSync(join(import.meta.dir, '../src/commands/jobs.ts'), 'utf8');
+  const jobsSrc = surfaceFileSource('jobs', 'src/commands/jobs.ts');
   const handlerBlock = jobsSrc.slice(
     jobsSrc.indexOf("registerBuiltinJob(worker, engine, 'extract-atoms-drain'"),
     jobsSrc.indexOf("registerBuiltinJob(worker, engine, 'extract-atoms-drain'") + 2200,
