@@ -304,11 +304,12 @@ jobs:
         # executed-test counts differ between the two backends.
         shell: bash
         run: |
+          export DATABASE_URL="postgresql://postgres:${PGPASSWORD}@localhost:5432/gbrain_test"
+          export GBRAIN_PGBOUNCER_E2E_URL="postgresql://postgres:${PGPASSWORD}@localhost:55433/gbrain_test?prepare=false"
           mapfile -t files < <(grep -v -e '^#' -e '^!' -e '^$' scripts/e2e-backend-matrix.txt | cut -f1)
           bash scripts/run-e2e.sh "${files[@]}"
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gbrain_test
-          GBRAIN_PGBOUNCER_E2E_URL: postgresql://postgres:postgres@localhost:55433/gbrain_test?prepare=false
+          PGPASSWORD: postgres
           GBRAIN_CI_REQUIRE_PGBOUNCER: '1'
           GBRAIN_TEST_DB: '1'
           GBRAIN_TEST_ALLOW_DATABASE_URL: '1'

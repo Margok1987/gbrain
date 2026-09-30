@@ -150,7 +150,7 @@ for _e2e_var in $(env | grep -oE '^(CONDUCTOR_|MCP_|OPENCLAW_|HERMES_|GROK_|OPEN
     GBRAIN_CI_DISABLE_TEST_ENV_FILE) ;;  # CI forbids loading checkout-local .env.testing — keep through Bun startup
     GBRAIN_TEST_DB) ;;  # explicit schema-reset opt-in for service hosts; schema-drift still requires a test-shaped DB name
     GBRAIN_PGBOUNCER_URL|GBRAIN_PGBOUNCER_DIRECT_URL|GBRAIN_CI_REQUIRE_PGBOUNCER) ;; # explicit pooler test target and execution requirement
-    GBRAIN_PGBOUNCER_E2E_URL) ;; # backend-matrix pooled target (scripts/e2e-backend-matrix.txt)
+    GBRAIN_PGBOUNCER_E2E_URL|GBRAIN_PGBOUNCER_E2E_DB) ;; # backend-matrix pooled target (scripts/e2e-backend-matrix.txt)
     GBRAIN_E2E_FILE_TIMEOUT) ;;  # per-file cap override — read AFTER this scrub, so it must survive it
     GBRAIN_E2E_ALLOW_DB) ;;  # #3485 name-floor opt-in — the guard's own error
                              # message tells operators to set it; stripping it
@@ -258,7 +258,20 @@ backend_matrix_timeouts=" "
     *pooled-timeout=*) backend_matrix_timeouts+="${line%%[[:space:]]*}=${line##*pooled-timeout=} " ;;
   esac
 done < "$BACKEND_MATRIX_FILE"
+# The pooled target is either a full URL (GBRAIN_PGBOUNCER_E2E_URL) or a
+# database name behind the pooler named by GBRAIN_PGBOUNCER_URL
+# (GBRAIN_PGBOUNCER_E2E_DB); the second form creates that database through
+# GBRAIN_PGBOUNCER_DIRECT_URL on first use and always pins prepare=false.
 PGBOUNCER_E2E_URL="${GBRAIN_PGBOUNCER_E2E_URL:-}"
+PGBOUNCER_E2E_DB="${GBRAIN_PGBOUNCER_E2E_DB:-}"
+if [ -z "$PGBOUNCER_E2E_URL" ] && [ -n "$PGBOUNCER_E2E_DB" ]; then
+  if [ -z "${GBRAIN_PGBOUNCER_URL:-}" ]; then
+    echo "ERROR: GBRAIN_PGBOUNCER_E2E_DB needs GBRAIN_PGBOUNCER_URL (the pooler to reach it through)." >&2
+    exit 2
+  fi
+  PGBOUNCER_E2E_URL="${GBRAIN_PGBOUNCER_URL%/*}/${PGBOUNCER_E2E_DB}?prepare=false"
+fi
+pooled_db_ready=0
 if [ -n "$PGBOUNCER_E2E_URL" ]; then
   case "$PGBOUNCER_E2E_URL" in
     *[?\&]prepare=false|*[?\&]prepare=false\&*) ;;
@@ -422,13 +435,17 @@ for f in "${files[@]}"; do
     if [ -z "$PGBOUNCER_E2E_URL" ]; then
       if [ "${GBRAIN_CI_REQUIRE_PGBOUNCER:-0}" = "1" ]; then
         echo "$output" | tail -8
-        echo "FAILED: $name is in $BACKEND_MATRIX_FILE but GBRAIN_PGBOUNCER_E2E_URL is unset, so its PgBouncer pass cannot run"
+        echo "FAILED: $name is in $BACKEND_MATRIX_FILE but neither GBRAIN_PGBOUNCER_E2E_URL nor GBRAIN_PGBOUNCER_E2E_DB is set, so its PgBouncer pass cannot run"
         rc=1
       fi
     else
       echo "--- $name [pgbouncer] ---"
       echo "$output" | tail -8
       psql "$DATABASE_URL" -At -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid != pg_backend_pid() AND datname = current_database()" >/dev/null 2>&1 || true
+      if [ "$pooled_db_ready" = "0" ] && [ -n "$PGBOUNCER_E2E_DB" ] && [ -n "${GBRAIN_PGBOUNCER_DIRECT_URL:-}" ]; then
+        bun scripts/lib/ensure-e2e-database.ts "$GBRAIN_PGBOUNCER_DIRECT_URL" "$PGBOUNCER_E2E_DB" || echo "WARN: could not create $PGBOUNCER_E2E_DB; the pooled pass will report the connection error"
+        pooled_db_ready=1
+      fi
       pooled_timeout_cmd="$TIMEOUT_CMD"
       case "$backend_matrix_timeouts" in
         *" ${f#./}="*)

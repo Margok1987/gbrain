@@ -48,11 +48,15 @@ describe('scripts/e2e-backend-matrix.txt', () => {
   });
 
   test('CI lanes supply the pooled target with an explicit prepare mode and require its execution', () => {
-    for (const file of ['scripts/ubicloud/ci-item.sh', 'scripts/ci-local.sh', '.github/workflows/e2e.yml']) {
+    for (const file of ['scripts/ubicloud/ci-item.sh', '.github/workflows/e2e.yml']) {
       const text = readFileSync(join(REPO, file), 'utf8');
-      expect(text, file).toMatch(/GBRAIN_PGBOUNCER_E2E_URL[=:]\s*['"]?\S+\?prepare=false/);
+      expect(text, file).toMatch(/GBRAIN_PGBOUNCER_E2E_URL=\S+\?prepare=false/);
       expect(text, file).toContain('GBRAIN_CI_REQUIRE_PGBOUNCER');
     }
+    // ci:local names a database behind its single pooler; run-e2e.sh pins prepare=false.
+    const local = readFileSync(join(REPO, 'scripts/ci-local.sh'), 'utf8');
+    expect(local.match(/GBRAIN_PGBOUNCER_E2E_DB=\S+/g)?.length).toBe(4);
+    expect(local).toContain('GBRAIN_CI_REQUIRE_PGBOUNCER');
   });
 });
 
@@ -80,12 +84,12 @@ test.skipIf(process.env.SKIP_ON === process.env.GBRAIN_TEST_BACKEND)('backend-se
         SHARD: '',
         COVERAGE_DIR: '',
         GBRAIN_DATABASE_URL: '',
-        DATABASE_URL: 'postgresql://postgres:postgres@127.0.0.1:1/gbrain_test',
+        DATABASE_URL: 'postgresql://postgres@127.0.0.1:1/gbrain_test',
         ...env,
       },
     });
   }
-  const pooled = 'postgresql://postgres:postgres@127.0.0.1:2/gbrain_test?prepare=false';
+  const pooled = 'postgresql://postgres@127.0.0.1:2/gbrain_test?prepare=false';
 
   test('a listed file runs on postgres-direct then pgbouncer with equal counts; unlisted files run once', () => {
     const root = setup('');
@@ -94,7 +98,7 @@ test.skipIf(process.env.SKIP_ON === process.env.GBRAIN_TEST_BACKEND)('backend-se
       const r = run(root, { GBRAIN_PGBOUNCER_E2E_URL: pooled, GBRAIN_CI_REQUIRE_PGBOUNCER: '1' });
       expect(r.status, r.stdout + r.stderr).toBe(0);
       expect(readFileSync(join(root, 'passes.txt'), 'utf8').trim().split('\n')).toEqual([
-        'postgres-direct postgresql://postgres:postgres@127.0.0.1:1/gbrain_test',
+        'postgres-direct postgresql://postgres@127.0.0.1:1/gbrain_test',
         `pgbouncer ${pooled}`,
       ]);
       expect(r.stdout).toContain('m.test.ts postgres-direct=2 pgbouncer=2');
@@ -116,6 +120,21 @@ test.skipIf(process.env.SKIP_ON === process.env.GBRAIN_TEST_BACKEND)('backend-se
     }
   });
 
+  test('a pooled database name derives the URL from the pooler with prepare=false pinned', () => {
+    const root = setup('');
+    try {
+      writeFileSync(join(root, 'test/e2e/m.test.ts'), record(root));
+      const r = run(root, { GBRAIN_PGBOUNCER_URL: 'postgresql://postgres@127.0.0.1:2/gbrain_pgbouncer_test', GBRAIN_PGBOUNCER_E2E_DB: 'gbrain_pooled_2_test' });
+      expect(r.status, r.stdout + r.stderr).toBe(0);
+      expect(readFileSync(join(root, 'passes.txt'), 'utf8')).toContain('pgbouncer postgresql://postgres@127.0.0.1:2/gbrain_pooled_2_test?prepare=false');
+      const missing = run(root, { GBRAIN_PGBOUNCER_URL: '', GBRAIN_PGBOUNCER_E2E_DB: 'gbrain_pooled_2_test' });
+      expect(missing.status).toBe(2);
+      expect(missing.stderr).toContain('GBRAIN_PGBOUNCER_E2E_DB needs GBRAIN_PGBOUNCER_URL');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('a pooled URL without an explicit prepare mode is refused', () => {
     const root = setup("import {test,expect} from 'bun:test'; test('x',()=>expect(1).toBe(1));");
     try {
@@ -132,7 +151,7 @@ test.skipIf(process.env.SKIP_ON === process.env.GBRAIN_TEST_BACKEND)('backend-se
     try {
       const r = run(root, { GBRAIN_CI_REQUIRE_PGBOUNCER: '1' });
       expect(r.status).toBe(1);
-      expect(r.stdout).toContain('is in scripts/e2e-backend-matrix.txt but GBRAIN_PGBOUNCER_E2E_URL is unset');
+      expect(r.stdout).toContain('is in scripts/e2e-backend-matrix.txt but neither GBRAIN_PGBOUNCER_E2E_URL nor GBRAIN_PGBOUNCER_E2E_DB is set');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

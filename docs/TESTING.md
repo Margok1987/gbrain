@@ -447,10 +447,14 @@ port 6543 and CI poolers listen elsewhere; the runner refuses a pooled URL
 without it. With `GBRAIN_CI_REQUIRE_PGBOUNCER=1`, a listed file fails when no
 pooled URL is configured.
 
-`ci:ubicloud` routes each slot's own pooler at the slot database, `ci:local`
-gives each shard a `gbrain_pooled_<N>_test` database behind its single pooler
-(created by `scripts/lib/ensure-e2e-database.ts`), and `e2e.yml` tier1 runs
-the list against a `pgbouncer` service. An entry may carry
+Instead of a full URL, a lane may set `GBRAIN_PGBOUNCER_E2E_DB=<name>`: the
+runner then reaches that database through the pooler in
+`GBRAIN_PGBOUNCER_URL`, pins `prepare=false` itself, and creates the database
+on first use through `GBRAIN_PGBOUNCER_DIRECT_URL`
+(`scripts/lib/ensure-e2e-database.ts`). `ci:ubicloud` routes each slot's own
+pooler at the slot database, `ci:local` gives each shard a
+`gbrain_pooled_<N>_test` database behind its single pooler, and `e2e.yml`
+tier1 runs the list against a `pgbouncer` service. An entry may carry
 `<TAB>pooled-timeout=<seconds>` when its pooled pass needs more than the
 per-file cap; `!path<TAB>reason` records a parity file deliberately left out.
 `test/scripts/e2e-backend-matrix.test.ts` pins the list's completeness, the CI
