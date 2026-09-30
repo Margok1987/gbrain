@@ -78,9 +78,10 @@ Per-file detail is in `docs/architecture/KEY_FILES.md`.
   imports use static top-level imports. Besides the snapshot loader's lazy
   `require()` cluster in `pglite-engine.ts:tryLoadSnapshot` (fs/crypto + one
   gateway shape lookup — lazy so production builds without the test-fixture
-  path don't eager-load; the snapshot hash reads migrate.ts/pglite-schema.ts
-  FILE BYTES, never the loaded modules, so coverage instrumentation can't
-  skew it; the guard now matches `require()` calls too), the only
+  path don't eager-load; the snapshot hash reads the FILE BYTES of the schema
+  import closure (`src/core/snapshot-schema-inputs.ts`), never the loaded
+  modules, so coverage instrumentation can't skew it; the guard now matches
+  `require()` calls too), the only
   dynamic-`import()` exceptions
   are the four `ai/gateway.ts` lookups in both engines'
   `initSchema()` and `_upsertChunksOnce()` methods; each remains lazy inside a
@@ -98,9 +99,8 @@ Per-file detail is in `docs/architecture/KEY_FILES.md`.
 - **Contract-first.** `src/core/operations.ts` is the single source; CLI + MCP are generated
   from it. Every op carries `scope: 'read'|'write'|'admin'` + optional `localOnly`. HTTP
   dispatch enforces scope/localOnly before the handler runs.
-- **Migrations.** Schema DDL migrations live one per file in `src/core/schema-migrations/`
-  (`bun run new:migration <name>`; `build:schema-migrations` regenerates the registry;
-  `migrate.ts` is the runner). `CREATE INDEX CONCURRENTLY` needs `transaction: false` (pre-drop invalid remnants on
+- **Migrations.** One file per schema migration in `src/core/schema-migrations/`
+  (`bun run new:migration <name>`; `migrate.ts` is the runner). `CREATE INDEX CONCURRENTLY` needs `transaction: false` (pre-drop invalid remnants on
   Postgres; plain `CREATE INDEX` on PGLite via `sqlFor.pglite`).
 - **Multi-source.** Slug uniqueness is `(source_id, slug)`, not slug. Key batch ops and
   reverse-writes on the composite key; `validateSourceId` before any `source_id` path join.

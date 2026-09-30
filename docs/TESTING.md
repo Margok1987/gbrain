@@ -916,6 +916,14 @@ that DB and replaying; one applied to retained data needs explicit `schema_versi
 reconciliation, never just a counter edit. Pinned by
 `test/scripts/build-schema-migrations.test.ts` and `test/migrations-golden.test.ts`.
 
+### Schema generator freshness
+
+`check:schema-fresh` (`scripts/check-schema-fresh.sh`) runs `scripts/build-schema.ts
+--out-dir <tmp>` (fragments -> `src/schema.sql` regions -> `schema-embedded.generated.ts`
+-> `pglite-schema.generated.ts`) and diffs every output, naming the source to edit.
+Canonical sources and PGLite capability rules: `docs/ENGINES.md#canonical-schema-sources`.
+Pinned by `test/scripts/build-schema.test.ts`; the end state by the E4 catalog goldens.
+
 ### Guard registry and self-test
 
 The privacy and test-isolation guards use `scripts/lib/guard-candidates.sh` to
