@@ -46,6 +46,7 @@ interface Stmt {
   line: number;
   tokens: string[];
   key: string;
+  exported: boolean;
 }
 
 export interface VerifyResult {
@@ -140,8 +141,7 @@ function collect(
       tokens = expanded;
     }
     const stripped = stripExport(tokens);
-    if (stripped.toggled) result.exportToggles++;
-    out.push({ path: p.path, line: p.line, tokens: stripped.tokens, key: stripped.tokens.join(' ') });
+    out.push({ path: p.path, line: p.line, tokens: stripped.tokens, key: stripped.tokens.join(' '), exported: stripped.toggled });
   }
   for (const name of wrapped.keys()) {
     if (!used.has(name)) result.problems.push(`FAIL: wrapper ${name} is defined but never referenced (a moved migration is missing from the registry)`);
@@ -173,7 +173,9 @@ export function verifyMoveOnly(base: SideFile[], head: SideFile[], opts: VerifyO
   for (const s of h) {
     const list = pool.get(s.key);
     if (list && list.length > 0) {
-      list.pop();
+      const same = list.findIndex((c) => c.exported === s.exported);
+      if (same < 0) result.exportToggles++;
+      list.splice(same < 0 ? list.length - 1 : same, 1);
       result.statements++;
     } else {
       result.added.push(s);
@@ -214,7 +216,7 @@ export function formatReport(r: VerifyResult, label: string): string {
 }
 
 function git(args: string[]): string {
-  return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 30 });
+  return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 1 << 30, stdio: ['ignore', 'pipe', 'pipe'] });
 }
 
 function readAt(rev: string, path: string): string | undefined {
