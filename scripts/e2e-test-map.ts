@@ -527,11 +527,15 @@ E2E_TEST_MAP["src/core/engine-sql/**"] = [
       "src/core/pglite-engine/**",
     ].flatMap((key) => E2E_TEST_MAP[key] ?? []),
   ),
-  // Executor contract on both backends: prepare mode, row normalizer,
-  // capabilities, RLS scope brands and per-domain transaction rollback.
+];
+
+// Executor-contract E2E files (both backends) claimed by the module they pin.
+const ENGINE_SQL_EXECUTOR_E2E = [
   "test/e2e/engine-sql-prepare-parity.test.ts",
-  "test/e2e/engine-sql-normalize-parity.test.ts",
   "test/e2e/engine-sql-capabilities-parity.test.ts",
-  "test/e2e/engine-sql-rls-scope.test.ts",
   "test/e2e/engine-sql-transaction-parity.test.ts",
 ];
+E2E_TEST_MAP["src/core/engine-sql/executor.ts"] = ENGINE_SQL_EXECUTOR_E2E;
+E2E_TEST_MAP["src/core/engine-sql/dialect-*.ts"] = ENGINE_SQL_EXECUTOR_E2E;
+E2E_TEST_MAP["src/core/engine-sql/normalize.ts"] = ["test/e2e/engine-sql-normalize-parity.test.ts"];
+E2E_TEST_MAP["src/core/engine-sql/brands.ts"] = ["test/e2e/engine-sql-rls-scope.test.ts"];
