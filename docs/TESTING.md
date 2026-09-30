@@ -430,6 +430,32 @@ by setup plus the longest single file,
 `test/reindex-markdown-persistence.slow.test.ts` (one test, about 230 seconds),
 so adding VMs past the default does not shorten a run.
 
+### E2E backend matrix
+
+`scripts/e2e-backend-matrix.txt` lists the E2E files that must pass on direct
+Postgres and through a transaction-mode PgBouncer: the E5 executor binding
+matrix (`test/e2e/executor-binding-matrix.test.ts`, whose PGLite arm is
+`test/executor-binding-matrix.test.ts`) and every `test/e2e/*parity*` file.
+When `GBRAIN_PGBOUNCER_E2E_URL` is set, `scripts/run-e2e.sh` runs each listed
+file twice: first against `DATABASE_URL` with
+`GBRAIN_TEST_BACKEND=postgres-direct`, then with `DATABASE_URL` set to the
+pooled URL and `GBRAIN_TEST_BACKEND=pgbouncer`. The PGLite arm inside each
+parity file runs in both passes. Both passes must execute the same, non-zero
+number of tests, and the summary prints the per-backend counts. The pooled
+URL must carry `?prepare=false`, because `resolvePrepare` only auto-detects
+port 6543 and CI poolers listen elsewhere; the runner refuses a pooled URL
+without it. With `GBRAIN_CI_REQUIRE_PGBOUNCER=1`, a listed file fails when no
+pooled URL is configured.
+
+`ci:ubicloud` routes each slot's own pooler at the slot database, `ci:local`
+gives each shard a `gbrain_pooled_<N>_test` database behind its single pooler
+(created by `scripts/lib/ensure-e2e-database.ts`), and `e2e.yml` tier1 runs
+the list against a `pgbouncer` service. An entry may carry
+`<TAB>pooled-timeout=<seconds>` when its pooled pass needs more than the
+per-file cap; `!path<TAB>reason` records a parity file deliberately left out.
+`test/scripts/e2e-backend-matrix.test.ts` pins the list's completeness, the CI
+wiring and the runner's count assertion.
+
 ### Native writer locks
 
 `bun test test/native-lock.test.ts test/scripts/native-lock-prebuilds.test.ts`
@@ -835,7 +861,7 @@ per-file rules. They do not cache passing results. Candidate scanner failures
 fail the guard, and matching files retain the same allowlists and diagnostics.
 
 `scripts/guards-manifest.tsv` is THE single registry of `scripts/check-*`
-guards (currently 56), each classified `scanner` (greps/parses repo sources —
+guards (currently 57), each classified `scanner` (greps/parses repo sources —
 must eventually carry fixtures), `buildfresh`, or `repostate` (build/freshness
 guards are exempt-with-reason, not fixture-tested).
 `scripts/guard-self-test.sh` (`bun run check:guard-self-test`, wired into
@@ -862,6 +888,42 @@ fails as new, and an entry whose file, test or count shrank fails as stale.
 This is a hygiene check for one pattern, not a detector of low-value tests in
 general; the authoring gate above owns that.
 
+### Function-size ratchet
+
+`scripts/check-function-size.ts` (`bun run check:function-size`, in
+`bun run verify`, about 1.5 s) measures every function-like node in
+`src/**/*.ts` except `*.generated.ts` and `.d.ts` with the TypeScript compiler
+API: function declarations, methods, constructors, accessors, arrow functions
+and function expressions, including object-literal and class-property forms.
+A nested function is measured on its own, and its lines also count toward the
+function that contains it. Code under `test/` is out of scope.
+
+`scripts/function-size-baseline.tsv` holds one row per function over 300
+lines: `path`, `name`, `lines`, `justification`. The name is a path built from
+declarations, property names and call context, never line numbers, so edits
+above a function do not touch its row: `PGLiteEngine.initSchema`,
+`runServeHttp>app.post('/mcp')`, `MIGRATIONS[v131].handler`. `>` enters a
+function, `.` a member, `=` a call whose result is bound, and a repeated key
+gets a `#2` ordinal. The guard fails when a function over 300 lines has no
+row, a baselined function grows, a baselined function drops to 300 lines or
+fewer (remove the row), a row has more than 50 lines of stale slack (lower
+it), a row names a function that no longer exists, or a row is malformed,
+duplicated or out of order. A row raised above, or added since, the baseline
+at the merge-base with `origin/master` needs an issue or TODO id (`#1234`,
+`TODOS.md:12`, `TODO: <slug>`) in its justification; the summary prints every
+raise.
+
+Each failure prints `FAIL: <file:line> <what>` with the computed key, then one
+`Why:` / `Fix:` / `See:` block. The fix is extraction: move a cohesive block
+into a named helper or sibling module (phase, stage or handler-table pattern).
+After a move-only commit changes a function's key, run
+`bun scripts/check-function-size.ts --transfer`. It rewrites a missing row to
+the one unbaselined over-limit function whose whitespace-normalized text is
+identical to the old function at `HEAD` (`--from <ref>` for another base),
+keeping lines and justification, and leaves everything else for review.
+Fixtures: `test/fixtures/guards/check-function-size.ts/{bad,good}`; every rule
+is driven in `test/scripts/check-function-size.test.ts`.
+
 ### Source reads in tests
 
 `test/test-reads-source-smell.test.ts` finds test code that reads `src/` text:
@@ -881,6 +943,21 @@ so a new untagged read in such a file fails and a count that drops must be
 lowered. The ratchet counts read sites only: a new assertion over an existing
 source binding is not detected and remains the authoring gate's job. Rerun with
 `bun test test/test-reads-source-smell.test.ts`.
+
+Structural guards over the files that refactor wave 1 decomposes read them
+through `test/helpers/source-surface.ts` rather than `readFileSync`. A surface
+is one façade plus the modules it is split into (`sync`, `cli`, `serve-http`,
+`jobs`, `hybrid`, `autopilot`, `migrate`, `pglite-engine`, `postgres-engine`,
+`doctor`). `surfaceSource(surface)` concatenates the surface with file
+boundary markers and serves containment assertions (`toContain`,
+`not.toContain`, single-line regexes). `surfaceFileSource(surface, path)`
+returns one named file and serves positional assertions (`indexOf` ordering,
+slice windows, `[\s\S]` spans, line math); a file outside the surface
+throws. A lane that moves code adds the destination to the surface in the
+same commit: a new directory is globbed automatically, while a module in an
+existing directory or flat file set is listed explicitly so today's
+assertions are not widened. `test/helpers/doctor-source.ts` is the doctor
+instance of the same loaders.
 
 ### Registry-walking ratchets
 

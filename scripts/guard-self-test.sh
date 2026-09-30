@@ -41,6 +41,7 @@ run_guard() {
   local guard="$1" fixture_root="$2"
   case "$guard" in
     *.mjs) GBRAIN_GUARD_ROOT="$fixture_root" node "scripts/$guard" "$fixture_root" >/dev/null 2>&1 ;;
+    *.ts)  GBRAIN_GUARD_ROOT="$fixture_root" bun "scripts/$guard" >/dev/null 2>&1 ;;
     *)     GBRAIN_GUARD_ROOT="$fixture_root" bash "scripts/$guard" >/dev/null 2>&1 ;;
   esac
 }
@@ -71,9 +72,10 @@ done < "$MANIFEST"
 
 # Manifest completeness: every scripts/check-* guard must have a manifest row
 # (new guards can't silently skip classification).
-for f in scripts/check-*.sh scripts/check-*.mjs; do
+for f in scripts/check-*.sh scripts/check-*.mjs scripts/check-*.ts; do
   base="$(basename "$f")"
   # The .ts companion of check-engine-dynamic-import is an implementation file.
+  [ "$base" = "check-engine-dynamic-import.ts" ] && continue
   if ! grep -q "^${base}	" "$MANIFEST"; then
     echo "FAIL  $base: no row in $MANIFEST — classify it (scanner|buildfresh|repostate)"
     failures=$((failures + 1))

@@ -125,6 +125,9 @@ CHECKS=(
   "check:pg-url-redaction"
   # Containment sprint: module-size ratchet + structural-suite freshness.
   "check:module-size"
+  # W5 (refactor wave 1): per-function line ratchet over src/**/*.ts (TS AST,
+  # ~1.5s); baseline scripts/function-size-baseline.tsv.
+  "check:function-size"
   "check:structural-manifest"
   # v0.50.5.0 security wave: compiled binaries must not autoload a cwd bunfig.toml.
   "check:compile-autoload"
