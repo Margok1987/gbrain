@@ -172,7 +172,7 @@ export async function beginConnectorSync(engine: BrainEngine, sourceId: string, 
   else authority.writer.databaseOnlyReason = 'connector_database';
   const canonicalRoot = connectorBindingRoot(sourceId, source, binding);
   const session = new ManagedConnectorSync(engine, sourceId, identity, source, authority, binding, canonicalRoot, opts.noEmbed === true, opts.noSchemaPack === true,
-    opts.retryFailed === true, lease, opts.resetCheckpoint === true, opts.githubItem !== undefined);
+    opts.retryFailed === true, lease, opts.resetCheckpoint === true, opts.githubItem !== undefined, opts.full === true);
   await session.load();
   return session;
 }
@@ -244,6 +244,7 @@ export class ManagedConnectorSync {
   private lastSaveCommitted = false;
   private stopped = false;
   private blockedByCheckpoint = false;
+  private pendingCheckpoint: ConnectorPendingEntry | null = null;
   /** True when this run ended with accepted writes pending, so its checkpoint did not advance. */
   deferred = false;
   readonly counts: Omit<ConnectorRunCounts, 'finished_at' | 'pending' | 'stopped_on_wait_budget'> & { created: number; updated: number; deleted: number } = {
@@ -253,7 +254,7 @@ export class ManagedConnectorSync {
   constructor(private engine: BrainEngine, readonly sourceId: string, private identity: ConnectorIdentity,
     private source: ConnectorSource, private authority: SyncAuthority, private binding: WorktreeBinding | null,
     private canonicalRoot: string | null, private noEmbed: boolean, private noSchemaPack: boolean, private retryFailed = false,
-    private lease?: ConnectorLease, private resetRequested = false, private targeted = false) {
+    private lease?: ConnectorLease, private resetRequested = false, private targeted = false, private fullSweep = false) {
     this.connector = identity.kind;
     this.checkpointKey = connectorCheckpointKey(sourceId, source.incarnation, identity);
   }
@@ -306,7 +307,7 @@ export class ManagedConnectorSync {
       let row = await getWriteRequest(this.engine, principal, entry.requestId);
       if (row && entry.itemRef === CHECKPOINT_SLUG && !isTerminal(row)) row = await this.budgetedWait(row, connectorWaitBudget.ms);
       if (!row || row.state === 'committed') continue;
-      if (entry.itemRef === CHECKPOINT_SLUG && !isTerminal(row)) { this.carried.push(entry); this.blockedByCheckpoint = true; continue; }
+      if (entry.itemRef === CHECKPOINT_SLUG && !isTerminal(row)) { this.pendingCheckpoint = entry; this.blockedByCheckpoint = true; continue; }
       if (!isTerminal(row)) { this.pendingRows.set(row.id, { entry, row, bytes: 0 }); continue; }
       this.autoRetry.add(entry.baseRequestId);
       this.carried.push(entry);
@@ -565,14 +566,15 @@ export class ManagedConnectorSync {
     const now = new Date().toISOString();
     const outstanding = [...this.pendingRows.values()].map(pending => pending.entry);
     const complete = this.lastSaveCommitted && !outstanding.length && !this.failedPending.length && !this.stopped;
-    // After a complete, fully enumerated sweep, a failed item the re-walk never reached was deleted upstream.
-    // A targeted refresh (one GitHub item) enumerates nothing else, so it keeps every carried entry.
+    // Only a complete --full sweep (which also reconciles deletions) proves that a failed item it never reached
+    // was deleted upstream. Delta and targeted runs keep every unreached carried entry for its automatic retry.
     const unreached = this.unreachedCarried();
-    const dropUnreached = complete && !this.targeted;
+    const dropUnreached = complete && this.fullSweep && !this.targeted;
     const unresolved = dropUnreached ? [] : unreached;
     if (dropUnreached) this.counts.dropped_upstream += unreached.filter(entry => entry.itemRef !== CHECKPOINT_SLUG).length;
-    const pending = [...new Map([...unresolved, ...this.failedPending, ...outstanding].map(entry => [entry.requestId, entry])).values()];
-    if (pending.length || this.stopped) this.deferred = true;
+    const pending = [...new Map([...unresolved, ...this.failedPending, ...outstanding, ...(this.pendingCheckpoint ? [this.pendingCheckpoint] : [])]
+      .map(entry => [entry.requestId, entry])).values()];
+    if (outstanding.length || this.failedPending.length || this.pendingCheckpoint || this.stopped) this.deferred = true;
     const recovery = this.connectorState.upgrade_recovery === 'rewalking_once' && complete ? 'none' : this.connectorState.upgrade_recovery;
     this.connectorState = { ...this.connectorState, pending, upgrade_recovery: recovery, last_run: {
       page_admissions: this.counts.page_admissions, skipped_unchanged: this.counts.skipped_unchanged, pending: pending.length,
@@ -730,7 +732,7 @@ export class ManagedConnectorSync {
     row = await this.budgetedWait(row!);
     if (kind === 'connector_v2_checkpoint') {
       if (!isTerminal(row)) {
-        this.carried.push({ itemRef: CHECKPOINT_SLUG, requestId: row.request_id, baseRequestId, admittedAt: new Date(row.created_at).toISOString() });
+        this.pendingCheckpoint = { itemRef: CHECKPOINT_SLUG, requestId: row.request_id, baseRequestId, admittedAt: new Date(row.created_at).toISOString() };
         this.stopped = true;
         throw new ConnectorWaitBudgetStop(row);
       }

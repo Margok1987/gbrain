@@ -37,10 +37,12 @@ export function connectorAccountChanged(sourceId: string, kind: ConnectorKind, c
       + `${github.scope === 'repos' ? ` --repos ${github.repos.join(',')}` : ''}${github.app ? ` --app-id ${github.app.appId} --app-pem <path>` : ''} --app-install ${installation}), `
       + `then archive this one: gbrain sources archive ${sourceId}`;
   }
+  // Account emails and installation ids stay in the local suggestion: job records persist and serve the message remotely.
   const error = new OperationError('connector_account_changed',
-    `Connector source ${sourceId} is pinned to ${show(recorded)}, but its credential resolves to ${show(resolved)}. Nothing was imported.`,
-    `(A) ${restore}. (B) For a deliberate account change, ${replace}; existing pages stay under ${sourceId}. `
-      + 'No reset flag authorizes an account change.', docsAnchor('connector_account_changed'));
+    `Connector source ${sourceId} is pinned to a different account than its credential resolves to. Nothing was imported.`,
+    `The source is pinned to ${show(recorded)}; the credential resolves to ${show(resolved)}. (A) ${restore}. `
+      + `(B) For a deliberate account change, ${replace}; existing pages stay under ${sourceId}. No reset flag authorizes an account change.`,
+    docsAnchor('connector_account_changed'));
   error.detail = resolved === null ? 'account_unresolved' : 'account_changed';
   return error;
 }

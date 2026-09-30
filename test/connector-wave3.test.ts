@@ -67,7 +67,9 @@ test('account pin: a contacts-only or calendar-only credential swap refuses befo
     const swapped = google(engine, f, base, 'someone-else@example.invalid', {}, config);
     await expect(swapped).rejects.toMatchObject({ code: 'connector_account_changed', detail: 'account_changed', docs: 'docs/guides/write-refusals.md#connector-account-changed' });
     const error = await swapped.catch(e => e) as { suggestion: string; message: string };
-    expect(error.message).toContain('someone-else@example.invalid');
+    // Identities stay out of the message (job records persist and serve it remotely) and appear in the local suggestion.
+    expect(error.message).not.toContain('someone-else@example.invalid');
+    expect(error.suggestion).toContain('pinned to owner@example.invalid; the credential resolves to someone-else@example.invalid');
     expect(error.suggestion).toContain('g_token_env (CONNECTOR_TEST_TOKEN)');
     expect(error.suggestion).toContain(`gbrain sync --source ${f.id}`);
     expect(error.suggestion).toContain(`gbrain sources archive ${f.id}`);
@@ -493,3 +495,45 @@ test('connector state row: a lost lease writes nothing; a new source incarnation
     expect(fresh).toMatchObject({ account: null, pending: [], upgrade_recovery: 'none', last_run: null });
   }
 }), 180_000);
+
+test('pending set: a checkpoint still pending at the end of a run is recorded and resolved first next run; a delta run keeps an unreached failure that only a full sweep drops', async () => withEnv(env, async () => {
+  for (const engine of engines) {
+    const f = await boundSource(engine, googleConfig);
+    let token = 0;
+    const { fetcher } = people(() => [contact('first', 'First Example')], { token: () => `contacts-${++token}` });
+    await google(engine, f, fetcher);
+    await engine.executeRaw("UPDATE persistence_worktrees SET state='draining' WHERE id=$1::uuid", [f.binding.worktree_id]);
+    await disposePersistenceConsumer(engine);
+    expect(await google(engine, f, fetcher)).toMatchObject({ status: 'partial', reason: 'writer_pending' });
+    const [checkpoint] = await connectorPendingSet(engine, f.id);
+    expect(checkpoint).toMatchObject({ itemRef: '__managed_connector_checkpoint__' });
+    await disposePersistenceConsumer(engine);
+    await engine.executeRaw("UPDATE persistence_worktrees SET state='active' WHERE id=$1::uuid", [f.binding.worktree_id]);
+    expect((await google(engine, f, fetcher)).status).not.toBe('partial');
+    expect(await connectorPendingSet(engine, f.id)).toEqual([]);
+  }
+  for (const engine of engines) {
+    const f = await boundSource(engine, githubConfig);
+    await engine.executeRaw("UPDATE persistence_worktrees SET state='draining' WHERE id=$1::uuid", [f.binding.worktree_id]);
+    const run = (fetch: ReturnType<typeof githubFetch>, extra: object = {}) => runGitHubSync(engine, f.id, parseGitHubSourceConfig(githubConfig, f.dir), { ...options, ...extra }, fetch);
+    expect(await run(githubFetch())).toMatchObject({ status: 'partial', reason: 'writer_pending' });
+    const [entry] = await connectorPendingSet(engine, f.id);
+    const [accepted] = await engine.executeRaw<WriteRequest>('SELECT * FROM persistence_requests WHERE request_id=$1::uuid', [entry.requestId]);
+    await disposePersistenceConsumer(engine);
+    const path = join(f.dir, 'gh/acme-example/app/1.md');
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, '---\ntitle: Operator file\n---\nAn unindexed operator file occupies the path.\n');
+    await engine.executeRaw("UPDATE persistence_worktrees SET state='active' WHERE id=$1::uuid", [f.binding.worktree_id]);
+    startPersistenceConsumer(engine, { engine: engine.kind });
+    expect((await waitForWrite(engine, accepted, { engine: engine.kind }, 20_000)).state).toBe('conflict');
+    rmSync(path);
+    await disposePersistenceConsumer(engine);
+    // The provider no longer lists the item: a delta run cannot tell deletion from absence, so it keeps the entry.
+    expect((await run(githubFetch({ deleted: true }))).status).not.toBe('partial');
+    expect((await connectorPendingSet(engine, f.id)).map(pending => pending.requestId)).toEqual([accepted.request_id]);
+    await disposePersistenceConsumer(engine);
+    await run(githubFetch({ deleted: true }), { full: true });
+    expect(await connectorPendingSet(engine, f.id)).toEqual([]);
+    expect((await readConnectorSourceStatuses(engine)).get(f.id)!.last_run).toMatchObject({ dropped_upstream: 1 });
+  }
+}), 240_000);

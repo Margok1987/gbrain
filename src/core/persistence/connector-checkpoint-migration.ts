@@ -83,15 +83,20 @@ export async function orphanConnectorCheckpoints(engine: Pick<BrainEngine, 'exec
  * in the same statement, so a row loaded, touched or newly referenced since
  * planning survives.
  */
-export async function deleteOrphanConnectorCheckpoints(engine: Pick<BrainEngine, 'executeRaw'>, rows: OrphanCheckpointRow[], opts: { before?: string; minAgeDays?: number } = {}): Promise<{ checkpoints: number; retries: number }> {
-  const loadable = [...(await loadableConnectorKeys(engine)).keys()];
+export async function deleteOrphanConnectorCheckpoints(engine: Pick<BrainEngine, 'executeRaw' | 'transaction'>, rows: OrphanCheckpointRow[], opts: { before?: string; minAgeDays?: number } = {}): Promise<{ checkpoints: number; retries: number }> {
   const removed = { checkpoints: 0, retries: 0 };
-  for (const row of rows) {
-    const deleted = await engine.executeRaw<{ op: string }>(`DELETE FROM op_checkpoints c WHERE c.op=$1 AND c.fingerprint=$2 AND c.updated_at=$3::text::timestamptz
-      AND ${orphanPredicate(4)} RETURNING c.op`, [row.op, row.fingerprint, row.updated_at, loadable, opts.before ?? null, opts.minAgeDays ?? null, CONNECTOR_STATE_OP]);
-    if (!deleted.length) continue;
-    if (row.op === 'managed-connector') removed.checkpoints++; else removed.retries++;
-  }
+  if (!rows.length) return removed;
+  // Connector source rows stay share-locked while loadability is recomputed and rows are deleted, so a config change cannot make a deleted key current.
+  await engine.transaction(async tx => {
+    await tx.executeRaw("SELECT id FROM sources WHERE config->>'kind' IN ('google','github') ORDER BY id FOR SHARE");
+    const loadable = [...(await loadableConnectorKeys(tx)).keys()];
+    for (const row of rows) {
+      const deleted = await tx.executeRaw<{ op: string }>(`DELETE FROM op_checkpoints c WHERE c.op=$1 AND c.fingerprint=$2 AND c.updated_at=$3::text::timestamptz
+        AND ${orphanPredicate(4)} RETURNING c.op`, [row.op, row.fingerprint, row.updated_at, loadable, opts.before ?? null, opts.minAgeDays ?? null, CONNECTOR_STATE_OP]);
+      if (!deleted.length) continue;
+      if (row.op === 'managed-connector') removed.checkpoints++; else removed.retries++;
+    }
+  });
   return removed;
 }
 
