@@ -14,6 +14,7 @@
  * the margin below suppress_below take the no-change outcome margin_hold.
  * Everything else leaves the reflex result as it is (no_fire).
  */
+import { RECALL_SUPPRESS_BELOW_DEFAULT } from './config.ts';
 import { registerDatasetAdapter, registerDatasetBuilder, type DatasetItem } from './dataset.ts';
 import type { DecideQuestion, EvidenceItem } from './types.ts';
 
@@ -99,7 +100,7 @@ registerDatasetAdapter({
       const p = values[it.id];
       if (p === null || p === undefined) return [];
       const outcome = reduceRecallNeeded(p, { fired: it.slice === REFLEX_FIRED_SLICE, identityHit: it.protected === true }, {
-        threshold: policy.threshold, suppressBelow: policy.suppressBelow ?? 0.05, margin: policy.margin,
+        threshold: policy.threshold, suppressBelow: policy.suppressBelow ?? RECALL_SUPPRESS_BELOW_DEFAULT, margin: policy.margin,
       });
       return outcome === 'suppress' ? [{ item: it, correct: it.label === false }] : [];
     });

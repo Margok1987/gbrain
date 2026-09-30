@@ -23,7 +23,7 @@
  */
 import type { BrainEngine } from '../engine.ts';
 import { loadConfigSnapshot } from '../config-snapshot.ts';
-import { pickDecideConfig, readDecideConfig, type DecideConfig } from '../ai/decide/config.ts';
+import { pickDecideConfig, readDecideConfig, RECALL_SUPPRESS_BELOW_DEFAULT, type DecideConfig } from '../ai/decide/config.ts';
 import { hasTypesafeKey, runDecide } from '../ai/decide/index.ts';
 import { packShape } from '../ai/decide/pack.ts';
 import { driftReason, resolveSlotPolicy, type SlotPolicy } from '../ai/decide/policy.ts';
@@ -207,7 +207,7 @@ async function decideRecall(
       void writeReceipts(engine, { ...base, result, outcomes: {}, fallbackOutcome: 'skipped', reason });
       return { result, reason };
     }
-    const outcome = reduceRecallNeeded(answer.p, reflex, { threshold: policy.threshold!, suppressBelow: policy.suppressBelow ?? 0.05, margin: policy.margin });
+    const outcome = reduceRecallNeeded(answer.p, reflex, { threshold: policy.threshold!, suppressBelow: policy.suppressBelow ?? RECALL_SUPPRESS_BELOW_DEFAULT, margin: policy.margin });
     return { outcome, result };
   };
   const metaFor = (j: Awaited<ReturnType<typeof judge>>, effective: DecideSlotMeta['effective'], reason?: string): DecideSlotMeta => ({

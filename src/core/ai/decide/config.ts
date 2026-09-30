@@ -8,6 +8,8 @@ import { DECIDE_SLOTS, EVIDENCE_CLASSES, type DecideMode, type DecideSlot, type 
 export const DEFAULT_TYPESAFE_MODEL = 'jev-1.13.0';
 export const DEFAULT_TYPESAFE_PROVIDER = `typesafe:${DEFAULT_TYPESAFE_MODEL}`;
 export const TYPESAFE_ALIASES = ['jev-latest', 'jev-preview'] as const;
+/** S6 suppression boundary default (decide.slots.recall_needed.suppress_below); 0.05 before 2026-09-30. */
+export const RECALL_SUPPRESS_BELOW_DEFAULT = 0.1;
 
 type Validator = (value: string) => string | null;
 
@@ -178,7 +180,7 @@ export function readDecideConfig(snapshot: Record<string, string | undefined> | 
       ...(sample !== undefined && SLOT_KEY_VALIDATORS.shadow_sample!(sample) === null ? { shadowSample: Number(sample) } : {}),
       shadowWait: k('shadow_wait') === 'on',
       ...(k('calibration') && calibrationRef(k('calibration')!) === null ? { calibration: k('calibration') } : {}),
-      ...(slot === 'recall_needed' ? { suppressBelow: num(k('suppress_below'), 0.05, GLOBAL_KEYS['decide.slots.recall_needed.suppress_below']!) } : {}),
+      ...(slot === 'recall_needed' ? { suppressBelow: num(k('suppress_below'), RECALL_SUPPRESS_BELOW_DEFAULT, GLOBAL_KEYS['decide.slots.recall_needed.suppress_below']!) } : {}),
     };
     return [slot, cfg];
   })) as Record<DecideSlot, DecideSlotConfig>;
@@ -209,7 +211,8 @@ export function readDecideConfig(snapshot: Record<string, string | undefined> | 
   };
 }
 
-function parseEvalSlots(raw: string | undefined): Partial<Record<DecideSlot, DecideMode>> {
+/** Parse a GBRAIN_DECIDE_SLOTS value (`triage=on,evidence=shadow`); unknown slots and modes are ignored. */
+export function parseEvalSlots(raw: string | undefined): Partial<Record<DecideSlot, DecideMode>> {
   const out: Partial<Record<DecideSlot, DecideMode>> = {};
   for (const part of (raw ?? '').split(',')) {
     const [slot, mode] = part.split('=').map((s) => s.trim());

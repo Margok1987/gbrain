@@ -44,8 +44,9 @@ describe('reduceRecallNeeded', () => {
     expect(reduceRecallNeeded(0, identity, policy)).toBe('no_fire');
   });
 
-  test('with the shipped defaults (suppress_below 0.05, margin floor 0.05) suppression cannot happen', () => {
-    for (const p of [0, 0.01, 0.049]) expect(reduceRecallNeeded(p, fired, { threshold: 0.5, suppressBelow: 0.05, margin: 0.05 })).toBe('margin_hold');
+  test('with the shipped defaults (suppress_below 0.10, margin floor 0.05) p below 0.05 suppresses and 0.05-0.10 holds', () => {
+    for (const p of [0, 0.01, 0.049]) expect(reduceRecallNeeded(p, fired, { threshold: 0.5, suppressBelow: 0.1, margin: 0.05 })).toBe('suppress');
+    for (const p of [0.05, 0.07, 0.099]) expect(reduceRecallNeeded(p, fired, { threshold: 0.5, suppressBelow: 0.1, margin: 0.05 })).toBe('margin_hold');
   });
 
   test('recallReflex: alias and exact-title arms are identity hits, others are not', () => {
@@ -124,11 +125,11 @@ describe('dataset adapter and builder', () => {
 });
 
 describe('policy and config', () => {
-  test('suppress_below defaults to 0.05 on recall_needed only, and reads the registered key', () => {
-    expect(readDecideConfig({}).slots.recall_needed.suppressBelow).toBe(0.05);
+  test('suppress_below defaults to 0.10 on recall_needed only, and reads the registered key', () => {
+    expect(readDecideConfig({}).slots.recall_needed.suppressBelow).toBe(0.1);
     expect(readDecideConfig({}).slots.evidence.suppressBelow).toBeUndefined();
     expect(readDecideConfig({ 'decide.slots.recall_needed.suppress_below': '0.2' }).slots.recall_needed.suppressBelow).toBe(0.2);
-    expect(readDecideConfig({ 'decide.slots.recall_needed.suppress_below': '7' }).slots.recall_needed.suppressBelow).toBe(0.05);
+    expect(readDecideConfig({ 'decide.slots.recall_needed.suppress_below': '7' }).slots.recall_needed.suppressBelow).toBe(0.1);
   });
 
   test('the fingerprint binds suppress_below and leaves other slots unchanged', () => {
