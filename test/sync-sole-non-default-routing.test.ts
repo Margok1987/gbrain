@@ -24,6 +24,10 @@ import { resetPgliteState } from './helpers/reset-pglite.ts';
 
 let engine: PGLiteEngine;
 let repoPath: string;
+// runSync records the monthly backup check under GBRAIN_HOME; a file-local home keeps that
+// (and every other state file sync writes) out of the shared per-run test home.
+let home: string;
+let priorHome: string | undefined;
 
 async function pageCountBySource(): Promise<Record<string, number>> {
   const rows = await engine.executeRaw<{ source_id: string; n: number }>(
@@ -36,6 +40,9 @@ async function pageCountBySource(): Promise<Record<string, number>> {
 
 describe('#1434 — runSync auto-routes to sole_non_default source', () => {
   beforeAll(async () => {
+    priorHome = process.env.GBRAIN_HOME;
+    home = mkdtempSync(join(tmpdir(), 'gbrain-snd-home-'));
+    process.env.GBRAIN_HOME = home;
     engine = new PGLiteEngine();
     await engine.connect({});
     await engine.initSchema();
@@ -43,6 +50,8 @@ describe('#1434 — runSync auto-routes to sole_non_default source', () => {
 
   afterAll(async () => {
     if (engine) await engine.disconnect();
+    if (priorHome === undefined) delete process.env.GBRAIN_HOME; else process.env.GBRAIN_HOME = priorHome;
+    rmSync(home, { recursive: true, force: true });
   }, 60_000);
 
   beforeEach(async () => {
