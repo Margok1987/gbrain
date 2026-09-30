@@ -63,7 +63,8 @@ export async function listEmbeddingCandidates(engine: Pick<BrainEngine, 'execute
         ELSE (SELECT SUM(length(p.compiled_truth) + length(COALESCE(p.timeline,''))) FROM pages p WHERE p.source_id = e.source_id AND p.deleted_at IS NULL)
       END, 0)::bigint AS chars
     FROM persistence_effects e JOIN persistence_requests r ON r.id = e.request_id
-    WHERE ${EMBEDDING_CANDIDATE_WHERE} AND r.source_id = ANY($1::text[]) ORDER BY e.id`, [sourceIds]);
+    WHERE ${EMBEDDING_CANDIDATE_WHERE} AND (r.source_id = ANY($1::text[])
+      OR NOT EXISTS (SELECT 1 FROM sources s WHERE s.id = r.source_id AND s.incarnation = r.source_incarnation)) ORDER BY e.id`, [sourceIds]);
   return rows.map(row => ({ ...row, attempts: Number(row.attempts), chars: Number(row.chars) }));
 }
 
@@ -89,11 +90,6 @@ export async function settleEmbeddingEffect(engine: BrainEngine, candidate: Pick
       || Number(effect.attempts) !== candidate.attempts || effect.execution_token !== null || effect.recovery) {
       return { outcome: 'changed_since_preview' };
     }
-    try { await guardEffectSource(tx, effect, opts.hostId); }
-    catch (error) {
-      if (error instanceof OperationError && ['owner_unavailable', 'source_changed'].includes(error.code)) return { outcome: 'blocked', reason: 'owner_unavailable' };
-      throw error;
-    }
     const commit = async (outcome: Record<string, unknown>): Promise<boolean> => {
       if (opts.dryRun) return true;
       const rows = await tx.executeRaw(`UPDATE persistence_effects SET state='committed', error_code=NULL, claim_expires_at=NULL,
@@ -102,10 +98,24 @@ export async function settleEmbeddingEffect(engine: BrainEngine, candidate: Pick
       [effect.id, effect.state, JSON.stringify(outcome), effect.attempts]);
       return rows.length > 0;
     };
+    // The obligation of a removed (or replaced) source incarnation is moot: nothing can read those vectors.
+    const [source] = await tx.executeRaw<{ incarnation: string }>('SELECT incarnation FROM sources WHERE id=$1 FOR SHARE', [effect.source_id]);
+    if (!source || source.incarnation !== effect.source_incarnation) {
+      return await commit({ embedding: 'superseded', reason: 'source_removed' }) ? { outcome: 'superseded', reason: 'source_removed' } : { outcome: 'changed_since_preview' };
+    }
+    try { await guardEffectSource(tx, effect, opts.hostId); }
+    catch (error) {
+      if (error instanceof OperationError && ['owner_unavailable', 'source_changed'].includes(error.code)) return { outcome: 'blocked', reason: 'owner_unavailable' };
+      throw error;
+    }
     const scanning = targetedWithdrawalEffect(effect) || effect.data.source_scan === true;
     const snapshot = await selectedEffectPage(tx, effect);
     let pendingChunks: number | undefined;
-    if (!scanning) {
+    if (scanning) {
+      // A finished scan has nothing left to embed; one with pages left needs a configured model like a page effect.
+      if (!snapshot) return await commit({ embedding: 'reconciled' }) ? { outcome: 'reconciled' } : { outcome: 'changed_since_preview' };
+      if (!configuredSignature(opts.config)) return { outcome: 'blocked', reason: 'embedding_unconfigured' };
+    } else {
       if (!snapshot || snapshot.page.deleted_at || snapshot.page.id !== effect.data.page_id || snapshot.revision !== effect.revision) {
         const deleted = !snapshot || snapshot.page.deleted_at || snapshot.page.id !== effect.data.page_id;
         const [replacement] = deleted ? [] : await tx.executeRaw<{ id: string }>(`SELECT id::text FROM persistence_effects

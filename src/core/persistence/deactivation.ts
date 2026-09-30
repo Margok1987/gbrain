@@ -100,14 +100,15 @@ export async function deactivationBlockers(engine: BrainEngine): Promise<Deactiv
     "SELECT id::text AS id, operation, source_id FROM persistence_topology_changes WHERE state='recovering' OR recovery IS NOT NULL ORDER BY created_at LIMIT 20");
   for (const t of topology) blockers.push({ kind: 'topology_recovery', id: t.id, source_id: t.source_id, detail: `${t.operation} for ${t.source_id} is recovering`,
     exit: `gbrain sources writer status ${t.source_id} --json, then let the owner finish recovery` });
-  const effects = await engine.executeRaw<{ effect_id: string; kind: string; state: string; source_id: string; request_id: string; error_code: string | null; recovering: boolean }>(
+  const effects = await engine.executeRaw<{ effect_id: string; kind: string; state: string; source_id: string; request_id: string; error_code: string | null; recovering: boolean; source_live: boolean }>(
     `SELECT e.id::text AS effect_id, e.kind, e.state, COALESCE(e.source_id, r.source_id) AS source_id, r.request_id::text AS request_id, e.error_code,
-       e.recovery IS NOT NULL AS recovering
+       e.recovery IS NOT NULL AS recovering,
+       EXISTS (SELECT 1 FROM sources s WHERE s.id = r.source_id AND s.incarnation = r.source_incarnation) AS source_live
      FROM persistence_effects e JOIN persistence_requests r ON r.id=e.request_id
      WHERE e.state<>'committed' OR e.recovery IS NOT NULL ORDER BY e.id LIMIT 50`);
   for (const e of effects) {
     blockers.push({ kind: 'effect', id: e.effect_id, source_id: e.source_id, detail: `${e.kind} effect ${e.state}${e.error_code ? ` (${e.error_code})` : ''} for request ${e.request_id}`,
-      exit: e.kind === 'embedding' ? `gbrain repair embedding-effects --source ${e.source_id}`
+      exit: e.kind === 'embedding' ? (e.source_live ? `gbrain repair embedding-effects --source ${e.source_id}` : 'gbrain repair embedding-effects (its source was removed; run it brain-wide)')
         : e.state === 'failed' ? `gbrain sources writer retry-effects ${e.source_id} --request-id ${e.request_id} --dry-run`
           : 'wait for the owner to drain it, then rerun deactivate' });
   }

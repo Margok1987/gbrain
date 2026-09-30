@@ -273,5 +273,28 @@ for (const kind of testBackends()) {
       expect(next.resumed_from).not.toBeNull();
       expect([first.outcome_items![0].item, next.outcome_items![0].item].sort()).toEqual([`${a.sourceId}:page`, `${b.sourceId}:page`].sort());
     });
+
+    check('an effect whose source was removed is superseded, and the brain-wide repair reaches it', async () => {
+      const f = await fixture('stale');
+      await engine.executeRaw('DELETE FROM sources WHERE id=$1', [f.sourceId]);
+      const candidates = await listEmbeddingCandidates(engine, []);
+      expect(candidates.map(c => c.effect_id)).toContain(f.effectId);
+      expect(await settleEmbeddingEffect(engine, { effect_id: f.effectId, state: 'queued', attempts: 0 }, { dryRun: false, config, hostId: localHostId() }))
+        .toEqual({ outcome: 'superseded', reason: 'source_removed' });
+      expect(await effect(f.effectId)).toMatchObject({ state: 'committed', outcome: { embedding: 'superseded', reason: 'source_removed' } });
+    });
+
+    check('a withdrawal-target effect with pages left is blocked without an embedding model, never dropped', async () => {
+      const f = await fixture('failed');
+      const snapshot = (await engine.readPageSnapshot('page', { sourceId: f.sourceId }))!;
+      await engine.transaction(async tx => {
+        await declarePersistenceProtocol(tx);
+        await tx.executeRaw(`UPDATE persistence_effects SET data=jsonb_build_object('version',2,'targets',
+          jsonb_build_array(jsonb_build_object('slug','page','page_id',$2::int,'revision',$3::text))) WHERE id=$1`, [f.effectId, snapshot.page.id, snapshot.revision]);
+      });
+      expect(await settleEmbeddingEffect(engine, { effect_id: f.effectId, state: 'failed', attempts: 5 }, { dryRun: false, config: { engine: kind }, hostId: localHostId(), runId: randomUUID() }))
+        .toEqual({ outcome: 'blocked', reason: 'embedding_unconfigured' });
+      expect(await effect(f.effectId)).toMatchObject({ state: 'failed' });
+    });
   });
 }
