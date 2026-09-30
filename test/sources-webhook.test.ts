@@ -127,7 +127,7 @@ describe('Branch ref construction (D5)', () => {
 
 describe('Webhook sync job extraction contract', () => {
   test('opts into extraction before the pushed commit is consumed', () => {
-    const serveSource = surfaceFileSource('serve-http', 'src/commands/serve-http.ts');
+    const serveSource = surfaceFileSource('serve-http', 'src/commands/serve-http-webhooks.ts');
     const routeStart = serveSource.indexOf("'/webhooks/github'");
     const queueStart = serveSource.indexOf('const job = await queue.add(', routeStart);
     const responseStart = serveSource.indexOf('res.status(202)', queueStart);

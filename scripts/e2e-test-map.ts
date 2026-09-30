@@ -354,13 +354,14 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   ],
   // Both engines route CJK queries through the shared branch since #3986
   // (src/core/search/cjk-keyword-sql.ts). The cross-engine parity is pinned — any change here must re-run the pin. (Matches
-  // src/core/pglite-engine/** too; selector unions the entries.)
-  "src/core/pglite-engine/cjk-search.ts": ["test/e2e/engine-parity-cjk.test.ts"],
+  // src/core/engine-sql/** too; selector unions the entries.)
+  "src/core/engine-sql/cjk-search.ts": ["test/e2e/engine-parity-cjk.test.ts"],
   // D7 parity batch: the code-edge read paths (getCallersOf / getCalleesOf /
-  // getEdgesByChunk) live in the peeled engine modules; both modules key the
-  // cross-engine read-parity suite directly. (The engine-dir ** globs above
-  // match these files too; the selector unions the entries.)
-  "src/core/postgres-engine/code-edges.ts": ["test/e2e/code-edges-read-parity.test.ts"],
+  // getEdgesByChunk) live in engine-sql/code-edges.ts (PGLite's getEdgesByChunk
+  // stays in its engine module dir); both key the cross-engine read-parity
+  // suite directly. (The ** globs match these files too; the selector unions
+  // the entries.)
+  "src/core/engine-sql/code-edges.ts": ["test/e2e/code-edges-read-parity.test.ts"],
   "src/core/pglite-engine/code-edges.ts": ["test/e2e/code-edges-read-parity.test.ts"],
   // D7 parity batch: chronicle ontology merge (mergeOntologyFact helpers in
   // chronicle/ontology.ts) + event projection (only production caller:
@@ -448,7 +449,18 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/serve-http-registration.ts": ["test/e2e/serve-http-consent.test.ts"],
   "src/commands/serve-http-admin-limits.ts": ["test/e2e/serve-http-consent.test.ts"],
   "src/core/harness/client-setup.ts": ["test/e2e/serve-http-consent.test.ts"],
-  "src/commands/serve-http-oauth.ts": ["test/e2e/serve-http-consent.test.ts"],
+  "src/commands/serve-http-oauth.ts": ["test/e2e/serve-http-consent.test.ts", "test/e2e/serve-http-oauth.test.ts"],
+  // Refactor wave 1 split runServeHttp into these modules; each keeps the
+  // façade's e2e claims for the code it took.
+  "src/commands/serve-http-admin-api.ts": ["test/e2e/serve-http-consent.test.ts", "test/e2e/serve-http-oauth.test.ts"],
+  "src/commands/serve-http-metrics.ts": ["test/e2e/serve-http-oauth.test.ts"],
+  "src/commands/serve-http-spa.ts": ["test/e2e/serve-http-consent.test.ts"],
+  "src/commands/serve-http-webhooks.ts": ["test/e2e/serve-http-ingest-webhook.test.ts"],
+  "src/commands/serve-http-mcp.ts": [
+    "test/e2e/serve-http-oauth.test.ts",
+    "test/e2e/harness-access.test.ts",
+    "test/e2e/serve-http-source-grant.test.ts",
+  ],
   "src/commands/serve-http.ts": [
     "test/e2e/serve-http-consent.test.ts",
     "test/e2e/serve-http-ingest-webhook.test.ts",

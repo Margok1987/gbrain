@@ -131,6 +131,15 @@ CHECKS=(
   # EO10 (refactor wave 1): engine-sql/ and schema-migrations/ never import
   # back up into the engine façades or migrate.ts (ESM TDZ cycles).
   "check:layering"
+  # Goal (a) (refactor wave 1): engine SQL only shrinks; baseline
+  # scripts/engine-sql-baseline.tsv.
+  "check:engine-sql-ratchet"
+  # CQ3 / EO17 (refactor wave 1): engine-sql splices only constant text, no
+  # composed $n, no expanded IN lists.
+  "check:engine-sql-dynamic"
+  # EO4 (refactor wave 1): RLS read brands stay unforgeable; brand factories
+  # importable only from their allowlists (never src/core/ops/**).
+  "check:engine-sql-brands"
   "check:schema-migrations"
   "check:schema-fresh"
   "check:schema-migration-order"

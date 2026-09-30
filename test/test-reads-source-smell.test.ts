@@ -113,7 +113,6 @@ const GRANDFATHERED: Record<string, number> = {
   'schema-pack-unify-types-handler.test.ts': 1,
   'schema-pack/suggest.test.ts': 1,
   'search/knobs-hash-reranker.test.ts': 2,
-  'serve-http-admin-route-guard.test.ts': 1,
   'skillpack-scaffold.test.ts': 1,
   'spend-off-switch.test.ts': 3,
   'sync-failures.test.ts': 1,

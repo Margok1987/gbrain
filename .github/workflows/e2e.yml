@@ -306,6 +306,7 @@ jobs:
         run: |
           export DATABASE_URL="postgresql://postgres:${PGPASSWORD}@localhost:5432/gbrain_test"
           export GBRAIN_PGBOUNCER_E2E_URL="postgresql://postgres:${PGPASSWORD}@localhost:55433/gbrain_test?prepare=false"
+          export GBRAIN_PGBOUNCER_DIRECT_URL="$DATABASE_URL"
           mapfile -t files < <(grep -v -e '^#' -e '^!' -e '^$' scripts/e2e-backend-matrix.txt | cut -f1)
           bash scripts/run-e2e.sh "${files[@]}"
         env:

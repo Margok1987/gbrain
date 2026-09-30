@@ -132,10 +132,7 @@ const ENGINE_INTERNAL_HELPERS: readonly string[] = [
   'buildChunklessPagesWhere',
   'buildStalePagesWhere',
   'pushChronicleSource',
-  'factsDeps',
-  'takesDeps',
   'codeEdgesDeps',
-  'salienceDeps',
   // refactor wave 1 C9: per-call engine-sql executor getter (EO1).
   'engineSql',
 ];

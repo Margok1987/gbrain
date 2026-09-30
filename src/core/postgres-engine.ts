@@ -116,19 +116,16 @@ import { EMBED_SKIP_FILTER_FRAGMENT } from './embed-skip.ts';
 import { QUARANTINE_FILTER_FRAGMENT, quarantineFilterFragment } from './quarantine.ts';
 import { acquireInitSchemaAdvisoryLock } from './postgres-engine/init-schema-lock.ts';
 import { applyPostgresForwardReferenceBootstrap } from './engine-sql/bootstrap.ts';
-import * as factsImpl from './postgres-engine/facts.ts';
-import type { PgFactsDeps } from './postgres-engine/facts.ts';
-import * as takesImpl from './postgres-engine/takes.ts';
-import type { PgTakesDeps } from './postgres-engine/takes.ts';
-import * as codeEdgesImpl from './postgres-engine/code-edges.ts';
-import type { PgCodeEdgesDeps } from './postgres-engine/code-edges.ts';
-import * as salienceImpl from './postgres-engine/salience.ts';
-import type { PgSalienceDeps } from './postgres-engine/salience.ts';
+import * as factsImpl from './engine-sql/facts.ts';
+import * as takesImpl from './engine-sql/takes.ts';
+import * as codeEdgesImpl from './engine-sql/code-edges.ts';
+import * as salienceImpl from './engine-sql/salience.ts';
 import { hasCJK } from './cjk.ts';
-import { searchKeywordCJK as searchKeywordCJKImpl } from './postgres-engine/cjk-search.ts';
+import { searchKeywordCJK as searchKeywordCJKImpl } from './engine-sql/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
 import { postgresExecutor, type RunUnsafeOpts } from './engine-sql/dialect-postgres.ts';
 import type { SqlExecutor } from './engine-sql/executor.ts';
+import { scopedRead, unscopedExecutor } from './engine-sql/brands.ts';
 
 function escapeSqlStringLiteral(value: string): string {
   return value.replace(/'/g, "''");
@@ -1924,14 +1921,17 @@ export class PostgresEngine implements BrainEngine {
    * #3986: CJK keyword fallback (parity port of PGLite's v0.32.7 branch).
    * SQL builds in the shared cjk-keyword-sql.ts; execution goes through the
    * same scoped read transaction (RLS scope binding + 8s statement timeout)
-   * as the FTS keyword paths. See src/core/postgres-engine/cjk-search.ts.
+   * as the FTS keyword paths. See src/core/engine-sql/cjk-search.ts.
    */
   private async _searchKeywordCJK(query: string, ctx: CjkKeywordCtx): Promise<SearchResult[]> {
     return searchKeywordCJKImpl(
-      async (sqlText, params) =>
+      async (read) =>
         await this.withScopedReadTransaction(ctx.opts?.sourceIds, ctx.opts?.sourceId, async (tx) => {
           await tx`SET LOCAL statement_timeout = '8s'`;
-          return await tx.unsafe(sqlText, params as Parameters<typeof tx.unsafe>[1]) as unknown as Record<string, unknown>[];
+          return await read(scopedRead(postgresExecutor(tx, {
+            runUnsafe: (conn, sql, params, opts) => this.runUnsafe(conn, sql, params, opts),
+            gauge: this.checkoutGauge,
+          })));
         }, { alwaysTransaction: true }),
       query,
       ctx,
@@ -4362,19 +4362,10 @@ export class PostgresEngine implements BrainEngine {
   // v0.31: Hot memory — facts table operations
   // ============================================================
 
-  // Peeled into ./postgres-engine/facts.ts (containment sprint C15): the
-  // methods below are one-line delegates over free functions with a narrow
-  // deps surface.
+  // Facts SQL lives once in ./engine-sql/facts.ts (refactor wave 1 C11): the
+  // methods below are one-line delegations over the engine-sql executor.
 
   /** Narrow deps for the peeled facts module. */
-  private get factsDeps(): PgFactsDeps {
-    const self = this;
-    return {
-      get sql() { return self.sql; },
-      resolveFactsEmbeddingCast: () => self.resolveFactsEmbeddingCast(),
-    };
-  }
-
   /**
    * v0.41.15.0 (T6, codex #20): per-process cache for the
    * `facts.embedding` cast suffix. Migration v40 creates the column as
@@ -4427,11 +4418,11 @@ export class PostgresEngine implements BrainEngine {
     input: NewFact,
     ctx: { source_id: string; supersedeId?: number },
   ): Promise<{ id: number; status: FactInsertStatus }> {
-    return factsImpl.insertFact(this.factsDeps, input, ctx);
+    return factsImpl.insertFact(this.engineSql, () => this.resolveFactsEmbeddingCast(), input, ctx);
   }
 
   async expireFact(id: number, opts?: { supersededBy?: number; at?: Date }): Promise<boolean> {
-    return factsImpl.expireFact(this.factsDeps, id, opts);
+    return factsImpl.expireFact(this.engineSql, id, opts);
   }
 
   async insertFacts(
@@ -4439,7 +4430,7 @@ export class PostgresEngine implements BrainEngine {
     ctx: { source_id: string },
     opts?: { deleteForPageFirst?: { slug: string; excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean } },
   ): Promise<{ inserted: number; ids: number[]; warnings: string[]; deleted: number }> {
-    return factsImpl.insertFacts(this.factsDeps, rows, ctx, opts);
+    return factsImpl.insertFacts(this.engineSql, () => this.resolveFactsEmbeddingCast(), rows, ctx, opts);
   }
 
   async deleteFactsForPage(
@@ -4447,7 +4438,7 @@ export class PostgresEngine implements BrainEngine {
     source_id: string,
     opts?: { excludeSourcePrefixes?: string[]; preserveExpiredLegacy?: boolean },
   ): Promise<{ deleted: number }> {
-    return factsImpl.deleteFactsForPage(this.factsDeps, slug, source_id, opts);
+    return factsImpl.deleteFactsForPage(this.engineSql, slug, source_id, opts);
   }
 
   async listFactsByEntity(
@@ -4455,7 +4446,7 @@ export class PostgresEngine implements BrainEngine {
     entitySlug: string,
     opts?: FactListOpts,
   ): Promise<FactRow[]> {
-    return factsImpl.listFactsByEntity(this.factsDeps, source_id, entitySlug, opts);
+    return factsImpl.listFactsByEntity(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, entitySlug, opts);
   }
 
   async listFactsSince(
@@ -4463,7 +4454,7 @@ export class PostgresEngine implements BrainEngine {
     since: Date,
     opts?: FactListOpts & { entitySlug?: string; sessionId?: string },
   ): Promise<FactRow[]> {
-    return factsImpl.listFactsSince(this.factsDeps, source_id, since, opts);
+    return factsImpl.listFactsSince(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, since, opts);
   }
 
   async listFactsBySession(
@@ -4471,18 +4462,18 @@ export class PostgresEngine implements BrainEngine {
     sessionId: string,
     opts?: FactListOpts,
   ): Promise<FactRow[]> {
-    return factsImpl.listFactsBySession(this.factsDeps, source_id, sessionId, opts);
+    return factsImpl.listFactsBySession(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, sessionId, opts);
   }
 
   async listSupersessions(
     source_id: string,
     opts?: { since?: Date; limit?: number; visibility?: ('private' | 'world')[] },
   ): Promise<FactRow[]> {
-    return factsImpl.listSupersessions(this.factsDeps, source_id, opts);
+    return factsImpl.listSupersessions(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, opts);
   }
 
   async countUnconsolidatedFacts(source_id: string): Promise<number> {
-    return factsImpl.countUnconsolidatedFacts(this.factsDeps, source_id);
+    return factsImpl.countUnconsolidatedFacts(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id);
   }
 
   async findCandidateDuplicates(
@@ -4491,48 +4482,37 @@ export class PostgresEngine implements BrainEngine {
     factText: string,
     opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null },
   ): Promise<FactRow[]> {
-    return factsImpl.findCandidateDuplicates(this.factsDeps, source_id, entitySlug, factText, opts);
+    return factsImpl.findCandidateDuplicates(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id, entitySlug, factText, opts);
   }
 
   async consolidateFact(id: number, takeId: number): Promise<void> {
-    return factsImpl.consolidateFact(this.factsDeps, id, takeId);
+    return factsImpl.consolidateFact(this.engineSql, id, takeId);
   }
 
   async findTrajectory(opts: import('./engine.ts').TrajectoryOpts): Promise<import('./engine.ts').TrajectoryPoint[]> {
-    return factsImpl.findTrajectory(this.factsDeps, opts);
+    return factsImpl.findTrajectory(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), opts);
   }
 
   async getFactsHealth(source_id: string): Promise<FactsHealth> {
-    return factsImpl.getFactsHealth(this.factsDeps, source_id);
+    return factsImpl.getFactsHealth(unscopedExecutor(this.engineSql, 'facts: unscoped on master (EO4 inventory)'), source_id);
   }
 
   // ============================================================
   // v0.28: Takes (typed/weighted/attributed claims) + synthesis_evidence
   // ============================================================
 
-  // Peeled into ./postgres-engine/takes.ts (containment sprint C15).
+  // Takes SQL lives once in ./engine-sql/takes.ts (refactor wave 1 C12).
 
   /** Narrow deps for the peeled takes module. */
-  private get takesDeps(): PgTakesDeps {
-    const self = this;
-    return {
-      get sql() { return self.sql; },
-      batchRetry: <T>(auditSite: BatchAuditSite, signal: AbortSignal | undefined, fn: () => Promise<T>, batchSize: number) =>
-        self.batchRetry(auditSite, signal, fn, batchSize),
-      executeRawJsonb: <R = Record<string, unknown>>(sqlText: string, scalarParams: SqlValue[], jsonbParams: unknown[]) =>
-        executeRawJsonb<R>(self, sqlText, scalarParams, jsonbParams),
-    };
-  }
-
   async addTakesBatch(rowsIn: TakeBatchInput[], opts?: BatchOpts): Promise<number> {
-    return takesImpl.addTakesBatch(this.takesDeps, rowsIn, opts);
+    return takesImpl.addTakesBatch(() => this.engineSql, (site, signal, fn, size) => this.batchRetry(site, signal, fn, size), rowsIn, opts);
   }
 
   async listActiveTakesForPages(
     pageIds: number[],
     opts: { takesHoldersAllowList?: string[] } = {},
   ): Promise<Map<number, Take[]>> {
-    return takesImpl.listActiveTakesForPages(this.takesDeps, pageIds, opts);
+    return takesImpl.listActiveTakesForPages(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), pageIds, opts);
   }
 
   async writeContradictionsRun(row: {
@@ -4550,7 +4530,7 @@ export class PostgresEngine implements BrainEngine {
     source_tier_breakdown: Record<string, unknown>;
     report_json: Record<string, unknown>;
   }): Promise<boolean> {
-    return takesImpl.writeContradictionsRun(this.takesDeps, row);
+    return takesImpl.writeContradictionsRun(this.engineSql, row);
   }
 
   async loadContradictionsTrend(days: number): Promise<Array<{
@@ -4568,7 +4548,7 @@ export class PostgresEngine implements BrainEngine {
     source_tier_breakdown: Record<string, unknown>;
     report_json: Record<string, unknown>;
   }>> {
-    return takesImpl.loadContradictionsTrend(this.takesDeps, days);
+    return takesImpl.loadContradictionsTrend(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), days);
   }
 
   async getContradictionCacheEntry(key: {
@@ -4578,7 +4558,7 @@ export class PostgresEngine implements BrainEngine {
     prompt_version: string;
     truncation_policy: string;
   }): Promise<Record<string, unknown> | null> {
-    return takesImpl.getContradictionCacheEntry(this.takesDeps, key);
+    return takesImpl.getContradictionCacheEntry(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), key);
   }
 
   async putContradictionCacheEntry(opts: {
@@ -4590,48 +4570,48 @@ export class PostgresEngine implements BrainEngine {
     verdict: Record<string, unknown>;
     ttl_seconds?: number;
   }): Promise<void> {
-    return takesImpl.putContradictionCacheEntry(this.takesDeps, opts);
+    return takesImpl.putContradictionCacheEntry(this.engineSql, opts);
   }
 
   async sweepContradictionCache(): Promise<number> {
-    return takesImpl.sweepContradictionCache(this.takesDeps);
+    return takesImpl.sweepContradictionCache(this.engineSql);
   }
 
   async listTakes(opts: TakesListOpts = {}): Promise<Take[]> {
-    return takesImpl.listTakes(this.takesDeps, opts);
+    return takesImpl.listTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), opts);
   }
 
   async searchTakes(query: string, opts: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[] } = {}): Promise<TakeHit[]> {
-    return takesImpl.searchTakes(this.takesDeps, query, opts);
+    return takesImpl.searchTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), query, opts);
   }
 
   async searchTakesVector(
     embedding: Float32Array,
     opts: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[] } = {},
   ): Promise<TakeHit[]> {
-    return takesImpl.searchTakesVector(this.takesDeps, embedding, opts);
+    return takesImpl.searchTakesVector(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), embedding, opts);
   }
 
   async getTakeEmbeddings(ids: number[]): Promise<Map<number, Float32Array>> {
-    return takesImpl.getTakeEmbeddings(this.takesDeps, ids);
+    return takesImpl.getTakeEmbeddings(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), ids);
   }
 
   async countStaleTakes(): Promise<number> {
-    return takesImpl.countStaleTakes(this.takesDeps);
+    return takesImpl.countStaleTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'));
   }
 
   async listStaleTakes(): Promise<StaleTakeRow[]> {
-    return takesImpl.listStaleTakes(this.takesDeps);
+    return takesImpl.listStaleTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'));
   }
 
-  async updateTakeEmbeddings(rowsIn: TakeEmbeddingInput[], opts?: BatchOpts): Promise<number> { return takesImpl.updateTakeEmbeddings(this.takesDeps, rowsIn, opts); }
+  async updateTakeEmbeddings(rowsIn: TakeEmbeddingInput[], opts?: BatchOpts): Promise<number> { return takesImpl.updateTakeEmbeddings(() => this.engineSql, (site, signal, fn, size) => this.batchRetry(site, signal, fn, size), rowsIn, opts); }
 
   async updateTake(
     pageId: number,
     rowNum: number,
     fields: { weight?: number; since_date?: string; source?: string },
   ): Promise<void> {
-    return takesImpl.updateTake(this.takesDeps, pageId, rowNum, fields);
+    return takesImpl.updateTake(this.engineSql, pageId, rowNum, fields);
   }
 
   async supersedeTake(
@@ -4639,23 +4619,23 @@ export class PostgresEngine implements BrainEngine {
     oldRow: number,
     newRow: Omit<TakeBatchInput, 'page_id' | 'row_num' | 'superseded_by'>,
   ): Promise<{ oldRow: number; newRow: number }> {
-    return takesImpl.supersedeTake(this.takesDeps, pageId, oldRow, newRow);
+    return takesImpl.supersedeTake(this.engineSql, pageId, oldRow, newRow);
   }
 
   async resolveTake(pageId: number, rowNum: number, resolution: TakeResolution): Promise<void> {
-    return takesImpl.resolveTake(this.takesDeps, pageId, rowNum, resolution);
+    return takesImpl.resolveTake(this.engineSql, pageId, rowNum, resolution);
   }
 
   async getScorecard(opts: TakesScorecardOpts, allowList: string[] | undefined): Promise<TakesScorecard> {
-    return takesImpl.getScorecard(this.takesDeps, opts, allowList);
+    return takesImpl.getScorecard(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), opts, allowList);
   }
 
   async getCalibrationCurve(opts: CalibrationCurveOpts, allowList: string[] | undefined): Promise<CalibrationBucket[]> {
-    return takesImpl.getCalibrationCurve(this.takesDeps, opts, allowList);
+    return takesImpl.getCalibrationCurve(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), opts, allowList);
   }
 
   async addSynthesisEvidence(rowsIn: SynthesisEvidenceInput[]): Promise<number> {
-    return takesImpl.addSynthesisEvidence(this.takesDeps, rowsIn);
+    return takesImpl.addSynthesisEvidence(this.engineSql, rowsIn);
   }
 
   // Versions
@@ -5464,41 +5444,35 @@ export class PostgresEngine implements BrainEngine {
   // per-lang tree-sitter queries land in Layer 5/6.
   // ============================================================
 
-  // Peeled into ./postgres-engine/code-edges.ts (containment sprint C15).
-
-  /** Narrow deps for the peeled code-edges module. */
-  private get codeEdgesDeps(): PgCodeEdgesDeps {
-    const self = this;
-    return { get sql() { return self.sql; } };
-  }
+  // Code-edge SQL lives once in ./engine-sql/code-edges.ts (refactor wave 1 C13).
 
   async addCodeEdges(edges: import('./types.ts').CodeEdgeInput[]): Promise<number> {
-    return codeEdgesImpl.addCodeEdges(this.codeEdgesDeps, edges);
+    return codeEdgesImpl.addCodeEdges(this.engineSql, edges);
   }
 
   async deleteCodeEdgesForChunks(chunkIds: number[]): Promise<void> {
-    return codeEdgesImpl.deleteCodeEdgesForChunks(this.codeEdgesDeps, chunkIds);
+    return codeEdgesImpl.deleteCodeEdgesForChunks(this.engineSql, chunkIds);
   }
 
   async getCallersOf(
     qualifiedName: string,
     opts?: { sourceId?: string; allSources?: boolean; limit?: number },
   ): Promise<import('./types.ts').CodeEdgeResult[]> {
-    return codeEdgesImpl.getCallersOf(this.codeEdgesDeps, qualifiedName, opts);
+    return codeEdgesImpl.getCallersOf(unscopedExecutor(this.engineSql, 'code-edges: unscoped on master (EO4 inventory)'), qualifiedName, opts);
   }
 
   async getCalleesOf(
     qualifiedName: string,
     opts?: { sourceId?: string; allSources?: boolean; limit?: number; bareFallback?: boolean },
   ): Promise<import('./types.ts').CodeEdgeResult[]> {
-    return codeEdgesImpl.getCalleesOf(this.codeEdgesDeps, qualifiedName, opts);
+    return codeEdgesImpl.getCalleesOf(unscopedExecutor(this.engineSql, 'code-edges: unscoped on master (EO4 inventory)'), qualifiedName, opts);
   }
 
   async getEdgesByChunk(
     chunkId: number,
     opts?: { direction?: 'in' | 'out' | 'both'; edgeType?: string; limit?: number },
   ): Promise<import('./types.ts').CodeEdgeResult[]> {
-    return codeEdgesImpl.getEdgesByChunk(this.codeEdgesDeps, chunkId, opts);
+    return codeEdgesImpl.getEdgesByChunk(unscopedExecutor(this.engineSql, 'code-edges: unscoped on master (EO4 inventory)'), chunkId, opts);
   }
 
   // Eval capture (v0.25.0). See BrainEngine interface docs.
@@ -5574,31 +5548,26 @@ export class PostgresEngine implements BrainEngine {
   // v0.29 — Salience + Anomaly Detection
   // ============================================================
 
-  // Peeled into ./postgres-engine/salience.ts (containment sprint C15).
+  // Salience SQL lives once in ./engine-sql/salience.ts (refactor wave 1 C10).
 
   /** Narrow deps for the peeled salience module. */
-  private get salienceDeps(): PgSalienceDeps {
-    const self = this;
-    return { get sql() { return self.sql; } };
-  }
-
   async batchLoadEmotionalInputs(slugs?: string[]): Promise<EmotionalWeightInputRow[]> {
-    return salienceImpl.batchLoadEmotionalInputs(this.salienceDeps, slugs);
+    return salienceImpl.batchLoadEmotionalInputs(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), slugs);
   }
 
   async setEmotionalWeightBatch(rows: EmotionalWeightWriteRow[]): Promise<number> {
-    return salienceImpl.setEmotionalWeightBatch(this.salienceDeps, rows);
+    return salienceImpl.setEmotionalWeightBatch(this.engineSql, rows);
   }
 
   async getRecentSalience(opts: SalienceOpts): Promise<SalienceResult[]> {
-    return salienceImpl.getRecentSalience(this.salienceDeps, opts);
+    return salienceImpl.getRecentSalience(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), opts);
   }
 
   async listEnrichCandidates(opts: EnrichCandidatesOpts): Promise<EnrichCandidate[]> {
-    return salienceImpl.listEnrichCandidates(this.salienceDeps, opts);
+    return salienceImpl.listEnrichCandidates(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), opts);
   }
 
   async findAnomalies(opts: AnomaliesOpts): Promise<AnomalyResult[]> {
-    return salienceImpl.findAnomalies(this.salienceDeps, opts);
+    return salienceImpl.findAnomalies(unscopedExecutor(this.engineSql, 'salience: unscoped on master (EO4 inventory)'), opts);
   }
 }

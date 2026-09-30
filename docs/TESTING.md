@@ -460,6 +460,41 @@ per-file cap; `!path<TAB>reason` records a parity file deliberately left out.
 `test/scripts/e2e-backend-matrix.test.ts` pins the list's completeness, the CI
 wiring and the runner's count assertion.
 
+### Engine-sql
+
+The engine-sql executor (`src/core/engine-sql/`, refactor wave 1 W1) is pinned
+by these tests; the `*-parity` and RLS files run on every backend in the matrix
+above, and each E2E file keeps a PGLite arm in the unit lane.
+
+- `test/executor-binding-matrix.test.ts` / `test/e2e/executor-binding-matrix.test.ts`:
+  the E5 case table runs twice per backend, through `engine.executeRaw` and
+  through the dialect adapters (`engineSqlExecutor` factory), so the adapters
+  bind, count, fail and cancel exactly like master's raw path.
+- `test/engine-sql-executor.test.ts`: `sqlFragment` renders the same text and
+  values as the postgres.js tagged template (vendored serializer); Postgres
+  driver options (`prepare: true, simple: false` for converted statements,
+  master's options for `executeRaw` / `unsafe`), gauge bypass, EO1 transaction
+  lane, brand `@ts-expect-error` fixtures.
+- `test/e2e/engine-sql-prepare-parity.test.ts`: `pg_prepared_statements` holds a
+  converted statement on direct Postgres and nothing through PgBouncer; a
+  zero-parameter multi-statement string is rejected on every backend.
+- `test/engine-sql-transaction.test.ts` / `test/e2e/engine-sql-transaction-parity.test.ts`:
+  per-domain write-then-throw rollback through `engine.transaction()` and
+  `transactionDirect()` (dual pool on Postgres), with a concurrent pool read.
+  Add a case to `test/helpers/engine-sql-rollback-cases.ts` for every migrated
+  domain write. A mutation that caches the executor on the engine fails it
+  (`DISCRIMINATE_BASE=<mutation> bash scripts/check-test-discriminates.sh`).
+- `test/engine-sql-capabilities.test.ts` / `test/e2e/engine-sql-capabilities-parity.test.ts`:
+  each dialect capability with a boundary-size and a concurrent-write case.
+- `test/e2e/engine-sql-normalize-parity.test.ts`: every declared column kind
+  of `normalize.ts` decodes to one shape on each backend.
+- `test/e2e/engine-sql-rls-scope.test.ts`: `ScopedRead` reads under a
+  non-owner `NOBYPASSRLS` role (cross-source denial, concurrent isolation,
+  nested rollback restoration, connection reuse).
+- SQL text: `test/engine-sql-sql-text.test.ts` goldens must stay byte-identical
+  after a conversion; only `sql-text/_driver.json` moves (tagged ->
+  `runUnsafe`).
+
 ### Native writer locks
 
 `bun test test/native-lock.test.ts test/scripts/native-lock-prebuilds.test.ts`
@@ -933,7 +968,7 @@ per-file rules. They do not cache passing results. Candidate scanner failures
 fail the guard, and matching files retain the same allowlists and diagnostics.
 
 `scripts/guards-manifest.tsv` is THE single registry of `scripts/check-*`
-guards (currently 58), each classified `scanner` (greps/parses repo sources —
+guards (currently 61), each classified `scanner` (greps/parses repo sources —
 must eventually carry fixtures), `buildfresh`, or `repostate` (build/freshness
 guards are exempt-with-reason, not fixture-tested).
 `scripts/guard-self-test.sh` (`bun run check:guard-self-test`, wired into
@@ -972,6 +1007,113 @@ load. Take the executor as a parameter and import types from
 and the `Migration` type in `schema-migrations/types.ts`. Fixtures:
 `test/fixtures/guards/check-layering.ts/`; forms are driven in
 `test/scripts/layering.test.ts`.
+
+#### Engine-sql ratchet
+
+`scripts/check-engine-sql-ratchet.ts` (`bun run check:engine-sql-ratchet`, in
+`bun run verify`) keeps each storage domain's SQL in one place,
+`src/core/engine-sql/<domain>.ts`, by stopping SQL from growing back into the
+engines. It parses `src/core/pglite-engine.ts`, `src/core/postgres-engine.ts`
+and every file under `src/core/pglite-engine/` and `src/core/postgres-engine/`,
+and names each class member (`PostgresEngine.getPage`), top-level function and
+top-level variable (`insertFact`). A unit is SQL-bearing when the literal text
+of a string, template, tagged template or `+` chain inside it has SQL
+structure: `SELECT ... FROM <x>`, `SELECT <fn>(`, `INSERT INTO <x>`,
+`UPDATE <x> [alias] SET`, `DELETE FROM <x>`, `WITH <x> AS (`,
+`CREATE|ALTER|DROP <object kind>`, `TRUNCATE <x>`, `SET LOCAL <x>`,
+`ON CONFLICT`, `WHERE ... ORDER BY|GROUP BY|LIMIT`, or a `$<n>::type` cast.
+Comments and identifiers never count. Keywords match in upper or lower case
+but never Title Case, and a lowercase match also needs a second SQL signal
+(`where`, `returning`, `$1`, `::`, `;`, `*` and similar), so "Select a file"
+or "could not delete from cache" is not SQL.
+
+`scripts/engine-sql-baseline.tsv` lists `migrated<TAB><domain>` rows (the
+domain's module must exist under `src/core/engine-sql/`) and
+`method<TAB><path><TAB><QualifiedName>` rows for the SQL-bearing members that
+remain. Rows only shrink. The guard fails on:
+
+- a new SQL-bearing member with no row: move the SQL into
+  `src/core/engine-sql/<domain>.ts` and delegate, or mark the declaration (on
+  its line or the line above) with `// engine-sql-ok: <reason>`; an empty
+  reason fails;
+- a stale row, whose member is gone, no longer SQL-bearing or now marked:
+  delete it, or run `bun scripts/check-engine-sql-ratchet.ts --prune`, which
+  drops stale and duplicate rows and never adds one;
+- a duplicate or malformed row, or a `migrated` row with no module.
+
+When a domain moves, delete its members' rows and add its `migrated` row in
+the same commit. Fixtures: `test/fixtures/guards/check-engine-sql-ratchet.ts/`;
+forms are driven in `test/scripts/engine-sql-ratchet.test.ts`.
+
+#### Engine-sql dynamic SQL
+
+`scripts/check-engine-sql-dynamic.ts` (`bun run check:engine-sql-dynamic`, in
+`bun run verify`) parses every file under `src/core/engine-sql/` except
+`fragment.ts`, the renderer, which writes `$n` and splices trusted text by
+design. In engine-sql every value reaches SQL as a bound parameter through
+`sqlFragment`, and only constant text is spliced. Trusted text is a string
+literal; a `const` in the same file initialized with trusted text or an
+`as const` object or array literal (members and element accesses included); a
+`CONSTANT_ALLOWLIST` name (`ENRICH_ORDER_SQL`); a call to a `VETTED_BUILDERS`
+entry (`pageReadFilter`, `buildRecencyComponentSql`,
+`privatePagesFilterFragment`, `currentCodeEdgeFilter`, `buildCJKKeywordSql`,
+`currentTextProjectionFilter`); a template or `+` chain whose parts are all
+trusted or are numbers the same function checked earlier with
+`Number.isFinite(<same expression>)`; or a conditional whose branches are both
+trusted. Both registries live in the script with a one-line reason each. The
+guard fails on:
+
+- `trustedSql(arg)` with an arg that is not trusted text: bind the value with
+  `${value}` in `sqlFragment` instead, or register a new builder with its
+  reason after review;
+- an untagged template or `+` concatenation, passed directly or through a
+  local variable (`let` appends included) as the SQL of `.query(`,
+  `.unsafe(`, `.executeRaw(` or `executeRawJsonb(`, with an untrusted part:
+  compose with `sqlFragment` and run it with `executor.run(fragment)`;
+- a literal `$<digit>`, or a `$` right before a substitution, in a composed
+  string (a template with substitutions, any `sqlFragment` template, any `+`
+  operand): let `renderFragment` number the parameters. A static string passed
+  as-is may carry `$1`;
+- an expanded list, `IN (` right before a substitution or a non-literal `+`
+  operand: bind the array as one parameter, `= ANY(${ids}::text[])`, so
+  prepared-statement caches stay bounded.
+
+Fixtures: `test/fixtures/guards/check-engine-sql-dynamic.ts/`; forms are
+driven in `test/scripts/engine-sql-dynamic.test.ts`.
+
+#### Engine-sql brands
+
+`scripts/check-engine-sql-brands.ts` (`bun run check:engine-sql-brands`, in
+`bun run verify`) keeps the RLS read brands in
+`src/core/engine-sql/brands.ts` unforgeable. `ScopedRead` records a read that
+ran inside `withScopedReadTransaction` on master and `LegacyUnscopedRead` one
+that ran unscoped on the pool (EO4), so a forged brand silently changes how a
+read is scoped. The guard fails on:
+
+- a brand key (any `__obtainVia...` name) in a text file under `src/`,
+  `test/` or `scripts/` other than `brands.ts` and the guard's own script,
+  fixtures and test: get a branded executor from `scopedRead(tx)` inside
+  `withScopedReadTransaction`, or from `unscopedExecutor(executor, '<reason>')`;
+- in `src/`, a cast onto `ScopedRead` or `LegacyUnscopedRead` outside
+  `brands.ts`, an `as unknown as T` where `T` names `SqlExecutor`,
+  `ScopedRead` or `LegacyUnscopedRead`, or a double cast passed straight to
+  `scopedRead(` or `unscopedExecutor(`. Driver-handle casts such as
+  `tx as unknown as PgConn` in `dialect-postgres.ts` pass;
+- an import of `unscopedExecutor` or `LegacyUnscopedRead` (value, type,
+  alias, re-export or `import('...').X` type) from outside engine-sql, the two
+  engine façades, doctor (`src/commands/doctor.ts`, `src/commands/doctor/**`,
+  `src/core/doctor*`), maintenance (`src/core/maintenance/**`), admin
+  (`src/commands/admin*.ts`, `src/core/admin/**`), migrations
+  (`src/core/migrate.ts`, `src/core/schema-migrations/**`,
+  `src/commands/migrations/**`) and `test/`; an import of `scopedRead` from
+  outside engine-sql, the façades and `test/`; or a namespace, dynamic or
+  `require` import of `brands.ts` from outside that `scopedRead` list.
+  `src/core/ops/**`, the MCP-facing surface, is always denied. Take the
+  branded executor from the engine façade instead.
+
+The allowlists live in the script. Fixtures:
+`test/fixtures/guards/check-engine-sql-brands.ts/`; forms are driven in
+`test/scripts/engine-sql-brands.test.ts`.
 
 ### Placeholder assertions
 
