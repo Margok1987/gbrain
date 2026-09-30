@@ -28,11 +28,9 @@
 
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
-const autopilotSource = readFileSync(
-  new URL('../src/commands/autopilot.ts', import.meta.url),
-  'utf8',
-);
+const autopilotSource = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
 const cycleSource = readFileSync(
   new URL('../src/core/cycle.ts', import.meta.url),
   'utf8',

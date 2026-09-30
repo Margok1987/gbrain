@@ -150,8 +150,17 @@ function facadeExpansion(p: string): string[] {
       'sync-reconcile.ts',
       'sync-status-report.ts',
     ];
-    return peeled.map(f => join(ROOT, 'src/core', f)).filter(p => existsSync(p));
+    // Refactor wave 1 moves sync's phases into src/commands/sync/; that dir's
+    // text is sync.ts's own text, so it joins the surface from its first file.
+    return [
+      ...peeled.map(f => join(ROOT, 'src/core', f)).filter(p => existsSync(p)),
+      ...collect(join(ROOT, 'src/commands/sync')),
+    ];
   }
+  // Refactor wave 1 subcommand tables for jobs/autopilot (cut-line) land in
+  // same-named command dirs; empty until those peels happen.
+  if (rel === 'src/commands/jobs.ts') return collect(join(ROOT, 'src/commands/jobs'));
+  if (rel === 'src/commands/autopilot.ts') return collect(join(ROOT, 'src/commands/autopilot'));
   return [];
 }
 

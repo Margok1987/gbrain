@@ -20,10 +20,10 @@
  * throw inside handleRequest) still tears both objects down.
  */
 import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 describe('POST /mcp transport cleanup (#2844)', () => {
-  const src = readFileSync('src/commands/serve-http.ts', 'utf8');
+  const src = surfaceFileSource('serve-http', 'src/commands/serve-http.ts');
 
   test('res.on(close) cleanup sits between transport construction and handleRequest', () => {
     const constructIdx = src.indexOf('new StreamableHTTPServerTransport(');

@@ -275,6 +275,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/pool-budget.ts": ["test/e2e/persistence-runtime-matrix.test.ts"],
   "src/core/connection-manager.ts": ["test/e2e/persistence-runtime-matrix.test.ts", "test/e2e/pgbouncer-teardown.test.ts"],
   "src/core/postgres-engine.ts": [
+    "test/e2e/executor-binding-matrix.test.ts",
     ...MIGRATION_WAVE_TESTS,
     "test/e2e/legacy-vector-compatibility-postgres.test.ts",
     "test/e2e/postgres-driver-install.test.ts",
@@ -305,6 +306,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   ],
   // PGLite bootstrap path + parity guard.
   "src/core/pglite-engine.ts": [
+    "test/e2e/executor-binding-matrix.test.ts",
     ...MIGRATION_WAVE_TESTS,
     "test/e2e/legacy-vector-compatibility-postgres.test.ts",
     "test/e2e/unsupported-embedding-identity-postgres.test.ts",
@@ -321,6 +323,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   // Engine method modules peeled from the façades carry the same blast
   // radius as the façades themselves.
   "src/core/postgres-engine/**": [
+    "test/e2e/executor-binding-matrix.test.ts",
     "test/e2e/unsupported-embedding-identity-postgres.test.ts",
     "test/e2e/chunk-canonical-text-privacy.test.ts",
     "test/e2e/engine-content-privacy.test.ts",
@@ -336,6 +339,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/source-boundary-mutation-postgres.test.ts",
   ],
   "src/core/pglite-engine/**": [
+    "test/e2e/executor-binding-matrix.test.ts",
     "test/e2e/unsupported-embedding-identity-postgres.test.ts",
     "test/e2e/chunk-canonical-text-privacy.test.ts",
     "test/e2e/engine-content-privacy.test.ts",
@@ -484,4 +488,21 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/doctor/checks/backup-coverage.ts": ["test/e2e/backup-coverage-parity.test.ts"],
   "src/commands/doctor/checks/sync-failures.ts": ["test/e2e/managed-sync-failures.test.ts"],
   "src/commands/doctor/checks/writer-version.ts": ["test/e2e/persistence-writer-stamps.test.ts"],
+  // E5 executor binding matrix: master's executor path is engine.executeRaw
+  // over sql-query.ts's scalar contract (refactor wave 1, EO20).
+  "src/core/sql-query.ts": ["test/e2e/executor-binding-matrix.test.ts"],
 };
+
+// Refactor wave 1: src/core/engine-sql/ holds SQL shared by BOTH engines, so a
+// change there re-runs every E2E file either engine's façade or module dir
+// selects (plus the E5 binding matrix, already in those rows).
+E2E_TEST_MAP["src/core/engine-sql/**"] = [
+  ...new Set(
+    [
+      "src/core/postgres-engine.ts",
+      "src/core/pglite-engine.ts",
+      "src/core/postgres-engine/**",
+      "src/core/pglite-engine/**",
+    ].flatMap((key) => E2E_TEST_MAP[key] ?? []),
+  ),
+];

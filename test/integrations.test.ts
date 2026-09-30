@@ -173,8 +173,7 @@ describe('CLI integration', () => {
   let cliSource: string;
 
   beforeAll(() => {
-    const { readFileSync } = require('fs');
-    cliSource = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf-8');
+    cliSource = surfaceFileSource('cli', 'src/cli.ts');
   });
 
   test('CLI_ONLY set contains integrations', () => {
@@ -705,6 +704,7 @@ describe('isInternalUrl', () => {
 // --- Recipe trust boundary (B1 regression) ---
 
 import { getRecipeDirs } from '../src/commands/integrations.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 describe('getRecipeDirs (B1 trust boundary)', () => {
   test('returns tiered list with trusted flag', () => {

@@ -2,9 +2,10 @@ import { describe, test, expect } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 // test-reads-source-ok[structural]: two kept pins need the dispatcher's text: the handleCliOnly case-label census (switch labels cannot be enumerated at runtime) and the local-op normalize call site (bigints only reach it from Postgres, never PGLite).
-const cliSource = readFileSync(new URL('../src/cli.ts', import.meta.url), 'utf-8');
+const cliSource = surfaceFileSource('cli', 'src/cli.ts');
 const repoRoot = new URL('..', import.meta.url).pathname;
 
 function isolatedEnv(home: string): Record<string, string> {

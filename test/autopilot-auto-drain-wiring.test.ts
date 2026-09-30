@@ -8,10 +8,9 @@
  * drains again.
  */
 import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'fs';
-import { join } from 'path';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
-const SRC = readFileSync(join(import.meta.dir, '../src/commands/autopilot.ts'), 'utf8');
+const SRC = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
 
 describe('autopilot auto-drain wiring', () => {
   test('CODEX #2: idempotency key includes a UTC-day time slot (not static)', () => {

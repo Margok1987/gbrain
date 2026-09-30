@@ -1,9 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { generateSystemdUnit } from '../src/commands/autopilot.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
-const AUTOPILOT_SRC = readFileSync(join(import.meta.dir, '../src/commands/autopilot.ts'), 'utf8');
+const AUTOPILOT_SRC = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
 
 describe('generateSystemdUnit', () => {
   const unit = generateSystemdUnit('/home/u/.gbrain/autopilot-run.sh');
