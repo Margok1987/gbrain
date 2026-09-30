@@ -69,8 +69,6 @@ src/core/postgres-engine/forward-reference-bootstrap.ts	applyPostgresForwardRefe
 src/core/progressive-batch/orchestrator.ts	runProgressiveBatch	348	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/remediation/run.ts	runRemediation	428	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/schema-pack/unify-types-handler.ts	runUnifyTypes	310	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/core/search/hybrid.ts	hybridSearch	1244	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/core/search/hybrid.ts	hybridSearchCached	437	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/skillopt/orchestrator.ts	runOptimizationLoop	704	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/skillopt/orchestrator.ts	runOptimizationLoop>withBudgetTracker(#1)	405	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/sources-ops.ts	addSource	317	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
