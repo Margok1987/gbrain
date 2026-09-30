@@ -210,7 +210,6 @@
         "buildStaleChunkWhere",
         "buildStalePagesWhere",
         "chronicleSourceCond",
-        "codeEdgesDeps",
         "connRetry",
         "connect",
         "consolidateFact",

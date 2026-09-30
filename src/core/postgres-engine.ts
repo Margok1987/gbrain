@@ -118,8 +118,7 @@ import { acquireInitSchemaAdvisoryLock } from './postgres-engine/init-schema-loc
 import { applyPostgresForwardReferenceBootstrap } from './postgres-engine/forward-reference-bootstrap.ts';
 import * as factsImpl from './engine-sql/facts.ts';
 import * as takesImpl from './engine-sql/takes.ts';
-import * as codeEdgesImpl from './postgres-engine/code-edges.ts';
-import type { PgCodeEdgesDeps } from './postgres-engine/code-edges.ts';
+import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './postgres-engine/cjk-search.ts';
@@ -5447,41 +5446,35 @@ export class PostgresEngine implements BrainEngine {
   // per-lang tree-sitter queries land in Layer 5/6.
   // ============================================================
 
-  // Peeled into ./postgres-engine/code-edges.ts (containment sprint C15).
-
-  /** Narrow deps for the peeled code-edges module. */
-  private get codeEdgesDeps(): PgCodeEdgesDeps {
-    const self = this;
-    return { get sql() { return self.sql; } };
-  }
+  // Code-edge SQL lives once in ./engine-sql/code-edges.ts (refactor wave 1 C13).
 
   async addCodeEdges(edges: import('./types.ts').CodeEdgeInput[]): Promise<number> {
-    return codeEdgesImpl.addCodeEdges(this.codeEdgesDeps, edges);
+    return codeEdgesImpl.addCodeEdges(this.engineSql, edges);
   }
 
   async deleteCodeEdgesForChunks(chunkIds: number[]): Promise<void> {
-    return codeEdgesImpl.deleteCodeEdgesForChunks(this.codeEdgesDeps, chunkIds);
+    return codeEdgesImpl.deleteCodeEdgesForChunks(this.engineSql, chunkIds);
   }
 
   async getCallersOf(
     qualifiedName: string,
     opts?: { sourceId?: string; allSources?: boolean; limit?: number },
   ): Promise<import('./types.ts').CodeEdgeResult[]> {
-    return codeEdgesImpl.getCallersOf(this.codeEdgesDeps, qualifiedName, opts);
+    return codeEdgesImpl.getCallersOf(unscopedExecutor(this.engineSql, 'code-edges: unscoped on master (EO4 inventory)'), qualifiedName, opts);
   }
 
   async getCalleesOf(
     qualifiedName: string,
     opts?: { sourceId?: string; allSources?: boolean; limit?: number; bareFallback?: boolean },
   ): Promise<import('./types.ts').CodeEdgeResult[]> {
-    return codeEdgesImpl.getCalleesOf(this.codeEdgesDeps, qualifiedName, opts);
+    return codeEdgesImpl.getCalleesOf(unscopedExecutor(this.engineSql, 'code-edges: unscoped on master (EO4 inventory)'), qualifiedName, opts);
   }
 
   async getEdgesByChunk(
     chunkId: number,
     opts?: { direction?: 'in' | 'out' | 'both'; edgeType?: string; limit?: number },
   ): Promise<import('./types.ts').CodeEdgeResult[]> {
-    return codeEdgesImpl.getEdgesByChunk(this.codeEdgesDeps, chunkId, opts);
+    return codeEdgesImpl.getEdgesByChunk(unscopedExecutor(this.engineSql, 'code-edges: unscoped on master (EO4 inventory)'), chunkId, opts);
   }
 
   // Eval capture (v0.25.0). See BrainEngine interface docs.

@@ -15,6 +15,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { BrainEngine } from '../../src/core/engine.ts';
+import { installFixtureChunks } from './page-projection.ts';
 
 export interface RollbackCase {
   domain: string;
@@ -83,7 +84,33 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return Number(rows[0]?.w ?? 0);
     },
   },
+  {
+    domain: 'code-edges',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.addCodeEdges([{ from_chunk_id: await rollbackChunk(engine), to_chunk_id: null, from_symbol_qualified: 'run', to_symbol_qualified: 'seeded-target', edge_type: 'calls' }]);
+    },
+    async write(tx) {
+      const n = await tx.addCodeEdges([{ from_chunk_id: await rollbackChunk(tx), to_chunk_id: null, from_symbol_qualified: 'run', to_symbol_qualified: 'rolled-back-target', edge_type: 'calls' }]);
+      expect(n).toBe(1);
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ n: number }>(
+        `SELECT count(*)::int AS n FROM code_edges_symbol WHERE to_symbol_qualified = 'rolled-back-target'`);
+      return Number(rows[0]?.n ?? 0);
+    },
+  },
 ];
+
+async function rollbackChunk(engine: BrainEngine): Promise<number> {
+  const existing = await engine.getChunks(SLUG);
+  if (existing.length > 0) return existing[0]!.id;
+  await installFixtureChunks(engine, SLUG, [{
+    chunk_index: 0, chunk_text: 'body', chunk_source: 'compiled_truth',
+    language: 'typescript', symbol_name: 'run', symbol_type: 'function', symbol_name_qualified: 'run',
+  }]);
+  return (await engine.getChunks(SLUG))[0]!.id;
+}
 
 async function pageId(engine: BrainEngine): Promise<number> {
   const rows = await engine.executeRaw<{ id: number }>(`SELECT id FROM pages WHERE slug = $1 AND source_id = 'default'`, [SLUG]);

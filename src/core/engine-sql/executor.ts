@@ -68,9 +68,10 @@ export interface DialectCapabilities {
    */
   readonly transactionAdvisoryLocks: boolean;
   /**
-   * Whether the embedding cast must be probed per column (`vector` vs
-   * `halfvec`). Postgres resolves it from the live column type; PGLite's
-   * schema only ever creates `vector` columns.
+   * Whether the embedding cast is probed per column (`vector` vs `halfvec`).
+   * Postgres resolves it from the live column type (pgvector < 0.7 has no
+   * vector->halfvec cast); PGLite never probed on master: it always casts
+   * `::vector` and relies on its bundled pgvector's assignment cast.
    */
   readonly probesEmbeddingCast: boolean;
 }

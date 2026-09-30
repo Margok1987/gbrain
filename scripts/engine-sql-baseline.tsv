@@ -8,6 +8,7 @@
 # SQL-bearing engine member never gets a row: move the SQL, or mark it
 # `// engine-sql-ok: <reason>`.
 # docs/TESTING.md#engine-sql-ratchet
+migrated	code-edges
 migrated	facts
 migrated	salience
 migrated	takes
@@ -111,10 +112,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.upsertEventProjection
 method	src/core/pglite-engine.ts	PGLiteEngine.upsertFile
 method	src/core/pglite-engine.ts	probePgliteScratchStore
 method	src/core/pglite-engine/checkpoint-guard.ts	PgliteCheckpointGuard.beforeOutermostTransaction
-method	src/core/pglite-engine/code-edges.ts	addCodeEdges
-method	src/core/pglite-engine/code-edges.ts	deleteCodeEdgesForChunks
-method	src/core/pglite-engine/code-edges.ts	getCalleesOf
-method	src/core/pglite-engine/code-edges.ts	getCallersOf
 method	src/core/pglite-engine/code-edges.ts	getEdgesByChunk
 method	src/core/postgres-engine.ts	PostgresEngine._addLinksBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._addTimelineEntriesBatchOnce
@@ -215,11 +212,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.updateSourceConfig
 method	src/core/postgres-engine.ts	PostgresEngine.upsertEventProjection
 method	src/core/postgres-engine.ts	PostgresEngine.upsertFile
 method	src/core/postgres-engine.ts	PostgresEngine.withScopedReadTransaction
-method	src/core/postgres-engine/code-edges.ts	addCodeEdges
-method	src/core/postgres-engine/code-edges.ts	deleteCodeEdgesForChunks
-method	src/core/postgres-engine/code-edges.ts	getCalleesOf
-method	src/core/postgres-engine/code-edges.ts	getCallersOf
-method	src/core/postgres-engine/code-edges.ts	getEdgesByChunk
 method	src/core/postgres-engine/forward-reference-bootstrap.ts	applyPostgresForwardReferenceBootstrap
 method	src/core/postgres-engine/init-schema-lock.ts	acquireInitSchemaAdvisoryLock
 method	src/core/postgres-engine/init-schema-lock.ts	lockHolderPid

@@ -7,8 +7,9 @@
  *     `pg_advisory_xact_lock` inside a transaction; PGLite (single connection)
  *     never locked and its plain insert never opened a transaction.
  *   - probesEmbeddingCast: Postgres matches the vector literal cast to the
- *     live `facts.embedding` column type (`::vector` | `::halfvec`); PGLite's
- *     schema only creates `vector`.
+ *     live `facts.embedding` column type (`::vector` | `::halfvec`); PGLite
+ *     always cast `::vector` on master (its bundled pgvector assignment-casts
+ *     to the halfvec column).
  * Every read was unscoped on master (EO4 inventory): reads take
  * `LegacyUnscopedRead`.
  */
@@ -30,8 +31,8 @@ export type EmbeddingCast = '::vector' | '::halfvec';
 
 /**
  * The `facts.embedding` cast suffix. Postgres probes the column (cache state
- * lives on the engine: `PostgresEngine#resolveFactsEmbeddingCast`); PGLite's
- * column is always `vector`.
+ * lives on the engine: `PostgresEngine#resolveFactsEmbeddingCast`); PGLite
+ * keeps master's constant `::vector`.
  */
 export type ResolveEmbeddingCast = () => Promise<EmbeddingCast>;
 

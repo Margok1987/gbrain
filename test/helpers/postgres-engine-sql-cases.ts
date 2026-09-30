@@ -69,7 +69,6 @@ export const DOMAIN_OF: Record<string, string> = {
   'getBulkRetryOpts': OOS.helper,
   'batchRetry': OOS.helper,
   'connRetry': OOS.helper,
-  'codeEdgesDeps': OOS.helper,
   'resolveFactsEmbeddingCast': OOS.helper,
   'activeEmbeddingColId': OOS.helper,
   'buildStaleChunkWhere': OOS.helper,
