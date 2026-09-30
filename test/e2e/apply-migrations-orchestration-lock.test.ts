@@ -62,4 +62,18 @@ describeE2E('apply-migrations orchestration lock (Postgres)', () => {
       rmSync(home, { recursive: true, force: true });
     }
   }, 120_000);
+
+  test('a runner that lost its lease stops before the next migration and reports the new holder', async () => {
+    await getConn().unsafe('DELETE FROM gbrain_cycle_locks WHERE id = $1', [MIGRATION_ORCHESTRATION_LOCK_ID]);
+    const home = makeHome({ engine: 'postgres', database_url: process.env.DATABASE_URL! });
+    try {
+      const run = await collect(spawnDriver(home, writeDriver(home, { holdMs: 0, openDatastore: false, stealLease: true })));
+      expect(run.code, run.stderr + run.stdout).toBe(75);
+      expect(run.stderr).toContain('host host-b, pid 4242');
+      expect(logHas(home, 'start')).toBe(false);
+    } finally {
+      await getConn().unsafe('DELETE FROM gbrain_cycle_locks WHERE id = $1', [MIGRATION_ORCHESTRATION_LOCK_ID]);
+      rmSync(home, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

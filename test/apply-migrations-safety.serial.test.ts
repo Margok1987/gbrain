@@ -128,7 +128,7 @@ mock.module(${JSON.stringify(join(root, 'src/commands/migrations/in-process.ts')
   ...migrationSetup, runMigrateOnlyCore: async () => ({ engine: 'postgres' }),
 }));
 mock.module(${JSON.stringify(join(root, 'src/core/migration-orchestration-lock.ts'))}, () => ({
-  acquireMigrationOrchestrationLock: async () => ({ release: async () => {} }),
+  acquireMigrationOrchestrationLock: async () => ({ assertHeld: async () => {}, release: async () => {} }),
   MIGRATIONS_RUNNING_EXIT_CODE: 75,
   MigrationsRunningError: class extends Error {},
 }));

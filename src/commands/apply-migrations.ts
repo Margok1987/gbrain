@@ -373,7 +373,8 @@ export async function runApplyMigrations(args: string[]): Promise<void> {
   // read-only and never take the lock.
   const held: { lock: MigrationOrchestrationLock | null } = { lock: null };
   const holdLock = async (): Promise<void> => {
-    if (cli.list || cli.dryRun || held.lock) return;
+    if (cli.list || cli.dryRun) return;
+    if (held.lock) { await held.lock.assertHeld(); return; }
     held.lock = await acquireMigrationOrchestrationLock(config);
   };
   let exitCode: number | undefined;
@@ -597,6 +598,8 @@ async function runLockedMigrations(
   // ledger drop was the root cause of the original infinite-retry symptom).
   let failed = false;
   for (const m of toRun) {
+    // A lease lost while an earlier orchestrator ran stops the chain here.
+    await holdLock();
     const recordCheckpoint = !m.reconcile || !plan.applied.includes(m);
     console.log(`\n=== Applying migration v${m.version}: ${m.featurePitch.headline} ===`);
     try {

@@ -30,7 +30,10 @@ import { tryAcquireNativeLock } from './persistence/native-lock.ts';
 export const MIGRATION_ORCHESTRATION_LOCK_ID = 'gbrain-apply-migrations';
 /** Exit status of a runner refused because another runner holds the lock (EX_TEMPFAIL). */
 export const MIGRATIONS_RUNNING_EXIT_CODE = 75;
-const LEASE_TTL_MINUTES = 10;
+// Long enough to outlast a synchronous orchestrator phase (subprocess timeouts
+// reach 30 minutes) that starves the refresh timer; ownership is rechecked
+// before every orchestrator.
+const LEASE_TTL_MINUTES = 60;
 const LEASE_REFRESH_MS = 60_000;
 
 export interface MigrationLockHolder {
@@ -47,6 +50,8 @@ export class MigrationsRunningError extends Error {
 }
 
 export interface MigrationOrchestrationLock {
+  /** Throws MigrationsRunningError when the lease was lost to another runner. */
+  assertHeld(): Promise<void>;
   release(): Promise<void>;
 }
 
@@ -69,9 +74,10 @@ function readPgliteHolder(lockPath: string): MigrationLockHolder | null {
   }
 }
 
-function isMissingLockTable(error: unknown): boolean {
+/** A schema too old for the lease: no table, or one without the acquisition-token columns. */
+function isMissingLockSchema(error: unknown): boolean {
   const e = error as { code?: string; message?: string };
-  return e?.code === '42P01' || /gbrain_cycle_locks.*does not exist/i.test(e?.message ?? '');
+  return e?.code === '42P01' || e?.code === '42703' || /(gbrain_cycle_locks|column).*does not exist/i.test(e?.message ?? '');
 }
 
 async function acquirePglite(dataDir: string): Promise<MigrationOrchestrationLock> {
@@ -80,6 +86,7 @@ async function acquirePglite(dataDir: string): Promise<MigrationOrchestrationLoc
   if (!native) throw new MigrationsRunningError(readPgliteHolder(lockPath) ?? { host: null, pid: null });
   writeFileSync(metadataPath(lockPath), JSON.stringify({ pid: process.pid, host: hostname(), acquired_at: new Date().toISOString() }), { mode: 0o600 });
   return {
+    assertHeld: async () => {},
     release: async () => {
       if (readPgliteHolder(lockPath)?.pid === process.pid) {
         try { rmSync(metadataPath(lockPath), { force: true }); } catch { /* diagnostic metadata only */ }
@@ -103,7 +110,7 @@ async function acquirePostgres(config: GBrainConfig): Promise<MigrationOrchestra
     handle = await tryAcquireDbLock(engine, MIGRATION_ORCHESTRATION_LOCK_ID, LEASE_TTL_MINUTES);
   } catch (error) {
     await engine.disconnect();
-    if (isMissingLockTable(error)) return null;
+    if (isMissingLockSchema(error)) return null;
     throw error;
   }
   if (!handle) {
@@ -113,11 +120,16 @@ async function acquirePostgres(config: GBrainConfig): Promise<MigrationOrchestra
   }
   const timer = setInterval(() => {
     handle.refresh().then((owned) => {
-      if (!owned) console.error('[apply-migrations] orchestration lease was lost; another runner may start.');
+      if (!owned) console.error('[apply-migrations] orchestration lease was lost; stopping before the next migration.');
     }).catch(() => { /* transient; the TTL is the backstop */ });
   }, LEASE_REFRESH_MS);
   timer.unref?.();
   return {
+    assertHeld: async () => {
+      if (await handle.refresh()) return;
+      const snapshot = await inspectLock(engine, MIGRATION_ORCHESTRATION_LOCK_ID).catch(() => null);
+      throw new MigrationsRunningError({ host: snapshot?.holder_host ?? null, pid: snapshot?.holder_pid ?? null });
+    },
     release: async () => {
       clearInterval(timer);
       try { await handle.release(); } finally { await engine.disconnect(); }
@@ -133,7 +145,7 @@ async function acquirePostgres(config: GBrainConfig): Promise<MigrationOrchestra
  */
 export async function acquireMigrationOrchestrationLock(config: GBrainConfig): Promise<MigrationOrchestrationLock | null> {
   if (config.engine === 'pglite') {
-    if (!config.database_path) return { release: async () => {} };
+    if (!config.database_path) return { assertHeld: async () => {}, release: async () => {} };
     return acquirePglite(config.database_path);
   }
   return acquirePostgres(config);
