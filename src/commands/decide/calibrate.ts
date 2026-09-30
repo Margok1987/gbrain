@@ -56,7 +56,7 @@ async function askFamilies(engine: BrainEngine, slot: DecideSlot, provider: stri
       const item = req.itemFor[q.id];
       if (!item) continue;
       const a = r.answers[q.id];
-      perItem.set(item.id, [...(perItem.get(item.id) ?? []), a ? thresholdValue(a) : null]);
+      perItem.set(item.id, [...(perItem.get(item.id) ?? []), a ? (adapter.calibrationValue ? adapter.calibrationValue(a) : thresholdValue(a)) : null]);
       answers[item.id] = a;
     }
     for (const [id, list] of perItem) {
@@ -119,6 +119,7 @@ async function cmdCalibrate(engine: BrainEngine, args: string[]): Promise<number
     const choice = searchThreshold(labelled, target, minRaw === undefined ? undefined : Number(minRaw));
     if (!choice) { console.error(`no threshold meets --min ${minRaw} for ${target}`); return 1; }
     const rel = reliability(labelled);
+    const extra = adapter.calibrateExtra?.(calibrate, first.answers, choice.threshold) ?? null;
     const retestFams = sample(fams, retestN, `${slot}:retest`);
     const retest = new Map<string, number[]>();
     const repack = new Map<string, number[]>();
@@ -135,7 +136,7 @@ async function cmdCalibrate(engine: BrainEngine, args: string[]): Promise<number
       slot, call_site: callSite, provider, model_resolved: first.model, threshold: choice.threshold,
       min_keep: SLOT_SPECS[slot].defaultMinKeep ?? null, metric: target, metric_value: choice.metric_value, ece: rel.ece,
       retest_sd: meanItemSd(retest), repack_sd: meanItemSd(repack), n: labelled.length, dataset_hash: datasetHash(text),
-      split_hash: splitHash(all), calibrate_ids_hash: idsHash(calibrate), calibrate_only: true, pack_shape: slotPackShape(slot, state.cfg), notes: null,
+      split_hash: splitHash(all), calibrate_ids_hash: idsHash(calibrate), calibrate_only: true, pack_shape: slotPackShape(slot, state.cfg), notes: extra ? JSON.stringify(extra) : null,
     };
     const id = await insertCalibration(engine, row);
     resetDecideSearchCache();

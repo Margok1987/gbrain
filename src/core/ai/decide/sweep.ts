@@ -71,10 +71,12 @@ function newSweepId(now: number): string {
   return `${new Date(now).toISOString().replace(/[-:]/g, '').slice(0, 15)}-${randomBytes(3).toString('hex')}`;
 }
 
-export function proposalFloor(snapshot: Record<string, string> | null): number {
+/** Proposal floor: the operator's decide.slots.conflict.proposal_floor, else the calibration's floor, else the default. */
+export function proposalFloor(snapshot: Record<string, string> | null, calibrated?: number): number {
   const raw = snapshot?.['decide.slots.conflict.proposal_floor'];
   const n = raw === undefined ? NaN : Number(raw);
-  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : DEFAULT_PROPOSAL_FLOOR;
+  if (Number.isFinite(n) && n >= 0 && n <= 1) return n;
+  return calibrated ?? DEFAULT_PROPOSAL_FLOOR;
 }
 
 interface SweepContext {
@@ -238,7 +240,7 @@ export async function runConflictSweep(engine: BrainEngine, opts: ConflictSweepO
   }
   const start = opts.since ?? stored!;
   const ctx: SweepContext = {
-    engine, cfg, policy, floor: proposalFloor(snapshot), sweepId: result.sweep_id, sourceId, salt: await receiptSalt(engine),
+    engine, cfg, policy, floor: proposalFloor(snapshot, policy.calibration?.proposal_floor), sweepId: result.sweep_id, sourceId, salt: await receiptSalt(engine),
     judged: new Set(), pairIndex: 0, deadlineMs: opts.deadlineMs ?? SWEEP_REQUEST_DEADLINE_MS, now, result, receipts: [], signal: opts.signal,
   };
   const max = opts.maxFacts ?? SWEEP_MAX_FACTS;

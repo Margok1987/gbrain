@@ -34,6 +34,17 @@ export interface PolicyCalibration {
   pack_shape: string;
   split_hash: string | null;
   calibrate_only: boolean;
+  /** S9: proposal floor calibrated on supersede labels (local row notes or the reference row). */
+  proposal_floor?: number;
+}
+
+/** A calibrated S9 proposal floor stored in a local row's notes JSON, if any. */
+export function notesProposalFloor(notes: string | null | undefined): number | undefined {
+  if (!notes) return undefined;
+  try {
+    const v = (JSON.parse(notes) as { proposal_floor?: unknown }).proposal_floor;
+    return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1 ? v : undefined;
+  } catch { return undefined; }
 }
 
 export interface SlotPolicy {
@@ -97,6 +108,7 @@ function fromLocal(row: CalibrationRow): PolicyCalibration {
     ref: `local:${row.id}`, model_resolved: row.model_resolved, threshold: row.threshold, min_keep: row.min_keep,
     retest_sd: row.retest_sd ?? 0, repack_sd: row.repack_sd ?? 0, action_precision_lb: row.action_precision_lb,
     policy_fingerprint: row.policy_fingerprint, pack_shape: row.pack_shape, split_hash: row.split_hash, calibrate_only: row.calibrate_only,
+    ...(notesProposalFloor(row.notes) !== undefined ? { proposal_floor: notesProposalFloor(row.notes) } : {}),
   };
 }
 
@@ -105,6 +117,7 @@ function fromReference(row: ReferenceCalibration): PolicyCalibration {
     ref: `ref:${row.id}`, model_resolved: row.model_resolved, threshold: row.threshold, min_keep: row.min_keep,
     retest_sd: row.retest_sd, repack_sd: row.repack_sd, action_precision_lb: row.action_precision_lb,
     policy_fingerprint: row.policy_fingerprint, pack_shape: row.pack_shape, split_hash: row.split_hash, calibrate_only: true,
+    ...(row.proposal_floor !== undefined ? { proposal_floor: row.proposal_floor } : {}),
   };
 }
 

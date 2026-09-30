@@ -26,6 +26,8 @@ export interface ReferenceCalibration {
   pack_shape: string;
   dataset_hash: string;
   split_hash: string;
+  /** S9 only: proposal floor calibrated on supersede labels. */
+  proposal_floor?: number;
   /** Recorded eval verdict for the slot on this model. `enable --recommended` needs `win`. */
   verdict: 'win' | 'no_change' | 'regression' | 'not_measured';
   /** Binary version that shipped the row. */

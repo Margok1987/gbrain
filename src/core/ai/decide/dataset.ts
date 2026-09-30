@@ -99,6 +99,10 @@ export interface SlotDatasetAdapter {
   harmfulActions?(family: readonly DatasetItem[], values: Record<string, number | null>, policy: { threshold: number; margin: number; minKeep: number; suppressBelow?: number }): Array<{ item: DatasetItem; correct: boolean }>;
   /** Choice slots: whether the answer is correct for the item (calibration label); default: the item label is true. */
   positive?(item: DatasetItem, answer: DecideAnswer | undefined): boolean;
+  /** The number the production reducer thresholds, when it is not thresholdValue(answer) (S9: P(duplicate) only when duplicate is chosen). */
+  calibrationValue?(answer: DecideAnswer): number;
+  /** Extra knobs calibrated on the same answers, stored as JSON in the row's notes (S9: proposal_floor on supersede labels). */
+  calibrateExtra?(items: readonly DatasetItem[], answers: Record<string, DecideAnswer | undefined>, threshold: number): Record<string, number> | null;
 }
 
 /** Items that carry `state.call_site` (one dataset, several call sites) belong to that call site only. */

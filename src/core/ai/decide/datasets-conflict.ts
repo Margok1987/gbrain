@@ -13,10 +13,39 @@
  * `family` defaults to `id` (pairs sharing a new fact should share a family
  * so they pack together). The calibrated number is the duplicate threshold,
  * so the dataset label is `true` exactly for `duplicate`; the choice label is
- * kept as the slice unless one is given.
+ * kept as the slice unless one is given. Calibration also picks the proposal
+ * floor on the supersede labels (stored in the row's notes; the sweep uses it
+ * unless decide.slots.conflict.proposal_floor overrides it).
  */
-import { conflictQuestion } from './conflict.ts';
+import { searchThreshold } from './calibrate.ts';
+import { conflictQuestion, reduceConflict, supersedeProbability } from './conflict.ts';
 import { registerDatasetAdapter, registerDatasetBuilder, stableSplit, type DatasetItem } from './dataset.ts';
+import { thresholdValue, type DecideAnswer } from './types.ts';
+
+/** Supersede labels the proposal-floor calibration needs before it runs. */
+export const MIN_SUPERSEDE_LABELS = 10;
+
+/** Reducer-consistent duplicate value: the duplicate rule fires only when duplicate is the chosen label. */
+export function duplicateValue(answer: DecideAnswer): number {
+  return answer.kind === 'choice' && answer.choice === 'duplicate' ? thresholdValue(answer) : 0;
+}
+
+/**
+ * Proposal floor on supersede labels (the choice label is the item's slice):
+ * over the pairs the calibrated duplicate rule does not take, the F1-best
+ * P(supersede) floor. Items whose slice is not a choice label are left out. Null when the dataset carries too few supersede labels.
+ */
+export function calibrateProposalFloor(items: readonly DatasetItem[], answers: Record<string, DecideAnswer | undefined>, threshold: number): Record<string, number> | null {
+  const rest = items.flatMap((it) => {
+    const a = answers[it.id];
+    if (a?.kind !== 'choice' || !(CONFLICT_LABELS as readonly string[]).includes(it.slice ?? '') || reduceConflict(a, { threshold, proposalFloor: Infinity }) === 'duplicate') return [];
+    return [{ value: supersedeProbability(a), label: it.slice === 'supersede' }];
+  });
+  const supersedes = rest.filter((r) => r.label).length;
+  if (supersedes < MIN_SUPERSEDE_LABELS) return null;
+  const c = searchThreshold(rest, 'f1');
+  return c ? { proposal_floor: c.threshold, proposal_floor_precision: c.precision, proposal_floor_recall: c.recall, proposal_floor_n: rest.length, proposal_floor_supersedes: supersedes } : null;
+}
 
 export const CONFLICT_LABELS = ['duplicate', 'supersede', 'independent'] as const;
 
@@ -35,6 +64,8 @@ export function registerConflictDatasets(): void {
       const fact = family[0]?.state.fact ?? '';
       return { state: { fact: { text: fact, class: 'facts', fact_id: 0, source_id: 'dataset', visibility: 'world' } }, questions, itemFor };
     },
+    calibrationValue: duplicateValue,
+    calibrateExtra: calibrateProposalFloor,
   });
   registerDatasetBuilder('facts-fixtures', async (path, opts) => parseConflictPairs(await Bun.file(path).text(), opts));
 }

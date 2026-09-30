@@ -75,11 +75,13 @@ function mcnemar(b: number, c: number): number {
   return Math.min(1, (2 * p) / 2 ** n);
 }
 
-const [a, a2, b, b2] = await Promise.all([load(flag('--a')), load(flag('--a2')), load(flag('--b')), load(flag('--b2'))]);
-const d = discordant(a, b);
-const report = {
-  a: summarize(a), b: summarize(b),
-  retest: { a: a2.length ? flips(a, a2) : null, b: b2.length ? flips(b, b2) : null, a2: a2.length ? summarize(a2) : null, b2: b2.length ? summarize(b2) : null },
-  discordant: d, mcnemar_p: mcnemar(d.b_right_a_wrong, d.a_right_b_wrong),
-};
-console.log(JSON.stringify(report, null, 2));
+if (import.meta.main) {
+  const [a, a2, b, b2] = await Promise.all([load(flag('--a')), load(flag('--a2')), load(flag('--b')), load(flag('--b2'))]);
+  const d = discordant(a, b);
+  const report = {
+    a: summarize(a), b: summarize(b),
+    retest: { a: a2.length ? flips(a, a2) : null, b: b2.length ? flips(b, b2) : null, a2: a2.length ? summarize(a2) : null, b2: b2.length ? summarize(b2) : null },
+    discordant: d, mcnemar_p: mcnemar(d.b_right_a_wrong, d.a_right_b_wrong),
+  };
+  console.log(JSON.stringify(report, null, 2));
+}
