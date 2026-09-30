@@ -132,12 +132,11 @@ import {
 } from './search/embedding-column.ts';
 import { hasCJK } from './cjk.ts';
 import * as factsImpl from './engine-sql/facts.ts';
-import * as takesImpl from './pglite-engine/takes.ts';
+import * as takesImpl from './engine-sql/takes.ts';
 import { PgliteCheckpointGuard } from './pglite-engine/checkpoint-guard.ts';
 import { pgliteExecutor } from './engine-sql/dialect-pglite.ts';
 import type { SqlExecutor } from './engine-sql/executor.ts';
 import { unscopedExecutor } from './engine-sql/brands.ts';
-import type { PgliteTakesDeps } from './pglite-engine/takes.ts';
 import * as codeEdgesImpl from './pglite-engine/code-edges.ts';
 import type { PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
@@ -5316,29 +5315,18 @@ export class PGLiteEngine implements BrainEngine {
   // v0.28: Takes (typed/weighted/attributed claims) + synthesis_evidence
   // ============================================================
 
-  // Peeled into ./pglite-engine/takes.ts (containment sprint C15).
+  // Takes SQL lives once in ./engine-sql/takes.ts (refactor wave 1 C12).
 
   /** Narrow deps for the peeled takes module. */
-  private get takesDeps(): PgliteTakesDeps {
-    const self = this;
-    return {
-      get db() { return self.db; },
-      batchRetry: <T>(auditSite: BatchAuditSite, signal: AbortSignal | undefined, fn: () => Promise<T>, batchSize: number) =>
-        self.batchRetry(auditSite, signal, fn, batchSize),
-      executeRawJsonb: <R = Record<string, unknown>>(sqlText: string, scalarParams: SqlValue[], jsonbParams: unknown[]) =>
-        executeRawJsonb<R>(self, sqlText, scalarParams, jsonbParams),
-    };
-  }
-
   async addTakesBatch(rowsIn: TakeBatchInput[], opts?: BatchOpts): Promise<number> {
-    return takesImpl.addTakesBatch(this.takesDeps, rowsIn, opts);
+    return takesImpl.addTakesBatch(() => this.engineSql, (site, signal, fn, size) => this.batchRetry(site, signal, fn, size), rowsIn, opts);
   }
 
   async listActiveTakesForPages(
     pageIds: number[],
     opts: { takesHoldersAllowList?: string[] } = {},
   ): Promise<Map<number, Take[]>> {
-    return takesImpl.listActiveTakesForPages(this.takesDeps, pageIds, opts);
+    return takesImpl.listActiveTakesForPages(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), pageIds, opts);
   }
 
   async writeContradictionsRun(row: {
@@ -5356,7 +5344,7 @@ export class PGLiteEngine implements BrainEngine {
     source_tier_breakdown: Record<string, unknown>;
     report_json: Record<string, unknown>;
   }): Promise<boolean> {
-    return takesImpl.writeContradictionsRun(this.takesDeps, row);
+    return takesImpl.writeContradictionsRun(this.engineSql, row);
   }
 
   async loadContradictionsTrend(days: number): Promise<Array<{
@@ -5374,7 +5362,7 @@ export class PGLiteEngine implements BrainEngine {
     source_tier_breakdown: Record<string, unknown>;
     report_json: Record<string, unknown>;
   }>> {
-    return takesImpl.loadContradictionsTrend(this.takesDeps, days);
+    return takesImpl.loadContradictionsTrend(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), days);
   }
 
   async getContradictionCacheEntry(key: {
@@ -5384,7 +5372,7 @@ export class PGLiteEngine implements BrainEngine {
     prompt_version: string;
     truncation_policy: string;
   }): Promise<Record<string, unknown> | null> {
-    return takesImpl.getContradictionCacheEntry(this.takesDeps, key);
+    return takesImpl.getContradictionCacheEntry(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), key);
   }
 
   async putContradictionCacheEntry(opts: {
@@ -5396,51 +5384,51 @@ export class PGLiteEngine implements BrainEngine {
     verdict: Record<string, unknown>;
     ttl_seconds?: number;
   }): Promise<void> {
-    return takesImpl.putContradictionCacheEntry(this.takesDeps, opts);
+    return takesImpl.putContradictionCacheEntry(this.engineSql, opts);
   }
 
   async sweepContradictionCache(): Promise<number> {
-    return takesImpl.sweepContradictionCache(this.takesDeps);
+    return takesImpl.sweepContradictionCache(this.engineSql);
   }
 
   async listTakes(opts: TakesListOpts = {}): Promise<Take[]> {
-    return takesImpl.listTakes(this.takesDeps, opts);
+    return takesImpl.listTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), opts);
   }
 
   async searchTakes(
     query: string,
     opts: SearchOpts & { takesHoldersAllowList?: string[] } = {},
   ): Promise<TakeHit[]> {
-    return takesImpl.searchTakes(this.takesDeps, query, opts);
+    return takesImpl.searchTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), query, opts);
   }
 
   async searchTakesVector(
     embedding: Float32Array,
     opts: SearchOpts & { takesHoldersAllowList?: string[] } = {},
   ): Promise<TakeHit[]> {
-    return takesImpl.searchTakesVector(this.takesDeps, embedding, opts);
+    return takesImpl.searchTakesVector(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), embedding, opts);
   }
 
   async getTakeEmbeddings(ids: number[]): Promise<Map<number, Float32Array>> {
-    return takesImpl.getTakeEmbeddings(this.takesDeps, ids);
+    return takesImpl.getTakeEmbeddings(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), ids);
   }
 
   async countStaleTakes(): Promise<number> {
-    return takesImpl.countStaleTakes(this.takesDeps);
+    return takesImpl.countStaleTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'));
   }
 
   async listStaleTakes(): Promise<StaleTakeRow[]> {
-    return takesImpl.listStaleTakes(this.takesDeps);
+    return takesImpl.listStaleTakes(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'));
   }
 
-  async updateTakeEmbeddings(rowsIn: TakeEmbeddingInput[], opts?: BatchOpts): Promise<number> { return takesImpl.updateTakeEmbeddings(this.takesDeps, rowsIn, opts); }
+  async updateTakeEmbeddings(rowsIn: TakeEmbeddingInput[], opts?: BatchOpts): Promise<number> { return takesImpl.updateTakeEmbeddings(() => this.engineSql, (site, signal, fn, size) => this.batchRetry(site, signal, fn, size), rowsIn, opts); }
 
   async updateTake(
     pageId: number,
     rowNum: number,
     fields: { weight?: number; since_date?: string; source?: string },
   ): Promise<void> {
-    return takesImpl.updateTake(this.takesDeps, pageId, rowNum, fields);
+    return takesImpl.updateTake(this.engineSql, pageId, rowNum, fields);
   }
 
   async supersedeTake(
@@ -5448,23 +5436,23 @@ export class PGLiteEngine implements BrainEngine {
     oldRow: number,
     newRow: Omit<TakeBatchInput, 'page_id' | 'row_num' | 'superseded_by'>,
   ): Promise<{ oldRow: number; newRow: number }> {
-    return takesImpl.supersedeTake(this.takesDeps, pageId, oldRow, newRow);
+    return takesImpl.supersedeTake(this.engineSql, pageId, oldRow, newRow);
   }
 
   async resolveTake(pageId: number, rowNum: number, resolution: TakeResolution): Promise<void> {
-    return takesImpl.resolveTake(this.takesDeps, pageId, rowNum, resolution);
+    return takesImpl.resolveTake(this.engineSql, pageId, rowNum, resolution);
   }
 
   async getScorecard(opts: TakesScorecardOpts, allowList: string[] | undefined): Promise<TakesScorecard> {
-    return takesImpl.getScorecard(this.takesDeps, opts, allowList);
+    return takesImpl.getScorecard(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), opts, allowList);
   }
 
   async getCalibrationCurve(opts: CalibrationCurveOpts, allowList: string[] | undefined): Promise<CalibrationBucket[]> {
-    return takesImpl.getCalibrationCurve(this.takesDeps, opts, allowList);
+    return takesImpl.getCalibrationCurve(unscopedExecutor(this.engineSql, 'takes: unscoped on master (EO4 inventory)'), opts, allowList);
   }
 
   async addSynthesisEvidence(rowsIn: SynthesisEvidenceInput[]): Promise<number> {
-    return takesImpl.addSynthesisEvidence(this.takesDeps, rowsIn);
+    return takesImpl.addSynthesisEvidence(this.engineSql, rowsIn);
   }
 
   // Versions

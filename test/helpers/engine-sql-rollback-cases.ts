@@ -67,7 +67,28 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return Number(rows[0]?.n ?? 0);
     },
   },
+  {
+    domain: 'takes',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.addTakesBatch([{ page_id: await pageId(engine), row_num: 1, claim: 'rollback claim', kind: 'take', holder: 'alice-example', weight: 0.25 }]);
+    },
+    async write(tx) {
+      const n = await tx.addTakesBatch([{ page_id: await pageId(tx), row_num: 1, claim: 'rollback claim', kind: 'take', holder: 'alice-example', weight: 0.75 }]);
+      expect(n).toBe(1);
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ w: number }>(
+        `SELECT t.weight::float8 AS w FROM takes t JOIN pages p ON p.id = t.page_id WHERE p.slug = $1 AND t.row_num = 1`, [SLUG]);
+      return Number(rows[0]?.w ?? 0);
+    },
+  },
 ];
+
+async function pageId(engine: BrainEngine): Promise<number> {
+  const rows = await engine.executeRaw<{ id: number }>(`SELECT id FROM pages WHERE slug = $1 AND source_id = 'default'`, [SLUG]);
+  return Number(rows[0].id);
+}
 
 class Rollback extends Error {}
 

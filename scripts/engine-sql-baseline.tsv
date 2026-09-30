@@ -10,6 +10,7 @@
 # docs/TESTING.md#engine-sql-ratchet
 migrated	facts
 migrated	salience
+migrated	takes
 method	src/core/pglite-engine.ts	PGLiteEngine._addLinksBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._addTimelineEntriesBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._connectInternal
@@ -115,26 +116,6 @@ method	src/core/pglite-engine/code-edges.ts	deleteCodeEdgesForChunks
 method	src/core/pglite-engine/code-edges.ts	getCalleesOf
 method	src/core/pglite-engine/code-edges.ts	getCallersOf
 method	src/core/pglite-engine/code-edges.ts	getEdgesByChunk
-method	src/core/pglite-engine/takes.ts	_addTakesBatchOnce
-method	src/core/pglite-engine/takes.ts	_updateTakeEmbeddingsOnce
-method	src/core/pglite-engine/takes.ts	addSynthesisEvidence
-method	src/core/pglite-engine/takes.ts	countStaleTakes
-method	src/core/pglite-engine/takes.ts	getCalibrationCurve
-method	src/core/pglite-engine/takes.ts	getContradictionCacheEntry
-method	src/core/pglite-engine/takes.ts	getScorecard
-method	src/core/pglite-engine/takes.ts	getTakeEmbeddings
-method	src/core/pglite-engine/takes.ts	listActiveTakesForPages
-method	src/core/pglite-engine/takes.ts	listStaleTakes
-method	src/core/pglite-engine/takes.ts	listTakes
-method	src/core/pglite-engine/takes.ts	loadContradictionsTrend
-method	src/core/pglite-engine/takes.ts	putContradictionCacheEntry
-method	src/core/pglite-engine/takes.ts	resolveTake
-method	src/core/pglite-engine/takes.ts	searchTakes
-method	src/core/pglite-engine/takes.ts	searchTakesVector
-method	src/core/pglite-engine/takes.ts	supersedeTake
-method	src/core/pglite-engine/takes.ts	sweepContradictionCache
-method	src/core/pglite-engine/takes.ts	updateTake
-method	src/core/pglite-engine/takes.ts	writeContradictionsRun
 method	src/core/postgres-engine.ts	PostgresEngine._addLinksBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._addTimelineEntriesBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._putPage
@@ -242,23 +223,3 @@ method	src/core/postgres-engine/code-edges.ts	getEdgesByChunk
 method	src/core/postgres-engine/forward-reference-bootstrap.ts	applyPostgresForwardReferenceBootstrap
 method	src/core/postgres-engine/init-schema-lock.ts	acquireInitSchemaAdvisoryLock
 method	src/core/postgres-engine/init-schema-lock.ts	lockHolderPid
-method	src/core/postgres-engine/takes.ts	_addTakesBatchOnce
-method	src/core/postgres-engine/takes.ts	_updateTakeEmbeddingsOnce
-method	src/core/postgres-engine/takes.ts	addSynthesisEvidence
-method	src/core/postgres-engine/takes.ts	countStaleTakes
-method	src/core/postgres-engine/takes.ts	getCalibrationCurve
-method	src/core/postgres-engine/takes.ts	getContradictionCacheEntry
-method	src/core/postgres-engine/takes.ts	getScorecard
-method	src/core/postgres-engine/takes.ts	getTakeEmbeddings
-method	src/core/postgres-engine/takes.ts	listActiveTakesForPages
-method	src/core/postgres-engine/takes.ts	listStaleTakes
-method	src/core/postgres-engine/takes.ts	listTakes
-method	src/core/postgres-engine/takes.ts	loadContradictionsTrend
-method	src/core/postgres-engine/takes.ts	putContradictionCacheEntry
-method	src/core/postgres-engine/takes.ts	resolveTake
-method	src/core/postgres-engine/takes.ts	searchTakes
-method	src/core/postgres-engine/takes.ts	searchTakesVector
-method	src/core/postgres-engine/takes.ts	supersedeTake
-method	src/core/postgres-engine/takes.ts	sweepContradictionCache
-method	src/core/postgres-engine/takes.ts	updateTake
-method	src/core/postgres-engine/takes.ts	writeContradictionsRun

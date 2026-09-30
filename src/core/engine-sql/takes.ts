@@ -1,12 +1,12 @@
 /**
- * v0.28: Takes (typed/weighted/attributed claims) + synthesis_evidence,
- * peeled out of PostgresEngine (containment sprint C15). Free functions over
- * a NARROW deps surface — never the whole engine class.
+ * Takes (typed/weighted/attributed claims), contradiction-probe runs + judge
+ * cache, and synthesis evidence: one SQL implementation for both engines
+ * (refactor wave 1, W1-core C12). Statement text is PostgresEngine's master
+ * text (SQL-text golden `sql-text/takes.json`); PGLite runs the same
+ * statements. The two JSONB batch writes keep master's executeRaw path
+ * (executeRawJsonb over the executor, raw gauge on Postgres). Every read was
+ * unscoped on master (EO4 inventory): reads take `LegacyUnscopedRead`.
  */
-import type postgres from '#postgres'
-
-type PgSql = ReturnType<typeof postgres>;
-
 import type {
   BatchOpts,
   TakeBatchInput, Take, TakesListOpts, TakeHit, StaleTakeRow,
@@ -18,41 +18,39 @@ import { clampSearchLimit } from '../engine.ts';
 import type { SearchOpts } from '../types.ts';
 import { GBrainError } from '../types.ts';
 import type { BatchAuditSite } from '../retry.ts';
-import type { SqlValue } from '../sql-query.ts';
+import { executeRawJsonb } from '../sql-query.ts';
 import { deriveResolutionTuple, finalizeScorecard } from '../takes-resolution.ts';
 import { normalizeWeightForStorage } from '../takes-fence.ts';
 import { buildTakeRows } from '../batch-rows.ts';
 import { staleTakeRowToRow, takeRowToTake, takeHitRowToHit, tryParseEmbedding } from '../utils.ts';
 import { privatePagesFilterFragment } from '../search/private-visibility.ts';
+import { jsonbParam, type SqlExecutor } from './executor.ts';
+import type { LegacyUnscopedRead } from './brands.ts';
+import { sqlFragment, trustedSql } from './fragment.ts';
 
-/** Narrow slice of PostgresEngine the takes operations use. */
-export interface PgTakesDeps {
-  /** Live postgres.js pool (getter-backed at the call site). */
-  readonly sql: PgSql;
-  /** Engine batch retry wrapper (audit JSONL + backoff live on the engine). */
-  batchRetry<T>(
-    auditSite: BatchAuditSite,
-    signal: AbortSignal | undefined,
-    fn: () => Promise<T>,
-    batchSize: number,
-  ): Promise<T>;
-  /** JSONB-safe positional write helper, bound to the engine at the call site. */
-  executeRawJsonb<R = Record<string, unknown>>(
-    sql: string,
-    scalarParams: SqlValue[],
-    jsonbParams: unknown[],
-  ): Promise<R[]>;
-}
+/** The engine's batch retry wrapper (audit JSONL + backoff + reconnect live on the engine). */
+export type BatchRetry = <T>(
+  auditSite: BatchAuditSite,
+  signal: AbortSignal | undefined,
+  fn: () => Promise<T>,
+  batchSize: number,
+) => Promise<T>;
 
-export async function addTakesBatch(deps: PgTakesDeps, rowsIn: TakeBatchInput[], opts?: BatchOpts): Promise<number> {
+/**
+ * Retried writes re-resolve the executor on every attempt: batchRetry may
+ * reconnect the engine between attempts, swapping the connection (EO1).
+ */
+export type ExecutorSource = () => SqlExecutor;
+
+export async function addTakesBatch(sql: ExecutorSource, batchRetry: BatchRetry, rowsIn: TakeBatchInput[], opts?: BatchOpts): Promise<number> {
     if (rowsIn.length === 0) return 0;
     // v0.42.26: takes is a batch primitive too — wrap in batchRetry so a
     // Supavisor circuit-breaker blip doesn't silently drop takes the way it
     // could before (links/timeline already had this; takes was the gap).
-    return deps.batchRetry(opts?.auditSite ?? 'addTakesBatch', opts?.signal, () => _addTakesBatchOnce(deps, rowsIn), rowsIn.length);
+    return batchRetry(opts?.auditSite ?? 'addTakesBatch', opts?.signal, () => _addTakesBatchOnce(sql(), rowsIn), rowsIn.length);
   }
 
-async function _addTakesBatchOnce(deps: PgTakesDeps, rowsIn: TakeBatchInput[]): Promise<number> {
+async function _addTakesBatchOnce(exec: SqlExecutor, rowsIn: TakeBatchInput[]): Promise<number> {
     // #1861: JSONB jsonb_to_recordset instead of unnest(${arr}::text[]). `claim`
     // is free LLM-extracted prose with the same array-literal crash hazard as
     // link context. JSONB additionally lets us declare NATIVE recordset column
@@ -65,7 +63,8 @@ async function _addTakesBatchOnce(deps: PgTakesDeps, rowsIn: TakeBatchInput[]): 
     if (weightClamped > 0) {
       process.stderr.write(`[takes] TAKES_WEIGHT_CLAMPED: ${weightClamped} row(s) had weight outside [0,1]; clamped\n`);
     }
-    const result = await deps.executeRawJsonb(
+    const result = await executeRawJsonb(
+      exec,
       `INSERT INTO takes (page_id, row_num, claim, kind, holder, weight, since_date, until_date, source, superseded_by, active)
        SELECT v.page_id, v.row_num, v.claim, v.kind, v.holder, v.weight,
               v.since_date, v.until_date, v.source, v.superseded_by, v.active
@@ -97,15 +96,14 @@ async function _addTakesBatchOnce(deps: PgTakesDeps, rowsIn: TakeBatchInput[]): 
    * for MCP scope enforcement. Pages with no active takes get an empty array.
    */
 export async function listActiveTakesForPages(
-  deps: PgTakesDeps,
+  exec: LegacyUnscopedRead,
     pageIds: number[],
     opts: { takesHoldersAllowList?: string[] } = {},
   ): Promise<Map<number, Take[]>> {
     const out = new Map<number, Take[]>();
     for (const pid of pageIds) out.set(pid, []);
     if (pageIds.length === 0) return out;
-    const sql = deps.sql;
-    const rows = await sql`
+    const rows = (await exec.run(sqlFragment`
       SELECT t.*, p.slug AS page_slug
       FROM takes t
       JOIN pages p ON p.id = t.page_id
@@ -116,7 +114,7 @@ export async function listActiveTakesForPages(
           OR t.holder = ANY(${opts.takesHoldersAllowList ?? null}::text[])
         )
       ORDER BY t.page_id, t.row_num
-    `;
+    `)).rows;
     for (const r of rows) {
       const take = takeRowToTake(r as Record<string, unknown>);
       const bucket = out.get(take.page_id);
@@ -129,7 +127,7 @@ export async function listActiveTakesForPages(
    * v0.32.6 — persist a contradiction-probe run row (M5). Idempotent on
    * run_id via ON CONFLICT DO NOTHING. Returns true iff a row was inserted.
    */
-export async function writeContradictionsRun(deps: PgTakesDeps, row: {
+export async function writeContradictionsRun(exec: SqlExecutor, row: {
     run_id: string;
     judge_model: string;
     prompt_version: string;
@@ -144,8 +142,7 @@ export async function writeContradictionsRun(deps: PgTakesDeps, row: {
     source_tier_breakdown: Record<string, unknown>;
     report_json: Record<string, unknown>;
   }): Promise<boolean> {
-    const sql = deps.sql;
-    const result = await sql`
+    const result = await exec.run(sqlFragment`
       INSERT INTO eval_contradictions_runs (
         run_id, judge_model, prompt_version,
         queries_evaluated, queries_with_contradiction, total_contradictions_flagged,
@@ -157,19 +154,19 @@ export async function writeContradictionsRun(deps: PgTakesDeps, row: {
         ${row.queries_evaluated}, ${row.queries_with_contradiction}, ${row.total_contradictions_flagged},
         ${row.wilson_ci_lower}, ${row.wilson_ci_upper}, ${row.judge_errors_total},
         ${row.cost_usd_total}, ${row.duration_ms},
-        ${sql.json(row.source_tier_breakdown as Parameters<typeof sql.json>[0])},
-        ${sql.json(row.report_json as Parameters<typeof sql.json>[0])}
+        ${jsonbParam(row.source_tier_breakdown)},
+        ${jsonbParam(row.report_json)}
       )
       ON CONFLICT (run_id) DO NOTHING
-    `;
-    return result.count > 0;
+    `);
+    return result.affectedRows > 0;
   }
 
   /**
    * v0.32.6 — load probe runs from the last N days, newest first (M5).
    * Used by `trend` sub-subcommand and the doctor `contradictions` check.
    */
-export async function loadContradictionsTrend(deps: PgTakesDeps, days: number): Promise<Array<{
+export async function loadContradictionsTrend(exec: LegacyUnscopedRead, days: number): Promise<Array<{
     run_id: string;
     ran_at: string;
     judge_model: string;
@@ -184,9 +181,8 @@ export async function loadContradictionsTrend(deps: PgTakesDeps, days: number): 
     source_tier_breakdown: Record<string, unknown>;
     report_json: Record<string, unknown>;
   }>> {
-    const sql = deps.sql;
     const cutoff = new Date(Date.now() - Math.max(0, days) * 86400000);
-    const rows = await sql`
+    const rows = (await exec.run(sqlFragment`
       SELECT run_id, ran_at, judge_model,
              queries_evaluated, queries_with_contradiction, total_contradictions_flagged,
              wilson_ci_lower, wilson_ci_upper, judge_errors_total,
@@ -195,7 +191,7 @@ export async function loadContradictionsTrend(deps: PgTakesDeps, days: number): 
       FROM eval_contradictions_runs
       WHERE ran_at >= ${cutoff}
       ORDER BY ran_at DESC
-    `;
+    `)).rows;
     return rows.map((r) => ({
       run_id: r.run_id as string,
       ran_at: (r.ran_at instanceof Date ? r.ran_at.toISOString() : String(r.ran_at)),
@@ -217,15 +213,14 @@ export async function loadContradictionsTrend(deps: PgTakesDeps, days: number): 
    * v0.32.6 — judge cache lookup (P2). Returns verdict JSON for a non-
    * expired row matching the full 5-component key, else NULL.
    */
-export async function getContradictionCacheEntry(deps: PgTakesDeps, key: {
+export async function getContradictionCacheEntry(exec: LegacyUnscopedRead, key: {
     chunk_a_hash: string;
     chunk_b_hash: string;
     model_id: string;
     prompt_version: string;
     truncation_policy: string;
   }): Promise<Record<string, unknown> | null> {
-    const sql = deps.sql;
-    const rows = await sql`
+    const rows = (await exec.run(sqlFragment`
       SELECT verdict
       FROM eval_contradictions_cache
       WHERE chunk_a_hash = ${key.chunk_a_hash}
@@ -235,7 +230,7 @@ export async function getContradictionCacheEntry(deps: PgTakesDeps, key: {
         AND truncation_policy = ${key.truncation_policy}
         AND expires_at > now()
       LIMIT 1
-    `;
+    `)).rows;
     if (rows.length === 0) return null;
     return rows[0].verdict as Record<string, unknown>;
   }
@@ -244,7 +239,7 @@ export async function getContradictionCacheEntry(deps: PgTakesDeps, key: {
    * v0.32.6 — judge cache upsert. ON CONFLICT DO UPDATE refreshes verdict +
    * slides expires_at forward; same-key re-runs are safe.
    */
-export async function putContradictionCacheEntry(deps: PgTakesDeps, opts: {
+export async function putContradictionCacheEntry(exec: SqlExecutor, opts: {
     chunk_a_hash: string;
     chunk_b_hash: string;
     model_id: string;
@@ -253,37 +248,34 @@ export async function putContradictionCacheEntry(deps: PgTakesDeps, opts: {
     verdict: Record<string, unknown>;
     ttl_seconds?: number;
   }): Promise<void> {
-    const sql = deps.sql;
     const ttl = Math.max(60, opts.ttl_seconds ?? 30 * 86400);
     const expiresAt = new Date(Date.now() + ttl * 1000);
-    await sql`
+    (await exec.run(sqlFragment`
       INSERT INTO eval_contradictions_cache (
         chunk_a_hash, chunk_b_hash, model_id, prompt_version, truncation_policy,
         verdict, expires_at
       ) VALUES (
         ${opts.chunk_a_hash}, ${opts.chunk_b_hash}, ${opts.model_id},
         ${opts.prompt_version}, ${opts.truncation_policy},
-        ${sql.json(opts.verdict as Parameters<typeof sql.json>[0])}, ${expiresAt}
+        ${jsonbParam(opts.verdict)}, ${expiresAt}
       )
       ON CONFLICT (chunk_a_hash, chunk_b_hash, model_id, prompt_version, truncation_policy)
       DO UPDATE SET
         verdict = EXCLUDED.verdict,
         expires_at = EXCLUDED.expires_at,
         created_at = now()
-    `;
+    `)).rows;
   }
 
   /** v0.32.6 — periodic sweep of expired cache rows. */
-export async function sweepContradictionCache(deps: PgTakesDeps): Promise<number> {
-    const sql = deps.sql;
-    const result = await sql`
+export async function sweepContradictionCache(exec: SqlExecutor): Promise<number> {
+    const result = await exec.run(sqlFragment`
       DELETE FROM eval_contradictions_cache WHERE expires_at <= now()
-    `;
-    return result.count ?? 0;
+    `);
+    return result.affectedRows;
   }
 
-export async function listTakes(deps: PgTakesDeps, opts: TakesListOpts = {}): Promise<Take[]> {
-    const sql = deps.sql;
+export async function listTakes(exec: LegacyUnscopedRead, opts: TakesListOpts = {}): Promise<Take[]> {
     const limit = clampSearchLimit(opts.limit, 100, 500);
     const offset = Math.max(0, Math.floor(opts.offset ?? 0));
     const active = opts.active ?? true;
@@ -291,16 +283,16 @@ export async function listTakes(deps: PgTakesDeps, opts: TakesListOpts = {}): Pr
     // source_id (already JOINed). Array wins over scalar, matching sourceScopeOpts.
     const sourceFilter =
       opts.sourceIds && opts.sourceIds.length > 0
-        ? sql`AND p.source_id = ANY(${opts.sourceIds}::text[])`
+        ? sqlFragment`AND p.source_id = ANY(${opts.sourceIds}::text[])`
         : opts.sourceId
-          ? sql`AND p.source_id = ${opts.sourceId}`
-          : sql``;
-    const rows = await sql`
+          ? sqlFragment`AND p.source_id = ${opts.sourceId}`
+          : sqlFragment``;
+    const rows = (await exec.run(sqlFragment`
       SELECT t.*, p.slug AS page_slug
       FROM takes t
       JOIN pages p ON p.id = t.page_id
       WHERE 1=1
-        ${opts.excludePrivate ? sql.unsafe(`AND ${privatePagesFilterFragment('p')}`) : sql``}
+        ${opts.excludePrivate ? trustedSql(`AND ${privatePagesFilterFragment('p')}`) : sqlFragment``}
         AND (${opts.page_id ?? null}::int   IS NULL OR t.page_id = ${opts.page_id ?? null}::int)
         AND (${opts.page_slug ?? null}::text IS NULL OR p.slug   = ${opts.page_slug ?? null}::text)
         AND (${opts.holder ?? null}::text   IS NULL OR t.holder  = ${opts.holder ?? null}::text)
@@ -321,19 +313,18 @@ export async function listTakes(deps: PgTakesDeps, opts: TakesListOpts = {}): Pr
         CASE WHEN ${opts.sortBy ?? 'created_at'} = 'since_date'  THEN t.since_date END DESC NULLS LAST,
         CASE WHEN ${opts.sortBy ?? 'created_at'} = 'created_at'  THEN t.created_at END DESC NULLS LAST
       LIMIT ${limit} OFFSET ${offset}
-    `;
+    `)).rows;
     return rows.map((r) => takeRowToTake(r as Record<string, unknown>));
   }
 
-export async function searchTakes(deps: PgTakesDeps, query: string, opts: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[] } = {}): Promise<TakeHit[]> {
-    const sql = deps.sql;
+export async function searchTakes(exec: LegacyUnscopedRead, query: string, opts: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[] } = {}): Promise<TakeHit[]> {
     const limit = clampSearchLimit(opts.limit, 30, 100);
     const sourceFilter = opts.sourceIds && opts.sourceIds.length > 0
-      ? sql`AND p.source_id = ANY(${opts.sourceIds}::text[])`
+      ? sqlFragment`AND p.source_id = ANY(${opts.sourceIds}::text[])`
       : opts.sourceId
-        ? sql`AND p.source_id = ${opts.sourceId}`
-        : sql``;
-    const rows = await sql`
+        ? sqlFragment`AND p.source_id = ${opts.sourceId}`
+        : sqlFragment``;
+    const rows = (await exec.run(sqlFragment`
       SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num,
              t.claim, t.kind, t.holder, t.weight,
              word_similarity(${query}, t.claim)::real AS score
@@ -341,7 +332,7 @@ export async function searchTakes(deps: PgTakesDeps, query: string, opts: Search
       JOIN pages p ON p.id = t.page_id
       WHERE t.active
         AND ${query} <% t.claim
-        ${opts.excludePrivate ? sql.unsafe(`AND ${privatePagesFilterFragment('p')}`) : sql``}
+        ${opts.excludePrivate ? trustedSql(`AND ${privatePagesFilterFragment('p')}`) : sqlFragment``}
         AND (
           ${opts.takesHoldersAllowList ?? null}::text[] IS NULL
           OR t.holder = ANY(${opts.takesHoldersAllowList ?? null}::text[])
@@ -349,7 +340,7 @@ export async function searchTakes(deps: PgTakesDeps, query: string, opts: Search
         ${sourceFilter}
       ORDER BY score DESC, t.weight DESC
       LIMIT ${limit}
-    `;
+    `)).rows;
     // #2450-class: int8 columns arrive as native BigInt from the pg driver;
     // coerce per-row (takeRowToTake precedent) so MCP/CLI JSON.stringify
     // doesn't crash the moment a search actually matches.
@@ -357,19 +348,18 @@ export async function searchTakes(deps: PgTakesDeps, query: string, opts: Search
   }
 
 export async function searchTakesVector(
-  deps: PgTakesDeps,
+  exec: LegacyUnscopedRead,
     embedding: Float32Array,
     opts: SearchOpts & { takesHoldersAllowList?: string[]; sourceId?: string; sourceIds?: string[] } = {},
   ): Promise<TakeHit[]> {
-    const sql = deps.sql;
     const limit = clampSearchLimit(opts.limit, 30, 100);
     const vec = `[${Array.from(embedding).join(',')}]`;
     const sourceFilter = opts.sourceIds && opts.sourceIds.length > 0
-      ? sql`AND p.source_id = ANY(${opts.sourceIds}::text[])`
+      ? sqlFragment`AND p.source_id = ANY(${opts.sourceIds}::text[])`
       : opts.sourceId
-        ? sql`AND p.source_id = ${opts.sourceId}`
-        : sql``;
-    const rows = await sql`
+        ? sqlFragment`AND p.source_id = ${opts.sourceId}`
+        : sqlFragment``;
+    const rows = (await exec.run(sqlFragment`
       SELECT t.id AS take_id, t.page_id, p.slug AS page_slug, t.row_num,
              t.claim, t.kind, t.holder, t.weight,
              (1 - (t.embedding <=> ${vec}::vector))::real AS score
@@ -377,7 +367,7 @@ export async function searchTakesVector(
       JOIN pages p ON p.id = t.page_id
       WHERE t.active
         AND t.embedding IS NOT NULL
-        ${opts.excludePrivate ? sql.unsafe(`AND ${privatePagesFilterFragment('p')}`) : sql``}
+        ${opts.excludePrivate ? trustedSql(`AND ${privatePagesFilterFragment('p')}`) : sqlFragment``}
         AND (
           ${opts.takesHoldersAllowList ?? null}::text[] IS NULL
           OR t.holder = ANY(${opts.takesHoldersAllowList ?? null}::text[])
@@ -385,19 +375,18 @@ export async function searchTakesVector(
         ${sourceFilter}
       ORDER BY t.embedding <=> ${vec}::vector
       LIMIT ${limit}
-    `;
+    `)).rows;
     // #2450-class: int8 columns arrive as native BigInt from the pg driver;
     // coerce per-row (takeRowToTake precedent) so MCP/CLI JSON.stringify
     // doesn't crash the moment a search actually matches.
     return rows.map((r) => takeHitRowToHit(r as Record<string, unknown>));
   }
 
-export async function getTakeEmbeddings(deps: PgTakesDeps, ids: number[]): Promise<Map<number, Float32Array>> {
+export async function getTakeEmbeddings(exec: LegacyUnscopedRead, ids: number[]): Promise<Map<number, Float32Array>> {
     if (ids.length === 0) return new Map();
-    const sql = deps.sql;
-    const rows = await sql`
+    const rows = (await exec.run(sqlFragment`
       SELECT id, embedding FROM takes WHERE id = ANY(${ids}::bigint[]) AND embedding IS NOT NULL
-    `;
+    `)).rows;
     const out = new Map<number, Float32Array>();
     for (const r of rows as unknown as Array<{ id: number; embedding: unknown }>) {
       const parsed = tryParseEmbedding(r.embedding);
@@ -406,43 +395,42 @@ export async function getTakeEmbeddings(deps: PgTakesDeps, ids: number[]): Promi
     return out;
   }
 
-export async function countStaleTakes(deps: PgTakesDeps): Promise<number> {
-    const sql = deps.sql;
-    const [row] = await sql`
+export async function countStaleTakes(exec: LegacyUnscopedRead): Promise<number> {
+    const [row] = (await exec.run(sqlFragment`
       SELECT count(*)::int AS count FROM takes WHERE active AND embedding IS NULL
-    `;
+    `)).rows;
     return Number((row as { count?: number } | undefined)?.count ?? 0);
   }
 
-export async function listStaleTakes(deps: PgTakesDeps): Promise<StaleTakeRow[]> {
-    const sql = deps.sql;
-    const rows = await sql`
+export async function listStaleTakes(exec: LegacyUnscopedRead): Promise<StaleTakeRow[]> {
+    const rows = (await exec.run(sqlFragment`
       SELECT t.id AS take_id, p.slug AS page_slug, t.row_num, t.claim
       FROM takes t
       JOIN pages p ON p.id = t.page_id
       WHERE t.active AND t.embedding IS NULL
       ORDER BY t.id
       LIMIT 100000
-    `;
+    `)).rows;
     return rows.map((row) => staleTakeRowToRow(row as Record<string, unknown>));
   }
 
 export async function updateTakeEmbeddings(
-  deps: PgTakesDeps,
+  sql: ExecutorSource,
+  batchRetry: BatchRetry,
   rowsIn: TakeEmbeddingInput[],
   opts?: BatchOpts,
 ): Promise<number> {
   if (rowsIn.length === 0) return 0;
-  return deps.batchRetry(
+  return batchRetry(
     opts?.auditSite ?? 'updateTakeEmbeddings',
     opts?.signal,
-    () => _updateTakeEmbeddingsOnce(deps, rowsIn),
+    () => _updateTakeEmbeddingsOnce(sql(), rowsIn),
     rowsIn.length,
   );
 }
 
 async function _updateTakeEmbeddingsOnce(
-  deps: PgTakesDeps,
+  exec: SqlExecutor,
   rowsIn: TakeEmbeddingInput[],
 ): Promise<number> {
   const seen = new Set<number>();
@@ -456,7 +444,8 @@ async function _updateTakeEmbeddingsOnce(
     }
     return { take_id, embedding: `[${values.join(',')}]` };
   });
-  const result = await deps.executeRawJsonb(
+  const result = await executeRawJsonb(
+      exec,
     `WITH updated AS (
        UPDATE takes AS t
           SET embedding = v.embedding::vector,
@@ -474,12 +463,11 @@ async function _updateTakeEmbeddingsOnce(
 }
 
 export async function updateTake(
-  deps: PgTakesDeps,
+  exec: SqlExecutor,
     pageId: number,
     rowNum: number,
     fields: { weight?: number; since_date?: string; source?: string },
   ): Promise<void> {
-    const sql = deps.sql;
     let weight = fields.weight;
     if (weight !== undefined) {
       const norm = normalizeWeightForStorage(weight);
@@ -488,7 +476,7 @@ export async function updateTake(
       }
       weight = norm.weight;
     }
-    const result = await sql`
+    const result = (await exec.run(sqlFragment`
       UPDATE takes SET
         weight     = COALESCE(${weight ?? null}::real, weight),
         since_date = COALESCE(${fields.since_date ?? null}::text, since_date),
@@ -496,47 +484,45 @@ export async function updateTake(
         updated_at = now()
       WHERE page_id = ${pageId} AND row_num = ${rowNum}
       RETURNING 1
-    `;
+    `)).rows;
     if (result.length === 0) {
       throw new GBrainError('TAKE_ROW_NOT_FOUND', `take not found at page_id=${pageId} row=${rowNum}`, 'list takes for this page with `gbrain takes <slug>` to see valid row numbers');
     }
   }
 
 export async function supersedeTake(
-  deps: PgTakesDeps,
+  exec: SqlExecutor,
     pageId: number,
     oldRow: number,
     newRow: Omit<TakeBatchInput, 'page_id' | 'row_num' | 'superseded_by'>,
   ): Promise<{ oldRow: number; newRow: number }> {
-    const conn = deps.sql;
-    return await conn.begin(async (tx) => {
-      const [existing] = await tx`
+    return await exec.transaction(async (tx) => {
+      const [existing] = (await tx.run(sqlFragment`
         SELECT resolved_at FROM takes WHERE page_id = ${pageId} AND row_num = ${oldRow}
-      `;
+      `)).rows;
       if (!existing) throw new GBrainError('TAKE_ROW_NOT_FOUND', `take not found at page_id=${pageId} row=${oldRow}`, 'list takes with `gbrain takes <slug>`');
       if ((existing as { resolved_at?: unknown }).resolved_at) {
         throw new GBrainError('TAKE_RESOLVED_IMMUTABLE', `take ${pageId}#${oldRow} is resolved`, 'resolved bets are immutable; add a new take instead');
       }
-      const [maxRow] = await tx`SELECT COALESCE(MAX(row_num), 0) + 1 AS next FROM takes WHERE page_id = ${pageId}`;
+      const [maxRow] = (await tx.run(sqlFragment`SELECT COALESCE(MAX(row_num), 0) + 1 AS next FROM takes WHERE page_id = ${pageId}`)).rows;
       const newRowNum = Number((maxRow as { next?: number })?.next ?? 1);
       const wClamped = Math.max(0, Math.min(1, newRow.weight ?? 0.5));
-      await tx`
+      (await tx.run(sqlFragment`
         INSERT INTO takes (page_id, row_num, claim, kind, holder, weight, since_date, until_date, source, active)
         VALUES (${pageId}, ${newRowNum}, ${newRow.claim}, ${newRow.kind}, ${newRow.holder}, ${wClamped},
                 ${newRow.since_date ?? null}::text, ${newRow.until_date ?? null}::text,
                 ${newRow.source ?? null}, ${newRow.active ?? true})
-      `;
-      await tx`
+      `)).rows;
+      (await tx.run(sqlFragment`
         UPDATE takes SET active = false, superseded_by = ${newRowNum}, updated_at = now()
         WHERE page_id = ${pageId} AND row_num = ${oldRow}
-      `;
+      `)).rows;
       return { oldRow, newRow: newRowNum };
     }) as { oldRow: number; newRow: number };
   }
 
-export async function resolveTake(deps: PgTakesDeps, pageId: number, rowNum: number, resolution: TakeResolution): Promise<void> {
-    const sql = deps.sql;
-    const [existing] = await sql`SELECT resolved_at FROM takes WHERE page_id = ${pageId} AND row_num = ${rowNum}`;
+export async function resolveTake(exec: SqlExecutor, pageId: number, rowNum: number, resolution: TakeResolution): Promise<void> {
+    const [existing] = (await exec.run(sqlFragment`SELECT resolved_at FROM takes WHERE page_id = ${pageId} AND row_num = ${rowNum}`)).rows;
     if (!existing) throw new GBrainError('TAKE_ROW_NOT_FOUND', `take not found at page_id=${pageId} row=${rowNum}`, 'list takes for this page with `gbrain takes <slug>` to see valid row numbers');
     if ((existing as { resolved_at?: unknown }).resolved_at) {
       throw new GBrainError('TAKE_ALREADY_RESOLVED', `take ${pageId}#${rowNum} already resolved`, 'resolution is immutable; add a new take to record a new outcome');
@@ -544,7 +530,7 @@ export async function resolveTake(deps: PgTakesDeps, pageId: number, rowNum: num
     // v0.30.0: derive (quality, outcome) tuple. quality wins when both set.
     // Schema CHECK enforces consistency as a defense-in-depth backstop.
     const { quality, outcome } = deriveResolutionTuple(resolution);
-    await sql`
+    (await exec.run(sqlFragment`
       UPDATE takes SET
         resolved_at      = now(),
         resolved_quality = ${quality}::text,
@@ -555,7 +541,7 @@ export async function resolveTake(deps: PgTakesDeps, pageId: number, rowNum: num
         resolved_by      = ${resolution.resolvedBy},
         updated_at       = now()
       WHERE page_id = ${pageId} AND row_num = ${rowNum}
-    `;
+    `)).rows;
   }
 
   /**
@@ -563,28 +549,27 @@ export async function resolveTake(deps: PgTakesDeps, pageId: number, rowNum: num
    * Hidden-holder rows contribute zero to aggregates. NULL allowList means
    * trusted caller (no filtering). Empty array → zero results.
    */
-export async function getScorecard(deps: PgTakesDeps, opts: TakesScorecardOpts, allowList: string[] | undefined): Promise<TakesScorecard> {
-    const sql = deps.sql;
-    const allowed = allowList ? sql`AND holder = ANY(${allowList}::text[])` : sql``;
-    const holderClause = opts.holder ? sql`AND holder = ${opts.holder}` : sql``;
+export async function getScorecard(exec: LegacyUnscopedRead, opts: TakesScorecardOpts, allowList: string[] | undefined): Promise<TakesScorecard> {
+    const allowed = allowList ? sqlFragment`AND holder = ANY(${allowList}::text[])` : sqlFragment``;
+    const holderClause = opts.holder ? sqlFragment`AND holder = ${opts.holder}` : sqlFragment``;
     const domainClause = opts.domainPrefix
-      ? sql`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.slug LIKE ${opts.domainPrefix + '%'})`
-      : sql``;
-    const sinceClause = opts.since ? sql`AND since_date >= ${opts.since}` : sql``;
-    const untilClause = opts.until ? sql`AND since_date <= ${opts.until}` : sql``;
+      ? sqlFragment`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.slug LIKE ${opts.domainPrefix + '%'})`
+      : sqlFragment``;
+    const sinceClause = opts.since ? sqlFragment`AND since_date >= ${opts.since}` : sqlFragment``;
+    const untilClause = opts.until ? sqlFragment`AND since_date <= ${opts.until}` : sqlFragment``;
     // #2200-class: takes carry no source_id; scope via the take's page via EXISTS
     // (this query has no pages JOIN). Array wins over scalar (sourceScopeOpts shape).
     const sourceFilter =
       opts.sourceIds && opts.sourceIds.length > 0
-        ? sql`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ANY(${opts.sourceIds}::text[]))`
+        ? sqlFragment`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ANY(${opts.sourceIds}::text[]))`
         : opts.sourceId
-          ? sql`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ${opts.sourceId})`
-          : sql``;
+          ? sqlFragment`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ${opts.sourceId})`
+          : sqlFragment``;
     // v0.36.1.1 T1c: `resolved` deliberately filters to the 3-state subset
     // (correct|incorrect|partial) — NOT `resolved_quality IS NOT NULL` — so
     // historical comparisons against pre-v74 scorecards stay valid.
     // `unresolvable_count` is a sibling field counting the new 4th state.
-    const rows = await sql`
+    const rows = (await exec.run(sqlFragment`
       SELECT
         COUNT(*) FILTER (WHERE kind = 'bet')::int                                              AS total_bets,
         COUNT(*) FILTER (WHERE resolved_quality IN ('correct','incorrect','partial'))::int     AS resolved,
@@ -599,8 +584,8 @@ export async function getScorecard(deps: PgTakesDeps, opts: TakesScorecardOpts, 
         )::float                                                                               AS brier
       FROM takes
       WHERE 1=1 ${holderClause} ${domainClause} ${sinceClause} ${untilClause} ${allowed} ${sourceFilter}
-        ${opts.excludePrivate ? sql.unsafe(`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND ${privatePagesFilterFragment('p')})`) : sql``}
-    `;
+        ${opts.excludePrivate ? trustedSql(`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND ${privatePagesFilterFragment('p')})`) : sqlFragment``}
+    `)).rows;
     const r = rows[0] as { total_bets: number; resolved: number; correct: number; incorrect: number; partial: number; unresolvable_count: number; brier: number | null };
     return finalizeScorecard(r);
   }
@@ -615,24 +600,23 @@ export async function getScorecard(deps: PgTakesDeps, opts: TakesScorecardOpts, 
    * and bomb with `invalid input syntax for type integer: "0.1"`. PGLite is
    * more permissive — caught at e2e parity by takes-scorecard-parity.test.ts.
    */
-export async function getCalibrationCurve(deps: PgTakesDeps, opts: CalibrationCurveOpts, allowList: string[] | undefined): Promise<CalibrationBucket[]> {
-    const sql = deps.sql;
+export async function getCalibrationCurve(exec: LegacyUnscopedRead, opts: CalibrationCurveOpts, allowList: string[] | undefined): Promise<CalibrationBucket[]> {
     const bucketSize = opts.bucketSize && opts.bucketSize > 0 && opts.bucketSize <= 1 ? opts.bucketSize : 0.1;
     const maxIdx = Math.floor(1 / bucketSize) - 1;
-    const allowed = allowList ? sql`AND holder = ANY(${allowList}::text[])` : sql``;
-    const holderClause = opts.holder ? sql`AND holder = ${opts.holder}` : sql``;
+    const allowed = allowList ? sqlFragment`AND holder = ANY(${allowList}::text[])` : sqlFragment``;
+    const holderClause = opts.holder ? sqlFragment`AND holder = ${opts.holder}` : sqlFragment``;
     const sourceFilter =
       opts.sourceIds && opts.sourceIds.length > 0
-        ? sql`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ANY(${opts.sourceIds}::text[]))`
+        ? sqlFragment`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ANY(${opts.sourceIds}::text[]))`
         : opts.sourceId
-          ? sql`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ${opts.sourceId})`
-          : sql``;
+          ? sqlFragment`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND p.source_id = ${opts.sourceId})`
+          : sqlFragment``;
     // Bucketing uses NUMERIC for exact decimal arithmetic. Going through
     // FLOAT introduces IEEE 754 rounding (e.g. 0.7/0.1 = 6.9999..., FLOOR=6
     // instead of the expected 7), which makes Postgres and PGLite diverge
     // at bucket boundaries. NUMERIC is exact, so the bucket index is
     // engine-agnostic and the parity test holds.
-    const rows = await sql`
+    const rows = (await exec.run(sqlFragment`
       WITH binned AS (
         SELECT
           LEAST(FLOOR(weight::numeric / ${bucketSize}::numeric)::int, ${maxIdx}::int)::int AS bucket_idx,
@@ -641,7 +625,7 @@ export async function getCalibrationCurve(deps: PgTakesDeps, opts: CalibrationCu
         FROM takes
         WHERE resolved_quality IN ('correct','incorrect')
           ${holderClause} ${allowed} ${sourceFilter}
-          ${opts.excludePrivate ? sql.unsafe(`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND ${privatePagesFilterFragment('p')})`) : sql``}
+          ${opts.excludePrivate ? trustedSql(`AND EXISTS (SELECT 1 FROM pages p WHERE p.id = takes.page_id AND ${privatePagesFilterFragment('p')})`) : sqlFragment``}
       )
       SELECT
         (bucket_idx::numeric * ${bucketSize}::numeric)::float       AS bucket_lo,
@@ -652,7 +636,7 @@ export async function getCalibrationCurve(deps: PgTakesDeps, opts: CalibrationCu
       FROM binned
       GROUP BY bucket_idx
       ORDER BY bucket_idx
-    `;
+    `)).rows;
     return (rows as unknown as { bucket_lo: number; bucket_hi: number; n: number; observed: number | null; predicted: number | null }[]).map(r => ({
       bucket_lo: r.bucket_lo,
       bucket_hi: r.bucket_hi,
@@ -662,14 +646,13 @@ export async function getCalibrationCurve(deps: PgTakesDeps, opts: CalibrationCu
     }));
   }
 
-export async function addSynthesisEvidence(deps: PgTakesDeps, rowsIn: SynthesisEvidenceInput[]): Promise<number> {
+export async function addSynthesisEvidence(exec: SqlExecutor, rowsIn: SynthesisEvidenceInput[]): Promise<number> {
     if (rowsIn.length === 0) return 0;
-    const sql = deps.sql;
     const synthesisIds = rowsIn.map(r => r.synthesis_page_id);
     const takePageIds  = rowsIn.map(r => r.take_page_id);
     const takeRowNums  = rowsIn.map(r => r.take_row_num);
     const citationIxs  = rowsIn.map(r => r.citation_index);
-    const result = await sql`
+    const result = (await exec.run(sqlFragment`
       INSERT INTO synthesis_evidence (synthesis_page_id, take_page_id, take_row_num, citation_index)
       SELECT v.synthesis_page_id::int, v.take_page_id::int, v.take_row_num::int, v.citation_index::int
       FROM unnest(
@@ -677,6 +660,6 @@ export async function addSynthesisEvidence(deps: PgTakesDeps, rowsIn: SynthesisE
       ) AS v(synthesis_page_id, take_page_id, take_row_num, citation_index)
       ON CONFLICT (synthesis_page_id, take_page_id, take_row_num) DO NOTHING
       RETURNING 1
-    `;
+    `)).rows;
     return result.length;
   }

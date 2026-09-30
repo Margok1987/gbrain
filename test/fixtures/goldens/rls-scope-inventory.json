@@ -3404,7 +3404,6 @@
         "supersedeTake": "none",
         "sweepContradictionCache": "none",
         "sweepDreamVerdicts": "none",
-        "takesDeps": "none",
         "transaction": "none",
         "transactionDirect": "none",
         "transactionOn": "none",
