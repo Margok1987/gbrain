@@ -3,7 +3,8 @@
  * Each stage reads the resolved request (HybridRequest, request.ts) and
  * writes its per-request accumulators only as `req.<field>`.
  */
-import { type BrainEngine, MAX_SEARCH_LIMIT } from '../../engine.ts';
+import type { BrainEngine } from '../../engine.ts';
+import { perArmPoolLimit } from '../eval-pool-depth.ts';
 import type { DegradedStageEntry, HybridSearchMeta, SearchOpts, SearchResult } from '../../types.ts';
 import { type GBrainConfig, loadConfigWithEngine } from '../../config.ts';
 import { type HybridSearchOpts, PRE_FUSION_POOL_FLOOR, compiledTruthFusionBoost } from '../hybrid.ts';
@@ -152,10 +153,7 @@ export async function resolveHybridRequest(
 
   const limit = opts?.limit || resolvedMode.searchLimit;
   const offset = opts?.offset || 0;
-  const innerLimit = Math.min(
-    Math.max(limit * 2, PRE_FUSION_POOL_FLOOR, offset + limit),
-    MAX_SEARCH_LIMIT,
-  );
+  const innerLimit = perArmPoolLimit(limit, offset, PRE_FUSION_POOL_FLOOR);
 
   // v0.32.x search-lite: classify intent once up front. Drives BOTH the
   // legacy auto-detail / salience / recency suggestions AND the new

@@ -154,7 +154,9 @@ export async function searchVectorFallback(
   // #1663 — structural exact-lookup tier (slug / exact-title identity).
   const kwHopped = await applyExactLookupTier(engine, kwPreExact, query, exactLookupOpts);
   stampEvidence(kwHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
-  const kwSliced = kwHopped.slice(offset, offset + limit);
+  // System One S3 evidence gate (no-op when the slot is off), at the fused path's position.
+  const kwGated = await applyEvidenceGate(req.decide, query, kwHopped);
+  const kwSliced = kwGated.slice(offset, offset + limit);
   // v0.32.3 search-lite: budget enforcement on the keyword-fallback path too.
   const { results: kwBudgeted, meta: kwBudgetMeta } = enforceTokenBudget(kwSliced, resolvedMode.tokenBudget);
   await stampContentFlags(engine, kwBudgeted, opts);
