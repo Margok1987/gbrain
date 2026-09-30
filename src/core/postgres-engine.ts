@@ -115,7 +115,7 @@ import { LINK_EXTRACTOR_VERSION_TS } from './link-extraction.ts';
 import { EMBED_SKIP_FILTER_FRAGMENT } from './embed-skip.ts';
 import { QUARANTINE_FILTER_FRAGMENT, quarantineFilterFragment } from './quarantine.ts';
 import { acquireInitSchemaAdvisoryLock } from './postgres-engine/init-schema-lock.ts';
-import { applyPostgresForwardReferenceBootstrap } from './postgres-engine/forward-reference-bootstrap.ts';
+import { applyPostgresForwardReferenceBootstrap } from './engine-sql/bootstrap.ts';
 import * as factsImpl from './postgres-engine/facts.ts';
 import type { PgFactsDeps } from './postgres-engine/facts.ts';
 import * as takesImpl from './postgres-engine/takes.ts';
@@ -559,14 +559,9 @@ export class PostgresEngine implements BrainEngine {
   }
 
   /**
-   * Bootstrap state that SCHEMA_SQL forward-references but that older brains
-   * don't have yet. Mirror of `PGLiteEngine#applyForwardReferenceBootstrap`
-   * in shape and intent. The probe set + DDL live in the shared module
-   * `src/core/postgres-engine/forward-reference-bootstrap.ts` (#4477) so the
-   * standalone `db.initSchema()` SCHEMA_SQL-replay path runs the SAME
-   * bootstrap — keep that module in sync with the PGLite version; covered by
-   * `test/schema-bootstrap-coverage.test.ts` (PGLite side) and
-   * `test/e2e/postgres-bootstrap.test.ts` (Postgres side).
+   * Forward-reference bootstrap before SCHEMA_SQL replay; the single
+   * implementation (shared with PGLite and `db.initSchema()`) lives in
+   * `engine-sql/bootstrap.ts` (E1).
    */
   private async applyForwardReferenceBootstrap(injectedConn?: postgres.Sql): Promise<void> {
     // Use the caller-provided connection (DDL pool, holding the advisory lock

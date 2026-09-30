@@ -125,7 +125,7 @@ describe('snapshot schema hash inputs (EO7)', () => {
     const migrationFiles = readdirSync(join(CORE, 'schema-migrations')).filter((f) => /^v\d{3,}-.*\.ts$/.test(f));
     expect(migrationFiles.length).toBeGreaterThan(170);
     for (const f of migrationFiles) expect(runtimeInputs).toContain(`schema-migrations/${f}`);
-    for (const f of [...SNAPSHOT_SCHEMA_ROOTS, ...SNAPSHOT_SCHEMA_LEAVES, 'schema-migrations/helpers.ts']) expect(runtimeInputs).toContain(f);
+    for (const f of [...SNAPSHOT_SCHEMA_ROOTS, ...SNAPSHOT_SCHEMA_LEAVES, 'schema-migrations/helpers.ts', 'engine-sql/bootstrap.ts']) expect(runtimeInputs).toContain(f);
   });
 
   test('every literal dynamic import inside the closure is classified (hashed leaf or not-hashed with a reason)', () => {

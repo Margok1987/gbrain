@@ -20,11 +20,13 @@ export const SNAPSHOT_SCHEMA_ROOTS: readonly string[] = [
   'pglite-schema.ts',
   'schema-migrations/registry.generated.ts',
   'migrate.ts',
+  'engine-sql/bootstrap.ts',
 ];
 
 /**
  * Hashed as bytes, closure not followed:
- * - pglite-engine.ts holds `PGLiteEngine#applyForwardReferenceBootstrap`;
+ * - pglite-engine.ts holds `PGLiteEngine#initSchema`'s replay sequence (the
+ *   forward-reference bootstrap it runs is the engine-sql/bootstrap.ts root);
  * - grants/service.ts is lazy-imported by grants/migration.ts (a migration
  *   handler helper) together with the grant profile table it validates against
  *   (its full static closure is ~500 unrelated modules).

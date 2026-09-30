@@ -109,7 +109,6 @@ const GRANDFATHERED: Record<string, number> = {
   'register-client-source-normalize.test.ts': 1,
   'reranker-default-seam.test.ts': 1,
   'retrieval-reflex-recipe-routing.test.ts': 1,
-  'schema-bootstrap-coverage.test.ts': 5,
   'schema-pack-best-effort.test.ts': 1,
   'schema-pack-unify-types-handler.test.ts': 1,
   'schema-pack/suggest.test.ts': 1,
