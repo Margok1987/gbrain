@@ -19,6 +19,7 @@ import { isTerminal, type WriteAuthority, type WriteRequest } from './model.ts';
 import { authorizePageVisibility } from './page-visibility.ts';
 import { nativeLockCapability } from './native-lock.ts';
 import { assertPhysicalRoot } from './physical-root.ts';
+import { isConnectorSourceKind } from './connector-identity.ts';
 
 export interface MaintenanceAuthority {
   writer: WriteAuthority;
@@ -39,13 +40,19 @@ export async function maintenancePreflight(engine: BrainEngine, sourceId: string
     throw new OperationError('permission_denied', 'Managed maintenance requires a registered local CLI writer; remote maintenance jobs are not supported.');
   }
   if (!verified) await registerLocalWriter(engine, 'cli');
-  const [source] = await engine.executeRaw<{ incarnation: string; archived: boolean; local_path: string | null }>(
-    'SELECT incarnation,archived,local_path FROM sources WHERE id=$1', [sourceId]);
+  const [source] = await engine.executeRaw<{ incarnation: string; archived: boolean; local_path: string | null; kind: string | null }>(
+    "SELECT incarnation,archived,local_path,config->>'kind' AS kind FROM sources WHERE id=$1", [sourceId]);
   if (!source || source.archived) throw new OperationError('source_changed', 'The maintenance source is not active.');
   const writer = await submissionAuthority({ engine, remote: false, sourceId } as OperationContext,
     'submit_job', sourceId, source.incarnation, 'maintenance');
   if (writer.slugPrefixes !== null) throw new OperationError('permission_denied', 'Managed maintenance requires a source-wide grant.');
   const binding = await getWorktreeBinding(engine, sourceId);
+  // An unbound Google or GitHub source publishes database-only, exactly as its own connector sync does
+  // (its local_path is the connector's state directory, not a canonical checkout).
+  if (!binding && isConnectorSourceKind(source.kind)) {
+    writer.databaseOnlyReason = 'connector_database';
+    return { writer, binding: null };
+  }
   const writeThrough = !/^(false|0|off|no)$/i.test(await engine.getConfig('sync.write_through') ?? 'true');
   const configuredRoot = source.local_path || (sourceId === 'default' ? await engine.getConfig('sync.repo_path') : null);
   if (writeThrough && (root || configuredRoot || binding)) {
