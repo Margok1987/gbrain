@@ -18,7 +18,21 @@ const FILES = [
   's9-conflict.jsonl',
   's9-conflict.sweep-eligible.jsonl',
   's8-grounding.jsonl',
+  's7-triage.jsonl',
+  's2-intent.jsonl',
+  's5-injection.jsonl',
 ];
+
+/** Datasets whose lines predate the per-line label_source field (their builders do not emit it). */
+const PROVENANCE: Record<string, (text: string) => string> = {
+  's7-triage.jsonl': (text) => {
+    const ids = text.split('\n').filter((l) => l.trim()).map((l) => (JSON.parse(l) as { id: string }).id);
+    const syn = ids.filter((id) => id.startsWith('syn-')).length;
+    return `synthetic-construction ${syn} (s7-triage/gold/*.json), upstream-gold ${ids.length - syn} (Cat 35 expected_triage)`;
+  },
+  's2-intent.jsonl': (text) => `upstream-gold ${text.split('\n').filter((l) => l.trim()).length} (LongMemEval question_type, BrainBench relational fixtures)`,
+  's5-injection.jsonl': (text) => `upstream-gold ${text.split('\n').filter((l) => l.trim()).length} (test/fixtures/decide/injection-cases.jsonl)`,
+};
 
 const rows = FILES.map((f) => {
   const text = readFileSync(join(dir, f), 'utf8');
@@ -30,7 +44,8 @@ const rows = FILES.map((f) => {
     mix.set(src, (mix.get(src) ?? 0) + 1);
   }
   const cal = items.filter((i) => i.split === 'calibrate').length;
-  return `| \`${f}\` | \`${datasetHash(text)}\` | \`${splitHash(items)}\` | ${items.length} | ${families(items).size} | ${cal} / ${items.length - cal} | ${[...mix].sort().map(([k, v]) => `${k} ${v}`).join(', ')} |`;
+  const provenance = PROVENANCE[f]?.(text) ?? [...mix].sort().map(([k, v]) => `${k} ${v}`).join(', ');
+  return `| \`${f}\` | \`${datasetHash(text)}\` | \`${splitHash(items)}\` | ${items.length} | ${families(items).size} | ${cal} / ${items.length - cal} | ${provenance} |`;
 });
 
 writeFileSync(join(dir, 'HASHES.md'), `# System One dataset hashes

@@ -14,3 +14,6 @@ the repository's own parser.
 | `s9-conflict.jsonl` | `37fe4083e9722308` | `2ec631956c4b9e33` | 786 | 408 | 391 / 395 | synthetic-construction 780, upstream-gold 6 |
 | `s9-conflict.sweep-eligible.jsonl` | `7dbf17fb5073d9e9` | `ea1f192b0ed16c14` | 172 | 162 | 84 / 88 | synthetic-construction 169, upstream-gold 3 |
 | `s8-grounding.jsonl` | `13c9845020ba8779` | `dc24dffe77eff2f0` | 750 | 16 | 254 / 496 | llm:claude-sonnet-5 (dream-page) 567, llm:claude-sonnet-5 (perturbation) 183 |
+| `s7-triage.jsonl` | `91bb3dec2951e309` | `de2b13e9820b5ffb` | 254 | 254 | 145 / 109 | synthetic-construction 230 (s7-triage/gold/*.json), upstream-gold 24 (Cat 35 expected_triage) |
+| `s2-intent.jsonl` | `59d0d17abfbeba15` | `be9564887bf21a74` | 866 | 866 | 442 / 424 | upstream-gold 866 (LongMemEval question_type, BrainBench relational fixtures) |
+| `s5-injection.jsonl` | `9eafb629a0ab28a6` | `edde14e1853279ed` | 36 | 12 | 18 / 18 | upstream-gold 36 (test/fixtures/decide/injection-cases.jsonl) |

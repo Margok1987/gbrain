@@ -422,7 +422,8 @@ async function enableRecommended(engine: BrainEngine, state: DecideState, args: 
     return 1;
   }
   let code = 0;
-  for (const slot of winners) code = Math.max(code, await cmdEnable(engine, ['enable', slot, ...args.filter((a) => a !== '--recommended')]));
+  const pin = state.cfg.provider === 'none' && !flagValue(args, '--provider') ? ['--provider', provider] : [];
+  for (const slot of winners) code = Math.max(code, await cmdEnable(engine, ['enable', slot, ...pin, ...args.filter((a) => a !== '--recommended')]));
   return code;
 }
 

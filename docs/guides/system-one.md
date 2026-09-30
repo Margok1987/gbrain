@@ -51,7 +51,9 @@ today  jev  probability  slug
     3    -    private  notes/board-prep
 Next: gbrain decide enable --recommended   (or gbrain decide status)
 $ gbrain decide enable --recommended
-no slot has a recorded win for jev-1.13.0; see docs/eval/system-one/
+Private content cannot be sent to the provider. (egress_private_denied: decide.egress.private is deny) fix: gbrain config set decide.egress.private allow   # or route the slot to an llm: provider docs: docs/guides/system-one.md#egress_private_denied
+Missing keys: decide.egress.private=allow, or decide.slots.triage.provider llm:<provider:model>, or decide.egress_fallback llm:<provider:model>
+...
 $ gbrain decide status
 System One (decide): provider none; key: TYPESAFE_API_KEY
 egress: private=deny; consent query=deny candidates=deny facts=deny conversation=deny; deny_sources: none; fallback: none
@@ -76,11 +78,16 @@ What each step shows:
    and Jev ranks the note with the answer first.
 3. `enable --recommended` turns on exactly the slots that have a recorded
    eval win for your model and a reference calibration that passes the
-   precision gate. When no slot qualifies, it says so, exits non-zero and
-   changes nothing. That is the answer in the example: until the maintainers'
-   evals record a win in [`docs/eval/system-one/`](../eval/system-one/), the
-   preset is empty. Turn one slot on yourself with `gbrain decide enable
-   <slot>` (see [Turning a slot on](#turning-a-slot-on)).
+   precision gate. For `jev-1.13.0` that is dream triage and the
+   contradiction sweep ([`docs/eval/system-one/`](../eval/system-one/) has the
+   measurements, including triage's cost tradeoff). Both read private data
+   (conversation windows and facts), so on a brain that keeps
+   `decide.egress.private=deny`, the example's default, the preset refuses
+   them, names the missing key and changes nothing. Allow it with
+   `gbrain config set decide.egress.private allow` and run the command again,
+   or route those slots to an `llm:` provider. When no slot qualifies for
+   your model, it says so and exits non-zero. Turn one slot on yourself with
+   `gbrain decide enable <slot>` (see [Turning a slot on](#turning-a-slot-on)).
 4. `status` shows each slot's readiness. `ready for on` means `enable` would
    succeed now; `needs calibration` means the slot needs a calibration
    before it can act.
@@ -257,8 +264,8 @@ default 0.90). A qualified calibration comes from one of two places:
 
 - A **reference calibration** shipped in the binary, measured by the
   maintainers' evals. `--recommended` and `enable` use it when your brain has
-  no local row. None ship yet; `status` shows `needs calibration` until they
-  do.
+  no local row. This build ships two, for `jev-1.13.0`: dream triage and the
+  contradiction sweep. Other slots show `needs calibration`.
 - **Your own**, from a labelled dataset (the advanced path below).
 
 The contradiction sweep only proposes, and routing and the injection signal

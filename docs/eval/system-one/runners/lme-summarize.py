@@ -43,7 +43,7 @@ def mcnemar(b, c):
 
 
 def judged(r):
-    for k in ("judge_label", "judge_verdict", "judgment", "judge"):
+    for k in ("judge_correct", "judge_label", "judge_verdict", "judgment", "judge"):
         v = r.get(k)
         if isinstance(v, bool):
             return v

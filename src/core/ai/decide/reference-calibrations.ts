@@ -6,7 +6,9 @@
  * it adopted (`decide.slots.<slot>.calibration`), so a newer binary never
  * silently switches it: `decide status` shows "newer reference available".
  *
- * Empty until a slot's eval records a win; the eval lane appends rows here.
+ * Rows exist only for slots whose recorded verdict is a win and, for
+ * harmful-direction slots, whose action_precision_lb passes the 0.90 gate
+ * (docs/eval/system-one/README.md).
  */
 import type { DecideSlot } from './types.ts';
 
@@ -34,4 +36,21 @@ export interface ReferenceCalibration {
   shipped_in: string;
 }
 
-export const REFERENCE_CALIBRATIONS: readonly ReferenceCalibration[] = [];
+export const REFERENCE_CALIBRATIONS: readonly ReferenceCalibration[] = [
+  {
+    // S7: Cat 35 + synthetic routine/buried-signal transcripts (docs/eval/system-one/datasets/s7-triage.jsonl),
+    // calibrated for recall 1.0 on the calibrate half; qualified 39/39 correct rejections on the eval half.
+    id: 'triage-jev-1.13.0-2026-09-30', slot: 'triage', call_site: 'dream', provider: 'typesafe:jev-1.13.0', model_resolved: 'jev-1.13.0',
+    threshold: 0.77, min_keep: null, retest_sd: 0.0138, repack_sd: 0.0127, action_precision_lb: 0.9103, policy_fingerprint: '4d1429790e67d15d',
+    pack_shape: 'v1:order=rank-id:max=1:slots=triage', dataset_hash: '91bb3dec2951e309', split_hash: 'de2b13e9820b5ffb',
+    verdict: 'win', shipped_in: '0.60.17.0',
+  },
+  {
+    // S9: labelled fact pairs (docs/eval/system-one/datasets/s9-conflict.jsonl); duplicate threshold by F1 and the
+    // proposal floor calibrated on supersede labels. Not a harmful-direction slot (proposals only).
+    id: 'conflict-jev-1.13.0-2026-09-30', slot: 'conflict', call_site: 'sweep', provider: 'typesafe:jev-1.13.0', model_resolved: 'jev-1.13.0',
+    threshold: 0.52, min_keep: null, retest_sd: 0.0013, repack_sd: 0.0046, action_precision_lb: null, policy_fingerprint: null,
+    pack_shape: 'v1:order=rank-id:max=budget:slots=conflict', dataset_hash: '37fe4083e9722308', split_hash: '2ec631956c4b9e33', proposal_floor: 0.65,
+    verdict: 'win', shipped_in: '0.60.17.0',
+  },
+];

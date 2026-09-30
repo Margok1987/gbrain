@@ -1,4 +1,4 @@
-# System One labelled datasets (S6, S8, S9)
+# System One labelled datasets
 
 Labelled inputs for `gbrain decide calibrate` / `qualify` and the matched-pair evals of three slots:
 S6 `recall_needed`, S9 `conflict` and S8 `grounding`. Every dataset line is in the
@@ -179,6 +179,51 @@ bun docs/eval/system-one/generators/grounding-labels.ts ~/.capy/work/gbrain-eval
 gbrain decide dataset --slot grounding --from grounding-labels docs/eval/system-one/datasets/s8-grounding/labels.jsonl --out s8.raw.jsonl
 bun docs/eval/system-one/generators/label-source.ts s8.raw.jsonl docs/eval/system-one/datasets/s8-grounding.jsonl llm:claude-sonnet-5 docs/eval/system-one/datasets/s8-grounding/labels.jsonl
 ```
+
+## S7 `triage` (dream triage)
+
+`s7-triage.jsonl` is built with `gbrain decide dataset --slot triage --from cat35 docs/eval/system-one/datasets/s7-triage`.
+The directory holds 254 transcripts in the Cat 35 layout (`gold/<id>.json` + `transcripts-txt/<date>-<id>.txt`):
+
+- 24 Cat 35 transcripts copied unchanged from garrytan/gbrain-evals `eval/data/transcript-distill-v1` at
+  `88d0b1997e4b7fb3bd61e04d6eb637ef166ea6d4` (MIT; itself a synthetic corpus). Label: the corpus's own
+  `expected_triage` (`label_source: upstream-gold`).
+- 230 synthetic transcripts from `docs/eval/system-one/generators/s7-synthetic-transcripts.ts` (openai:gpt-5.6-luna,
+  reasoning none, temperature 1, seeded spec list): 180 entirely routine (label false) and 50 mostly routine with
+  one buried synthesis-worthy passage (label true). Labels are the generator's instructions
+  (`label_source: synthetic-construction`); nobody read and labelled them. A name check found no planted person or
+  project name in any routine transcript.
+
+Family = transcript. Eval half: 109 transcripts (79 negative, 30 positive).
+
+## S2 `intent` (query routing)
+
+`s2-intent.jsonl` = `gbrain decide dataset --slot intent --from longmemeval longmemeval_s_cleaned.json` (470
+non-abstention questions, search and think call sites, labels from `question_type`) plus `--from brainbench
+test/fixtures/retrieval-quality/relational/relational.jsonl` (38 relational queries). Labels are the corpora's own
+annotations mapped by the builder (`upstream-gold`). The search label set this produces is only `temporal` and
+`general`, so it measures a slice of the search question.
+
+## S5 `injection`
+
+`s5-injection.jsonl` = `gbrain decide dataset --slot injection --from injection-fixtures
+test/fixtures/decide/injection-cases.jsonl`: 12 cases, 4 with an attack candidate (`upstream-gold`). Too small to
+calibrate or qualify on; used for a detection check only.
+
+## S3 `evidence` and S4 `answerable` (not committed: size)
+
+Both are regenerated from LongMemEval-S cleaned (MIT, sha256 `d6f21ea9d60a0d56…`):
+
+- S3: `gbrain decide dataset --slot evidence --from longmemeval longmemeval_s_cleaned.json` → 10,000 items in 500
+  families (question), 20 sessions per family, label = the session is an answer session; split_hash
+  `036999bf920b7039` (57 MB). Candidate text is the session capped at 6,000 characters, the same cap
+  `capRerankDoc` applies to production candidates.
+- S4: `gbrain decide dataset --slot answerable --from longmemeval longmemeval_s_cleaned.json` → 500 items, label
+  false for the 30 `_abs` questions; split_hash `c2d7aea440b81e88`.
+
+The LongMemEval question lists the retrieval arms ran on are in `longmemeval/`: `s-eval-half.txt` (the 248
+eval-half families of the S3 split), `s-eval-judged-100.txt` (85 answerable by hash order + all 15 abstention
+questions of the eval half) and `m-pilot-28.txt` (the frozen gbrain-evals LongMemEval-M pilot selection).
 
 ## Spend
 
