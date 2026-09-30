@@ -581,7 +581,10 @@ CREATE TABLE IF NOT EXISTS page_versions (
   page_id        INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
   compiled_truth TEXT    NOT NULL,
   frontmatter    JSONB   NOT NULL DEFAULT '{}',
-  snapshot_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  snapshot_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- #5393 (migration v179): the page's recorded canonical file when the
+  -- version was taken, so a revert is judged on the version it writes.
+  source_path    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_versions_page ON page_versions(page_id);

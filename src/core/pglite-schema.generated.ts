@@ -241,7 +241,8 @@ CREATE TABLE IF NOT EXISTS page_versions (
   page_id        INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
   compiled_truth TEXT    NOT NULL,
   frontmatter    JSONB   NOT NULL DEFAULT '{}',
-  snapshot_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+  snapshot_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  source_path    TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_versions_page ON page_versions(page_id);

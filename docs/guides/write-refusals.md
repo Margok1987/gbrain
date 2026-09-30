@@ -67,7 +67,7 @@ A source with a checkout path (`local_path`, or `sync.repo_path` for the
 that checkout, through the source's canonical owner. PGLite claims that owner
 automatically on the first write. Postgres does not, because several hosts can
 share one Postgres brain and only one of them may own the files. Until someone
-binds the source, `put_page`, `capture` and `delete_page` to it refuse with
+binds the source, page writes to it refuse with
 `owner_unavailable` and `detail: unbound_source`. The suggestion names both
 ways out with the real source filled in:
 
@@ -80,17 +80,23 @@ ways out with the real source filled in:
 2. **Allow database-only writes** with
    `gbrain config set persistence.unbound_write database_only` (the default is
    `refuse`; no other value is accepted, and the key can only be set on the
-   brain host). A `put_page` to a new page, or to a page that is already
-   database-only, then writes to the database only. Its result says
+   brain host). Every page write to a page with no recorded canonical file
+   (a new page, or one with no stored source path) then writes to the
+   database only: `put_page`, `capture`, `delete_page`, `restore_page`,
+   `revert_version`, `add_tag`, `remove_tag`, `add_timeline_entry` and the
+   `takes_*` writes. Its result says
    `write_through: { written: false, skipped: "unbound_source" }` with a
    warning. Pages written this way stay database-only: binding the source
    later does not materialize them into canonical files, later writes keep
-   them database-only, and sync never deletes or overwrites them.
+   them database-only, and sync never deletes or overwrites them. To restore
+   the refusal, run `gbrain config unset persistence.unbound_write`.
 
 The opt-in never applies to a page that came from a canonical file (it has a
 stored source path). An edit there could be lost on the owner's next sync, so
-it keeps refusing with only the bind option. `capture` and `delete_page` also
-keep refusing.
+it keeps refusing with only the bind option. `revert_version` is also judged on
+the version it writes: reverting to a version recorded while the page had a
+canonical file refuses the same way (versions taken before this release did not
+record it and count as file-less).
 
 If the source is bound after a database-only write was accepted but before it
 was published, the write fails with the same reason and nothing is written;
