@@ -69,7 +69,7 @@ export async function addTimelineEntry(
 export async function addTimelineEntriesBatch(exec: SqlExecutor, entries: TimelineBatchInput[]): Promise<number> {
     // #1861: JSONB jsonb_to_recordset instead of unnest(${arr}::text[]). Meeting
     // summary/detail/source are free text with the same array-literal crash
-    // hazard as link context. See _addLinksBatchOnce for the full rationale.
+    // hazard as link context. See links.ts addLinksBatch for the full rationale.
     // `date` stays text in the recordset and is cast v.date::date in the SELECT,
     // exactly as the old unnest shape did.
     const rows = buildTimelineRows(entries);
