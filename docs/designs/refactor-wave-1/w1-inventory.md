@@ -143,3 +143,54 @@ column dropped at once, then each probed column dropped singly: 48 scenarios per
 DDL batch (whitespace-normalized) and the stderr line. PGLite traces are byte-identical. Postgres traces are identical
 except the recorded probe call form (tagged template vs `unsafe` with tagged-template options); on a single direct
 connection both leave the probe as a named prepared statement.
+
+# W1-extended (lane b): sources, files, chunks
+
+Same classes and rules as W1-core above. Sources compared: `PostgresEngine` / `PGLiteEngine` at
+`origin/refactor/wave-1` 98c155835 (master's SQL for these methods; W1-core did not touch them). Destinations:
+`src/core/engine-sql/{sources,files,chunks}.ts`. Statement text is PostgresEngine's text, pinned by
+`test/fixtures/goldens/sql-text/{sources,files,chunks}.json`; PGLite runs it. RLS scoping per method matches
+`rls-scope-inventory.json`: reads that ran inside `withScopedReadTransaction` on master take `ScopedRead` and the
+engine keeps the literal `withScopedReadTransaction(...)` call in the public method (the AST inventory counts direct
+sites per method); every other read takes `LegacyUnscopedRead`. Source scope (`sourceId` / `sourceIds` precedence and
+the `'default'` fallback) and the registry-active embedding column are resolved in the engine and passed in; engine-sql
+never resolves them.
+
+Driver paths are preserved per statement: Postgres tagged templates become `query` / `run` (`runUnsafe` with
+`{prepare: true, simple: false}`), master's direct `conn.unsafe(...)` stays `unsafe`, and master's `executeRaw`
+(raw gauge) stays `executeRaw`. Hand-numbered `$N` text built by string concatenation is recomposed with
+`sqlFragment`; where master numbered placeholders out of textual order (`_upsertChunksOnce`'s embedding
+placeholders, the invalidations' lock-array index), the fragment numbers them by occurrence. Every such placeholder
+occurs exactly once in master's text, so the bound parameter count is unchanged and the golden's
+occurrence-renumbered text hash is identical.
+
+## sources (`engine-sql/sources.ts`)
+
+| Method | Class | Notes |
+|---|---|---|
+| `listAllSources` | identical-after-normalization | PGLite cast `$1::boolean` / `$2::boolean`; Postgres binds uncast (the `OR` context types them boolean on both). Row mapping was already the same code (`last_sync_at` to `Date`, string `config` parsed). Unscoped on master: `LegacyUnscopedRead`. |
+| `updateSourceConfig` | identical-after-normalization | Same `SOURCE_CONFIG_OBJECT_SQL` merge. PGLite bound `JSON.stringify(patch)` to `$1::jsonb` and returned `RETURNING id` row count; Postgres binds `sql.json(patch)` uncast and reads `.count`. Unified: `jsonbParam(patch)` (postgres.js `sql.json` on Postgres, serialized value on PGLite, never pre-stringified on Postgres) and `affectedRows > 0`. |
+
+## files (`engine-sql/files.ts`)
+
+| Method | Class | Notes |
+|---|---|---|
+| `upsertFile` | identical-after-normalization | PGLite bound `JSON.stringify(metadata)` to `$9::jsonb`; Postgres binds `sql.json(metadata)` uncast. Unified on `jsonbParam`. Same `ON CONFLICT (storage_path)` update and `(xmax = 0) AS created`. |
+| `getFile`, `listFilesForPage` | identical-after-normalization | Placeholder numbering only. Rows returned as the driver decodes them on both engines (no mapping on master). Unscoped: `LegacyUnscopedRead`. |
+
+## chunks (`engine-sql/chunks.ts`)
+
+| Method | Class | Notes |
+|---|---|---|
+| `upsertChunks` / `_upsertChunksOnce` | identical-after-normalization | PGLite cast `chunk_index != ALL($2::int[])`; Postgres binds the array uncast (the `ALL` context types it `int[]`). The multi-row `INSERT ... ON CONFLICT` text is the same on both; built once with `sqlFragment` (occurrence numbering, see above). Kept in the engine: the `batchRetry` + `transaction()` wrapper (retry ownership) and the page-state guard calls `lockPageKeys` / `readPageSnapshot` + `assertPageRevision`, which the store receives as engine callbacks and runs in master's order. The lazy gateway import keeps its `engine-dynamic-import-ok` marker. No bind batching: master PGLite never batched this statement (19 binds per chunk). Statements: page lookup, delete and the two config reads were tagged on Postgres (`query`); the `chunkWriteInvalidation` update and the `INSERT` were `unsafe` (stay `unsafe`). |
+| `getChunks` | identical-after-normalization | Scoped on master: `ScopedRead` (Postgres: `withScopedReadTransaction(sourceIds, sourceIds ? undefined : sourceId)`; PGLite brands its own executor). Shared `rowToChunk`. |
+| `countStaleChunks` | identical-after-normalization | Shared `buildStaleChunkWhere` (both engines) becomes a fragment builder. Scoped: `ScopedRead`. Postgres ran `tx.unsafe`: stays `unsafe`. |
+| `sumStaleChunkChars` | identical-after-normalization | Same predicate builder; `::bigint` sum mapped through `Number()` on both. Unscoped: `LegacyUnscopedRead`; stays `unsafe`. |
+| `setPageEmbeddingSignature` | identical-after-normalization | Placeholder numbering only. |
+| `invalidateStaleSignatureEmbeddings`, `invalidateContentDriftEmbeddings` | identical | Same code on both engines (`executeRaw` inside `engine.transaction()` after `lockEmbeddingSources`). The transaction stays the engine's (`tx` gauge, transaction-clone flags); the store runs on the clone's executor. `currentSpaceChunkPredicate(colId, 2, 3)` (hand-numbered, `embedding-invalidation.ts`) is expressed as a fragment with identical text, pinned against the shared builder by `test/engine-sql-chunks.test.ts`. |
+| `listStaleChunks` | identical-after-normalization | PGLite reused `$1` for the three `afterUpdatedAt` comparisons; Postgres binds each occurrence. Scoped: `ScopedRead`. |
+| `countChunklessPagesWithContent`, `listChunklessPagesWithContent` | identical | Shared `buildChunklessPagesWhere` becomes a fragment builder. Scoped: `ScopedRead`; Postgres ran `tx.unsafe`: stays `unsafe`. |
+| `deleteChunks` | identical-after-normalization | Placeholder numbering only. |
+| `getEmbeddingsByChunkIds` | identical SQL, different driver post-processing | Same statement (raw on both). PGLite parsed the vector with `JSON.parse` when it arrived as text; Postgres used `tryParseEmbedding`. Unified on `tryParseEmbedding` (same result for every valid pgvector literal; takes' `getTakeEmbeddings` precedent). Unscoped: `LegacyUnscopedRead`. |
+| `getChunksWithEmbeddings` | identical-after-normalization | Placeholder numbering only; shared `rowToChunk(r, true)`. Unscoped: `LegacyUnscopedRead`. |
+| Stays in the engines: `activeEmbeddingColId` (also serves `getStats` / `getHealth`, out of scope), `upsertChunks`'s retry/transaction wrapper, `lockPageKeys` / `readPageSnapshot` (pages domain). No chunks, files or sources method is dialect-specific. | | |
