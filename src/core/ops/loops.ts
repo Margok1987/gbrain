@@ -230,14 +230,18 @@ function rankGroups(groups: CounterpartyGroup[], backlinks: Map<string, number>)
   return [...groups].sort((a, b) => score(b) - score(a) || a.counterparty.localeCompare(b.counterparty));
 }
 
-function renderText(groups: CounterpartyGroup[], stale: boolean, noGoogleSources: boolean, held: HeldItemView[] = []): string {
+function renderText(groups: CounterpartyGroup[], stale: boolean, noGoogleSources: boolean,
+  coverage: { completeness: 'complete' | 'partial'; held: HeldItemView[] } = { completeness: 'complete', held: [] }): string {
   const lines: string[] = [];
+  const { held } = coverage;
   if (stale) lines.push('⚠ google sources have not synced recently — this may be out of date.');
-  if (held.length && groups.length === 0) {
-    lines.push(`No open loops found, but coverage is partial: ${held.length} held item(s) could not be imported:`, ...partialLines(held));
+  const partial = coverage.completeness === 'partial';
+  const what = held.length ? `${held.length} held item(s) could not be imported:` : 'the held-item state could not be read.';
+  if (partial && groups.length === 0) {
+    lines.push(`No open loops found, but coverage is partial: ${what}`, ...partialLines(held));
     return lines.join('\n');
   }
-  if (held.length) lines.push(`⚠ Coverage is partial: ${held.length} held item(s) could not be imported:`, ...partialLines(held), '');
+  if (partial) lines.push(`⚠ Coverage is partial: ${what}`, ...partialLines(held), '');
   if (groups.length === 0) {
     if (noGoogleSources) {
       // Trust-critical copy: on a brain whose email arrives some other way
@@ -441,7 +445,7 @@ const open_loops: Operation = {
       held: coverage.held,
       no_google_sources: noGoogleSources,
       redacted: !trusted,
-      ...(trusted ? { text: renderText(groups, freshness.stale, noGoogleSources, coverage.held) } : {}),
+      ...(trusted ? { text: renderText(groups, freshness.stale, noGoogleSources, coverage) } : {}),
     };
   },
 };

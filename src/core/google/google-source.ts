@@ -636,17 +636,18 @@ function threadFailureMessage(tid: string, rateLimited: boolean, e: unknown): st
 export const GMAIL_RECENT_HORIZON_MS = 14 * 86_400_000;
 /**
  * #5581 (Eng): the parked delta thread ids are capped at 1,000 ids or 64 KB
- * serialized. A delta larger than the cap is never parked partially: its
- * candidate anchor waits while the window is walked again, newest→oldest,
- * and is installed only when that walk is exhausted.
+ * serialized. A delta larger than the cap is drained in bounded batches: the
+ * history listing stops at the last record that fits, the anchor advances only
+ * to that record once its threads are landed or parked, and the next run
+ * resumes the history from there, so no change is ever dropped.
  */
 export const GMAIL_PENDING_MAX_IDS = 1_000;
 export const GMAIL_PENDING_MAX_BYTES = 64 * 1024;
-/** Test seam: overflow fixtures lower the cap instead of flagging 1,000 threads. */
+/** Test seam: bounded-batch fixtures lower the cap instead of flagging 1,000 threads. */
 export const gmailPendingCap = { ids: GMAIL_PENDING_MAX_IDS, bytes: GMAIL_PENDING_MAX_BYTES };
 const fitsPendingCap = (ids: readonly string[]) => ids.length <= gmailPendingCap.ids && Buffer.byteLength(JSON.stringify(ids)) <= gmailPendingCap.bytes;
 
-type WalkOutcome = 'done' | 'failed' | 'aborted';
+type WalkOutcome = 'done' | 'failed' | 'aborted' | 'more';
 
 interface GmailSweep {
   deps: GoogleSyncDeps;
@@ -707,7 +708,7 @@ async function attemptThread(g: GmailSweep, tid: string, version: string | null)
 /**
  * Drain `[lowerMs, state[floorKey])` newest→oldest, committing the floor per
  * fully-successful batch so a killed walk resumes where it stopped (F7a).
- * Shared by the historical backfill and the history-expired or overflow gap.
+ * Shared by the historical backfill and the history-expired gap.
  */
 async function walkGmailWindow(g: GmailSweep, floorKey: 'gmail_backfill_floor_ms' | 'gmail_gap_floor_ms', lowerMs: number): Promise<WalkOutcome> {
   const { deps, gmail, state } = g;
@@ -767,7 +768,7 @@ async function walkGmailWindow(g: GmailSweep, floorKey: 'gmail_backfill_floor_ms
 
 /**
  * #5581: returns true when CURRENT mail is complete: the history delta
- * drained, no history-expired or overflow gap remains, and the recent inbox is
+ * drained, no history-expired gap remains, and the recent inbox is
  * imported (backfill done or its floor past GMAIL_RECENT_HORIZON_MS). Held
  * threads never block it; `gbrain waiting` reports them as partial coverage.
  * False = the caller must NOT stamp `last_sync_at`. The deep historical
@@ -800,7 +801,7 @@ async function sweepGmail(g: GmailSweep, onCurrent?: () => Promise<void>): Promi
   }
   if (!state.gmail_history_id) return true;
 
-  // ── Current mail first: delta, then any history-expired or overflow gap ──
+  // ── Current mail first: delta, then any history-expired gap ──
   const delta = await drainGmailDelta(g, cutoffMs);
   if (delta === 'aborted') return false;
   if (state.gmail_gap_floor_ms != null) {
@@ -809,12 +810,7 @@ async function sweepGmail(g: GmailSweep, onCurrent?: () => Promise<void>): Promi
     if (gap === 'done') {
       state.gmail_gap_after_ms = null;
       state.gmail_gap_floor_ms = null;
-      // An overflowed delta's candidate anchor is installed only now that its window walk is exhausted.
-      if (state.gmail_delta_candidate_history_id) {
-        state.gmail_history_id = state.gmail_delta_candidate_history_id;
-        state.gmail_delta_candidate_history_id = null;
-      }
-      await saveGoogleState(deps, state);
+          await saveGoogleState(deps, state);
     }
   }
   // Held threads no listing of this run reached: re-attempt those retry-held
@@ -825,7 +821,7 @@ async function sweepGmail(g: GmailSweep, onCurrent?: () => Promise<void>): Promi
     await attemptThread(g, tid, null);
   }
   const isCurrent = (): boolean => {
-    if (delta !== 'done' || state.gmail_gap_floor_ms != null || state.gmail_delta_candidate_history_id) return false;
+    if (delta !== 'done' || state.gmail_gap_floor_ms != null) return false;
     if (state.gmail_backfill_done) return true;
     const floor = state.gmail_backfill_floor_ms;
     if (floor == null || state.gmail_newest_ms == null) return false;
@@ -859,12 +855,14 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
   const { deps, gmail, state } = g;
   let threadIds: string[] = [];
   let newHistoryId: string | null = null;
-  // While an overflowed delta's window is still being walked, its retained
-  // anchor is not listed again: the walk covers everything since it.
-  if (!state.gmail_delta_candidate_history_id) {
+  let truncated = false;
+  const parked = state.gmail_pending_thread_ids ?? [];
+  // Room left under the pending cap; a full pending set drains before any new history is listed.
+  const room = gmailPendingCap.ids - parked.length;
+  if (room > 0) {
     try {
-      ({ threadIds, newHistoryId } = await gmail.listHistoryThreadIds(state.gmail_history_id!, {
-        ...(deps.opts.signal ? { signal: deps.opts.signal } : {}),
+      ({ threadIds, newHistoryId, truncated } = await gmail.listHistoryThreadIds(state.gmail_history_id!, {
+        maxThreads: room, ...(deps.opts.signal ? { signal: deps.opts.signal } : {}),
       }));
     } catch (e) {
       if (!(e instanceof GoogleCursorExpiredError)) throw e;
@@ -880,18 +878,12 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
       await saveGoogleState(deps, state);
     }
   }
-  const parked = state.gmail_pending_thread_ids ?? [];
+  if (truncated) deps.log(`[google] history delta over the ${gmailPendingCap.ids}-thread pending cap; draining it in bounded batches`);
   let merged = [...new Set([...parked, ...threadIds])];
-  if (!fitsPendingCap(merged)) {
-    // Overflow: never park part of the delta. Keep the retained anchor, record
-    // the candidate, and walk the window again; the parked ids still drain.
-    deps.log(`[google] history delta flags ${merged.length} threads (over the ${gmailPendingCap.ids}-id pending cap); walking the window instead`);
-    state.gmail_delta_candidate_history_id = newHistoryId ?? state.gmail_history_id;
-    openGmailGap(state, cutoffMs);
-    await saveGoogleState(deps, state);
-    newHistoryId = null;
-    merged = parked;
-  }
+  // A pathological id set over the byte cap never advances the anchor: only the parked ids drain.
+  if (!fitsPendingCap(merged)) { newHistoryId = null; truncated = true; merged = parked; threadIds = []; }
+  // A thread flagged by this listing changed upstream (even when it is also parked): its hold may re-admit it.
+  const fromHistory = new Set(threadIds);
   // `unlanded` shrinks as threads land or are dropped (404) or held.
   const unlanded = new Set(merged);
   // Bank drain progress: advancing the anchor is safe because every flagged
@@ -913,7 +905,7 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
       if (!deps.managed) await checkpoint();
       return 'aborted';
     }
-    const outcome = await attemptThread(g, tid, parked.includes(tid) ? null : deltaVersion);
+    const outcome = await attemptThread(g, tid, fromHistory.has(tid) ? deltaVersion : null);
     if (outcome.kind === 'failed' || outcome.kind === 'rate_limited') {
       failed++;
       // Per-user quota: the remaining threads would burn the client's retry
@@ -936,7 +928,8 @@ async function drainGmailDelta(g: GmailSweep, cutoffMs: number): Promise<WalkOut
   // landed — a partial drain re-lists the same window next run (idempotent).
   // A managed sweep that landed a thread already advanced it, parking the rest.
   if (failed === 0 && newHistoryId) state.gmail_history_id = newHistoryId;
-  return failed === 0 ? 'done' : 'failed';
+  // A bounded batch is not a drained delta: current mail is complete only once the listing is not truncated.
+  return failed !== 0 ? 'failed' : truncated ? 'more' : 'done';
 }
 
 // ── Full reconcile (deletes) ─────────────────────────────────────────────────

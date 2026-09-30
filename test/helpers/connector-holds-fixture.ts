@@ -40,7 +40,11 @@ export function gmailFetch(fx: FakeGmail) {
     if (u.pathname.endsWith('/users/me/profile')) return json({ emailAddress: fx.account, historyId: fx.profileHistoryId });
     if (u.pathname.endsWith('/users/me/history')) {
       if (fx.historyExpired) return json({ error: { code: 404, message: 'Start history id is too old' } }, 404);
-      return json({ historyId: fx.historyResponseId, history: fx.history.map(threadId => ({ messages: [{ threadId }] })) });
+      // One record per flagged thread, ids after the profile anchor; history.list returns records after startHistoryId.
+      const start = Number(u.searchParams.get('startHistoryId') ?? 0);
+      const records = fx.history.map((threadId, i) => ({ id: String(Number(fx.profileHistoryId) + i + 1), messages: [{ threadId }] }))
+        .filter(record => Number(record.id) > start);
+      return json({ historyId: fx.historyResponseId, history: records });
     }
     if (u.pathname.endsWith('/users/me/messages')) {
       const q = u.searchParams.get('q') ?? '';

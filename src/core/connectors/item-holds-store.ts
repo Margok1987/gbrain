@@ -49,7 +49,8 @@ export async function readConnectorCursorState(engine: Exec, source: ConnectorSo
   if (!dir) return null;
   const file = join(dir, kind === 'google' ? '.google-source.json' : '.github-source.json');
   if (!existsSync(file)) return null;
-  try { return JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>; } catch { return null; }
+  // A corrupt state file is unknown hold state, not "no holds": the caller reports it.
+  return JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
 }
 
 export interface SourceHolds { sourceId: string; kind: ConnectorKind; held: ItemHoldRecord[] }
@@ -62,7 +63,8 @@ export async function readAllSourceHolds(engine: Exec, opts: { sourceIds?: strin
   const out: SourceHolds[] = [];
   for (const source of sources) {
     if (opts.sourceIds && !opts.sourceIds.includes(source.id)) continue;
-    const state = await readConnectorCursorState(engine, source, managed).catch(() => null);
+    // A read failure propagates: callers must report unknown coverage, never an empty hold list.
+    const state = await readConnectorCursorState(engine, source, managed);
     const held = heldItems(state?.item_holds);
     if (held.length) out.push({ sourceId: source.id, kind: source.config.kind as ConnectorKind, held });
   }

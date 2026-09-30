@@ -59,7 +59,7 @@ export interface GoogleSourceState {
    */
   gmail_backfill_cutoff_ms?: number | null;
   /**
-   * #5581: history-expired or overflow gap: `[gmail_gap_after_ms,
+   * #5581: history-expired gap: `[gmail_gap_after_ms,
    * gmail_gap_floor_ms)` is drained newest→oldest with the same resumable floor
    * walk as the backfill. Both null when no gap is open.
    */
@@ -71,12 +71,6 @@ export interface GoogleSourceState {
    * advances `gmail_history_id` and parks the remainder here.
    */
   gmail_pending_thread_ids?: string[];
-  /**
-   * #5581 (Eng): the candidate anchor of a delta too large to park. The
-   * retained anchor (`gmail_history_id`) stays until the overflow gap walk is
-   * exhausted; only then is this installed.
-   */
-  gmail_delta_candidate_history_id?: string | null;
   /** Bookmark for the history-expired fallback: newest internalDate imported. */
   gmail_newest_ms: number | null;
   /**

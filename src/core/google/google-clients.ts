@@ -326,34 +326,52 @@ export class GmailClient extends GoogleApiClient {
    * Thread ids touched since the stored historyId. Throws
    * GoogleCursorExpiredError(404) when the cursor is too old (~1 week).
    * Returns the new historyId to store after a successful drain.
+   *
+   * #5581 (fix wave 4): with `maxThreads`, the listing stops before the
+   * history record that would exceed it and returns `truncated: true` with
+   * `newHistoryId` set to the last record fully included, so the caller can
+   * bank that far and resume from there without dropping any change. A
+   * record without an id cannot be bounded safely, so the listing then
+   * drains everything.
    */
   async listHistoryThreadIds(
     startHistoryId: string,
-    opts: { signal?: AbortSignal } = {},
-  ): Promise<{ threadIds: string[]; newHistoryId: string | null }> {
+    opts: { signal?: AbortSignal; maxThreads?: number } = {},
+  ): Promise<{ threadIds: string[]; newHistoryId: string | null; truncated: boolean }> {
     const threadIds = new Set<string>();
     let newHistoryId: string | null = null;
+    let lastRecordId: string | null = null;
+    let truncated = false;
     await this.drainPages(
       (t) =>
         `${GMAIL_BASE}/users/me/history?startHistoryId=${encodeURIComponent(startHistoryId)}&maxResults=100${t ? `&pageToken=${encodeURIComponent(t)}` : ''}`,
       (body) => {
-        if (typeof body.historyId === 'string') newHistoryId = body.historyId;
         const records = (body.history as Array<Record<string, unknown>> | undefined) ?? [];
         for (const rec of records) {
+          const touched = new Set<string>();
           for (const key of ['messages', 'messagesAdded', 'messagesDeleted', 'labelsAdded', 'labelsRemoved']) {
             const arr = rec[key] as Array<{ threadId?: string; message?: { threadId?: string } }> | undefined;
             for (const m of arr ?? []) {
               const tid = m.threadId ?? m.message?.threadId;
-              if (tid) threadIds.add(tid);
+              if (tid) touched.add(tid);
             }
           }
+          const fresh = [...touched].filter((tid) => !threadIds.has(tid));
+          const recordId = typeof rec.id === 'string' ? rec.id : null;
+          if (opts.maxThreads !== undefined && lastRecordId && recordId && threadIds.size + fresh.length > opts.maxThreads) {
+            truncated = true;
+            return { items: [], nextPageToken: null };
+          }
+          for (const tid of fresh) threadIds.add(tid);
+          if (recordId) lastRecordId = recordId;
         }
+        if (typeof body.historyId === 'string') newHistoryId = body.historyId;
         return { items: [], nextPageToken: (body.nextPageToken as string | undefined) ?? null };
       },
       'gmail',
       opts,
     );
-    return { threadIds: [...threadIds], newHistoryId };
+    return { threadIds: [...threadIds], newHistoryId: truncated ? lastRecordId : newHistoryId, truncated };
   }
 
   async getThread(

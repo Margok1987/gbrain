@@ -251,11 +251,17 @@ test('managed abort path: a failing page write is counted by a holds-only public
       const [record] = Object.values(((await sourceCheckpoint(engine, f.id))[0] as any).completed_keys[0].state.item_holds.items) as any[];
       expect(record).toMatchObject({ key: 'acme-example/app#2', attempts: i, state: i < 3 ? 'failing' : 'held', code: 'storage_error' });
     }
-    const [held] = await sourceHolds(engine, f.id);
-    expect(held.request_id).toBeTruthy();
     // Run 4 skips the held item and completes.
     expect((await run()).status).not.toBe('partial');
     await disposePersistenceConsumer(engine);
+    // A retry-held re-attempt that fails again is consumed: the next sync skips the item instead of aborting again.
+    await retryHeld(engine, f.id);
+    await expect(run()).rejects.toMatchObject({ code: 'storage_error' });
+    await disposePersistenceConsumer(engine);
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    const [held] = await sourceHolds(engine, f.id);
+    expect(held.request_id).toBeTruthy();
     await pageFault(engine, f.id, null);
     const [failed] = await engine.executeRaw<{ intent: Record<string, unknown> }>('SELECT intent FROM persistence_requests WHERE request_id=$1::uuid', [held.request_id]);
     expect((await retryHeld(engine, f.id)).scheduled).toBe(1);
@@ -357,7 +363,7 @@ test(`connector_holds_exhausted: a run that would hold a ${HOLD_CAP + 1}st item 
   }
 }), 120_000);
 
-test('#5581: a delta over the pending cap keeps its anchor, walks the window across a crash and an expired token, and loses no thread', async () => withEnv(env, async () => {
+test('#5581: a delta over the pending cap drains in bounded history batches across a crash and loses no older thread', async () => withEnv(env, async () => {
   const { gmailPendingCap, readGoogleState } = await import('../src/core/google/google-source.ts');
   for (const engine of engines) {
     const f = await gmailSource(engine, false);
@@ -368,30 +374,65 @@ test('#5581: a delta over the pending cap keeps its anchor, walks the window acr
     expect(readGoogleState(f.dir)).toMatchObject({ gmail_history_id: '100', gmail_backfill_done: true });
     gmailPendingCap.ids = 3;
     try {
+      // Five changed threads, all older than the newest imported mail: a date-window scan would miss them.
       const flagged = Array.from({ length: 5 }, (_, i) => `a1b2c3d4e5f6070${i}`);
-      flagged.forEach((id, i) => addThread(fx, id, Date.now() - (60 + i) * 60_000));
+      flagged.forEach((id, i) => addThread(fx, id, Date.now() - (20 + i) * 86_400_000));
       fx.history = flagged;
       fx.historyResponseId = '200';
-      // Crash after two fetches: the retained anchor stays, the candidate waits, nothing is parked beyond the cap.
+      // Crash after two fetches: the anchor moves only to the last history record whose threads are landed or parked.
       const controller = new AbortController();
       fx.onThreadFetch = () => { if (fx.fetched.length >= 2) controller.abort(); };
       fx.fetched.length = 0;
       await run(controller.signal);
       let state = readGoogleState(f.dir);
-      expect(state).toMatchObject({ gmail_history_id: '100', gmail_delta_candidate_history_id: '200' });
-      expect(state.gmail_gap_floor_ms).not.toBeNull();
-      expect((state.gmail_pending_thread_ids ?? []).length).toBeLessThanOrEqual(3);
-      // The token expires and a new message arrives; the walk resumes, then installs the candidate.
+      expect(state.gmail_history_id).toBe('103');
+      expect(state.gmail_pending_thread_ids).toEqual([flagged[2]]);
       fx.onThreadFetch = undefined;
-      fx.historyExpired = true;
-      addThread(fx, 'a1b2c3d4e5f60799', Date.now() - 30 * 60_000);
       expect((await run()).status).not.toBe('partial');
       state = readGoogleState(f.dir);
-      expect(state).toMatchObject({ gmail_history_id: '200', gmail_delta_candidate_history_id: null, gmail_gap_floor_ms: null });
-      await run();
-      const slugs = await engine.executeRaw<{ n: number }>("SELECT count(*)::int AS n FROM pages WHERE source_id=$1 AND slug LIKE 'emails/%'", [f.id]);
-      expect(slugs[0].n).toBe(7);
+      expect(state).toMatchObject({ gmail_history_id: '200', gmail_pending_thread_ids: [] });
+      const pages = await engine.executeRaw<{ n: number }>("SELECT count(*)::int AS n FROM pages WHERE source_id=$1 AND slug LIKE 'emails/%'", [f.id]);
+      expect(pages[0].n).toBe(6);
     } finally { gmailPendingCap.ids = 1_000; }
+  }
+}), 120_000);
+
+test('a parked held Gmail thread flagged again by fresh history is re-attempted as an upstream change', async () => withEnv(env, async () => {
+  const { readGoogleState } = await import('../src/core/google/google-source.ts');
+  for (const engine of engines) {
+    const f = await gmailSource(engine, false);
+    const fx = fakeGmail(account);
+    const run = () => runGoogleSync(engine, f.id, f.cfg, options, withGoogleAccount(gmailFetch(fx), account));
+    await run();
+    addThread(fx, 'a1b2c3d4e5f60900', Date.now() - 3_600_000);
+    fx.failThreads.set('a1b2c3d4e5f60900', 400);
+    fx.history = ['a1b2c3d4e5f60900'];
+    fx.historyResponseId = '150';
+    for (let i = 0; i < 3; i++) await run();
+    expect(readGoogleState(f.dir).gmail_pending_thread_ids).toEqual(['a1b2c3d4e5f60900']);
+    expect((await sourceHolds(engine, f.id)).map(h => h.key)).toEqual(['a1b2c3d4e5f60900']);
+    // It changes upstream and the provider recovers: the fresh listing re-admits it despite the hold.
+    fx.failThreads.delete('a1b2c3d4e5f60900');
+    fx.history = ['a1b2c3d4e5f60900', 'a1b2c3d4e5f60900'];
+    fx.historyResponseId = '160';
+    fx.fetched.length = 0;
+    expect((await run()).status).not.toBe('partial');
+    expect(fx.fetched).toContain('a1b2c3d4e5f60900');
+    expect(await sourceHolds(engine, f.id)).toEqual([]);
+  }
+}), 120_000);
+
+test('waiting reports partial coverage when the hold state cannot be read', async () => withEnv(env, async () => {
+  const { writeFileSync } = await import('node:fs');
+  const { googleStateFile } = await import('../src/core/google/google-source.ts');
+  for (const engine of engines) {
+    const f = await gmailSource(engine, false);
+    await engine.executeRaw('UPDATE sources SET last_sync_at=now() WHERE id=$1', [f.id]);
+    writeFileSync(googleStateFile(f.dir), '{not json');
+    const answer = await waiting(engine, f.id);
+    expect(answer.completeness).toBe('partial');
+    expect(answer.text).toContain('coverage is partial');
+    expect(answer.text).not.toContain('You are clean');
   }
 }), 120_000);
 
@@ -431,5 +472,32 @@ test('a facts fence below the timeline sentinel of a connector page refuses the 
     const [rendered] = await engine.executeRaw<{ compiled_truth: string }>(`SELECT compiled_truth FROM pages WHERE source_id=$1 AND slug='gh/acme-example/app/1'`, [f.id]);
     expect(rendered.compiled_truth).toContain('Body 1 edited upstream');
     expect(rendered.compiled_truth).toContain('Ships weekly');
+  }
+}), 240_000);
+
+test('a due transient reconsideration of a managed held write is admitted under a new request identity', async () => withEnv(env, async () => {
+  for (const engine of engines) {
+    const f = await githubSource(engine, true);
+    const fx = fakeGitHub();
+    fx.issues = [1, 2].map(n => ({ number: n, title: `Synthetic issue ${n}`, body: `Body ${n}`, updated_at: issueAt(n) }));
+    const run = () => runGitHubSync(engine, f.id, f.cfg, options, githubHoldsFetch(fx));
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    fx.issues[1] = { ...fx.issues[1], body: 'Body 2 edited upstream', updated_at: issueAt(5) };
+    await pageFault(engine, f.id, 'gh/acme-example/app/2');
+    for (let i = 0; i < 3; i++) { await expect(run()).rejects.toMatchObject({ code: 'storage_error' }); await disposePersistenceConsumer(engine); }
+    const [held] = await sourceHolds(engine, f.id);
+    expect(held).toMatchObject({ class: 'transient', state: 'held' });
+    // Storage recovers and the reconsideration falls due.
+    await pageFault(engine, f.id, null);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+    await engine.executeRaw(`UPDATE op_checkpoints SET completed_keys=jsonb_set(completed_keys,'{0,state,item_holds,items,acme-example/app#2,next_attempt_at}','"2000-01-01T00:00:00.000Z"')
+      WHERE op='managed-connector' AND completed_keys->0->'state'->'item_holds'->'items' ? 'acme-example/app#2'`);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    expect(await sourceHolds(engine, f.id)).toEqual([]);
+    const [page] = await engine.executeRaw<{ compiled_truth: string }>(`SELECT compiled_truth FROM pages WHERE source_id=$1 AND slug='gh/acme-example/app/2'`, [f.id]);
+    expect(page.compiled_truth).toContain('Body 2 edited upstream');
   }
 }), 240_000);

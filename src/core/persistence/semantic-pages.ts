@@ -59,7 +59,8 @@ export async function prepareSemanticPageMutation(engine: BrainEngine, row: Writ
   // marker makes its preserving render carry the bullet forward instead of deleting it (fix wave 4 audit).
   const [source] = await engine.executeRaw<{ kind: string | null }>("SELECT config->>'kind' AS kind FROM sources WHERE id=$1", [row.source_id]);
   const block = regeneratedByWriter(source?.kind, snapshot.page) ? `${materializedMarker(rendered.canonical)}\n${rendered.block}` : rendered.block;
-  const exact = hasExactBlock(snapshot.page.timeline, block);
+  // An identical entry written before the page's writer marked user bullets is still a duplicate.
+  const exact = hasExactBlock(snapshot.page.timeline, block) || (block !== rendered.block && hasExactBlock(snapshot.page.timeline, rendered.block));
   const tuples = extractTimelineFromContent(`${snapshot.page.compiled_truth}\n<!-- timeline -->\n${snapshot.page.timeline}`, row.slug);
   if (!exact && tuples.some(tuple => tuple.date === rendered.canonical.date && tuple.source === rendered.canonical.source && tuple.summary === rendered.canonical.summary)) {
     throw new OperationError('invalid_params', 'This timeline identity already exists with different detail.', 'Read and conditionally edit the existing page to change that entry.');

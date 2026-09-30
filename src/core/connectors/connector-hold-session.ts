@@ -16,7 +16,7 @@ import type { BrainEngine } from '../engine.ts';
 import { LockStolenError } from '../db-lock.ts';
 import { OperationError } from '../ops/contract.ts';
 import type { ManagedConnectorSync } from '../persistence/connector-sync.ts';
-import { clearHoldRetryKeys, readHoldRetryKeys } from './item-holds-store.ts';
+import { clearHoldRetryKeys, readHoldRetryKeys, writeHeldRetryPointer } from './item-holds-store.ts';
 import { holdsExhaustedError, ItemHoldsRun, type ClassifiedConnectorError, type ItemHoldMeta, type ItemHoldsFinish, type ItemHoldsState } from './item-holds.ts';
 
 /** Errors a managed connector must not absorb (the run aborts). Refusals raised before submission are counted instead. */
@@ -46,7 +46,18 @@ export class ConnectorHoldSession {
     const [row] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation::text AS incarnation FROM sources WHERE id=$1', [sourceId]).catch(() => []);
     const incarnation = row?.incarnation ?? null;
     const keys = incarnation ? await readHoldRetryKeys(engine, sourceId, incarnation).catch(() => []) : [];
-    return new ConnectorHoldSession(engine, sourceId, incarnation, managed, empty, stored, new Set(keys), opts);
+    const session = new ConnectorHoldSession(engine, sourceId, incarnation, managed, empty, stored, new Set(keys), opts);
+    // A managed held item re-admitted by a due transient reconsideration gets the same durable retry
+    // pointer retry-held writes, so its re-attempt is a new request identity instead of a replay.
+    if (managed) {
+      for (const key of session.holds.heldKeys()) {
+        const record = session.holds.record(key);
+        if (record?.request_id && !keys.includes(key) && session.holds.shouldAttempt(key)) {
+          await writeHeldRetryPointer(engine, sourceId, record.request_id).catch(() => false);
+        }
+      }
+    }
+    return session;
   }
 
   /** False for a held item this run skips; the skip neither counts nor resets it. */
@@ -85,7 +96,11 @@ export class ConnectorHoldSession {
       const done = this.holds.finish();
       if (!done.exhausted) {
         this.managed.holdSlugs(this.heldSlugs(done.state));
-        await this.managed.publishHolds(this.empty, done.state);
+        // A retry-held re-attempt that failed again is consumed once its hold is published,
+        // so the next sync skips the item instead of aborting on it again.
+        if (await this.managed.publishHolds(this.empty, done.state) && this.attemptedRetries.has(key) && this.incarnation) {
+          await clearHoldRetryKeys(this.engine, this.sourceId, this.incarnation, [key]).catch(() => {});
+        }
       }
     }
     throw error;

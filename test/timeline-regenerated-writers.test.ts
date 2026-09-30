@@ -16,6 +16,7 @@ import type { OperationContext } from '../src/core/ops/contract.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { maintenancePreflight, publishMaintenancePage } from '../src/core/persistence/prepared-maintenance.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { serializePageToMarkdown } from '../src/core/markdown.ts';
 
 let engine: PGLiteEngine;
 const dir = mkdtempSync(join(tmpdir(), 'gbrain-regenerated-timeline-'));
@@ -60,3 +61,16 @@ for (const writer of writers) {
     expect(after.page.timeline.includes('User note added by hand')).toBe(writer.regenerated);
   }), 60_000);
 }
+
+test('repeating an identical entry written before the page was regenerated-owned is still a duplicate, not a conflict', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  const slug = 'dream/legacy-entry';
+  await submit('put_page', { slug, content: '---\ntype: note\ntitle: Legacy\n---\nBody\n' });
+  const entry = { slug, date: '2026-09-16', summary: 'Pre-upgrade user note', source: 'user' };
+  await submit('add_timeline_entry', entry);
+  const before = (await engine.readPageSnapshot(slug, { sourceId }))!;
+  expect(before.page.timeline).not.toContain('gbrain:materialized');
+  await submit('put_page', { slug, content: serializePageToMarkdown({ ...before.page, frontmatter: { ...before.page.frontmatter, dream_generated: true } }, before.tags),
+    expected_revision: before.revision });
+  const replay = await submit('add_timeline_entry', entry);
+  expect(replay.status).toBe('skipped');
+}), 60_000);
