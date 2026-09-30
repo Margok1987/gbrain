@@ -350,6 +350,25 @@ as one line each, for example
 A line that says `Unknown:` means the check could not run; it is not a clean
 result. Ask the brain host's operator to run the steps above.
 
+### Symptoms from the lifecycle fixes in this release
+
+| Symptom or error text | Issue | Preview | Apply | Verify |
+| --- | --- | --- | --- | --- |
+| `gbrain upgrade` said the upgrade failed, or migrations ran twice | #5693 | `gbrain apply-migrations --list` | `gbrain apply-migrations --yes` | `gbrain doctor` (`minions_migration` ok) |
+| `another apply-migrations is running (host …, pid …)` | #5693 | `gbrain doctor` | wait, then `gbrain apply-migrations --yes` | `gbrain apply-migrations --list` |
+| doctor `orphan_persistence_bindings`; a re-added source fails with `writer_coordinator_required` | #5732 | `gbrain repair orphan-bindings` | `gbrain repair orphan-bindings --apply` | `gbrain doctor` |
+| doctor `stale_embedding_effects`; `writer_not_quiesced` names an embedding effect | #5629, #5734 | `gbrain repair embedding-effects --source <id>` | `gbrain repair embedding-effects --source <id> --apply` | `gbrain doctor` (pending until the owner run commits a `retry_queued` effect) |
+| autopilot never syncs a connector, or prints `has never synced` | #5673 | `gbrain sources status <id>` | `gbrain sync --source <id>` once | `gbrain sources status <id>` |
+| a connector source keeps a stale `local_path` | #5673 | `gbrain sources list` | `gbrain sources set-path <id> --clear` | `gbrain sources list` |
+| classic writes refused after leaving managed mode, or `local_markers: pending` | #5628 | `gbrain sources writer deactivate --dry-run` | see the [deactivate runbook](../architecture/topologies.md#deactivate-runbook) | `gbrain sources writer status` on every host |
+
+`orphan-bindings` and `embedding-effects` also run under `gbrain repair --all`
+and `gbrain doctor --remediate --include-repairs`; `embedding-effects` is paid
+work when it queues a retry. Retry commands: `gbrain sources writer retry-effects <source> --request-id <id>`
+(one failed or parked effect), `gbrain sync --source <id> --no-pull --retry-failed`
+(a failed sync write) and `gbrain repair embedding-effects --source <id> --apply`
+(stuck embedding effects, including a used-up retry allowance).
+
 ## Quarantine self-captured corpus files
 
 `gbrain doctor` reports `self_capture` when the dream session corpus
