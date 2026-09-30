@@ -1904,7 +1904,7 @@
         "kind": "function",
         "name": "embedQuery",
         "signature": [
-          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; }) => Promise<Float32Array>"
+          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; queryPrefix?: string; }) => Promise<Float32Array>"
         ]
       },
       {
@@ -2881,7 +2881,7 @@
         "kind": "function",
         "name": "embedQuery",
         "signature": [
-          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; }) => Promise<Float32Array>"
+          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; queryPrefix?: string; }) => Promise<Float32Array>"
         ]
       },
       {
@@ -6354,6 +6354,7 @@
         "kind": "interface",
         "members": [
           "_queryEmbedDeadline?: QueryEmbedDeadline | undefined",
+          "_queryPrefix?: string | undefined",
           "_searchModeInput?: ResolveSearchModeInput | undefined",
           "_telemetryCacheStatus?: \"miss\" | \"disabled\" | undefined",
           "adaptiveReturn?: AdaptiveReturnInput",
@@ -6594,7 +6595,7 @@
         "kind": "function",
         "name": "embedQueryBounded",
         "signature": [
-          "(text: string, embedOpts: { embeddingModel?: string; dimensions?: number; } | undefined, dl: QueryEmbedDeadline) => Promise<Float32Array>"
+          "(text: string, embedOpts: { embeddingModel?: string; dimensions?: number; queryPrefix?: string; } | undefined, dl: QueryEmbedDeadline) => Promise<Float32Array>"
         ]
       },
       {

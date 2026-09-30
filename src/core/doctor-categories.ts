@@ -85,6 +85,8 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'embedding_env_override',
   'embedding_migration_state',
   'embedding_provider',
+  // #5691: query-instruction advisory for instruction-style embedding models.
+  'embedding_query_prefix',
   'embedding_width_consistency',
   'embeddings',
   'entity_link_coverage',
