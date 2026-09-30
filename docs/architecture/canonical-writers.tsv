@@ -173,3 +173,4 @@ src/commands/quarantine.ts	2	early_refusal	Legacy direct content import. Direct 
 src/commands/reindex.ts	1	early_refusal	Legacy direct content import. Direct importFromContent calls without prepare refuse on managed brains before any write (assertUnmanagedCanonicalWriter).
 src/eval/brainbench/metrics/write-back.ts	1	isolated_eval	Explicit isolated evaluation database only; never opened against the active managed brain.
 src/eval/longmemeval/diagnostics.ts	1	isolated_eval	Explicit isolated evaluation database only; never opened against the active managed brain.
+src/core/persistence/effects.ts	1	coordinator	The embedding effect clears only the page embedding signature, inside its claimed, source-guarded installation transaction, when #4616 refused a chunk, so embed --stale finds the page; no canonical content column changes.

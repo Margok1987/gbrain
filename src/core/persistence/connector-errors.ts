@@ -11,7 +11,7 @@ import { describeConnectorAccount, type ConnectorAccount } from './connector-sta
 import type { ConnectorConfig, ConnectorKind } from './connector-identity.ts';
 import type { GitHubSourceConfig } from '../github-source.ts';
 import type { GoogleSourceConfig } from '../google/types.ts';
-import { UNBOUND_PUBLICATION_MESSAGE, UNBOUND_SOURCE_DOCS, unboundPublicationHint } from './unbound-source.ts';
+import { CONNECTOR_BOUND_HINT, CONNECTOR_BOUND_MESSAGE, UNBOUND_PUBLICATION_MESSAGE, UNBOUND_SOURCE_DOCS, unboundPublicationHint } from './unbound-source.ts';
 import { EMBEDDING_ZERO_NORM, EMBEDDING_ZERO_NORM_DOCS } from '../ai/embedding-guard.ts';
 
 export const REFUSAL_DOCS = 'docs/guides/write-refusals.md';
@@ -83,6 +83,7 @@ export function receiptDeliveredHint(receipt: { error_code?: string | null; erro
           + `Inspect those chunks' text (empty, whitespace- or symbol-only chunks are the usual cause) or the provider, then run gbrain embed ${slug}${sourceFlag}.` };
     }
     case 'owner_unavailable':
+      if (receipt.error_message === CONNECTOR_BOUND_MESSAGE) return { suggestion: CONNECTOR_BOUND_HINT, docs: UNBOUND_SOURCE_DOCS };
       if (receipt.error_message !== UNBOUND_PUBLICATION_MESSAGE) return null;
       return { detail: 'unbound_source', docs: UNBOUND_SOURCE_DOCS, suggestion: unboundPublicationHint(source) };
     default:

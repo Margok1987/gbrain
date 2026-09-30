@@ -32,6 +32,9 @@ import { connectorCheckpointKey, connectorIdentity, type ConnectorIdentity, type
 import { readManagedConnectorState, sameConnectorAccount, writeManagedConnectorState, type ConnectorAccount, type ConnectorPendingEntry, type ConnectorRunCounts, type ConnectorState } from './connector-state.ts';
 import { connectorAccountChanged, CONNECTOR_INTENT_OUTDATED_OLD_HOST, CONNECTOR_INTENT_OUTDATED_PRE_UPGRADE } from './connector-errors.ts';
 import { inspectUnchanged, screeningRequest } from './noop-kernel.ts';
+import { conceptPreservationHold, preserveCanonicalFences } from '../cycle/concept-publication.ts';
+import { FACTS_FENCE_BEGIN } from '../facts-fence.ts';
+import { TAKES_FENCE_BEGIN } from '../takes-fence.ts';
 import { readJournalLimits } from './limits.ts';
 import { withCoordinatedWrite } from './context.ts';
 import { readConnectorV2Cutoff } from './connector-checkpoint-migration.ts';
@@ -832,7 +835,13 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
   if (parsed.slug !== row.slug) throw new OperationError('invalid_params', 'The connector content changes its page identity.');
   // #5567: carry materialized and database-only timeline rows forward into the connector render.
   const carried = await materializeTimeline(engine, parsed, row.slug, snapshot, 'preserving');
-  const content = carried.materialized && snapshot ? serializePageToMarkdown({ ...snapshot.page, ...parsed, timeline: carried.timeline, type: parsed.typeExplicit ? parsed.type : snapshot.page.type }, parsed.tags) : p.content;
+  // The provider never renders the page's facts or takes fences (remember, loop extraction); carry them over
+  // verbatim so a re-render does not expire those facts. Ambiguous fences are left to the existing path.
+  const fenced = snapshot && [FACTS_FENCE_BEGIN, TAKES_FENCE_BEGIN].some(begin => (snapshot.page.compiled_truth ?? '').includes(begin)) && !conceptPreservationHold(snapshot.page)
+    ? preserveCanonicalFences(snapshot.page, parsed.compiled_truth) : parsed.compiled_truth;
+  const content = (carried.materialized || fenced !== parsed.compiled_truth) && snapshot
+    ? serializePageToMarkdown({ ...snapshot.page, ...parsed, compiled_truth: fenced, timeline: carried.timeline, type: parsed.typeExplicit ? parsed.type : snapshot.page.type }, parsed.tags)
+    : p.content;
   let prepared: PreparedContentImport | undefined;
   const result = await importFromContent(engine, row.slug, content, { sourceId: row.source_id, sourcePath: p.sourcePath,
     filename: basename(p.sourcePath).replace(/\.mdx?$/i, ''), noEmbed: true, allowEmptyOverwrite: true, activePack,

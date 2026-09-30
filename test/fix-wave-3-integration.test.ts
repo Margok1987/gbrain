@@ -94,8 +94,8 @@ async function quietRun(engine: BrainEngine, f: { id: string; dir: string }, fet
   await google(engine, f, fetcher, extra, config);
   return admissions(engine, f.id, before);
 }
-const addTimeline = (engine: BrainEngine, sourceId: string, slug: string, summary: string) => submitPageMutation(ctxFor(engine, sourceId),
-  { operation: 'add_timeline_entry', params: { request_id: randomUUID(), slug, date: '2026-03-01', summary, source: 'operator' } });
+const addTimeline = (engine: BrainEngine, sourceId: string, slug: string, summary: string, date = '2026-03-01') => submitPageMutation(ctxFor(engine, sourceId),
+  { operation: 'add_timeline_entry', params: { request_id: randomUUID(), slug, date, summary, source: 'operator' } });
 const timeline = async (engine: BrainEngine, sourceId: string, slug: string) => (await engine.getTimeline(slug, { sourceId })).map(row => row.summary);
 const VECTOR = `[${Array(1536).fill(0.01).join(',')}]`;
 
@@ -138,21 +138,28 @@ test('check 2 (S1): the no-op skip holds across a user timeline entry, a withdra
     // A user adds history to a connector page. On a database-only connector source the write stays
     // database-only (it never claims the connector's source); on a bound one it lands in the file.
     expect((await addTimeline(engine, f.id, slug, 'Operator note')).state).toBe('committed');
+    // An earlier entry is spliced above the marked one without separating that bullet from its marker.
+    expect((await addTimeline(engine, f.id, slug, 'Earlier note', '2026-02-01')).state).toBe('committed');
     expect(await engine.executeRaw('SELECT 1 FROM persistence_source_bindings WHERE source_id=$1', [f.id])).toHaveLength(bound ? 1 : 0);
-    // A withdrawn fact on the same page.
+    // A withdrawn fact and a live fact on the same page.
     const ctx = ctxFor(engine, f.id);
+    const live = await submitRememberMutation(ctx, { fact: 'Example live detail', entity: slug, provenance: 'integration', visibility: 'world' }) as { id: number };
     const remembered = await submitRememberMutation(ctx, { fact: 'Example retired detail', entity: slug, provenance: 'integration', visibility: 'world' }) as { id: number };
     await submitForgetMutation(ctx, 'forget', { id: remembered.id });
     // An upstream change re-renders the page from the provider: the user's entry survives (#5567).
     org = 'Renamed Example Org';
     expect((await quietRun(engine, f, fetcher, { resetCheckpoint: true })).pages).toBe(1);
-    expect(await timeline(engine, f.id, slug)).toEqual(['Operator note']);
+    expect((await timeline(engine, f.id, slug)).sort()).toEqual(['Earlier note', 'Operator note']);
     const page = (await engine.readPageSnapshot(slug, { sourceId: f.id }))!;
     expect(page.page.compiled_truth).toContain('Renamed Example Org');
     expect(page.page.timeline).toContain('Operator note');
-    if (bound) expect(readFileSync(join(f.dir, `${slug}.md`), 'utf8')).toContain('Operator note');
-    const [fact] = await engine.executeRaw<{ expired: boolean }>('SELECT expired_at IS NOT NULL AS expired FROM facts WHERE id=$1', [remembered.id]);
-    expect(fact!.expired).toBe(true);
+    expect(page.page.timeline).toContain('Earlier note');
+    if (bound) expect(readFileSync(join(f.dir, `${slug}.md`), 'utf8')).toContain('Earlier note');
+    const facts = async () => Object.fromEntries((await engine.executeRaw<{ id: number; expired: boolean }>('SELECT id,expired_at IS NOT NULL AS expired FROM facts WHERE id=ANY($1::int[])',
+      [[remembered.id, live.id]])).map(row => [Number(row.id), row.expired]));
+    // The re-render keeps the page's facts fence: the withdrawn fact stays withdrawn, the live one stays live.
+    expect(await facts()).toEqual({ [remembered.id]: true, [live.id]: false });
+    expect(page.page.compiled_truth).toContain('Example live detail');
     // The carried-forward entry and the withdrawal do not defeat the skip.
     expect(await quietRun(engine, f, fetcher, { resetCheckpoint: true })).toEqual({ pages: 0, checkpoints: expect.any(Number) });
     // Lane C's contextual-mode repair stamps an embedded page with no mode; the next re-walk still skips.
@@ -168,7 +175,8 @@ test('check 2 (S1): the no-op skip holds across a user timeline entry, a withdra
     await engine.executeRaw('UPDATE pages SET chunker_version=1 WHERE source_id=$1 AND slug=$2', [f.id, slug]);
     expect((await runner.run('safe-chunks', scope)).applied).toBe(1);
     expect((await quietRun(engine, f, fetcher, { resetCheckpoint: true })).pages).toBe(0);
-    expect(await timeline(engine, f.id, slug)).toEqual(['Operator note']);
+    expect((await timeline(engine, f.id, slug)).sort()).toEqual(['Earlier note', 'Operator note']);
+    expect(await facts()).toEqual({ [remembered.id]: true, [live.id]: false });
     await disposePersistenceConsumer(engine);
   }
 }), 300_000);
@@ -505,6 +513,23 @@ test('check 12: the admin lock never blocks ordinary publication or a connector 
       expect((await quietRun(engine, f, unchanged, { resetCheckpoint: true })).pages).toBe(0);
       expect(await timeline(engine, f.id, 'people/first-example')).toEqual(['Locked note']);
     } finally { await setWriterAdminLock(engine, false); }
+    // Admitted database-only while the connector source was unbound, published after an owner claimed it: refused.
+    await disposePersistenceConsumer(engine);
+    const [template] = await engine.executeRaw<WriteRequest>("SELECT * FROM persistence_requests WHERE source_id=$1 AND operation='add_timeline_entry' AND state='committed' LIMIT 1", [f.id]);
+    expect(template!.authority.databaseOnlyReason).toBe('connector_database');
+    const intent = { ...template!.intent, summary: 'Raced note', date: '2026-04-01' };
+    const raced = await admitWrite(engine, { requestId: randomUUID(), operation: 'add_timeline_entry', sourceId: f.id, sourceIncarnation: template!.source_incarnation,
+      slug: template!.slug, pageId: template!.page_id, principal: { kind: template!.principal_kind, id: template!.principal_id },
+      authority: template!.authority, callerIntent: intent, intent } as never);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
+    await claimWorktree(engine, f.id, f.dir);
+    await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+    startPersistenceConsumer(engine, { engine: engine.kind });
+    const refused = await waitForWrite(engine, raced, { engine: engine.kind }, 20_000);
+    expect(refused).toMatchObject({ state: 'failed', error_code: 'owner_unavailable', consumer_version: null });
+    const hint = (() => { try { writeResponse(refused); } catch (error) { return error as { suggestion?: string }; } return {}; })();
+    expect(hint.suggestion).toContain('new request_id');
+    expect(await timeline(engine, f.id, 'people/first-example')).not.toContain('Raced note');
     await disposePersistenceConsumer(engine);
     await protocol(engine, "UPDATE persistence_requests SET completed_at=now()-interval '60 days' WHERE source_id=$1 AND state='committed'", [f.id]);
     await compactWriteReceipts(engine, 30);

@@ -249,7 +249,14 @@ async function embedPage(engine: BrainEngine, config: GBrainConfig, effect: Pers
       const installed = await installPageEmbeddings(tx, prepared, pending.map((chunk, i) => ({ chunk_index: chunk.chunk_index,
         chunk_text: chunk.chunk_text, chunk_source: chunk.chunk_source, embedding: vectors[i] ?? undefined, model: opts.embedding?.model })),
       refused ? undefined : signature);
-      if (installed) await restampIfDemotedToTitleTier(tx, prepared.snapshot.page, snapshot.page.slug, effect.source_id);
+      if (installed && refused) {
+        // A refused chunk keeps no vector from an earlier convention, and the page reads as not fully embedded.
+        const ids = refused.failures.map(f => pending[f.index]?.id).filter((id): id is number => id !== undefined);
+        await tx.executeRaw(`UPDATE content_chunks SET ${quoteIdentifier(prepared.embeddingColumn.name)}=NULL,embedded_at=NULL,
+          embedded_text_hash=NULL,embedding_input_hash=NULL WHERE page_id=$1 AND id=ANY($2::int[])`, [prepared.snapshot.page.id, ids]);
+        await tx.executeRaw('UPDATE pages SET embedding_signature=NULL WHERE id=$1', [prepared.snapshot.page.id]);
+      }
+      if (installed && !refused) await restampIfDemotedToTitleTier(tx, prepared.snapshot.page, snapshot.page.slug, effect.source_id);
       signal.throwIfAborted();
       if (installed && !refused) await finishPage(tx, effect, snapshot);
       return installed;

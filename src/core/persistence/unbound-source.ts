@@ -14,6 +14,8 @@ export const UNBOUND_WRITE_VALUES = ['refuse', 'database_only'] as const;
 export type UnboundWritePolicy = typeof UNBOUND_WRITE_VALUES[number];
 export const UNBOUND_SOURCE_DOCS = 'docs/guides/write-refusals.md#unbound-sources-on-postgres';
 export const UNBOUND_PUBLICATION_MESSAGE = 'The source was bound, or the page gained a canonical file, after this database-only write was accepted.';
+export const CONNECTOR_BOUND_HINT = 'Nothing was written. Read the page again and submit the write with a new request_id; the bound source publishes it to its canonical file.';
+export const CONNECTOR_BOUND_MESSAGE = 'The connector source gained a canonical owner after this database-only write was accepted.';
 export const UNBOUND_COLLISION_MESSAGE = 'A database-only page written while its source was unbound already uses this slug.';
 
 export function parseUnboundWriteValue(value: string): UnboundWritePolicy {
@@ -60,7 +62,15 @@ export function unboundPublicationHint(sourceId: string): string {
  * (authorizeStoredRequest), so a concurrent claim either committed before this
  * read or waits for the publication to finish.
  */
-export async function assertUnboundPublication(tx: SqlEngine, row: Pick<WriteRequest, 'authority' | 'source_id'>, sourcePath: string | null | undefined): Promise<void> {
+export async function assertUnboundPublication(tx: SqlEngine, row: Pick<WriteRequest, 'authority' | 'source_id' | 'operation'>, sourcePath: string | null | undefined): Promise<void> {
+  // A page or memory write admitted database-only to an unbound connector source (connector_database)
+  // must not publish around canonical files once the source has an owner. Connector intents
+  // (submit_job) carry their own sync-authority check.
+  if (row.authority.databaseOnlyReason === 'connector_database' && row.operation !== 'submit_job') {
+    const bound = await tx.executeRaw('SELECT 1 FROM persistence_source_bindings WHERE source_id=$1 LIMIT 1', [row.source_id]);
+    if (bound.length) throw new OperationError('owner_unavailable', CONNECTOR_BOUND_MESSAGE, CONNECTOR_BOUND_HINT);
+    return;
+  }
   if (row.authority.databaseOnlyReason !== 'unbound_source') return;
   const bound = await tx.executeRaw('SELECT 1 FROM persistence_source_bindings WHERE source_id=$1 LIMIT 1', [row.source_id]);
   if (!bound.length && !sourcePath) return;
