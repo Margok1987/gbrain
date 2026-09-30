@@ -27,6 +27,7 @@ import type { CompanyBrainPlan } from '../company-brain/types.ts';
 import { companyBrainProfile } from '../company-brain/profile.ts';
 import { companyBrainPolicyFingerprint } from '../company-brain/policy.ts';
 import { isUnboundSourcePage, UNBOUND_COLLISION_MESSAGE } from './unbound-source.ts';
+import { frontmatterSlugConflictMessage } from './verb-errors.ts';
 
 export interface SyncIntent extends Record<string, unknown> {
   companyApproval?: { schema: NonNullable<CompanyBrainPlan['schema']>; planDigest: string; extractorVersion: string; policyFingerprint: string };
@@ -191,7 +192,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   const retainedWindowsOrigin = process.platform === 'win32' && snapshot?.page.source_path != null &&
     syncOriginPath(snapshot.page.source_path) === syncOriginPath(p.sourcePath) && parsedInput.slug === snapshot.page.slug;
   if (expectedSlug && parsedInput.slug !== expectedSlug && slugifyPath(parsedInput.slug) !== expectedSlug && !retainedWindowsOrigin) {
-    throw new OperationError('invalid_params', 'The file frontmatter slug conflicts with its physical origin.');
+    throw new OperationError('invalid_params', frontmatterSlugConflictMessage(p.sourcePath, parsedInput.slug, expectedSlug));
   }
   if (!p.companyApproval && base && !p.lineEndingOnly && p.rawHash !== sha256(p.content) && !sameCanonicalImport(base, parsedInput)) {
     throw new OperationError('source_changed', 'Newer working-tree bytes and the current page disagree with this pinned Git import.');

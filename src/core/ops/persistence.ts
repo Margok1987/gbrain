@@ -93,10 +93,11 @@ async function publicReceipt(ctx: OperationContext, row: WriteRequest, facts?: W
   const { receiptFor } = await import('../persistence/journal.ts');
   const { publicEffectsForRequest } = await import('../persistence/effect-journal.ts');
   const { receiptDeliveredHint } = await import('../persistence/connector-errors.ts');
+  const { writeFailureDiagnostic } = await import('../persistence/verb-errors.ts');
   return {
     ...publicWriteReceipt(receiptFor(row, facts)),
     operation: row.operation, source_id: row.source_id, slug: row.slug,
-    ...(isWriteErrorCode(row.error_code) ? { write_error: row.error_code } : {}),
+    ...(isWriteErrorCode(row.error_code) ? { write_error: row.error_code, write_error_message: writeFailureDiagnostic(row.error_code, row.error_message).message } : {}),
     effects: (await publicEffectsForRequest(ctx.engine, row.id)).map(effect => {
       const hint = effect.reason ? receiptDeliveredHint({ error_code: effect.reason, source_id: row.source_id, slug: row.slug }) : null;
       return hint ? { ...effect, suggestion: hint.suggestion, docs: hint.docs } : effect;
