@@ -678,7 +678,7 @@ describe('migrate v14 — pages_updated_at_index (handler-based, engine-aware)',
   });
 
   test('v14 handler source delegates invalid-remnant cleanup to the shared helper (#1178)', async () => {
-    const src = surfaceFileSource('migrate', 'src/core/migrate.ts');
+    const src = surfaceFileSource('migrate', 'src/core/schema-migrations/v014-pages-updated-at-index.ts');
     const v14Start = src.indexOf("name: 'pages_updated_at_index'");
     expect(v14Start).toBeGreaterThan(-1);
     const v14Block = src.slice(v14Start, v14Start + 3000);
@@ -732,7 +732,7 @@ describe('migrate — DROP INDEX CONCURRENTLY invalid-remnant cleanup (#1178, fi
   });
 
   test('dropInvalidConcurrentIndex helper itself probes pg_index.indisvalid and issues a standalone DROP (no DO block)', async () => {
-    const src = surfaceFileSource('migrate', 'src/core/migrate.ts');
+    const src = surfaceFileSource('migrate', 'src/core/schema-migrations/helpers.ts');
     const helperStart = src.indexOf('async function dropInvalidConcurrentIndex');
     expect(helperStart).toBeGreaterThan(-1);
     const helperBlock = src.slice(helperStart, helperStart + 1200);
@@ -837,7 +837,7 @@ describe('migrate v66 — embed_stale_partial_index (D6)', () => {
   });
 
   test('v66 handler source delegates invalid-remnant cleanup to the shared helper (#1178)', async () => {
-    const src = surfaceFileSource('migrate', 'src/core/migrate.ts');
+    const src = surfaceFileSource('migrate', 'src/core/schema-migrations/v066-embed-stale-partial-index.ts');
     const v66Start = src.indexOf("name: 'embed_stale_partial_index'");
     expect(v66Start).toBeGreaterThan(-1);
     const v66Block = src.slice(v66Start, v66Start + 3000);
@@ -864,7 +864,7 @@ describe('migrate v66 — embed_stale_partial_index (D6)', () => {
   });
 
   test('dropInvalidConcurrentIndex helper itself probes pg_index.indisvalid and issues a standalone DROP (no DO block)', async () => {
-    const src = surfaceFileSource('migrate', 'src/core/migrate.ts');
+    const src = surfaceFileSource('migrate', 'src/core/schema-migrations/helpers.ts');
     const helperStart = src.indexOf('async function dropInvalidConcurrentIndex');
     expect(helperStart).toBeGreaterThan(-1);
     const helperBlock = src.slice(helperStart, helperStart + 1200);
