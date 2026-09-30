@@ -28,13 +28,13 @@ Regenerate the raw list with, for example,
 
 ## `src/commands/sync.ts` (W4 sync → src/commands/sync/)
 
-- [ ] `docs/architecture/KEY_FILES.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
-- [ ] `docs/architecture/canonical-writers.tsv` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
+- [x] `docs/architecture/KEY_FILES.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
+- [x] `docs/architecture/canonical-writers.tsv` — census rows follow the moved write sites (sync/deletes.ts, preflight.ts, renames.ts); the façade has none
 - [ ] `docs/architecture/key-files/commands-3.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/architecture/key-files/commands-5.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
-- [ ] `docs/architecture/key-files/commands-6.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
-- [ ] `docs/architecture/key-files/files-and-sync-1.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
-- [ ] `docs/architecture/key-files/files-and-sync-2.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
+- [x] `docs/architecture/key-files/commands-6.md` — façade note + new `src/commands/sync/` entry (W4 sync)
+- [x] `docs/architecture/key-files/files-and-sync-1.md` — stale `sync.ts:1497-1519` line reference re-pointed to `resolveCliSyncSource` in sync/run.ts
+- [x] `docs/architecture/key-files/files-and-sync-2.md` — cleanup-loop reference re-pointed to `sweepUnsyncableModified` in sync/deletes.ts
 - [ ] `docs/architecture/key-files/runtime.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/designs/BRAIN_CURRENCY.md` — historical record: no action (describes past state)
 - [ ] `docs/eval/FIX_WAVE_BASELINES.md` — historical record: no action (describes past state)
@@ -42,10 +42,10 @@ Regenerate the raw list with, for example,
 - [ ] `docs/test-audit/2026-09-29/lane-seams/seam-callers.tsv` — historical record: no action (describes past state)
 - [ ] `docs/test-audit/2026-09-29/lane-seams/test-only-exports.tsv` — historical record: no action (describes past state)
 - [ ] `docs/test-audit/2026-09-29/lane-source-grep/pertest.json` — historical record: no action (describes past state)
-- [ ] `scripts/coverage-baseline.json` — coverage data: exemptions and baseline rows transfer with moved code (net shrink)
+- [ ] `scripts/coverage-baseline.json` — coverage data: advisory watchlist names the façade; no corpus rows exist to transfer (no action)
 - [x] `scripts/function-size-baseline.tsv` — ratchet data (W5): rows move with `check-function-size.ts --transfer` in the move-only commit
-- [ ] `scripts/generate-flag-registry.ts` — generator (reads command text): facadeExpansion extended to sync|jobs|autopilot dirs in W0b; W4 cli re-targets it to the command table
-- [ ] `scripts/module-size-limits.tsv` — ratchet data: lower/transfer ceilings with the moved code (C24); notes trimmed in W0b
+- [x] `scripts/generate-flag-registry.ts` — facadeExpansion already scans src/commands/sync/; cli-flag-registry.generated.ts byte-identical (freshness guard)
+- [x] `scripts/module-size-limits.tsv` — sync.ts ceiling 6022 -> 468; no sync/ module needs a row (all under the 1500 cap)
 - [ ] `test/helpers/persistence-sync-interruption.ts` — test helper (import): façade keeps its exports: no action
 - [x] `test/helpers/source-surface.ts` — test helper (A10 loader): surface loaders; a moving lane adds its destination files
 
