@@ -902,7 +902,13 @@ string/SQL text is exact). Imports, `export ... from` lines and toggling the
 `bun scripts/verify-move-only.ts <commit>` (default `HEAD~1..HEAD`);
 `--wrapper migration` inlines `export const vNNN: Migration = {...}` files into
 the generated registry array so the W3 split must reproduce the original
-`MIGRATIONS` array, and `--rename-map <json>` applies identifier rewrites for
+`MIGRATIONS` array; `--wrapper doctor-entry` inlines each
+`run<Topic>(ctx: DoctorContext): Promise<Check[]>` body (minus its ctx
+destructure / `connectedEngine` / `const checks` prologue and `return checks;`)
+at its `checks.push(...(await runX(ctx)));` call in `buildChecks`, drops the
+`const ctx: DoctorContext = {...};` glue and resolves relative `import()` /
+`require()` specifiers to repo paths, so the W4 doctor peel must reproduce the
+original `buildChecks` body; and `--rename-map <json>` applies identifier rewrites for
 `Mechanical-Rename: yes` commits. Failures print `FAIL: <file:line>` with the
 first differing token. Pinned by `test/scripts/verify-move-only.test.ts`.
 
