@@ -94,18 +94,37 @@ export function postgresCatalogQuery(conn: { unsafe: (sql: string) => Promise<un
   return async (sql) => (await conn.unsafe(sql)) as Array<Record<string, unknown>>;
 }
 
-/** Fresh in-memory PGLite, cold (no GBRAIN_PGLITE_SNAPSHOT), full `initSchema()`. */
-export async function capturePgliteEngineCatalog(): Promise<CatalogSnapshot> {
+/** Raw `prosrc` of gbrain's own public functions, keyed like the catalog (`name(identity args)`). */
+export const FUNCTION_BODIES_SQL = `
+  SELECT p.proname::text || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS key,
+         COALESCE(p.prosrc, '') AS body
+    FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+   WHERE n.nspname = 'public'
+     AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+   ORDER BY 1`;
+
+export async function pgliteFunctionBodies(engine: PGLiteEngine): Promise<Map<string, string>> {
+  const { rows } = await engine.db.query<{ key: string; body: string }>(FUNCTION_BODIES_SQL);
+  return new Map(rows.map((r) => [r.key, r.body]));
+}
+
+/** Fresh in-memory PGLite, cold (no GBRAIN_PGLITE_SNAPSHOT), full `initSchema()`: catalog + function bodies. */
+export async function capturePgliteFreshInstall(): Promise<{ catalog: CatalogSnapshot; functionBodies: Map<string, string> }> {
   return withColdPglite(async () => {
     const engine = new PGLiteEngine();
     try {
       await engine.connect({});
       await engine.initSchema();
-      return await snapshotCatalog(pgliteCatalogQuery(engine));
+      return { catalog: await snapshotCatalog(pgliteCatalogQuery(engine)), functionBodies: await pgliteFunctionBodies(engine) };
     } finally {
       await engine.disconnect();
     }
   });
+}
+
+/** Fresh in-memory PGLite, cold (no GBRAIN_PGLITE_SNAPSHOT), full `initSchema()`. */
+export async function capturePgliteEngineCatalog(): Promise<CatalogSnapshot> {
+  return (await capturePgliteFreshInstall()).catalog;
 }
 
 /**
