@@ -186,3 +186,5 @@ src/core/schema-migrations/v048-takes-weight-round-to-grid.ts	1	schema	Schema in
 src/core/schema-migrations/v123-configurable-fts-language.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
 src/core/schema-migrations/v142-takes-embedding-dimension-matches-config.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
 src/core/schema-migrations/v144-open-loops.ts	1	schema	Schema installation and forward-reference DDL; coordinated activation quiesces canonical writers.
+src/core/persistence/connector-path.ts	1	coordinator	Connector path clear locks the source row, refuses filesystem sources and bound connectors, and runs as a coordinated write on managed brains.
+src/core/source-delete.ts	1	engine_guard	Unmanaged source delete with its incarnation binding; managed brains route removal through source lifecycle first and the writer guard refuses a direct delete.

@@ -2801,6 +2801,9 @@ async function connectEngine(opts?: { probeOnly?: boolean }): Promise<BrainEngin
     console.warn('  Re-run: `gbrain apply-migrations --yes`');
   }
 
+  // #5628: drop this host's markers of a retired managed epoch before any filesystem guard check.
+  try { await (await import('./core/persistence/deactivation.ts')).cleanupRetiredManagedMarkers(engine); } catch { /* status reports pending markers */ }
+
   // v0.27.1 (F3 fix): re-merge DB-plane config now that the engine is up.
   // Flags like `embedding_multimodal` are user-mutable via `gbrain config set`
   // (DB plane) and need to flow into the gateway after connect. Schema-sizing

@@ -31,7 +31,11 @@ export async function refreshManagedFilesystemRoots(engine: SqlEngine, databaseP
       ) roots ORDER BY local_path,worktree_id NULLS LAST,source_id,source_incarnation,topology_generation`, [localHostId()], { signal }) : [];
   signal?.throwIfAborted();
   if (brain.enabled && databasePath) roots.push({ local_path: databasePath });
-  if (brain.enabled) recordManagedRoots(brain.brain_id, roots);
+  if (brain.enabled) {
+    const [epoch] = await engine.executeRaw<{ mode_epoch: string | null }>(
+      "SELECT to_jsonb(persistence_brain)->>'mode_epoch' AS mode_epoch FROM persistence_brain WHERE singleton=1", undefined, { signal });
+    recordManagedRoots(brain.brain_id, roots, epoch?.mode_epoch == null ? undefined : Number(epoch.mode_epoch));
+  }
   managedRoots.set(brain.brain_id, new Set(roots.map(row => resolve(row.local_path))));
 }
 export function hasFilesystemPublication(path: string): boolean {
