@@ -14,6 +14,7 @@ import type { BrainEngine } from '../../core/engine.ts';
 import { meanItemSd, qualifyActions, reliability, requiredN, searchThreshold, type CalibrationTarget, type HarmfulAction, type LabelledValue } from '../../core/ai/decide/calibrate.ts';
 import { datasetAdapter, datasetBuilder, datasetHash, datasetSources, families, idsHash, parseDatasetJsonl, splitHash, toJsonl, type DatasetItem } from '../../core/ai/decide/dataset.ts';
 import { runDecide } from '../../core/ai/decide/index.ts';
+import { runDecideUnpacked } from '../../core/ai/decide/unpacked.ts';
 import { estimateContextTokens, planBatches } from '../../core/ai/decide/pack.ts';
 import { lookupModel, marginFor, policyFingerprint } from '../../core/ai/decide/policy.ts';
 import { refusalLine } from '../../core/ai/decide/outcomes.ts';
@@ -44,11 +45,21 @@ async function askFamilies(engine: BrainEngine, slot: DecideSlot, provider: stri
   const models = new Set<string>();
   for (const fam of fams) {
     const req = adapter.request(fam);
-    const r = await runDecide({ slot, callSite: adapter.callSite, state: req.state, questions: req.questions, provider, lane: 'background', deadlineMs: 60_000 }, { engine, config: cfgOverride });
-    models.add(r.model_resolved);
+    const base = { slot, callSite: adapter.callSite, state: req.state, questions: req.questions, provider, lane: 'background' as const };
+    const r = adapter.unpacked
+      ? await runDecideUnpacked(base, { engine, config: cfgOverride }, { deadlineAt: Date.now() + 60_000, concurrency: cfgOverride.backgroundConcurrency })
+      : await runDecide({ ...base, deadlineMs: 60_000 }, { engine, config: cfgOverride });
+    if (r.model_resolved) models.add(r.model_resolved);
+    const perItem = new Map<string, Array<number | null>>();
     for (const q of req.questions) {
       const a = r.answers[q.id];
-      values[req.itemFor[q.id]!.id] = a ? thresholdValue(a) : null;
+      const id = req.itemFor[q.id]!.id;
+      perItem.set(id, [...(perItem.get(id) ?? []), a ? thresholdValue(a) : null]);
+    }
+    for (const [id, list] of perItem) {
+      values[id] = adapter.aggregate === 'max'
+        ? (list.some((v) => v === null) ? null : Math.max(...(list as number[])))
+        : list[list.length - 1] ?? null;
     }
   }
   if (models.size > 1) throw new DecideError('mixed_model', `calibration answered by ${models.size} different models`);

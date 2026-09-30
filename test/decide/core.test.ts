@@ -250,7 +250,7 @@ describe('slot policy', () => {
   });
 
   test('unwired slots are unavailable', () => {
-    const p = resolveSlotPolicy({ ...inputs({ ...ON, 'decide.slots.triage.mode': 'on' }, []), slot: 'triage', packShape: packShape('triage') });
+    const p = resolveSlotPolicy({ ...inputs({ ...ON, 'decide.slots.intent.mode': 'on' }, []), slot: 'intent', packShape: packShape('intent') });
     expect(p).toMatchObject({ inactive: 'slot_unavailable', effective: 'off' });
   });
 });

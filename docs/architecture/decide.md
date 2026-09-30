@@ -74,6 +74,12 @@ when it fits the deadline; background lanes drop to one worker after a 429.
 (`stageDeadlineMs`, stages skip with `late`); detached shadow work runs under
 its own `BudgetTracker`, behind a bounded queue, drained at CLI exit.
 
+`unpacked.ts` `runDecideUnpacked`: slots whose answers must not depend on
+co-packed neighbours (S7 windows, S8 claim units) send one question per request
+as one logical decision (one decision id and deadline, a process-wide
+background-lane cap, per-question failure reasons so a slot can require
+complete coverage).
+
 `packShape(slot, coPacked, {unpacked})` names the request shape a calibration
 is valid for; `on` refuses a calibration with a different shape
 (`pack_shape_mismatch`).
@@ -120,6 +126,17 @@ with the background-work drain (500 ms bound at CLI exit). Retention:
 daily cap sums `decide_spend` for the UTC day (third-party only; cached 60 s;
 soft in both directions); remote-triggered spend is capped by
 `decide.budget.remote_share`.
+
+### S9 proposals and sweep state
+
+`decide_proposals` rows (`pending | accepted | rejected | stale | undone`)
+are never pruned by receipt retention. The sweep keeps one internal
+`decide_state` key per source (`conflict_watermark:<source>`) and retries
+transient skips from `decide_sweep_deferred` (at most 5 attempts). Accept
+and undo are the only S9 writes to facts: a checked supersede that stores
+before/after state (`expired_at`, `valid_until`, `superseded_by`, the fence
+row, the page revision) and applies the database and fence changes as one
+unit; on managed brains it is the coordinator mutation `decide_proposal`.
 
 ### Outcome vocabulary (canonical: `src/core/ai/decide/outcomes.ts`)
 
@@ -180,7 +197,11 @@ acceptance never run for a remote caller.
 | S6 fire: minimum server budget left / response margin / hits | 150 ms / 40 ms / 3 | no |
 | S6 state caps (prompt head / previous-turn tail) | 6,000 / 2,000 characters | no |
 | S6 suppression boundary | 0.05 | `decide.slots.recall_needed.suppress_below` (bound into the policy fingerprint) |
-| S4 k, S8 window count, S7 window size/cap | per slot lane | documented with each slot |
+| S7 window | whole turns, about 1,500 chars; a turn over 24,000 chars splits at paragraphs (marked); at most 256 windows per transcript (more → today's triage) | no (`TRIAGE_WINDOW_CHARS`, `TRIAGE_TURN_SPLIT_CHARS`, `TRIAGE_MAX_WINDOWS`) |
+| S7 decision deadline / segment map | 60 s per transcript; top 8 windows, 300-char quotes | no |
+| S8 source windows / coverage floor | 3 per claim; 0.25 of the claim's content words | no (`GROUNDING_MAX_WINDOWS`, `GROUNDING_KEYWORD_FLOOR`) |
+| S8 deadlines | 30 s per page, 10 min per dream phase | no |
+| S4 k | per slot lane | documented with each slot |
 
 ## Extension points for slot lanes
 
@@ -194,7 +215,12 @@ acceptance never run for a remote caller.
   (`dataset.ts`): production-shaped requests, harmful-action reducers, and
   `gbrain decide dataset --from <source>` builders.
 - `registerDecideSubcommand(name, run, help)` (`src/commands/decide.ts`):
-  `proposals`, `sweep`, `judge-agreement`.
+  `proposals`, `sweep`, `judge-agreement`. Lane modules that register
+  subcommands, what-if reducers or dataset adapters are imported by
+  `loadDecideLanes()` (write path: `src/commands/decide/writepath.ts`).
+- `SlotDatasetAdapter.unpacked` / `aggregate: 'max'` (`dataset.ts`): calibrate
+  and qualify send one request per question and fold several questions into
+  one item value (S7 transcript = max window).
 - `registerWhatIfReducer(slot, reducer)` (`src/commands/decide/receipts.ts`)
   for slots whose reducer replays exactly (S7, S8).
 - `writeReceipts(engine, input)` (`receipts.ts`) and the per-request

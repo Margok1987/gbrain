@@ -213,7 +213,7 @@
         "calibration": null,
         "cost_per_1k": {
           "basis": "n/a",
-          "unit": "units",
+          "unit": "transcripts",
           "usd": null
         },
         "decisions_24h": 0,
@@ -236,13 +236,13 @@
         "status": "pending",
         "threshold": null,
         "threshold_source": "none",
-        "wired": false
+        "wired": true
       },
       {
         "calibration": null,
         "cost_per_1k": {
           "basis": "n/a",
-          "unit": "units",
+          "unit": "dream pages",
           "usd": null
         },
         "decisions_24h": 0,
@@ -265,13 +265,13 @@
         "status": "pending",
         "threshold": null,
         "threshold_source": "none",
-        "wired": false
+        "wired": true
       },
       {
         "calibration": null,
         "cost_per_1k": {
           "basis": "n/a",
-          "unit": "units",
+          "unit": "swept facts",
           "usd": null
         },
         "decisions_24h": 0,
@@ -294,7 +294,7 @@
         "status": "pending",
         "threshold": null,
         "threshold_source": "none",
-        "wired": false
+        "wired": true
       }
     ]
   },

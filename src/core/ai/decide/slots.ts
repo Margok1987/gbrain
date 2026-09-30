@@ -64,17 +64,17 @@ export const SLOT_SPECS: Readonly<Record<DecideSlot, SlotSpec>> = {
   triage: {
     slot: 'triage', lane: 'background', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['dream'],
     egressClasses: ['conversation'], shadowSample: 1, whatIfReproducible: true, questionVersion: 1,
-    failDirection: 'fail open: today\'s triage path', wired: false,
+    failDirection: 'fail open: today\'s triage path', wired: true,
   },
   grounding: {
     slot: 'grounding', lane: 'background', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['dream'],
     egressClasses: ['conversation'], shadowSample: 1, whatIfReproducible: true, questionVersion: 1,
-    failDirection: 'keep the mechanical verification result', wired: false,
+    failDirection: 'keep the mechanical verification result', wired: true,
   },
   conflict: {
     slot: 'conflict', lane: 'background', questionKind: 'choice', harmful: false, thresholded: true, callSites: ['sweep'],
     egressClasses: ['facts'], shadowSample: 1, whatIfReproducible: false, questionVersion: 1,
-    failDirection: 'no proposal; the fact stays as written', wired: false,
+    failDirection: 'no proposal; the fact stays as written', wired: true,
   },
 };
 

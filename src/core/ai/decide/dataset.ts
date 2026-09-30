@@ -91,6 +91,10 @@ export interface SlotDatasetAdapter {
   callSite: string;
   /** Build one production-shaped request for a family; question ids map back to item ids. */
   request(family: readonly DatasetItem[]): { state: Record<string, EvidenceItem>; questions: DecideQuestion[]; itemFor: Record<string, DatasetItem> };
+  /** Each question is its own request (S7 windows, S8 claim units), as in production. */
+  unpacked?: boolean;
+  /** Several questions answer one item: its value is their maximum, null when any is unanswered (S7 transcript = max window). */
+  aggregate?: 'max';
   /** Harmful action the production reducer took on an item, and whether it was right (null: no harmful action). */
   harmfulActions?(family: readonly DatasetItem[], values: Record<string, number | null>, policy: { threshold: number; margin: number; minKeep: number; suppressBelow?: number }): Array<{ item: DatasetItem; correct: boolean }>;
 }

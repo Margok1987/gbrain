@@ -10,6 +10,7 @@ import type { CliDispatchContext } from '../command-table.ts';
 
 export async function run(args: string[], ctx: CliDispatchContext): Promise<void> {
   const decide = await import('../../commands/decide.ts');
+  await decide.loadDecideLanes();
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     console.log(decide.decideHelpText());
     return;
