@@ -2012,11 +2012,13 @@ deferred M-effort issues above are NOT repeated here.
   function. **Blocked by:** re-pointing the two positional source-text guards
   (test/sync.test.ts #132 prelude scan, test/redos-hardening.test.ts ordering) at the phase
   modules — needs its own plan. **Effort:** L→M with CC. **Priority:** P2.
-- [ ] **P2 — Wave 4b: hoist buildChecks' ~220 inline checks.push literals into named
-  functions, then finish the doctor split (own plan).** **What:** doctor.ts is 4,177 lines,
-  ~3,240 of them buildChecks. Hoisting the inline literals into named check functions makes
-  them movable into the checks/ bundles. **Why:** completes the assessment's #1 named peel
-  target. **Effort:** L→M with CC. **Priority:** P2.
+- [x] **P2 — Wave 4b: hoist buildChecks' ~220 inline checks.push literals into named
+  functions, then finish the doctor split (own plan).** **Completed: refactor wave 1 (W4
+  doctor).** Every `buildChecks` block now lives verbatim in a registry entry under
+  `src/commands/doctor/checks/` and runs through `DOCTOR_CHECK_REGISTRY` in
+  `src/commands/doctor/registry.ts`; `buildChecks` is the flag parse plus the runner call and
+  doctor.ts is 653 lines. Pinned by the W0 registry / early-stop / `--json` goldens,
+  `test/doctor-registry.test.ts` and `test/doctor-mode-matrix.serial.test.ts`.
 - [ ] **P2 — CLI subprocess coverage.** **What:** investigate an in-process CLI-invocation
   harness for a coverage lane (import cli.ts main instead of spawning) and track bun
   child-process coverage support upstream. **Why:** E2E-spawned `bun src/cli.ts` children are
@@ -4489,7 +4491,12 @@ single canonical `src/core/model-pricing.ts` with `canonicalLookup`.
   documented as additive) and add `atoms_inserted` +
   `concepts_inserted` next to `facts_consolidated`.
 
-- **TODO-V19-C (P3)**: Check-registry refactor for `gbrain doctor`. The
+- **TODO-V19-C (P3)** — **Completed: refactor wave 1 (W4 doctor).** The check registry
+  landed as `DOCTOR_CHECK_REGISTRY` (`src/commands/doctor/registry.ts`): ordered
+  `{ name, emits, run(ctx) }` entries with an explicit `DoctorContext`; categories stay in
+  `src/core/doctor-categories.ts` (no per-entry category field), enforced by
+  `test/doctor-registry.test.ts`. `--scope` gates stay inside the entries; a future scope
+  dimension can filter entries instead of adding inline gates. Original entry: Check-registry refactor for `gbrain doctor`. The
   v0.41.19.0 `--scope=brain` uses explicit early-skip gates inline at
   each call site (~40 LOC across resolver + skill_conformance +
   skill_brain_first + whoknows). If we want to add more scope

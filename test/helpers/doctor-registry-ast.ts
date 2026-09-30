@@ -24,6 +24,12 @@
  * Dynamic names are recorded as templates (`${expr}` kept verbatim). A name
  * is recorded at its first reachable occurrence. `early_returns_after` lists
  * the last name reachable before each early `return` inside buildChecks.
+ *
+ * Registry walk (W4 doctor): a root that calls `runDoctorRegistry(...)` is
+ * followed into `DOCTOR_CHECK_REGISTRY`, in array order. Each entry's `run`
+ * function is walked exactly like a root (its `checks.push(...)` calls), and
+ * a `return STOP_DOCTOR` inside it is an early return: the runner stops
+ * there, which is where master's `buildChecks` returned early.
  */
 import ts from 'typescript';
 import { existsSync, readFileSync, statSync } from 'node:fs';
@@ -428,6 +434,117 @@ function isChecksPush(node: ts.Node): node is ts.CallExpression {
   );
 }
 
+export interface DoctorRegistryEntry {
+  /** Exported entry binding, e.g. `rlsEntry`. */
+  entry: string;
+  /** Repo-relative module holding the entry. */
+  file: string;
+  /** The entry's `name` literal. */
+  name: string;
+  /** The entry's `emits` literals, in source order. */
+  emits: string[];
+  /** Check names its `run` function can push, in walk order (first occurrence). */
+  names: string[];
+  /** True when `run` can return STOP_DOCTOR. */
+  stops: boolean;
+}
+
+function stringArray(expr: ts.Expression | undefined): string[] {
+  const e = expr && unwrap(expr);
+  if (!e || !ts.isArrayLiteralExpression(e)) return [];
+  return e.elements.filter((el): el is ts.StringLiteral => ts.isStringLiteral(el)).map((el) => el.text);
+}
+
+function isStopReturn(node: ts.Node): boolean {
+  return ts.isReturnStatement(node) && !!node.expression && ts.isIdentifier(node.expression) && node.expression.text === 'STOP_DOCTOR';
+}
+
+interface ResolvedEntry {
+  entry: string;
+  file: string;
+  name: string;
+  emits: string[];
+  run: FnRef;
+}
+
+/** Entries of `DOCTOR_CHECK_REGISTRY` in `registryFile`, in array order. */
+function registryEntries(registryFile: string): ResolvedEntry[] {
+  const sf = parse(registryFile);
+  let arr: ts.ArrayLiteralExpression | null = null;
+  for (const st of sf.statements) {
+    if (!ts.isVariableStatement(st)) continue;
+    for (const d of st.declarationList.declarations) {
+      if (ts.isIdentifier(d.name) && d.name.text === 'DOCTOR_CHECK_REGISTRY' && d.initializer) {
+        const init = unwrap(d.initializer);
+        if (ts.isArrayLiteralExpression(init)) arr = init;
+      }
+    }
+  }
+  if (!arr) throw new Error(`DOCTOR_CHECK_REGISTRY not found in ${relative(REPO_ROOT, registryFile)}`);
+  return arr.elements.map((el) => {
+    if (!ts.isIdentifier(el)) throw new Error(`registry element is not an identifier: ${el.getText()}`);
+    const imp = importsOf(registryFile).get(el.text);
+    if (!imp) throw new Error(`registry entry ${el.text} is not imported in ${relative(REPO_ROOT, registryFile)}`);
+    const esf = parse(imp.file);
+    let obj: ts.ObjectLiteralExpression | null = null;
+    for (const st of esf.statements) {
+      if (!ts.isVariableStatement(st)) continue;
+      for (const d of st.declarationList.declarations) {
+        if (ts.isIdentifier(d.name) && d.name.text === imp.name && d.initializer && ts.isObjectLiteralExpression(unwrap(d.initializer))) {
+          obj = unwrap(d.initializer) as ts.ObjectLiteralExpression;
+        }
+      }
+    }
+    if (!obj) throw new Error(`entry ${imp.name} not found in ${relative(REPO_ROOT, imp.file)}`);
+    const prop = (key: string) =>
+      obj!.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === key)?.initializer;
+    const nameExpr = prop('name');
+    const runExpr = prop('run');
+    if (!nameExpr || !ts.isStringLiteral(nameExpr)) throw new Error(`entry ${imp.name}: name must be a string literal`);
+    if (!runExpr || !ts.isIdentifier(runExpr)) throw new Error(`entry ${imp.name}: run must name a top-level function`);
+    const node = topLevelFunction(esf, runExpr.text);
+    if (!node) throw new Error(`entry ${imp.name}: run function ${runExpr.text} not found`);
+    return { entry: imp.name, file: imp.file, name: nameExpr.text, emits: stringArray(prop('emits')), run: { file: imp.file, name: runExpr.text, node } };
+  });
+}
+
+/** Walk one root function: `checks.push(...)` arguments, early returns, and a nested registry run. */
+function walkRoot(x: Extractor, fn: FnRef, earlyReturnsAfter: string[], stopsOnly: boolean): void {
+  const body = fn.node.body;
+  if (!body) return;
+  const visit = (node: ts.Node) => {
+    if (node !== fn.node && ts.isFunctionLike(node)) return;
+    if (isChecksPush(node)) {
+      for (const arg of node.arguments) x.fromExpr(arg, fn.file);
+      return;
+    }
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'runDoctorRegistry') {
+      const runner = resolveCallee(fn.file, node.expression);
+      if (!runner) throw new Error(`runDoctorRegistry not resolvable from ${relative(REPO_ROOT, fn.file)}`);
+      for (const e of registryEntries(runner.file)) walkRoot(x, e.run, earlyReturnsAfter, true);
+      return;
+    }
+    if (stopsOnly ? isStopReturn(node) : ts.isReturnStatement(node) && node.parent !== body) {
+      earlyReturnsAfter.push(x.lastAdded ?? '<start>');
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(body);
+}
+
+/**
+ * Every entry of the doctor check registry with the names its `run` can push
+ * (walked in isolation, so a name shared by two entries is listed by both).
+ */
+export function extractDoctorRegistryEntries(rel = 'src/commands/doctor/registry.ts'): DoctorRegistryEntry[] {
+  return registryEntries(join(REPO_ROOT, rel)).map((e) => {
+    const x = new Extractor();
+    const stops: string[] = [];
+    walkRoot(x, e.run, stops, true);
+    return { entry: e.entry, file: relative(REPO_ROOT, e.file), name: e.name, emits: e.emits, names: x.names, stops: stops.length > 0 };
+  });
+}
+
 /**
  * @param rel root file relative to the repo, e.g. 'src/commands/doctor.ts'
  * @param fnName top-level function whose `checks.push(...)` calls are walked
@@ -438,18 +555,6 @@ export function extractDoctorRegistry(rel = 'src/commands/doctor.ts', fnName = '
   if (!fn?.body) throw new Error(`${fnName} not found in ${rel}`);
   const x = new Extractor();
   const earlyReturnsAfter: string[] = [];
-  const body = fn.body;
-  const visit = (node: ts.Node) => {
-    if (node !== fn && ts.isFunctionLike(node)) return;
-    if (isChecksPush(node)) {
-      for (const arg of node.arguments) x.fromExpr(arg, rootFile);
-      return;
-    }
-    if (ts.isReturnStatement(node) && node.parent !== body) {
-      earlyReturnsAfter.push(x.lastAdded ?? '<start>');
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(body);
+  walkRoot(x, { file: rootFile, name: fnName, node: fn }, earlyReturnsAfter, false);
   return { names: x.names, sequence: x.sequence, early_returns_after: earlyReturnsAfter, unresolved: x.unresolved };
 }

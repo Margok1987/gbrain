@@ -3,6 +3,7 @@
  *
  * Protects: the move proof reviewers rely on for ~50k moved lines. A pure move
  * (re-indented, comments changed, helper newly exported, W3 migration wrapper,
+ * W4 doctor-entry wrapper,
  * SyncRun-style rename map) passes; a single edited token fails in every mode
  * and the failure names file:line and the first differing token.
  */
@@ -148,6 +149,87 @@ describe('verify-move-only: wrapper mode (W3 migration split)', () => {
   test('an edited helper body fails even though only imports changed elsewhere', () => {
     const edited = HEAD_HELPERS.replace('IF EXISTS x;', 'IF EXISTS y;');
     expect(verifyMoveOnly(baseFiles, headFiles({ 'src/core/schema-migrations/helpers.ts': edited }), { wrapper: 'migration' }).ok).toBe(false);
+  });
+});
+
+describe('verify-move-only: doctor-entry mode (W4 doctor peel)', () => {
+  const BASE_DOCTOR = `export async function buildChecks(engine: BrainEngine | null, args: string[]): Promise<Check[]> {
+  const fastMode = args.includes('--fast');
+  const checks: Check[] = [];
+  // 1. First block.
+  if (engine && !fastMode) {
+    const { probe } = await import('./doctor/checks/probe.ts');
+    checks.push(await probe(engine));
+  }
+  checks.push({ name: 'alpha_example', status: 'ok', message: \`fast=\${fastMode}\` });
+  if (!engine) return checks;
+  checks.push({ name: 'beta_example', status: 'ok', message: 'db' });
+  return checks;
+}
+`;
+  const entry = (body = "checks.push({ name: 'alpha_example', status: 'ok', message: \`fast=\${fastMode}\` });") => `import type { Check } from '../../doctor.ts';
+import type { DoctorContext } from '../context.ts';
+
+export async function runFirst(ctx: DoctorContext): Promise<Check[]> {
+  const { engine, fastMode } = ctx;
+  const checks: Check[] = [];
+  // 1. First block, moved.
+  if (engine && !fastMode) {
+    const { probe } = await import('./probe.ts');
+    checks.push(await probe(engine));
+  }
+  ${body}
+  return checks;
+}
+`;
+  const HEAD_DOCTOR = `import { runFirst } from './doctor/checks/first.ts';
+export async function buildChecks(engine: BrainEngine | null, args: string[]): Promise<Check[]> {
+  const fastMode = args.includes('--fast');
+  const checks: Check[] = [];
+  const ctx: DoctorContext = { engine, args, fastMode };
+  checks.push(...(await runFirst(ctx)));
+  if (!engine) return checks;
+  checks.push({ name: 'beta_example', status: 'ok', message: 'db' });
+  return checks;
+}
+`;
+  const base = [{ path: 'src/commands/doctor.ts', text: BASE_DOCTOR }];
+  const head = (first = entry(), doctor = HEAD_DOCTOR) => [
+    { path: 'src/commands/doctor.ts', text: doctor },
+    { path: 'src/commands/doctor/checks/first.ts', text: first },
+  ];
+
+  test('blocks moved into run<Topic>(ctx) entries with re-rooted import() specifiers pass', () => {
+    const r = verifyMoveOnly(base, head(), { wrapper: 'doctor-entry' });
+    expect(r.problems).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(r.wrappedDefinitions).toBe(1);
+  });
+
+  test('without --wrapper doctor-entry the same move fails', () => {
+    expect(verifyMoveOnly(base, head()).ok).toBe(false);
+  });
+
+  test('one edited token inside a moved block fails', () => {
+    const r = verifyMoveOnly(base, head(entry("checks.push({ name: 'alpha_example', status: 'warn', message: \`fast=\${fastMode}\` });")), { wrapper: 'doctor-entry' });
+    expect(r.ok).toBe(false);
+    expect(formatReport(r, 'x..y')).toContain('FAIL: src/commands/doctor.ts:2 statement differs from src/commands/doctor.ts:1');
+  });
+
+  test('a specifier that resolves to a different module fails', () => {
+    const r = verifyMoveOnly(base, head(entry().replace("import('./probe.ts')", "import('./probe-other.ts')")), { wrapper: 'doctor-entry' });
+    expect(r.ok).toBe(false);
+  });
+
+  test('an entry that buildChecks never calls fails', () => {
+    const r = verifyMoveOnly(base, head(entry(), HEAD_DOCTOR.replace('  checks.push(...(await runFirst(ctx)));\n', '')), { wrapper: 'doctor-entry' });
+    expect(r.ok).toBe(false);
+    expect(r.problems.join('\n')).toContain('entry runFirst is defined but never called from buildChecks');
+  });
+
+  test('an edit next to the call site, outside any entry, fails', () => {
+    const r = verifyMoveOnly(base, head(entry(), HEAD_DOCTOR.replace('if (!engine) return checks;', 'if (!engine) return [];')), { wrapper: 'doctor-entry' });
+    expect(r.ok).toBe(false);
   });
 });
 
