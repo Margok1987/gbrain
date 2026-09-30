@@ -38,6 +38,7 @@ import { shouldForceExitAfterMain, finishCliTeardown, flushThenExit, currentExit
 import { serializeMarkdown } from './core/markdown.ts';
 import { parseGlobalFlags, setCliOptions, getCliOptions } from './core/cli-options.ts';
 import { runCliPreflight } from './core/cli-preflight.ts';
+import { isBooleanLiteral, isKnownOpFlag } from './core/op-flag-tokens.ts';
 import { conceptNudge } from './core/search/query-intent.ts';
 import { redactRetrievalOutput } from './core/search/output-redaction.ts';
 import type { CliOptions } from './core/cli-options.ts';
@@ -980,12 +981,6 @@ export function resolveQueryImage(
   return { path: imagePath, base64, mime };
 }
 
-// #4602: the ONE definition of "a literal true/false value token" — shared by
-// parseOpArgs (consume it as the boolean flag's value) and findUnknownOpFlag
-// (mirror the traversal so the token counts as consumed) so the parser and
-// the validator can never disagree on what a boolean flag swallows.
-const isBooleanLiteral = (tok: string | undefined): boolean => tok === 'true' || tok === 'false';
-
 export function parseOpArgs(op: Operation, args: string[]): Record<string, unknown> {
   const params: Record<string, unknown> = {};
   const positional = op.cliHints?.positional || [];
@@ -1047,6 +1042,13 @@ export function parseOpArgs(op: Operation, args: string[]): Record<string, unkno
         // flag's value (never a plausible positional), same as above.
         params[key] = isBooleanLiteral(args[i + 1]) ? args[++i] === 'true' : true;
       } else if (i + 1 < args.length) {
+        // #5700: a known flag of this command in the value slot is a missing
+        // argument, not a value (see op-flag-tokens.ts).
+        if (isKnownOpFlag(op, args[i + 1])) {
+          const flag = `--${key.replace(/_/g, '-')}`;
+          const stdinHint = op.cliHints?.stdin === key ? `; omit ${flag} (or put it last) to read stdin` : '';
+          throw new OperationError('invalid_params', `${flag} requires a value, but '${args[i + 1]}' is a flag${stdinHint}.`);
+        }
         // #2822: a flag silently overwriting an already-set positional is
         // almost always an argument-plumbing mistake (e.g. `gbrain put
         // notes.md --content "..."` — the file path landed in `content`
@@ -2854,14 +2856,19 @@ export function printOpHelp(op: Operation, invokedName?: string) {
   // v114 (#1941): when invoked via an alias (e.g. `gbrain link-add --help`),
   // show the alias the user typed, not the primary op name.
   const name = invokedName || op.cliHints?.name || op.name;
-  console.log(`Usage: gbrain ${name} ${positional} [options]\n`);
-  console.log(op.description + '\n');
+  const stdinKey = op.cliHints?.stdin;
+  const stdinFlag = stdinKey ? `--${stdinKey.replace(/_/g, '-')}` : '';
+  console.log(`Usage: gbrain ${name} ${positional} [options]`);
+  if (stdinKey) console.log(`       gbrain ${name} ${positional} [options] < file   (${stdinFlag} read from stdin)`);
+  console.log('\n' + op.description + '\n');
   const entries = Object.entries(op.params);
   if (entries.length > 0) {
     console.log('Options:');
     for (const [key, def] of entries) {
       const isPos = op.cliHints?.positional?.includes(key);
-      const req = def.required ? ' (required)' : '';
+      const req = key === stdinKey
+        ? ` (required: ${stdinFlag} needs a value; omit ${stdinFlag}, or put it last, to read stdin)`
+        : def.required ? ' (required)' : '';
       const prefix = isPos ? `  <${key}>` : `  --${key.replace(/_/g, '-')}`;
       console.log(`${prefix.padEnd(28)} ${def.description || ''}${req}`);
     }

@@ -58,7 +58,7 @@
           "consolidateFact: (id: number, takeId: number) => Promise<void>",
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
-          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; }) => Promise<number>",
+          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
           "countStaleTakes: () => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
@@ -151,6 +151,7 @@
           "logEvalCandidate: (input: EvalCandidateInput) => Promise<number>",
           "logEvalCaptureFailure: (reason: EvalCaptureFailureReason) => Promise<void>",
           "logIngest: (entry: IngestLogInput) => Promise<void>",
+          "markPagesAttendanceBlocked: (refs: Array<{ slug: string; source_id: string; revision: string; }>) => Promise<number>",
           "markPagesExtractedBatch: (refs: Array<{ slug: string; source_id: string; extractedAt?: string; }>, defaultExtractedAt: string) => Promise<number>",
           "mergeOntologyFact: (obs: OntologyObservationInput) => Promise<OntologyMergeResult>",
           "migrateFactsToCanonical: (phantomSlug: string, canonicalSlug: string, sourceId: string) => Promise<{ migrated: number; }>",
@@ -951,7 +952,7 @@
           "consolidateFact: (id: number, takeId: number) => Promise<void>",
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
-          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; }) => Promise<number>",
+          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
           "countStaleTakes: () => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
@@ -1045,6 +1046,7 @@
           "logEvalCandidate: (input: EvalCandidateInput) => Promise<number>",
           "logEvalCaptureFailure: (reason: EvalCaptureFailureReason) => Promise<void>",
           "logIngest: (entry: IngestLogInput) => Promise<void>",
+          "markPagesAttendanceBlocked: (refs: Array<{ slug: string; source_id: string; revision: string; }>) => Promise<number>",
           "markPagesExtractedBatch: (refs: Array<{ slug: string; source_id: string; extractedAt?: string; }>, defaultExtractedAt: string) => Promise<number>",
           "mergeOntologyFact: (obs: OntologyObservationInput) => Promise<OntologyMergeResult>",
           "migrateFactsToCanonical: (phantomSlug: string, canonicalSlug: string, sourceId: string) => Promise<{ migrated: number; }>",
@@ -1904,7 +1906,7 @@
         "kind": "function",
         "name": "embedQuery",
         "signature": [
-          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; }) => Promise<Float32Array>"
+          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; queryPrefix?: string; }) => Promise<Float32Array>"
         ]
       },
       {
@@ -2881,7 +2883,7 @@
         "kind": "function",
         "name": "embedQuery",
         "signature": [
-          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; }) => Promise<Float32Array>"
+          "(text: string, opts?: { embeddingModel?: string; dimensions?: number; abortSignal?: AbortSignal; queryPrefix?: string; }) => Promise<Float32Array>"
         ]
       },
       {
@@ -2973,7 +2975,7 @@
           "consolidateFact: (id: number, takeId: number) => Promise<void>",
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
-          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; }) => Promise<number>",
+          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
           "countStaleTakes: () => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
@@ -3066,6 +3068,7 @@
           "logEvalCandidate: (input: EvalCandidateInput) => Promise<number>",
           "logEvalCaptureFailure: (reason: EvalCaptureFailureReason) => Promise<void>",
           "logIngest: (entry: IngestLogInput) => Promise<void>",
+          "markPagesAttendanceBlocked: (refs: Array<{ slug: string; source_id: string; revision: string; }>) => Promise<number>",
           "markPagesExtractedBatch: (refs: Array<{ slug: string; source_id: string; extractedAt?: string; }>, defaultExtractedAt: string) => Promise<number>",
           "mergeOntologyFact: (obs: OntologyObservationInput) => Promise<OntologyMergeResult>",
           "migrateFactsToCanonical: (phantomSlug: string, canonicalSlug: string, sourceId: string) => Promise<{ migrated: number; }>",
@@ -4438,7 +4441,7 @@
         "kind": "variable",
         "name": "LINK_EXTRACTOR_VERSION_TS",
         "signature": [
-          "\"2026-09-21T00:00:00Z\""
+          "\"2026-09-30T00:00:00Z\""
         ]
       },
       {
@@ -4482,7 +4485,15 @@
       {
         "kind": "interface",
         "members": [
-          "resolve: (name: string, dirHint?: string | string[]) => Promise<string | null>",
+          "globalBasename?: boolean | undefined",
+          "selfSlug?: string | undefined"
+        ],
+        "name": "ResolveOptions"
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "resolve: (name: string, dirHint?: string | string[], opts?: ResolveOptions) => Promise<string | null>",
           "resolveAttendance?: ((name: string, dirHint?: string | string[]) => Promise<string | null>) | undefined",
           "resolveBasenameMatches?: ((name: string) => Promise<string[]>) | undefined"
         ],
@@ -5530,7 +5541,7 @@
           "consolidateFact: (id: number, takeId: number) => Promise<void>",
           "countChunklessPagesWithContent: (opts?: { sourceId?: string; }) => Promise<number>",
           "countStaleChunks: (opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean; }) => Promise<number>",
-          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; }) => Promise<number>",
+          "countStalePagesForExtraction: (opts?: { sourceId?: string; versionTs?: string; attendance?: \"exclude\" | \"blocked\"; }) => Promise<number>",
           "countStaleTakes: () => Promise<number>",
           "countUnconsolidatedFacts: (source_id: string) => Promise<number>",
           "createVersion: (slug: string, opts?: { sourceId?: string; }) => Promise<PageVersion>",
@@ -5624,6 +5635,7 @@
           "logEvalCandidate: (input: EvalCandidateInput) => Promise<number>",
           "logEvalCaptureFailure: (reason: EvalCaptureFailureReason) => Promise<void>",
           "logIngest: (entry: IngestLogInput) => Promise<void>",
+          "markPagesAttendanceBlocked: (refs: Array<{ slug: string; source_id: string; revision: string; }>) => Promise<number>",
           "markPagesExtractedBatch: (refs: Array<{ slug: string; source_id: string; extractedAt?: string; }>, defaultExtractedAt: string) => Promise<number>",
           "mergeOntologyFact: (obs: OntologyObservationInput) => Promise<OntologyMergeResult>",
           "migrateFactsToCanonical: (phantomSlug: string, canonicalSlug: string, sourceId: string) => Promise<{ migrated: number; }>",
@@ -6346,6 +6358,7 @@
         "kind": "interface",
         "members": [
           "_queryEmbedDeadline?: QueryEmbedDeadline | undefined",
+          "_queryPrefix?: string | undefined",
           "_searchModeInput?: ResolveSearchModeInput | undefined",
           "_telemetryCacheStatus?: \"miss\" | \"disabled\" | undefined",
           "adaptiveReturn?: AdaptiveReturnInput",
@@ -6586,7 +6599,7 @@
         "kind": "function",
         "name": "embedQueryBounded",
         "signature": [
-          "(text: string, embedOpts: { embeddingModel?: string; dimensions?: number; } | undefined, dl: QueryEmbedDeadline) => Promise<Float32Array>"
+          "(text: string, embedOpts: { embeddingModel?: string; dimensions?: number; queryPrefix?: string; } | undefined, dl: QueryEmbedDeadline) => Promise<Float32Array>"
         ]
       },
       {

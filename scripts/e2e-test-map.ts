@@ -109,6 +109,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/context-engine.ts": [
     "test/e2e/openclaw-context-engine-plugin.test.ts",
     "test/e2e/openclaw-plugin-load-real.test.ts",
+    "test/e2e/context-engine-rung3-extraction.test.ts",
   ],
   "src/openclaw-context-engine.ts": [
     "test/e2e/openclaw-context-engine-plugin.test.ts",
@@ -501,6 +502,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/google/attachment-backfill.ts": ["test/e2e/google-attachments-postgres.test.ts"],
   "src/core/persistence/connector-google-receipts.ts": ["test/e2e/google-attachments-postgres.test.ts"],
   // Fix wave 3 lane A: connector identity, account pin, no-op kernel, pending set and migration 176.
+  "src/core/take-proposals.ts": ["test/e2e/takes-propose-accept-managed.test.ts"],
   "src/core/persistence/connector-sync.ts": ["test/e2e/connector-wave3.test.ts"],
   "src/core/persistence/connector-identity.ts": ["test/e2e/connector-wave3.test.ts"],
   "src/core/persistence/connector-state.ts": ["test/e2e/connector-wave3.test.ts"],

@@ -28,6 +28,7 @@ import { companyBrainProfile } from '../company-brain/profile.ts';
 import { companyBrainPolicyFingerprint } from '../company-brain/policy.ts';
 import { isUnboundSourcePage, UNBOUND_COLLISION_MESSAGE } from './unbound-source.ts';
 import { findIncompleteSyncReceipt } from './checkpoint-validation.ts';
+import { frontmatterSlugConflictMessage } from './verb-errors.ts';
 
 /** The options that select a managed sync cursor (its key), recorded so a refusal can print the exact retry. */
 export interface SyncCursorOptions { full: boolean; workingTree: boolean; srcSubpath: string | null; exclude: string[]; includeHidden: string[]; strategy: string | null }
@@ -196,7 +197,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   const retainedWindowsOrigin = process.platform === 'win32' && snapshot?.page.source_path != null &&
     syncOriginPath(snapshot.page.source_path) === syncOriginPath(p.sourcePath) && parsedInput.slug === snapshot.page.slug;
   if (expectedSlug && parsedInput.slug !== expectedSlug && slugifyPath(parsedInput.slug) !== expectedSlug && !retainedWindowsOrigin) {
-    throw new OperationError('invalid_params', 'The file frontmatter slug conflicts with its physical origin.');
+    throw new OperationError('invalid_params', frontmatterSlugConflictMessage(p.sourcePath, parsedInput.slug, expectedSlug));
   }
   if (!p.companyApproval && base && !p.lineEndingOnly && p.rawHash !== sha256(p.content) && !sameCanonicalImport(base, parsedInput)) {
     throw new OperationError('source_changed', 'Newer working-tree bytes and the current page disagree with this pinned Git import.');

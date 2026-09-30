@@ -180,6 +180,7 @@ import { v176 } from './v176-connector-checkpoint-stable-identity.ts';
 import { v177 } from './v177-pages-database-only-reason.ts';
 import { v178 } from './v178-persistence-writer-version-stamps.ts';
 import { v179 } from './v179-persistence-request-sync-run-indexes.ts';
+import { v180 } from './v180-pages-links-attendance-blocked.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -358,4 +359,5 @@ export const MIGRATIONS: Migration[] = [
   v177,
   v178,
   v179,
+  v180,
 ];

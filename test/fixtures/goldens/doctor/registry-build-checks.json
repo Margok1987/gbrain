@@ -279,6 +279,10 @@
       },
       {
         "category": "brain",
+        "name": "embedding_query_prefix"
+      },
+      {
+        "category": "brain",
         "name": "embedding_column_registry"
       },
       {
