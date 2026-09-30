@@ -68,9 +68,11 @@ while IFS=$'\t' read -r path max policy note; do
 
   if [ "$measured" -gt "$max" ]; then
     echo "FAIL: $path is $measured $label, over its $max ceiling." >&2
-    echo "      Growing a size-ratcheted module is a conscious decision: either move" >&2
-    echo "      the new code into a sibling module (preferred), or raise the ceiling" >&2
-    echo "      in $TSV in this same commit so the reviewer sees it." >&2
+    echo "Why:  growing a size-ratcheted module is a conscious, reviewer-visible decision." >&2
+    echo "Fix:  move new logic into a sibling module (preferred), or raise the ceiling to" >&2
+    echo "      $measured in $TSV in this same commit. Engine methods, BrainEngine" >&2
+    echo "      signatures, CLI help lines and interface fields cannot move: raise it." >&2
+    echo "See:  CONTRIBUTING.md#where-does-my-change-go" >&2
     fail=1
   elif [ $((max - measured)) -gt "$SLACK" ]; then
     echo "FAIL: $path shrank to $measured $label but its ceiling is still $max." >&2

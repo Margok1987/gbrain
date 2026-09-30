@@ -142,7 +142,13 @@ export function expectGolden<T>(name: string, actual: T, normalizer: Normalizer<
       `FAIL: missing golden ${file}\nWhy: every W0 golden is captured on master before any move.\nFix: GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <this file> on master, then review and commit the fixture.\nSee: test/fixtures/goldens/README.md`,
     );
   }
-  expect(text).toBe(readFileSync(file, 'utf8'));
+  const expected = readFileSync(file, 'utf8');
+  if (text !== expected) {
+    console.error(
+      `FAIL: golden ${file} differs from the current output\nWhy: goldens pin behavior; a diff is either a regression or an intentional change.\nFix: if intentional, GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <this file>, review the fixture diff and explain it in the PR body.\nSee: test/fixtures/goldens/README.md`,
+    );
+  }
+  expect(text).toBe(expected);
 }
 
 /** Prove a normalizer: two independent captures must normalize to the same bytes. */

@@ -73,6 +73,11 @@ describe('doctor check registry contract', () => {
 
   test("emits[] lists exactly the checks each entry's run can push, and name is one of them", () => {
     for (const e of STATIC) {
+      if (JSON.stringify(e.emits) !== JSON.stringify(e.names)) {
+        console.error(
+          `FAIL: entry ${e.entry} declares emits ${JSON.stringify(e.emits)} but its run pushes ${JSON.stringify(e.names)}\nWhy: emits[] is checked against an AST walk of run, which only sees checks.push({ name: '<literal>', ... }) inside run itself.\nFix: build const checks: Check[] = [] in run and call checks.push({ name: '<literal>', ... }) directly (no helper, no returned array literal), or correct emits.\nSee: test/helpers/doctor-registry-ast.ts, CONTRIBUTING.md#where-does-my-change-go`,
+        );
+      }
       expect({ entry: e.entry, emits: e.emits }).toEqual({ entry: e.entry, emits: e.names });
       if (e.names.length > 0) expect({ entry: e.entry, nameEmitted: e.names.includes(e.name) }).toEqual({ entry: e.entry, nameEmitted: true });
     }
