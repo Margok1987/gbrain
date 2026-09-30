@@ -512,16 +512,16 @@ export interface BoundedExecOptions {
  * in that worktree fails), then SIGKILLs after a short grace period and
  * settles from the timer even if the exit event never arrives.
  */
-export function execFileBounded(file: string, args: string[], options: BoundedExecOptions): Promise<{ error: ExecFileException | null; stdout: string }> {
+export function execFileBounded(file: string, args: string[], options: BoundedExecOptions): Promise<{ error: ExecFileException | null; stdout: string; stderr: string }> {
   const { timeout, signal, ...rest } = options;
   return new Promise(resolve => {
     let settled = false;
-    const finish = (error: ExecFileException | null, stdout: string) => {
+    const finish = (error: ExecFileException | null, stdout: string, stderr = '') => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
-      resolve({ error, stdout });
+      resolve({ error, stdout, stderr });
     };
     let stopped: ExecFileException | null = null;
     let escalation: ReturnType<typeof setTimeout> | undefined;
@@ -529,12 +529,13 @@ export function execFileBounded(file: string, args: string[], options: BoundedEx
     const settleStopped = () => {
       clearTimeout(escalation);
       clearInterval(poll);
-      finish(stopped, '');
+      finish(stopped, '', '');
     };
-    const child = execFile(file, args, { ...rest, encoding: 'utf8' }, (error, stdout) => {
+    const child = execFile(file, args, { ...rest, encoding: 'utf8' }, (error, stdout, stderr) => {
       clearTimeout(escalation);
       clearInterval(poll);
-      finish(stopped ?? error, stopped ? '' : stdout);
+      if (stopped) finish(stopped, '', '');
+      else finish(error, stdout, stderr);
     });
     const stop = (message: string, code: string) => {
       if (stopped) return;
