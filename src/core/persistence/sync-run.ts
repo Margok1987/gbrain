@@ -155,7 +155,8 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
   if (entry) {
     assertSyncEntryOrigin(cursor, entry);
     const originScope = syncOriginScope(cursor);
-    await assertSyncPageOrigin(engine, cursor.sourceId, entry.sourcePath, entry.pageId ?? null, entry.action === 'delete', originScope);
+    // #5522: another cursor of this source may have imported this new file since enumeration.
+    const occupant = await alreadyImportedAtOrigin(engine, cursor, entry, originScope);
     assertActive();
     const bytes = readSyncFile(cursor.root, entry.path);
     rawHash = bytes === null ? null : sha256(bytes);
@@ -168,9 +169,12 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
     } else content = entry.action === 'import' ? readSyncContent(cursor, entry) : null;
     lineEndingOnly = bytes !== null && content !== null && bytes.equals(Buffer.from(bytes.toString('utf8'))) &&
       bytes.toString('utf8').replace(/\r\n/g, '\n') === content.replace(/\r\n/g, '\n');
-    slug = entry.slug!; pageId = entry.pageId ?? null; revision = entry.revision ?? null;
+    slug = entry.slug!; pageId = occupant?.page.id ?? entry.pageId ?? null; revision = occupant ? occupant.revision : entry.revision ?? null;
     const snapshot = await engine.readPageSnapshot(slug, { sourceId: cursor.sourceId, includeDeleted: true });
     assertActive();
+    if (occupant && !await sameContentAtOrigin(engine, cursor, entry, key, snapshot, content!, rawHash, lineEndingOnly)) {
+      throw new OperationError('page_identity_changed', 'The imported origin no longer identifies exactly the accepted page.');
+    }
     const moved = entry.renameFrom;
     const recorded = moved?.slug === slug ? moved.sourcePath : entry.sourcePath;
     if ((snapshot?.page.id ?? null) !== pageId || (snapshot?.revision ?? null) !== revision ||
@@ -196,6 +200,45 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
     slugMode: cursor.slugMode, index: cursor.index, total: cursor.entries.length, from: cursor.from, target: cursor.target, working: entry?.working ?? false,
     ...(cursor.companyPlan ? { companyApproval: { schema: cursor.companyPlan.schema!, planDigest: cursor.companyPlan.plan_digest, extractorVersion: cursor.companyPlan.extractor_version,
       policyFingerprint: currentCompanyBrainSync(cursor.sourceId)!.policyFingerprint } } : {}) } };
+}
+
+/**
+ * #5522: an import entry enumerated before its page existed (`pageId: null`)
+ * whose origin now names exactly one live page at the entry's slug, in the
+ * cursor's source incarnation, was imported meanwhile by another cursor of the
+ * same source. That page is returned so the entry can be re-frozen against it;
+ * anything else keeps the origin refusal. The manifest is never rewritten.
+ */
+async function alreadyImportedAtOrigin(engine: BrainEngine, cursor: Cursor, entry: Cursor['entries'][number], originScope: ReturnType<typeof syncOriginScope>) {
+  try {
+    await assertSyncPageOrigin(engine, cursor.sourceId, entry.sourcePath, entry.pageId ?? null, entry.action === 'delete', originScope);
+    return null;
+  } catch (error) {
+    if (!(error instanceof OperationError) || error.code !== 'page_identity_changed' || entry.action !== 'import' || (entry.pageId ?? null) !== null
+      || entry.renameFrom || cursor.companyPlan || !cursor.processingOptions) throw error;
+    const [source] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation::text FROM sources WHERE id=$1', [cursor.sourceId]);
+    const occupant = await engine.readPageSnapshot(entry.slug!, { sourceId: cursor.sourceId, includeDeleted: true });
+    if (source?.incarnation !== cursor.incarnation || !occupant || occupant.page.deleted_at != null || occupant.page.source_path == null
+      || !sameSyncOrigin(occupant.page.source_path, entry.sourcePath, originScope, occupant.page.slug)) throw error;
+    await assertSyncPageOrigin(engine, cursor.sourceId, entry.sourcePath, occupant.page.id, true, originScope).catch(() => { throw error; });
+    return occupant;
+  }
+}
+
+/** #5522: the page now at the origin already holds exactly the content this entry would import (the preparer's own no-op verdict). */
+async function sameContentAtOrigin(engine: BrainEngine, cursor: Cursor, entry: Cursor['entries'][number], key: string,
+  snapshot: Awaited<ReturnType<BrainEngine['readPageSnapshot']>>, content: string, rawHash: string | null, lineEndingOnly: boolean): Promise<boolean> {
+  if (!snapshot || snapshot.page.deleted_at != null) return false;
+  const intent: SyncIntent = { kind: 'managed_sync_import', expected_revision: snapshot.revision, sourcePath: entry.sourcePath, path: entry.path, rawHash, content, lineEndingOnly,
+    processingOptions: cursor.processingOptions, ownerEpoch: String(cursor.binding.owner_epoch), syncAuthority: cursor.authority,
+    cursorKey: key, runId: cursor.runId, slugMode: cursor.slugMode, index: cursor.index, total: cursor.entries.length, from: cursor.from, target: cursor.target, working: entry.working ?? false };
+  try {
+    const prepared = await prepareManagedSyncMutation(engine, screeningRequest({ source_id: cursor.sourceId, source_incarnation: cursor.incarnation, slug: snapshot.page.slug,
+      page_id: snapshot.page.id, worktree_id: cursor.binding.worktree_id, authority: cursor.authority.writer, intent }), { engine: engine.kind });
+    return prepared.contentUnchanged === true && !prepared.file && prepared.observedRevision === snapshot.revision;
+  } catch {
+    return false;
+  }
 }
 
 /** One immutable page is admitted at a time; foreground writes can never sit behind a whole scan. */
