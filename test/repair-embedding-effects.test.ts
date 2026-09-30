@@ -26,7 +26,8 @@ import { publishMutation } from '../src/core/persistence/coordinator.ts';
 import { installPageEmbeddings, installPageProjection, readProjectionSnapshot } from '../src/core/page-state/projections.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { listBlockingEffects } from '../src/core/persistence/blocking-effects.ts';
-import { settleEmbeddingEffect } from '../src/core/persistence/embedding-settlement.ts';
+import { listEmbeddingCandidates, settleEmbeddingEffect } from '../src/core/persistence/embedding-settlement.ts';
+import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts';
 import { staleEmbeddingEffectsCheck } from '../src/commands/doctor/checks/stale-embedding-effects.ts';
 import { repairRunner } from '../src/core/repair/registry.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
@@ -225,6 +226,41 @@ for (const kind of testBackends()) {
       const { embeddingGrantId } = await import('../src/core/persistence/embedding-settlement.ts');
       expect(after.data.repair_authorizations).toEqual([embeddingGrantId(row.completed_keys[0].run_id!, a.effectId)]);
       expect(resumed.complete).toBe(true);
+    });
+
+    check('the first retry a run grants a failed effect is recorded too, so resuming that run never grants a second cycle', async () => {
+      const f = await fixture('failed');
+      const runId = randomUUID();
+      const first = await settleEmbeddingEffect(engine, { effect_id: f.effectId, state: 'failed', attempts: 5 }, { dryRun: false, config, hostId: localHostId(), runId });
+      expect(first).toMatchObject({ outcome: 'retry_queued', paid: true });
+      for (let n = 0; n < 6; n++) {
+        await engine.executeRaw('UPDATE persistence_effects SET next_attempt_at=now() WHERE id=$1', [f.effectId]);
+        await runOwner(f.effectId, async () => { throw new Error('network timeout'); });
+      }
+      const failedAgain = await effect(f.effectId);
+      expect(failedAgain.state).toBe('failed');
+      const resumed = await settleEmbeddingEffect(engine, { effect_id: f.effectId, state: 'failed', attempts: Number(failedAgain.attempts) },
+        { dryRun: false, config, hostId: localHostId(), runId });
+      expect(resumed).toMatchObject({ outcome: 'retry_queued', reason: 'grant_replayed' });
+      expect(await effect(f.effectId)).toMatchObject({ state: 'failed' });
+    });
+
+    check('a withdrawal-target or source-scan effect is estimated from its pages, not as free', async () => {
+      const f = await fixture('exhausted');
+      const [page] = await engine.executeRaw<{ id: number }>('SELECT id FROM pages WHERE source_id=$1', [f.sourceId]);
+      await engine.transaction(async tx => {
+        await declarePersistenceProtocol(tx);
+        await tx.executeRaw(`UPDATE persistence_effects SET data=jsonb_build_object('version',2,'targets',jsonb_build_array(jsonb_build_object('slug','page','page_id',$2::int)))
+          WHERE id=$1`, [f.effectId, page.id]);
+      });
+      const [withTargets] = await listEmbeddingCandidates(engine, [f.sourceId]);
+      expect(withTargets.chars).toBeGreaterThan(0);
+      await engine.transaction(async tx => {
+        await declarePersistenceProtocol(tx);
+        await tx.executeRaw(`UPDATE persistence_effects SET data='{"source_scan":true}'::jsonb WHERE id=$1`, [f.effectId]);
+      });
+      const [scan] = await listEmbeddingCandidates(engine, [f.sourceId]);
+      expect(scan.chars).toBeGreaterThan(0);
     });
   });
 }

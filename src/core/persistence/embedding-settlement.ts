@@ -56,8 +56,12 @@ export const EMBEDDING_CANDIDATE_WHERE = `e.kind='embedding' AND r.state='commit
 
 export async function listEmbeddingCandidates(engine: Pick<BrainEngine, 'executeRaw'>, sourceIds: string[]): Promise<EmbeddingCandidate[]> {
   const rows = await engine.executeRaw<EmbeddingCandidate>(`SELECT e.id::text AS effect_id, r.source_id, r.slug, r.request_id::text AS request_id,
-      e.state, e.attempts, COALESCE((SELECT length(p.compiled_truth) + length(COALESCE(p.timeline,'')) FROM pages p
-        WHERE p.id = (e.data->>'page_id')::int), 0) AS chars
+      e.state, e.attempts, COALESCE(CASE
+        WHEN e.data ? 'page_id' THEN (SELECT length(p.compiled_truth) + length(COALESCE(p.timeline,'')) FROM pages p WHERE p.id = (e.data->>'page_id')::int)
+        WHEN e.data ? 'targets' THEN (SELECT SUM(length(p.compiled_truth) + length(COALESCE(p.timeline,''))) FROM pages p
+          JOIN jsonb_array_elements(e.data->'targets') t ON p.id = (t->>'page_id')::int)
+        ELSE (SELECT SUM(length(p.compiled_truth) + length(COALESCE(p.timeline,''))) FROM pages p WHERE p.source_id = e.source_id AND p.deleted_at IS NULL)
+      END, 0)::bigint AS chars
     FROM persistence_effects e JOIN persistence_requests r ON r.id = e.request_id
     WHERE ${EMBEDDING_CANDIDATE_WHERE} AND r.source_id = ANY($1::text[]) ORDER BY e.id`, [sourceIds]);
   return rows.map(row => ({ ...row, attempts: Number(row.attempts), chars: Number(row.chars) }));
@@ -139,11 +143,12 @@ async function queueRetry(tx: BrainEngine, effect: PersistenceEffect, opts: { dr
   const base = { outcome: 'retry_queued' as const, ...(pendingChunks !== undefined ? { pending_chunks: pendingChunks } : {}) };
   const exhausted = effect.state === 'failed' && effect.data.embedding_retry_base !== undefined;
   const grants: string[] = (effect.data as { repair_authorizations?: string[] }).repair_authorizations ?? [];
-  const grantId = exhausted && opts.runId ? embeddingGrantId(opts.runId, effect.id) : null;
-  if (exhausted && grantId && grants.includes(grantId)) return { ...base, reason: 'grant_replayed' };
+  // Every retry this run authorizes for a failed effect is recorded, the first one included.
   const paid = effect.state === 'failed';
+  const grantId = paid && opts.runId ? embeddingGrantId(opts.runId, effect.id) : null;
+  if (grantId && grants.includes(grantId)) return { ...base, reason: 'grant_replayed' };
   if (opts.dryRun) return { ...base, paid, ...(exhausted ? { reason: 'grant_new_retry_cycle' } : {}) };
-  if (exhausted && !grantId) throw new OperationError('invalid_params', 'An exhausted embedding retry needs a repair run id.');
+  if (paid && !grantId) throw new OperationError('invalid_params', 'An embedding retry grant needs a repair run id.');
   const now = new Date().toISOString();
   const data = { ...effect.data, repair_requeued_at: now,
     ...(effect.state === 'failed' ? { embedding_attempt_base: effect.attempts, embedding_retry_base: effect.attempts } : {}),
@@ -153,7 +158,7 @@ async function queueRetry(tx: BrainEngine, effect: PersistenceEffect, opts: { dr
     WHERE id=$1 AND state=$2 AND attempts=$4 AND execution_token IS NULL AND recovery IS NULL RETURNING id`,
   [effect.id, effect.state, JSON.stringify(data), effect.attempts]);
   if (!rows.length) return { outcome: 'changed_since_preview' };
-  return { ...base, paid, ...(grantId ? { reason: 'granted_new_retry_cycle' } : {}) };
+  return { ...base, paid, ...(exhausted ? { reason: 'granted_new_retry_cycle' } : {}) };
 }
 
 /** The retry budget one grant authorizes, for the `--max-usd` estimate. */
