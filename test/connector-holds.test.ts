@@ -12,7 +12,8 @@ import { readAllSourceHolds } from '../src/core/connectors/item-holds-store.ts';
 import { retryHeld } from '../src/commands/sources-retry-held.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { readManagedConnectorState } from '../src/core/persistence/connector-state.ts';
-import { createConnectorFixture, options, withGoogleAccount } from './helpers/connector-fixture.ts';
+import { createConnectorFixture, options, sourceCheckpoint, sourceCursor, withGoogleAccount } from './helpers/connector-fixture.ts';
+import { HOLD_CAP } from '../src/core/connectors/item-holds.ts';
 import { addThread, fakeGitHub, fakeGmail, githubHoldsFetch, gmailFetch } from './helpers/connector-holds-fixture.ts';
 import { withEnv } from './helpers/with-env.ts';
 
@@ -210,5 +211,148 @@ test('legacy gmail_fail_counts carry over once as held items with unknown metada
     expect(await sourceHolds(engine, f.id)).toEqual([expect.objectContaining({ key: 'a1b2c3d4e5f60505', legacy: true, code: 'legacy_poison',
       meta: { sender: null, subject: null, title: null, upstream_at: null } })]);
     expect((await waiting(engine, f.id)).completeness).toBe('partial');
+  }
+}), 120_000);
+
+const faultEngines = new WeakSet<BrainEngine>();
+async function pageFault(engine: BrainEngine, sourceId: string, slug: string | null) {
+  if (!faultEngines.has(engine)) {
+    await engine.executeRaw('CREATE TABLE IF NOT EXISTS connector_hold_faults(source_id text PRIMARY KEY, slug text)');
+    await engine.executeRaw(`CREATE OR REPLACE FUNCTION connector_hold_page_fault() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+      IF EXISTS(SELECT 1 FROM connector_hold_faults f WHERE f.source_id=NEW.source_id AND f.slug=NEW.slug) THEN
+        RAISE EXCEPTION 'Synthetic connector page storage failure' USING ERRCODE='58030';
+      END IF;
+      RETURN NEW;
+    END $$`);
+    await engine.executeRaw('DROP TRIGGER IF EXISTS connector_hold_page_fault ON pages');
+    await engine.executeRaw('CREATE TRIGGER connector_hold_page_fault BEFORE INSERT OR UPDATE ON pages FOR EACH ROW EXECUTE FUNCTION connector_hold_page_fault()');
+    faultEngines.add(engine);
+  }
+  await engine.executeRaw('DELETE FROM connector_hold_faults WHERE source_id=$1', [sourceId]);
+  if (slug) await engine.executeRaw('INSERT INTO connector_hold_faults(source_id,slug) VALUES($1,$2)', [sourceId, slug]);
+}
+
+test('managed abort path: a failing page write is counted by a holds-only publication, held on the third run, and a retry-held pointer is consumed once', async () => withEnv(env, async () => {
+  for (const engine of engines) {
+    const f = await githubSource(engine, true);
+    const fx = fakeGitHub();
+    fx.issues = [1, 2].map(n => ({ number: n, title: `Synthetic issue ${n}`, body: `Body ${n}`, updated_at: issueAt(n) }));
+    const run = () => runGitHubSync(engine, f.id, f.cfg, options, githubHoldsFetch(fx));
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    const cursor = await sourceCursor(engine, f.id);
+    fx.issues[1] = { ...fx.issues[1], body: 'Body 2 edited upstream', updated_at: issueAt(5) };
+    await pageFault(engine, f.id, 'gh/acme-example/app/2');
+    for (let i = 1; i <= 3; i++) {
+      await expect(run()).rejects.toMatchObject({ code: 'storage_error' });
+      await disposePersistenceConsumer(engine);
+      // The abort path publishes the count; the cursor never moves past the uncommitted receipt.
+      expect(await sourceCursor(engine, f.id)).toEqual(cursor);
+      const [record] = Object.values(((await sourceCheckpoint(engine, f.id))[0] as any).completed_keys[0].state.item_holds.items) as any[];
+      expect(record).toMatchObject({ key: 'acme-example/app#2', attempts: i, state: i < 3 ? 'failing' : 'held', code: 'storage_error' });
+    }
+    const [held] = await sourceHolds(engine, f.id);
+    expect(held.request_id).toBeTruthy();
+    // Run 4 skips the held item and completes.
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    await pageFault(engine, f.id, null);
+    const [failed] = await engine.executeRaw<{ intent: Record<string, unknown> }>('SELECT intent FROM persistence_requests WHERE request_id=$1::uuid', [held.request_id]);
+    expect((await retryHeld(engine, f.id)).scheduled).toBe(1);
+    const [pointer] = await engine.executeRaw<{ completed_keys: Array<Record<string, unknown>> }>(
+      "SELECT completed_keys FROM op_checkpoints WHERE op='managed-connector-retry' AND completed_keys->0->>'retryOf'=$1", [held.request_id]);
+    expect(pointer.completed_keys[0]).toMatchObject({ pending: true, retryOf: held.request_id });
+    // The pointer is durable: a fresh session admits the held write under the pointer's new identity, once.
+    const { beginConnectorSync } = await import('../src/core/persistence/connector-sync.ts');
+    for (let i = 0; i < 2; i++) {
+      const session = (await beginConnectorSync(engine, f.id, 'github', f.cfg, options))!;
+      await session.importMarkdown(failed.intent.sourcePath as string, failed.intent.content as string);
+      await disposePersistenceConsumer(engine);
+    }
+    const retries = await engine.executeRaw<{ state: string; request_id: string }>("SELECT state,request_id::text FROM persistence_requests WHERE source_id=$1 AND intent->>'retryOf'=$2", [f.id, held.request_id]);
+    expect(retries).toEqual([{ state: 'committed', request_id: pointer.completed_keys[0].requestId as string }]);
+    const [consumed] = await engine.executeRaw<{ completed_keys: Array<Record<string, unknown>> }>(
+      "SELECT completed_keys FROM op_checkpoints WHERE op='managed-connector-retry' AND completed_keys->0->>'retryOf'=$1", [held.request_id]);
+    expect(consumed.completed_keys[0].pending).toBeUndefined();
+  }
+}), 240_000);
+
+test('managed abort path: a stolen lease records nothing and leaves the cursor unmoved', async () => withEnv(env, async () => {
+  const { syncLockId } = await import('../src/core/db-lock.ts');
+  for (const engine of engines) {
+    const f = await githubSource(engine, true);
+    const fx = fakeGitHub();
+    fx.issues = [1, 2].map(n => ({ number: n, title: `Synthetic issue ${n}`, body: `Body ${n}`, updated_at: issueAt(n) }));
+    const run = () => runGitHubSync(engine, f.id, f.cfg, options, githubHoldsFetch(fx));
+    expect((await run()).status).not.toBe('partial');
+    await disposePersistenceConsumer(engine);
+    const checkpoint = await sourceCheckpoint(engine, f.id);
+    fx.issues[1] = { ...fx.issues[1], body: 'Body 2 edited upstream', updated_at: issueAt(5) };
+    await pageFault(engine, f.id, 'gh/acme-example/app/2');
+    const fetchImpl = githubHoldsFetch(fx);
+    const stealing = async (url: string) => {
+      if (new URL(url).pathname.endsWith('/issues/2')) {
+        await engine.executeRaw('UPDATE gbrain_cycle_locks SET acquisition_token=gen_random_uuid() WHERE id=$1', [syncLockId(f.id)]);
+      }
+      return fetchImpl(url);
+    };
+    await runGitHubSync(engine, f.id, f.cfg, options, stealing).then(r => expect(r.status).toBe('partial'), (e: Error) => expect(e.name).toMatch(/LockStolenError|AbortError|OperationError/));
+    await disposePersistenceConsumer(engine);
+    expect(await sourceCheckpoint(engine, f.id)).toEqual(checkpoint);
+    await engine.executeRaw('DELETE FROM gbrain_cycle_locks WHERE id=$1', [syncLockId(f.id)]);
+    await pageFault(engine, f.id, null);
+  }
+}), 240_000);
+
+test('checkpointBefore refuses the stale publication in both completion orders of a holds-only and a cursor checkpoint', async () => withEnv(env, async () => {
+  const { beginConnectorSync } = await import('../src/core/persistence/connector-sync.ts');
+  const empty = { last_sweep_at: null, repos: [] };
+  const holds = { version: 1, items: { 'acme-example/app#9': { key: 'acme-example/app#9', state: 'failing', attempts: 1 } } };
+  for (const engine of engines) for (const order of ['holds_first', 'cursor_first'] as const) {
+    const f = await githubSource(engine, true);
+    const seed = (await beginConnectorSync(engine, f.id, 'github', f.cfg, options))!;
+    await seed.saveState({ ...empty, last_sweep_at: issueAt(1) });
+    await disposePersistenceConsumer(engine);
+    const aborting = (await beginConnectorSync(engine, f.id, 'github', f.cfg, options))!;
+    const midRun = (await beginConnectorSync(engine, f.id, 'github', f.cfg, options))!;
+    const cursorSave = () => midRun.saveState({ ...empty, last_sweep_at: issueAt(3) });
+    if (order === 'holds_first') {
+      expect(await aborting.publishHolds(empty, holds)).toBe(true);
+      await expect(cursorSave()).rejects.toMatchObject({ code: 'revision_conflict' });
+      expect(await sourceCursor(engine, f.id)).toEqual([[{ state: { ...empty, last_sweep_at: issueAt(1) } }]]);
+    } else {
+      await cursorSave();
+      // The stale holds publication is refused and records nothing; the item is counted again next run.
+      expect(await aborting.publishHolds(empty, holds)).toBe(false);
+      expect(await sourceCursor(engine, f.id)).toEqual([[{ state: { ...empty, last_sweep_at: issueAt(3) } }]]);
+      expect(JSON.stringify(await sourceCheckpoint(engine, f.id))).not.toContain('acme-example/app#9');
+    }
+    await disposePersistenceConsumer(engine);
+  }
+}), 240_000);
+
+test(`connector_holds_exhausted: a run that would hold a ${HOLD_CAP + 1}st item refuses and leaves the cursor`, async () => withEnv(env, async () => {
+  const { gitHubStateFile } = await import('../src/core/github-source.ts');
+  const { writeFileSync, readFileSync } = await import('node:fs');
+  for (const engine of engines) {
+    const f = await githubSource(engine, false);
+    const now = new Date().toISOString();
+    const record = (key: string, state: string, attempts: number) => ({ key, state, code: 'http_4xx', class: 'content', message: 'x', upstream_version: issueAt(2),
+      first_failed_at: now, last_failed_at: now, attempts, held_at: state === 'held' ? now : null, next_attempt_at: null, reconsiderations: 0,
+      meta: { sender: null, subject: null, title: null, upstream_at: null }, slug: null, request_id: null, ref: 'issue', legacy: false });
+    const items: Record<string, unknown> = {};
+    for (let i = 0; i < HOLD_CAP; i++) items[`other-example/repo#${i}`] = record(`other-example/repo#${i}`, 'held', 3);
+    items['acme-example/app#2'] = record('acme-example/app#2', 'failing', 2);
+    const before = JSON.stringify({ last_sweep_at: null, repos: [], item_holds: { version: 1, items } });
+    writeFileSync(gitHubStateFile(f.dir), before);
+    const fx = fakeGitHub();
+    fx.issues = [1, 2].map(n => ({ number: n, title: `Synthetic issue ${n}`, body: `Body ${n}`, updated_at: issueAt(n) }));
+    fx.failDetail.set(2, 422);
+    const errors = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await expect(runGitHubSync(engine, f.id, f.cfg, options, githubHoldsFetch(fx))).rejects.toMatchObject({ code: 'connector_holds_exhausted',
+        suggestion: expect.stringContaining(`gbrain sources retry-held ${f.id}`) });
+    } finally { errors.mockRestore(); }
+    expect(readFileSync(gitHubStateFile(f.dir), 'utf8')).toBe(before);
   }
 }), 120_000);

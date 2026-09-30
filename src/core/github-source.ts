@@ -1353,8 +1353,8 @@ async function runGitHubSyncInner(engine: BrainEngine, sourceId: string, cfg: Gi
       if (managed) await managed.saveState(state, true, state.last_sweep_at ?? undefined);
       else { writeState(cfg.dir, state); await touchSourceRow(deps, state.last_sweep_at!); }
     } else if (managed) {
-      // The cursor is unchanged on a partial run; the save persists the holds.
-      if (!opts.signal?.aborted) await managed.saveState(state);
+      // A partial run leaves the cursor at its last committed position and publishes only changed holds.
+      if (!opts.signal?.aborted) await managed.publishHolds({ last_sweep_at: null, repos: [] }, state.item_holds);
     } else {
       // #5740 (#5741): a partial sweep persists its state but never stamps last_sync_at.
       writeState(cfg.dir, state);

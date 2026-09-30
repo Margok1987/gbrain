@@ -1233,7 +1233,8 @@ async function runGoogleSyncInner(engine: BrainEngine, sourceId: string, cfg: Go
     state.item_holds = holds.finish();
     if (managed) {
       if (summary.status !== 'partial' && gmailSweepOk) await managed.saveState(state, true, new Date(state.gmail_newest_ms ?? Date.now()).toISOString());
-      else if (!opts.signal?.aborted) await managed.saveState(state);
+      // A partial run keeps the cursor its mid-run checkpoints committed and publishes only changed holds.
+      else if (!opts.signal?.aborted) await managed.publishHolds(emptyState() as unknown as Record<string, unknown>, state.item_holds);
     } else writeGoogleState(cfg.dir, state);
     await holds.complete();
     // An aborted run (wall-clock budget, serve-delegation timeout) skips the

@@ -134,6 +134,22 @@ function connectorBindingRoot(sourceId: string, source: ConnectorSource, binding
   }
 }
 
+/**
+ * Fix wave 4: a page intent binds to the connector cursor, not to its item
+ * holds or the checkpoint generation. A holds-only publication (the abort
+ * path, a partial run) therefore neither invalidates accepted page writes nor
+ * changes their request identity, so an ordinary rerun still replays the same
+ * receipt. Checkpoint intents keep the full checkpoint.
+ */
+function cursorOnly(checkpoint: unknown): unknown[] {
+  return (Array.isArray(checkpoint) ? checkpoint : []).map(entry => {
+    const state = (entry as { state?: unknown } | null)?.state ?? null;
+    if (!state || typeof state !== 'object') return { state };
+    const { item_holds: _holds, ...cursor } = state as Record<string, unknown>;
+    return { state: cursor };
+  });
+}
+
 function stableId(value: unknown): string {
   const hash = digest(value);
   return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-5${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
@@ -619,6 +635,7 @@ export class ManagedConnectorSync {
   async publishHolds(empty: Record<string, unknown>, holds: unknown): Promise<boolean> {
     if (this.resetRequested || this.stopped) return false;
     const committed = (this.checkpoint[0] as { state?: Record<string, unknown> | null } | undefined)?.state ?? null;
+    if (digest(committed?.item_holds ?? { version: 1, items: {} }) === digest(holds)) return true;
     const state = { ...empty, ...(committed ?? {}), item_holds: holds };
     const next = [{ generation: Number((this.checkpoint[0] as { generation?: number } | undefined)?.generation ?? 0) + 1, state }];
     try {
@@ -680,7 +697,8 @@ export class ManagedConnectorSync {
     }
     const intent: ConnectorIntent = { kind, connector: this.connector, sourceRoot: this.source.local_path,
       configHash: this.identity.digest, syncAuthority: this.authority, expected_revision: snapshot?.revision ?? null,
-      sourcePath, noEmbed: this.noEmbed, noSchemaPack: this.noSchemaPack, checkpointKey: this.checkpointKey, checkpointBefore: this.checkpoint,
+      sourcePath, noEmbed: this.noEmbed, noSchemaPack: this.noSchemaPack, checkpointKey: this.checkpointKey,
+      checkpointBefore: kind === 'connector_v2_checkpoint' ? this.checkpoint : cursorOnly(this.checkpoint),
       ownerEpoch: this.binding ? String(this.binding.owner_epoch) : null, canonicalRoot: this.canonicalRoot,
       filePath: file?.path ?? null, fileBeforeHash: file?.expectedBeforeHash ?? null, ...extra };
     const callerIntent = { ...intent, syncAuthority: undefined, newestContentAt: undefined,
@@ -833,7 +851,7 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
     }
     if (p.kind !== 'connector_v2_checkpoint') {
       const [checkpoint] = await tx.executeRaw<{ completed_keys: unknown[] }>("SELECT completed_keys FROM op_checkpoints WHERE op='managed-connector' AND fingerprint=$1", [p.checkpointKey]);
-      if (digest(checkpoint?.completed_keys ?? []) !== digest(p.checkpointBefore)) throw new OperationError('revision_conflict', 'The connector checkpoint changed before publication.');
+      if (digest(cursorOnly(checkpoint?.completed_keys)) !== digest(cursorOnly(p.checkpointBefore))) throw new OperationError('revision_conflict', 'The connector checkpoint changed before publication.');
     }
   };
   await validate(engine);
