@@ -69,6 +69,11 @@ export function registerDecideSubcommand(name: string, run: DecideSubcommand, he
   extraSubcommands.set(name, { run, help });
 }
 
+/** Slot lanes register subcommands, what-if reducers and dataset adapters when their module loads. */
+export async function loadDecideLanes(): Promise<void> {
+  await import('./decide/writepath.ts');
+}
+
 export function decideHelpText(): string {
   const extra = [...extraSubcommands.entries()].map(([, v]) => `  ${v.help}`).join('\n');
   return extra ? `${DECIDE_HELP}\nMore subcommands:\n${extra}\n` : DECIDE_HELP;
@@ -439,6 +444,7 @@ async function cmdDisable(engine: BrainEngine, args: string[]): Promise<number> 
 
 export async function runDecideCommand(engine: BrainEngine, args: string[]): Promise<number> {
   const sub = args[0];
+  await loadDecideLanes();
   try {
     switch (sub) {
       case 'status': return await cmdStatus(engine, args.slice(1));
