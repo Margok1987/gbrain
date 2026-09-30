@@ -1158,7 +1158,7 @@ async function runGitHubSyncInner(engine: BrainEngine, sourceId: string, cfg: Gi
     );
   }
   const appTokens = cfg.app ? new AppTokenProvider(cfg.app, fetchImpl ?? fetch) : null;
-  const client = new GitHubClient(appTokens ?? process.env[cfg.tokenEnv] ?? '', fetchImpl);
+  const client = new GitHubClient(appTokens ?? process.env[cfg.tokenEnv] ?? '', fetchImpl, (message) => console.error(message));
   if (managed) await managed.assertAccount(await resolveGitHubAccount(cfg, client, appTokens, opts.signal)); // #5686 installation/login pin
   const deps: GitHubSyncDeps = { engine, sourceId, cfg, opts, client, managed };
   const summary: GitHubSyncSummary = {
