@@ -77,6 +77,10 @@ async function validateMaintenance(engine: BrainEngine, authority: MaintenanceAu
   if (!source || source.archived || source.incarnation !== authority.writer.sourceIncarnation) {
     throw new OperationError('source_changed', 'The accepted maintenance source changed.');
   }
+  // A connector preflighted as unbound publishes database-only; one claimed since then must use its owner.
+  if (authority.writer.databaseOnlyReason === 'connector_database' && await getWorktreeBinding(engine, authority.writer.sourceId)) {
+    throw new OperationError('source_changed', 'The connector source gained a canonical owner after maintenance preflight.', 'Rerun the maintenance command.');
+  }
   await authorizeWrite(engine, authority.writer, 'submit_job', slug);
   await authorizePageVisibility(engine, authority.writer, slug);
 }

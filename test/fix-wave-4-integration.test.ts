@@ -110,7 +110,7 @@ const people = (list: () => Array<Record<string, unknown>>) => async (url: strin
 };
 const googleContacts = { kind: 'google', g_account: 'owner@example.invalid', g_services: 'contacts', g_access: 'env', g_token_env: 'CONNECTOR_TEST_TOKEN' };
 
-test('X4: the v0.32.2 facts adoption on a connector page publishes above the timeline; the next connector run neither refuses nor re-admits it', async () => withEnv(env, async () => {
+test('X4: the v0.32.2 facts adoption on a connector page publishes above the timeline; connector re-renders carry the fence without a refusal and converge', async () => withEnv(env, async () => {
   for (const engine of engines) {
     const f = await source(engine, googleContacts);
     const cfg = parseGoogleSourceConfig(googleContacts, f.dir);
@@ -132,13 +132,20 @@ test('X4: the v0.32.2 facts adoption on a connector page publishes above the tim
     const adopted = (await engine.readPageSnapshot(slug, { sourceId: f.id }))!;
     expect(parseFactsFence(adopted.page.compiled_truth).facts.map(fact => fact.claim)).toEqual(['Adopt example prefers email']);
 
-    // Lane B's re-render carries the fence (no connector_fence_below_timeline), and Lane A's kernel sees nothing to publish.
-    const before = await pageAdmissions(engine, f.id);
-    const again = await runGoogleSync(engine, f.id, cfg, options, fetcher);
-    await disposePersistenceConsumer(engine);
-    expect(again.status).not.toBe('partial');
-    expect(await pageAdmissions(engine, f.id)).toBe(before);
+    // Full re-walks, so the connector really re-renders the adopted page. Lane B's re-render carries the fence (no
+    // connector_fence_below_timeline) byte for byte. The first re-render takes one admission back from the maintenance
+    // writer; after it Lane A's kernel sees nothing to publish, so re-renders converge instead of re-admitting every run.
+    const rewalk = async () => { const result = await runGoogleSync(engine, f.id, cfg, { ...options, resetCheckpoint: true }, fetcher);
+      await disposePersistenceConsumer(engine); return result; };
+    expect((await rewalk()).status).not.toBe('partial');
+    const rendered = (await engine.readPageSnapshot(slug, { sourceId: f.id }))!.page.compiled_truth;
+    expect(rendered).toBe(adopted.page.compiled_truth);
+    const settled = await pageAdmissions(engine, f.id);
+    expect((await rewalk()).status).not.toBe('partial');
+    expect(await pageAdmissions(engine, f.id)).toBe(settled);
     expect(parseFactsFence((await engine.readPageSnapshot(slug, { sourceId: f.id }))!.page.compiled_truth).facts.map(fact => fact.rowNum)).toEqual([1]);
+    const [kept] = await engine.executeRaw<{ expired_at: string | null }>('SELECT expired_at FROM facts WHERE id=$1', [factId]);
+    expect(kept.expired_at).toBeNull();
   }
 }), 240_000);
 

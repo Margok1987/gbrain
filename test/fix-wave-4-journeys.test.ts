@@ -275,7 +275,7 @@ test('journey (c): a checkpoint timeout with a dropped index recovers with the r
       for (let waited = 0; !refused.text.includes('checkpoint_validation_timeout') && waited < 30_000; waited += 500) {
         await new Promise(resolve => setTimeout(resolve, 500));
         const [row] = await engine.executeRaw<{ state: string }>("SELECT state FROM persistence_requests WHERE source_id=$1 AND intent->>'kind'='managed_sync_checkpoint'", [id]);
-        if (row?.state === 'failed') refused = await gbrain(engine, `gbrain sync --source ${id} --no-pull --no-embed --no-extract`);
+        if (row?.state === 'failed') refused = await j.run(engine, `gbrain sync --source ${id} --no-pull --no-embed --no-extract`);
       }
     } finally { restore(); }
     expect(refused.text).toContain('checkpoint_validation_timeout');

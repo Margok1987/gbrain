@@ -42,7 +42,7 @@ import { SOURCE_FRESHNESS_PHASES, MAINTENANCE_PHASES, LAST_GLOBAL_AT_KEY } from 
 import { CONNECTOR_SOURCE_PHASES } from '../core/cycle/phase-scope.ts';
 import { isConnectorSourceKind } from '../core/persistence/connector-identity.ts';
 import { attemptedConnectorSourceIds } from '../core/persistence/connector-state.ts';
-import { sourceConfigHasRemoteUrl, sourceLocalPathSkipWarning } from '../core/sources-load.ts';
+import { parseSourceConfig, sourceConfigHasRemoteUrl, sourceLocalPathSkipWarning } from '../core/sources-load.ts';
 import { isSyncDisabledConfig } from '../core/sync-policy.ts';
 import { loadActivationPendingSourceIds, skipActivationPendingSync } from '../core/sync-policy.ts';
 import { AUTOPILOT_FULL_CYCLE_FLOOR_MINUTES } from './autopilot-remediation-policy.ts';
@@ -428,7 +428,7 @@ export async function dispatchPerSource(
     const { connectorAwaitingFirstSync } = await import('./autopilot-dispatch.ts');
     const attempted = await attemptedConnectorSourceIds(engine).catch(() => null);
     connectorIds = new Set(attempted ?? []);
-    const checkouts = new Set(sources.filter(s => !isConnectorSourceKind(s.config?.kind)).map(s => s.id));
+    const checkouts = new Set(sources.filter(s => !isConnectorSourceKind(parseSourceConfig(s.config).kind)).map(s => s.id));
     idleConnectors = sources.filter(s => connectorAwaitingFirstSync(s, attempted, opts.jsonMode === true, emit)).length;
     const all = connectorIds.size ? await engine.listAllSources() : sources;
     sources = all.filter(s => connectorIds.has(s.id) || checkouts.has(s.id));

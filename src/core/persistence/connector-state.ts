@@ -15,6 +15,7 @@
  */
 import type { BrainEngine } from '../engine.ts';
 import { digest } from './digest.ts';
+import { parseSourceConfig } from '../sources-load.ts';
 
 export const CONNECTOR_STATE_OP = 'managed-connector-state';
 
@@ -114,14 +115,16 @@ export async function recordConnectorSyncAttempt(engine: Pick<BrainEngine, 'exec
  * `syncEnabled=false`), so the new gate idles no source autopilot synced.
  */
 export async function seedConnectorDispatchAttempts(engine: Pick<BrainEngine, 'executeRaw'>): Promise<number> {
-  const rows = await engine.executeRaw<{ id: string; config: unknown }>(`SELECT id,config FROM sources
-    WHERE config->>'kind' IN ('google','github') AND local_path IS NOT NULL AND archived IS NOT TRUE`);
+  const rows = await engine.executeRaw<{ id: string; config: unknown }>(
+    'SELECT id,config FROM sources WHERE local_path IS NOT NULL AND archived IS NOT TRUE');
   let seeded = 0;
   const at = new Date().toISOString();
   for (const row of rows) {
-    // Same predicate as isSyncDisabledConfig (sync-policy.ts), inlined so the schema-migration closure stays small.
-    const config = (typeof row.config === 'string' ? JSON.parse(row.config) : row.config) as { syncEnabled?: unknown } | null;
-    if (config?.syncEnabled === false) continue;
+    // parseSourceConfig, as the dispatch loops read it (string-wrapped configs included). The syncEnabled test is
+    // isSyncDisabledConfig's (sync-policy.ts), inlined so the schema-migration closure stays small.
+    const config = parseSourceConfig(row.config);
+    if (config.kind !== 'google' && config.kind !== 'github') continue;
+    if (config.syncEnabled === false) continue;
     await recordConnectorSyncAttempt(engine, row.id, at);
     seeded++;
   }
@@ -130,8 +133,8 @@ export async function seedConnectorDispatchAttempts(engine: Pick<BrainEngine, 'e
 
 /** Connector source ids (google, github) with a recorded sync attempt: the autopilot dispatch gate. */
 export async function attemptedConnectorSourceIds(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Set<string>> {
-  const sources = await engine.executeRaw<{ id: string; incarnation: string }>(
-    "SELECT id,incarnation::text AS incarnation FROM sources WHERE config->>'kind' IN ('google','github')");
+  // Every source: only connector syncs stamp the field, and a string-wrapped config would miss a kind filter here.
+  const sources = await engine.executeRaw<{ id: string; incarnation: string }>('SELECT id,incarnation::text AS incarnation FROM sources');
   if (sources.length === 0) return new Set();
   const keys = new Map(sources.map(source => [connectorStateKey(source.id, source.incarnation), source.id]));
   const rows = await engine.executeRaw<{ fingerprint: string }>(`SELECT fingerprint FROM op_checkpoints

@@ -117,7 +117,7 @@ export async function deactivationBlockers(engine: BrainEngine): Promise<Deactiv
   // the classic backfill window would drop out of retries and coverage warnings, so it is resolved first.
   for (const source of await readAllSourceHolds(engine)) {
     blockers.push({ kind: 'connector_holds', id: source.sourceId, source_id: source.sourceId, detail: `${source.held.length} held ${source.kind} item(s)`,
-      exit: `gbrain sources retry-held ${source.sourceId}, then gbrain sync --source ${source.sourceId}; an item that still fails stays held until gbrain sync --source ${source.sourceId} --full clears the holds` });
+      exit: `gbrain sources status ${source.sourceId} names each item's error; fix its cause, then gbrain sources retry-held ${source.sourceId} and gbrain sync --source ${source.sourceId} (a successful re-attempt clears the hold)` });
   }
   const leases = await engine.executeRaw<{ id: string; holder_host: string; holder_pid: number }>(
     'SELECT id, holder_host, holder_pid FROM gbrain_cycle_locks WHERE ttl_expires_at > now() ORDER BY id');

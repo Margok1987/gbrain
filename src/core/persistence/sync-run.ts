@@ -449,7 +449,9 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       }));
       await validateSyncAuthority(engine, cursor.authority, pending.slug);
       assertSyncDispatchActive();
-      const done = await waitForWrite(engine, row, config, 5000);
+      // #5762: a checkpoint's validation runs under the coordinator's 5 s statement timeout, so its wait outlasts that
+      // budget; a timed-out checkpoint then reports its terminal refusal and hint in this run instead of the next.
+      const done = await waitForWrite(engine, row, config, pending.intent.kind === 'managed_sync_checkpoint' ? 8000 : 5000);
       assertSyncDispatchActive();
       if (!isTerminalWriteState(done.state)) {
         return { ...result(cursor, 'partial', signal?.aborted ? 'timeout' : 'writer_pending'),
