@@ -11,15 +11,14 @@
 migrated	cjk-search
 migrated	code-edges
 migrated	facts
+migrated	links
 migrated	pages
-migrated	tags
 migrated	salience
+migrated	tags
 migrated	takes
-method	src/core/pglite-engine.ts	PGLiteEngine._addLinksBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._addTimelineEntriesBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._connectInternal
 method	src/core/pglite-engine.ts	PGLiteEngine._upsertChunksOnce
-method	src/core/pglite-engine.ts	PGLiteEngine.addLink
 method	src/core/pglite-engine.ts	PGLiteEngine.addTimelineEntry
 method	src/core/pglite-engine.ts	PGLiteEngine.buildChunklessPagesWhere
 method	src/core/pglite-engine.ts	PGLiteEngine.chronicleSelect
@@ -29,9 +28,7 @@ method	src/core/pglite-engine.ts	PGLiteEngine.deleteChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.deleteEvalCandidatesBefore
 method	src/core/pglite-engine.ts	PGLiteEngine.discoverOntologyDimensions
 method	src/core/pglite-engine.ts	PGLiteEngine.findOntologyConflicts
-method	src/core/pglite-engine.ts	PGLiteEngine.findOrphanPages
 method	src/core/pglite-engine.ts	PGLiteEngine.getAllConfig
-method	src/core/pglite-engine.ts	PGLiteEngine.getBacklinks
 method	src/core/pglite-engine.ts	PGLiteEngine.getChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.getChunksWithEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.getConfig
@@ -41,7 +38,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.getFile
 method	src/core/pglite-engine.ts	PGLiteEngine.getHealth
 method	src/core/pglite-engine.ts	PGLiteEngine.getIngestLog
 method	src/core/pglite-engine.ts	PGLiteEngine.getLastSeen
-method	src/core/pglite-engine.ts	PGLiteEngine.getLinks
 method	src/core/pglite-engine.ts	PGLiteEngine.getOnThisDay
 method	src/core/pglite-engine.ts	PGLiteEngine.getOntology
 method	src/core/pglite-engine.ts	PGLiteEngine.getRawData
@@ -57,7 +53,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.listConfigKeys
 method	src/core/pglite-engine.ts	PGLiteEngine.listEvalCandidates
 method	src/core/pglite-engine.ts	PGLiteEngine.listEvalCaptureFailures
 method	src/core/pglite-engine.ts	PGLiteEngine.listFilesForPage
-method	src/core/pglite-engine.ts	PGLiteEngine.listLinkSources
 method	src/core/pglite-engine.ts	PGLiteEngine.listStaleChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.logEvalCandidate
 method	src/core/pglite-engine.ts	PGLiteEngine.logEvalCaptureFailure
@@ -67,8 +62,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.migrateFactsToCanonical
 method	src/core/pglite-engine.ts	PGLiteEngine.pushChronicleSource
 method	src/core/pglite-engine.ts	PGLiteEngine.putDreamVerdict
 method	src/core/pglite-engine.ts	PGLiteEngine.putRawData
-method	src/core/pglite-engine.ts	PGLiteEngine.removeLink
-method	src/core/pglite-engine.ts	PGLiteEngine.removeLinksByPagesAndSource
 method	src/core/pglite-engine.ts	PGLiteEngine.searchKeyword
 method	src/core/pglite-engine.ts	PGLiteEngine.searchKeywordChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.searchTitles
@@ -77,8 +70,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.setConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.setPageEmbeddingSignature
 method	src/core/pglite-engine.ts	PGLiteEngine.sumStaleChunkChars
 method	src/core/pglite-engine.ts	PGLiteEngine.sweepDreamVerdicts
-method	src/core/pglite-engine.ts	PGLiteEngine.traverseGraph
-method	src/core/pglite-engine.ts	PGLiteEngine.traversePathsDetailed
 method	src/core/pglite-engine.ts	PGLiteEngine.unsetConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.updateSourceConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.upsertEventProjection
@@ -86,11 +77,9 @@ method	src/core/pglite-engine.ts	PGLiteEngine.upsertFile
 method	src/core/pglite-engine.ts	probePgliteScratchStore
 method	src/core/pglite-engine/checkpoint-guard.ts	PgliteCheckpointGuard.beforeOutermostTransaction
 method	src/core/pglite-engine/code-edges.ts	getEdgesByChunk
-method	src/core/postgres-engine.ts	PostgresEngine._addLinksBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._addTimelineEntriesBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._searchKeywordCJK
 method	src/core/postgres-engine.ts	PostgresEngine._upsertChunksOnce
-method	src/core/postgres-engine.ts	PostgresEngine.addLink
 method	src/core/postgres-engine.ts	PostgresEngine.addTimelineEntry
 method	src/core/postgres-engine.ts	PostgresEngine.buildChunklessPagesWhere
 method	src/core/postgres-engine.ts	PostgresEngine.connect
@@ -100,9 +89,7 @@ method	src/core/postgres-engine.ts	PostgresEngine.deleteChunks
 method	src/core/postgres-engine.ts	PostgresEngine.deleteEvalCandidatesBefore
 method	src/core/postgres-engine.ts	PostgresEngine.discoverOntologyDimensions
 method	src/core/postgres-engine.ts	PostgresEngine.findOntologyConflicts
-method	src/core/postgres-engine.ts	PostgresEngine.findOrphanPages
 method	src/core/postgres-engine.ts	PostgresEngine.getAllConfig
-method	src/core/postgres-engine.ts	PostgresEngine.getBacklinks
 method	src/core/postgres-engine.ts	PostgresEngine.getChunks
 method	src/core/postgres-engine.ts	PostgresEngine.getChunksWithEmbeddings
 method	src/core/postgres-engine.ts	PostgresEngine.getConfig
@@ -112,7 +99,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.getFile
 method	src/core/postgres-engine.ts	PostgresEngine.getHealth
 method	src/core/postgres-engine.ts	PostgresEngine.getIngestLog
 method	src/core/postgres-engine.ts	PostgresEngine.getLastSeen
-method	src/core/postgres-engine.ts	PostgresEngine.getLinks
 method	src/core/postgres-engine.ts	PostgresEngine.getOnThisDay
 method	src/core/postgres-engine.ts	PostgresEngine.getOntology
 method	src/core/postgres-engine.ts	PostgresEngine.getRawData
@@ -129,7 +115,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.listConfigKeys
 method	src/core/postgres-engine.ts	PostgresEngine.listEvalCandidates
 method	src/core/postgres-engine.ts	PostgresEngine.listEvalCaptureFailures
 method	src/core/postgres-engine.ts	PostgresEngine.listFilesForPage
-method	src/core/postgres-engine.ts	PostgresEngine.listLinkSources
 method	src/core/postgres-engine.ts	PostgresEngine.listStaleChunks
 method	src/core/postgres-engine.ts	PostgresEngine.logEvalCandidate
 method	src/core/postgres-engine.ts	PostgresEngine.logEvalCaptureFailure
@@ -138,8 +123,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.mergeOntologyFact
 method	src/core/postgres-engine.ts	PostgresEngine.migrateFactsToCanonical
 method	src/core/postgres-engine.ts	PostgresEngine.putDreamVerdict
 method	src/core/postgres-engine.ts	PostgresEngine.putRawData
-method	src/core/postgres-engine.ts	PostgresEngine.removeLink
-method	src/core/postgres-engine.ts	PostgresEngine.removeLinksByPagesAndSource
 method	src/core/postgres-engine.ts	PostgresEngine.resolveFactsEmbeddingCast
 method	src/core/postgres-engine.ts	PostgresEngine.searchKeyword
 method	src/core/postgres-engine.ts	PostgresEngine.searchKeywordChunks
@@ -149,8 +132,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.setConfig
 method	src/core/postgres-engine.ts	PostgresEngine.setPageEmbeddingSignature
 method	src/core/postgres-engine.ts	PostgresEngine.sumStaleChunkChars
 method	src/core/postgres-engine.ts	PostgresEngine.sweepDreamVerdicts
-method	src/core/postgres-engine.ts	PostgresEngine.traverseGraph
-method	src/core/postgres-engine.ts	PostgresEngine.traversePathsDetailed
 method	src/core/postgres-engine.ts	PostgresEngine.unsetConfig
 method	src/core/postgres-engine.ts	PostgresEngine.updateSourceConfig
 method	src/core/postgres-engine.ts	PostgresEngine.upsertEventProjection

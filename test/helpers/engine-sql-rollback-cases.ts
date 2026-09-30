@@ -25,6 +25,7 @@ export interface RollbackCase {
 }
 
 const SLUG = 'notes/engine-sql-rollback-alice-example';
+const LINK_TARGET = 'notes/engine-sql-rollback-target-alice-example';
 
 async function seedPage(engine: BrainEngine): Promise<void> {
   await engine.putPage(SLUG, { type: 'note', title: 'Rollback probe', compiled_truth: 'body' });
@@ -127,6 +128,21 @@ export const ROLLBACK_CASES: RollbackCase[] = [
     },
     async observe(engine) {
       return engine.getTags(SLUG, { sourceId: 'default' });
+    },
+  },
+  {
+    domain: 'links',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.putPage(LINK_TARGET, { type: 'note', title: 'Rollback link target', compiled_truth: 'target' });
+      await engine.addLink(SLUG, LINK_TARGET, 'seeded context', 'mentions', 'manual');
+    },
+    async write(tx) {
+      await tx.addLink(SLUG, LINK_TARGET, 'rolled-back context', 'mentions', 'manual');
+    },
+    async observe(engine) {
+      return (await engine.getLinks(SLUG, { sourceId: 'default' }))
+        .filter((l) => l.to_slug === LINK_TARGET).map((l) => `${l.link_type}:${l.context}`).sort();
     },
   },
 ];

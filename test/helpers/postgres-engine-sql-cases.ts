@@ -76,7 +76,6 @@ export const DOMAIN_OF: Record<string, string> = {
   'buildChunklessPagesWhere': OOS.helper,
   'chronicleSourceCond': OOS.helper,
   '_upsertChunksOnce': OOS.helper,
-  '_addLinksBatchOnce': OOS.helper,
   '_addTimelineEntriesBatchOnce': OOS.helper,
   '_searchKeywordCJK': OOS.helper,
 

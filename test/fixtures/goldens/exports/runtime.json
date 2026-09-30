@@ -2,7 +2,6 @@
   "golden": {
     "prototypes": {
       "PGLiteEngine": [
-        "_addLinksBatchOnce",
         "_addTimelineEntriesBatchOnce",
         "_attachDatabase",
         "_closeInternal",
@@ -187,7 +186,6 @@
         "writeContradictionsRun"
       ],
       "PostgresEngine": [
-        "_addLinksBatchOnce",
         "_addTimelineEntriesBatchOnce",
         "_searchKeywordCJK",
         "_upsertChunksOnce",

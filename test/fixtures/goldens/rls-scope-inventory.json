@@ -3234,7 +3234,6 @@
       },
       "helper": "withScopedReadTransaction",
       "scoping": {
-        "_addLinksBatchOnce": "none",
         "_addTimelineEntriesBatchOnce": "none",
         "_searchKeywordCJK": "direct",
         "_upsertChunksOnce": "via:readPageSnapshot",
