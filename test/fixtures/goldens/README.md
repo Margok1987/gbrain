@@ -56,3 +56,44 @@ reproduce byte for byte. Each file is written by `test/helpers/golden.ts` as
   identity): exact `(source, slug, page id, chunk id, chunk index, score)` for 8 queries
   through `hybridSearch` and `hybridSearchCached` cold + warm, hash stub embedder via
   `queryEmbedFn`, pinned clock.
+
+## Migrations, routes, exports (A11 / TE1 / O13)
+
+- `migrations/records.json` (`test/migrations-golden.test.ts`, `migrations-record-v1`):
+  all MIGRATIONS entries in array order (the runner sorts by version), gaps 17-19 and
+  100, name, exact `sql` / `sqlFor` hashes, `transaction`, `idempotent`, handler /
+  verify presence, and sha256 of the normalized AST source of handler / verify bodies
+  and the helpers they reference (`test/helpers/migration-records.ts`, tokens from
+  `scripts/lib/normalize-tokens.ts`; never `Function.toString()`). Records are located
+  by shape across `src/core/migrate.ts` and `src/core/schema-migrations/**`, helpers
+  keyed by name, so the W3 split must reproduce the file unchanged.
+- `serve-http/routes.json` (`test/serve-http-route-golden.test.ts`,
+  `serve-http-routes-v1`): the ordered Express registration stack from `runServeHttp`
+  by AST, following mount functions that receive the app.
+- `exports/runtime.json`, `exports/types.json` (`test/export-surface-golden.test.ts`,
+  `export-runtime-v1` / `export-types-v1`): runtime export names per package.json
+  subpath, engine prototype-chain methods, and a checker-printed type surface.
+  `test/fixtures/export-consumer/consumer.ts` imports every subpath by package name
+  and is typechecked by `bun run typecheck`.
+
+## CLI goldens (A16b / EO5 / EO13)
+
+- `cli/*.json` (`test/cli-goldens.test.ts`, `test/cli-dispatch-phase.test.ts`,
+  `test/cli-thin-client-refusal-matrix.test.ts`, `test/cli-engine-free-db-down.serial.test.ts`):
+  `--help` / `--version` / `--tools-json` / unknown command, membership sets and alias
+  table, per-command dispatch phase and thin-client mode (AST,
+  `test/helpers/cli-dispatch-extract.ts`), literal command imports, the thin-client
+  refusal matrix for every `handleCliOnly` case, and engine-free commands against an
+  unreachable database. Normalizers in `test/helpers/cli-golden-normalize.ts`.
+
+## Schema catalog and upgrade replay (E4 / EO3 / EO12)
+
+- `catalog/*.json` (`test/schema-catalog-golden.test.ts`,
+  `test/e2e/schema-catalog-golden.test.ts`, `schema-catalog-lines-v1`): catalog-level
+  snapshots (`snapshotCatalog` in `test/helpers/schema-diff.ts`) at three configs on
+  PGLite engine init, the PGLite blob without migrations, Postgres engine init and
+  Postgres `db.initSchema()`.
+- `pglite-upgrade-replay/` (`test/pglite-upgrade-replay.test.ts`): a master-built
+  PGLite brain (`brain.tar.gz` + `MANIFEST.json`, rebuilt only on master with
+  `bun scripts/build-pglite-upgrade-fixture.ts`), its post-boot catalog, and the
+  objects a repeat boot recreates.

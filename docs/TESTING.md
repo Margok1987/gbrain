@@ -827,6 +827,18 @@ completeness. Compare cold and warm caches separately. Snapshot timings and
 partition estimates are projections until matched workflow runs confirm them;
 successful test results are never cached.
 
+### Refactor wave 1 goldens
+
+Outputs captured on master before refactor wave 1 moves any code live under
+`test/fixtures/goldens/`; `test/fixtures/goldens/README.md` maps each file to
+its owning test and named normalizer. `test/helpers/golden.ts` writes and
+compares them (`expectGolden`) and proves each normalizer by capturing twice
+(`expectNormalizerStable`). Regenerate only deliberately, never in a refactor
+commit: `GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <file>` (the switch carries the
+`GBRAIN_TEST_` prefix because the unit preload scrubs other `GBRAIN_*`
+overrides). Performance baselines are a bench, not a test:
+`docs/designs/refactor-wave-1/perf-baseline.md`.
+
 ### Guard registry and self-test
 
 The privacy and test-isolation guards use `scripts/lib/guard-candidates.sh` to
