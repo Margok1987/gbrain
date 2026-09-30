@@ -18,21 +18,31 @@
  *                        definitions are inlined where the registry references them,
  *                        so the generated registry array must reproduce the original
  *                        MIGRATIONS array (same literals, same order).
+ *   --wrapper doctor-entry  W4 doctor peel: head-side `run<Topic>(ctx: DoctorContext): Promise<Check[]>`
+ *                        functions are inlined where `buildChecks` calls them
+ *                        (`checks.push(...(await runX(ctx)));`) after dropping their
+ *                        wrapper (leading `const ... = ctx;` / `const engine =
+ *                        connectedEngine(ctx);` / `const checks: Check[] = [];`, trailing
+ *                        `return checks;`), and the `const ctx: DoctorContext = {...};`
+ *                        glue is dropped, so buildChecks must reproduce the original body.
+ *                        Relative `import()` / `require()` specifiers on both sides are
+ *                        resolved to repo paths, so re-rooting a moved block is not an edit.
  *   --rename-map <json>  identifier rewrites applied to the BASE side before comparing,
  *                        e.g. {"pullFailed": "run.pullFailed"} for Mechanical-Rename commits.
  *
  * Usage:
- *   bun scripts/verify-move-only.ts [<base>..<head> | <commit>] [--wrapper migration] [--rename-map f.json]
+ *   bun scripts/verify-move-only.ts [<base>..<head> | <commit>] [--wrapper migration|doctor-entry] [--rename-map f.json]
  * Default range: HEAD~1..HEAD. Exit 0 = move-only, 1 = edited tokens, 2 = usage error.
  */
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { posix } from 'node:path';
 import ts from 'typescript';
 import { normalizeTokens } from './lib/normalize-tokens.ts';
 
 export interface VerifyOptions {
-  wrapper?: 'migration';
+  wrapper?: 'migration' | 'doctor-entry';
   renameMap?: Readonly<Record<string, string>>;
 }
 
@@ -92,6 +102,63 @@ function migrationWrapper(stmt: ts.Statement, sf: ts.SourceFile): { name: string
   return { name: d.name.text, expr: d.initializer };
 }
 
+const DOCTOR_ENTRY_NAME = /^run[A-Z]\w*$/;
+const DOCTOR_ENTRY_PROLOGUE = /^const (\{[^}]*\} = ctx|engine = connectedEngine\(ctx\)|checks: Check\[\] = \[\]);$/;
+
+/** Head-side `run<Topic>(ctx)` entry: the tokens of its body without the wrapper. */
+function doctorEntryWrapper(stmt: ts.Statement, sf: ts.SourceFile, path: string): { name: string; tokens: string[] } | undefined {
+  if (!ts.isFunctionDeclaration(stmt) || !stmt.name || !stmt.body || !DOCTOR_ENTRY_NAME.test(stmt.name.text)) return undefined;
+  const [param] = stmt.parameters;
+  if (stmt.parameters.length !== 1 || param!.name.getText(sf) !== 'ctx' || param!.type?.getText(sf) !== 'DoctorContext') return undefined;
+  if (stmt.type?.getText(sf) !== 'Promise<Check[]>') return undefined;
+  const body = [...stmt.body.statements];
+  let start = 0;
+  while (start < body.length && DOCTOR_ENTRY_PROLOGUE.test(body[start]!.getText(sf))) start++;
+  if (body.at(-1)?.getText(sf) !== 'return checks;') return undefined;
+  const tokens = body.slice(start, -1).flatMap((st) => resolveSpecifiers(normalizeTokens(st.getText(sf)), path));
+  return { name: stmt.name.text, tokens };
+}
+
+/** `import('./x.ts')` / `require('../y.ts')` specifiers rewritten to repo-relative paths. */
+function resolveSpecifiers(tokens: string[], path: string): string[] {
+  const out = [...tokens];
+  for (let i = 0; i + 2 < out.length; i++) {
+    if ((out[i] !== 'import' && out[i] !== 'require') || out[i + 1] !== '(') continue;
+    const m = /^(['"])(\.\.?\/.*)\1$/.exec(out[i + 2]!);
+    if (m) out[i + 2] = `'<repo>/${posix.normalize(posix.join(posix.dirname(path), m[2]!))}'`;
+  }
+  return out;
+}
+
+/** Inline `checks.push(...(await runX(ctx)));` call sites and drop the `const ctx: DoctorContext = {...};` glue. */
+function expandDoctorEntries(tokens: string[], wrapped: Map<string, string[]>, used: Set<string>, where: string, problems: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const call = ['checks', '.', 'push', '(', '...', '(', 'await'];
+    const name = tokens[i + 7];
+    if (call.every((t, k) => tokens[i + k] === t) && name && wrapped.has(name) && ['(', 'ctx', ')', ')', ')', ';'].every((t, k) => tokens[i + 8 + k] === t)) {
+      if (used.has(name)) problems.push(`FAIL: ${where} entry ${name} is called more than once`);
+      used.add(name);
+      out.push(...wrapped.get(name)!);
+      i += 13;
+      continue;
+    }
+    if (['const', 'ctx', ':', 'DoctorContext', '='].every((t, k) => tokens[i + k] === t)) {
+      let depth = 0;
+      let j = i + 5;
+      for (; j < tokens.length; j++) {
+        if (tokens[j] === '{' || tokens[j] === '(' || tokens[j] === '[') depth++;
+        else if (tokens[j] === '}' || tokens[j] === ')' || tokens[j] === ']') depth--;
+        else if (tokens[j] === ';' && depth === 0) break;
+      }
+      i = j;
+      continue;
+    }
+    out.push(tokens[i]!);
+  }
+  return out;
+}
+
 function collect(
   files: SideFile[],
   opts: VerifyOptions,
@@ -111,6 +178,15 @@ function collect(
         result.ignored.push({ path: f.path, line, kind: `${side} ${kind}` });
         continue;
       }
+      if (side === 'head' && opts.wrapper === 'doctor-entry') {
+        const w = doctorEntryWrapper(stmt, sf, f.path);
+        if (w) {
+          if (wrapped.has(w.name)) result.problems.push(`FAIL: ${f.path}:${line} entry ${w.name} is defined twice`);
+          wrapped.set(w.name, w.tokens);
+          result.wrappedDefinitions++;
+          continue;
+        }
+      }
       if (side === 'head' && opts.wrapper === 'migration') {
         const w = migrationWrapper(stmt, sf);
         if (w) {
@@ -126,7 +202,10 @@ function collect(
   const used = new Set<string>();
   for (const p of pending) {
     let tokens = normalizeTokens(p.text, rename ? { renameMap: rename } : {});
-    if (wrapped.size > 0) {
+    if (opts.wrapper === 'doctor-entry') {
+      tokens = resolveSpecifiers(tokens, p.path);
+      if (side === 'head') tokens = expandDoctorEntries(tokens, wrapped, used, `${p.path}:${p.line}`, result.problems);
+    } else if (wrapped.size > 0) {
       const expanded: string[] = [];
       for (const t of tokens) {
         const def = wrapped.get(t);
@@ -144,7 +223,12 @@ function collect(
     out.push({ path: p.path, line: p.line, tokens: stripped.tokens, key: stripped.tokens.join(' '), exported: stripped.toggled });
   }
   for (const name of wrapped.keys()) {
-    if (!used.has(name)) result.problems.push(`FAIL: wrapper ${name} is defined but never referenced (a moved migration is missing from the registry)`);
+    if (used.has(name)) continue;
+    result.problems.push(
+      opts.wrapper === 'doctor-entry'
+        ? `FAIL: entry ${name} is defined but never called from buildChecks (a moved block is missing)`
+        : `FAIL: wrapper ${name} is defined but never referenced (a moved migration is missing from the registry)`,
+    );
   }
   return out;
 }
@@ -197,7 +281,7 @@ export function formatReport(r: VerifyResult, label: string): string {
   const lines: string[] = [];
   if (r.ok) {
     lines.push(`OK: ${label} is move-only: ${r.statements} top-level statements across ${r.files.length} files preserved token for token.`);
-    lines.push(`    ignored: ${r.ignored.length} import/re-export statements; export-modifier toggles: ${r.exportToggles}; wrapped migration definitions: ${r.wrappedDefinitions}`);
+    lines.push(`    ignored: ${r.ignored.length} import/re-export statements; export-modifier toggles: ${r.exportToggles}; wrapped definitions: ${r.wrappedDefinitions}`);
     return lines.join('\n');
   }
   lines.push(...r.problems);
@@ -210,7 +294,7 @@ export function formatReport(r: VerifyResult, label: string): string {
   for (const s of r.removed.slice(pairs)) lines.push(`FAIL: ${s.path}:${s.line} statement removed: ${s.tokens.slice(0, 16).join(' ')}`);
   for (const s of r.added.slice(pairs)) lines.push(`FAIL: ${s.path}:${s.line} statement added: ${s.tokens.slice(0, 16).join(' ')}`);
   lines.push(`Why:  ${label} is tagged move-only, so every token must survive the move; ${r.removed.length} base statements and ${r.added.length} head statements have no identical counterpart.`);
-  lines.push('Fix:  move behavior edits into a separate commit, or drop the Move-Only trailer; pass --wrapper migration for the W3 split or --rename-map <json> for a Mechanical-Rename commit.');
+  lines.push('Fix:  move behavior edits into a separate commit, or drop the Move-Only trailer; pass --wrapper migration for the W3 split, --wrapper doctor-entry for the W4 doctor peel, or --rename-map <json> for a Mechanical-Rename commit.');
   lines.push(SEE);
   return lines.join('\n');
 }
@@ -234,15 +318,15 @@ function main(argv: string[]): number {
     const a = argv[i]!;
     if (a === '--wrapper') {
       const v = argv[++i];
-      if (v !== 'migration') {
-        console.error(`unknown --wrapper ${v ?? ''} (supported: migration)`);
+      if (v !== 'migration' && v !== 'doctor-entry') {
+        console.error(`unknown --wrapper ${v ?? ''} (supported: migration, doctor-entry)`);
         return 2;
       }
       opts.wrapper = v;
     } else if (a === '--rename-map') {
       opts.renameMap = JSON.parse(readFileSync(argv[++i]!, 'utf8')) as Record<string, string>;
     } else if (a === '--help' || a === '-h') {
-      console.log('usage: bun scripts/verify-move-only.ts [<base>..<head> | <commit>] [--wrapper migration] [--rename-map f.json]');
+      console.log('usage: bun scripts/verify-move-only.ts [<base>..<head> | <commit>] [--wrapper migration|doctor-entry] [--rename-map f.json]');
       return 0;
     } else if (!range) {
       range = a;

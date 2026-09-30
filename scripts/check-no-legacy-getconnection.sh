@@ -37,6 +37,8 @@ ALLOWED=(
   "src/commands/init.ts"                # first-time setup path, no engine yet
   "src/commands/doctor.ts"              # PR 1 refactors to accept engine
   "src/commands/doctor/checks/pglite-worker.ts"  # grandfathered doctor.ts call site, peeled verbatim (containment sprint); PR 1 refactors to accept engine
+  "src/commands/doctor/checks/schema-health.ts"  # grandfathered doctor.ts call sites (rls, rls_event_trigger), peeled verbatim (refactor wave 1 W4); PR 1 refactors to accept engine
+  "src/commands/doctor/checks/queue-assets.ts"   # grandfathered doctor.ts call site (index_audit), peeled verbatim (refactor wave 1 W4); PR 1 refactors to accept engine
   "src/commands/files.ts"               # PR 1 refactors to accept engine
   "src/commands/repair-jsonb.ts"        # PR 1 refactors
   "src/commands/serve-http.ts"          # PR 1 threads engine through the OAuth dispatch path

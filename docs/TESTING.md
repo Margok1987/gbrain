@@ -909,6 +909,23 @@ commit: `GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <file>` (the switch carries the
 overrides). Performance baselines are a bench, not a test:
 `docs/designs/refactor-wave-1/perf-baseline.md`.
 
+### Doctor check registry
+
+`gbrain doctor` runs `DOCTOR_CHECK_REGISTRY` (`src/commands/doctor/registry.ts`)
+in order: one `{ name, emits, run(ctx) }` entry per topic block under
+`src/commands/doctor/checks/`, each returning its checks or `STOP_DOCTOR`.
+`test/doctor-registry.test.ts` fails with a `FAIL` / `Why` / `Fix` / `See`
+block when an entry's `name` or any `emits[]` name is missing from
+`src/core/doctor-categories.ts`, when `emits[]` differs from what the entry's
+`run` can push (AST walk in `test/helpers/doctor-registry-ast.ts`), or when a
+STOP gate moves away from where master's `buildChecks` returned early.
+`test/doctor-mode-matrix.serial.test.ts` wraps every entry and the engine
+with recorders and asserts, per mode (default, `--fast`, `--fix`,
+`--fix --dry-run`, no engine, connection failure), which entries ran, where
+the run stopped, which engine calls happened and which mutations landed (the
+SKILL.md DRY auto-repair, the dead-holder lock reap). The W0 registry,
+early-stop and `--json` goldens pin the output itself.
+
 ### Move-only verifier
 
 `scripts/verify-move-only.ts` proves a commit tagged `Move-Only: yes` moves code
@@ -920,7 +937,13 @@ string/SQL text is exact). Imports, `export ... from` lines and toggling the
 `bun scripts/verify-move-only.ts <commit>` (default `HEAD~1..HEAD`);
 `--wrapper migration` inlines `export const vNNN: Migration = {...}` files into
 the generated registry array so the W3 split must reproduce the original
-`MIGRATIONS` array, and `--rename-map <json>` applies identifier rewrites for
+`MIGRATIONS` array; `--wrapper doctor-entry` inlines each
+`run<Topic>(ctx: DoctorContext): Promise<Check[]>` body (minus its ctx
+destructure / `connectedEngine` / `const checks` prologue and `return checks;`)
+at its `checks.push(...(await runX(ctx)));` call in `buildChecks`, drops the
+`const ctx: DoctorContext = {...};` glue and resolves relative `import()` /
+`require()` specifiers to repo paths, so the W4 doctor peel must reproduce the
+original `buildChecks` body; and `--rename-map <json>` applies identifier rewrites for
 `Mechanical-Rename: yes` commits. Failures print `FAIL: <file:line>` with the
 first differing token. Pinned by `test/scripts/verify-move-only.test.ts`.
 
@@ -1161,9 +1184,36 @@ After a move-only commit changes a function's key, run
 `bun scripts/check-function-size.ts --transfer`. It rewrites a missing row to
 the one unbaselined over-limit function whose whitespace-normalized text is
 identical to the old function at `HEAD` (`--from <ref>` for another base),
-keeping lines and justification, and leaves everything else for review.
+apart from an added leading `export` and module specifiers re-relativized to
+the new directory (each resolved against its own file, so a retargeted
+specifier still refuses), keeping lines and justification, and leaves
+everything else for review.
 Fixtures: `test/fixtures/guards/check-function-size.ts/{bad,good}`; every rule
 is driven in `test/scripts/check-function-size.test.ts`.
+
+### SyncRun state guard
+
+`scripts/check-sync-run-state.ts` (`bun run check:sync-run-state`, in
+`bun run verify`, well under a second) protects the refactor wave 1 `SyncRun`
+rule (A17). `SyncRun` (`src/commands/sync/sync-run.ts`) holds the state one
+incremental sync shares between closures that interleave across awaits: the
+checkpoint flush and its cadence, the import workers, the stall watchdog and
+the partial exit. Its mutable fields are the members of `interface SyncRun`
+not marked `readonly`. Over `src/commands/sync/**/*.ts` the guard fails when a
+mutable field is destructured from a SyncRun value (`const { bankedFiles } =
+run`, or a `{ checkpointDead }: SyncRun` parameter) or copied into a local
+(`const banked = run.bankedFiles`), because such a copy goes stale at the next
+await. A SyncRun value is a binding named `run`, annotated `SyncRun`, or
+initialized from `createSyncRun()`. Readonly fields (collection references,
+fixed configuration) may be destructured. Fields tagged `@checkpoint` in their
+JSDoc (the flush cadence, banked count, single-flight flag, dead flag, SIGTERM
+deregistration and yield counter) have one owner: only functions in
+`sync-run.ts` may assign them, so the flush, the SIGTERM hook and `partial()`
+cannot disagree about checkpoint state. Each failure prints
+`FAIL: <file:line>` plus `Why:` / `Fix:` / `See:`; the fix is to use
+`run.<field>` at each read and write, and to change checkpoint state through a
+`sync-run.ts` function. Fixtures:
+`test/fixtures/guards/check-sync-run-state.ts/{good,bad,bad-alias,bad-param,bad-owner}`.
 
 ### Source reads in tests
 
@@ -1781,6 +1831,8 @@ Unit tests and what they cover:
 - `test/check-resolvable.test.ts` — resolver reachability, MECE overlap, gap detection, proximity-based DRY detection, `extractDelegationTargets` coverage.
 - `test/dry-fix.test.ts` — auto-fix: three shape-aware expander pure-function tests; five guards (working-tree-dirty, no-git-backup, inside-code-fence, already-delegated within 40 lines, ambiguous-multi-match, block-is-callout).
 - `test/doctor-fix.test.ts` — `gbrain doctor --fix` CLI integration: dry-run preview, apply path, JSON output shape.
+- `test/doctor-registry.test.ts` — doctor check registry contract: every entry name and emitted check categorized (FAIL/Why/Fix/See), `emits[]` equals the AST-walked names of each entry's `run`, runtime registry equals the static walk, STOP gates at master's early returns.
+- `test/doctor-mode-matrix.serial.test.ts` — doctor mode matrix through the registry runner: entries run, STOP position, engine calls and `--fix` mutations for default, `--fast`, `--fix`, `--fix --dry-run`, no engine and connection failure.
 - `test/backoff.test.ts` — load-aware throttling, concurrency limits, active hours.
 - `test/transcription.test.ts` — provider detection, format validation, API key errors.
 - `test/enrichment-service.test.ts` — entity slugification, extraction, tier escalation.
