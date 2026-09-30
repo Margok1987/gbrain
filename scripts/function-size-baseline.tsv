@@ -6,8 +6,6 @@
 # fewer. Raising a row or adding one needs an issue/TODO id in the justification.
 # docs/TESTING.md#function-size-ratchet
 path	name	lines	justification
-src/cli.ts	handleCliOnly	1520	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/cli.ts	main	415	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/apply-migrations.ts	runApplyMigrations	305	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/bootstrap.ts	runHooks	597	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/bootstrap.ts	runHooks>withLock(#1)	449	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
@@ -27,8 +25,6 @@ src/commands/import.ts	runImport	959	seed: W5 baseline, refactor wave 1 (decompo
 src/commands/mcp-expose.ts	runPublish	443	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/migrate-embeddings.ts	runMigrateEmbeddings	325	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/migrate-engine.ts	runMigrateEngine	405	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/serve-http.ts	runServeHttp	2251	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/serve-http.ts	runServeHttp>app.post('/mcp')	415	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/serve.ts	installStdioLifecycle	315	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/sources.ts	runAdd	362	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/sync.ts	performFullSync	436	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
