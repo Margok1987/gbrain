@@ -211,21 +211,28 @@ describe('acceptProposal', () => {
     }
   });
 
-  test('wave-g: stranded claim (accepted, no promoted take) surfaces the repair SQL on retry', async () => {
+  test('wave-g: a stranded claim (accepted, no promoted take) is resumed by the retry, and a failed resume leaves it actionable', async () => {
     // The crash-between-CAS-and-fence-write shape (#4480 residual): the row
     // is status='accepted' with promoted_row_num NULL — invisible in the
-    // pending list, so the retry path must name it and print the repair.
+    // pending list. Re-running accept resumes the claim's own write request
+    // (never a second take); here that write fails (no such page), so the
+    // claim is released and the row is pending again instead of stranded.
     const id = await insertProposal({ slug: 'people/strand-example', claim: 'stranded claim', status: 'accepted' });
-    try {
-      await acceptProposal({ engine, brainDir: repo, config: testConfig }, id);
-      throw new Error('expected acceptProposal to throw for the stranded row');
-    } catch (e) {
-      expect(e).toBeInstanceOf(TakeProposalError);
-      expect((e as TakeProposalError).code).toBe('not_pending');
-      expect((e as Error).message).toContain('stranded');
-      expect((e as Error).message).toContain(`SET status='pending'`);
-      expect((e as Error).message).toContain(String(id));
-    }
+    await expect(acceptProposal({ engine, brainDir: repo, config: testConfig }, id)).rejects.toBeDefined();
+    expect((await proposalRow(id)).status).toBe('pending');
+  });
+
+  test('a claim taken moments ago by another accept is not resumed while that accept may still be submitting', async () => {
+    const id = await insertProposal({ slug: 'people/strand-example', claim: 'fresh claim', status: 'accepted' });
+    await engine.executeRaw('UPDATE take_proposals SET acted_at = now() WHERE id = $1', [id]);
+    await expect(acceptProposal({ engine, brainDir: repo, config: testConfig }, id)).rejects.toThrow('may still be submitting');
+    expect((await proposalRow(id)).status).toBe('accepted');
+  });
+
+  test('reject refuses a claimed accept and names the resume command', async () => {
+    const id = await insertProposal({ slug: 'people/strand-example', claim: 'claimed accept', status: 'accepted' });
+    await expect(rejectProposal({ engine }, id)).rejects.toMatchObject({ code: 'not_pending' });
+    await expect(rejectProposal({ engine }, id)).rejects.toThrow(`gbrain takes propose --accept ${id}`);
   });
 
   test('source scope: accepting an out-of-scope proposal reads as not_found', async () => {
