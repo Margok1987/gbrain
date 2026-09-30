@@ -10,6 +10,47 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.16.0] - 2026-09-30
+
+**Long-running brains stop getting stuck waiting on a `git` check that already finished.**
+
+Before GBrain publishes a page to your brain's git repo, it runs two quick `git` commands to confirm the repo is safe to write to. On the Bun versions GBrain runs on today, Bun can miss the signal that one of those commands has finished. GBrain then waited forever. The write queue stalled, and shutting down the owner process hung behind it. In our test suite this hit roughly one run in sixty under load and showed up as whole test files timing out after "killed 1 dangling process".
+
+Now every one of those `git` calls has its own deadline. If the command hasn't reported back in time, GBrain stops it and moves on, with the same "git unavailable" result a slow `git` already produced. The worst case is a 10 to 20 second delay instead of a hang.
+
+| Under load (16 parallel test workers) | Before | After |
+| --- | --- | --- |
+| Runs that hung | 4 of 250 | 0 of 320 |
+| Worst-case wait on a lost `git` exit | forever | 10 s (durability check), 20 s (page publish) |
+
+Nothing to configure and nothing to run after upgrading.
+
+### To take advantage of v0.60.16.0
+
+`gbrain upgrade` is all you need. There is no migration. To confirm, run `gbrain doctor`.
+
+### Itemized changes
+
+- `execFileBounded` in `src/core/brain-repo-durability.ts` settles from its own timer at the deadline or on abort and SIGKILLs the child, so a lost exit or pipe event (Bun 1.3.x, oven-sh/bun#30301) can no longer strand the caller. The durability probe (10 s) and the persistence effect `git` runner (20 s) use it; the staged topology clone's exit wait also returns once its deadline kill fires.
+- New `test/bounded-child-exec.test.ts` reproduces the lost exit event deterministically and pins deadline, abort, exit code and stdout behavior.
+
+## [0.60.15.0] - 2026-09-30
+
+**Import retries pick up edited files, contacts recover from expired sync tokens, and published skills work without extra tool annotations.** This release also filters machine-authored transcript entries and makes lock, push, and health checks report the right outcome.
+
+### Fixed
+- **Retried imports recheck the files you have now.** A checkpoint left by an interrupted or partly failed import no longer hides later edits, including edits with preserved timestamps. Unchanged pages still avoid re-chunking and embedding; retrying a large import does repeat file reads and content-hash checks.
+- **Claude Code transcript imports exclude metadata and explicitly non-human user text.** Root metadata and compact-summary markers are honored, while assistant text and tool placeholders keep their existing behavior. Legacy records without a structured origin remain compatible; this is not a strict human-origin requirement.
+- **Quoted installation paths no longer make a live autopilot lock look abandoned.** Script paths containing spaces are recognized without accepting similarly named scripts.
+- **Brain-repository pushes recognize work already saved remotely.** When a push reports failure, the helper checks fresh evidence from the exact branch at every configured push destination for the intended commit before reporting local-only work. Rebase conflicts and genuinely rejected pushes still fail; unrelated working-tree edits are not automatically stashed.
+- **`gbrain schema lint --with-db` works with or without a pack name.** The flag can appear before or after the name, and unsupported lint arguments are rejected rather than mistaken for a pack.
+- **Sync health checks respect `syncEnabled: false`.** Deliberately disabled sources no longer raise stale-sync warnings. Their scheduled non-sync maintenance still runs and remains covered by cycle-health checks.
+- **Legacy host-repository MCP skills can omit optional `tools:` metadata.** Valid skills without that field inherit the caller's available brain tools, filtered by grants and the effective tool surface. Explicit tool lists still narrow the inventory, `tools: []` stays empty, and invalid metadata does not receive the fallback. Canonical shared-skill requirements and server authorization are unchanged.
+- **Google contacts recover from HTTP 400 sync-token expiry.** A documented expiry reason or recognized expiry message triggers a full contacts refresh and stores a new token. Other bad requests still fail instead of silently resetting sync state.
+
+### To take advantage of v0.60.15.0
+If upgrading from before v0.51.0.0, first follow the [coordinated writer upgrade guide](skills/migrations/v0.51.0.0.md). From v0.51.0.0, run `gbrain upgrade` and restart long-running GBrain processes. Retry a partly failed import normally; deleting its checkpoint is no longer necessary to pick up edits. The next contacts sync recovers an expired token automatically. For existing hardened, unmanaged brain repositories, run `gbrain sources harden <source-id>` to refresh the generated push helper and local hook; managed worktrees retain the persistence outbox as their Git writer. This patch adds no migration, credentials, permission grants, or automatic-capture requirement beyond v0.51.0.0.
+
 ## [0.60.13.0] - 2026-09-30
 
 **Two things: your agent can now ask search for the whole conversation, section or page around each hit in the same call (off by default until a matched study shows it helps), and seven correctness fixes land, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**
