@@ -129,7 +129,51 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return rows[0]?.h ?? null;
     },
   },
+  {
+    domain: 'chunks (upsertChunks)',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.upsertChunks(SLUG, [{ chunk_index: 0, chunk_text: 'seeded chunk', chunk_source: 'compiled_truth' }]);
+    },
+    async write(tx) {
+      await tx.upsertChunks(SLUG, [{ chunk_index: 0, chunk_text: 'rolled-back chunk', chunk_source: 'compiled_truth' }]);
+    },
+    observe: chunkTexts,
+  },
+  {
+    domain: 'chunks (deleteChunks)',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.upsertChunks(SLUG, [{ chunk_index: 0, chunk_text: 'seeded chunk', chunk_source: 'compiled_truth' }]);
+    },
+    async write(tx) {
+      await tx.deleteChunks(SLUG);
+    },
+    observe: chunkTexts,
+  },
+  {
+    domain: 'chunks (setPageEmbeddingSignature)',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.setPageEmbeddingSignature(SLUG, { signature: 'seeded:3' });
+    },
+    async write(tx) {
+      await tx.setPageEmbeddingSignature(SLUG, { signature: 'rolled-back:3' });
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ s: string | null }>(
+        `SELECT embedding_signature AS s FROM pages WHERE slug = $1 AND source_id = 'default'`, [SLUG]);
+      return rows[0]?.s ?? null;
+    },
+  },
 ];
+
+async function chunkTexts(engine: BrainEngine): Promise<string[]> {
+  const rows = await engine.executeRaw<{ t: string }>(
+    `SELECT cc.chunk_text AS t FROM content_chunks cc JOIN pages p ON p.id = cc.page_id
+      WHERE p.slug = $1 AND p.source_id = 'default' ORDER BY cc.chunk_index`, [SLUG]);
+  return rows.map((r) => r.t);
+}
 
 async function rollbackChunk(engine: BrainEngine): Promise<number> {
   const existing = await engine.getChunks(SLUG);

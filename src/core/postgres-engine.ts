@@ -121,6 +121,7 @@ import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
 import * as sourcesImpl from './engine-sql/sources.ts';
 import * as filesImpl from './engine-sql/files.ts';
+import * as chunksImpl from './engine-sql/chunks.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './engine-sql/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
@@ -246,7 +247,16 @@ export class PostgresEngine implements BrainEngine {
    * returns the tx handle) runs migrated domain SQL inside its transaction.
    */
   private get engineSql(): SqlExecutor {
-    return postgresExecutor(this.sql, {
+    return this.engineSqlOn(this.sql);
+  }
+
+  /**
+   * Engine-sql executor over a given handle (the `tx` a
+   * `withScopedReadTransaction` callback receives), built per call like
+   * `engineSql` and never stored.
+   */
+  private engineSqlOn(conn: ReturnType<typeof postgres>): SqlExecutor {
+    return postgresExecutor(conn, {
       runUnsafe: (conn, sql, params, opts) => this.runUnsafe(conn, sql, params, opts),
       gauge: this.checkoutGauge,
     });
@@ -2107,33 +2117,8 @@ export class PostgresEngine implements BrainEngine {
     return rows.map(rowToSearchResult);
   }
 
-  async getEmbeddingsByChunkIds(
-    ids: number[],
-    column: string = 'embedding',
-  ): Promise<Map<number, Float32Array>> {
-    if (ids.length === 0) return new Map();
-    // v0.36 (D9): column parameter used by hybrid.cosineReScore so
-    // rescoring rehydrates from the active column's embedding space,
-    // not always 'embedding'. Engine has no resolver access; the
-    // caller must pass a known column name. Identifier-quoted (D12
-    // defense layer 2) plus a strict regex check (D12 defense layer 1)
-    // so even a misconfigured caller can't smuggle a SQL fragment.
-    if (!COLUMN_NAME_REGEX.test(column)) {
-      throw new EmbeddingColumnNotRegisteredError(column, []);
-    }
-    const quotedCol = quoteIdentifier(column);
-    const sql = this.sql;
-    const rawQuery = `
-      SELECT cc.id, cc.${quotedCol} AS embedding FROM content_chunks cc JOIN pages p ON p.id=cc.page_id
-      WHERE cc.id = ANY($1::int[]) AND cc.${quotedCol} IS NOT NULL AND ${currentTextProjectionFilter('p')}
-    `;
-    const rows = await sql.unsafe(rawQuery, [ids] as Parameters<typeof sql.unsafe>[1]);
-    const result = new Map<number, Float32Array>();
-    for (const row of rows) {
-      const embedding = tryParseEmbedding(row.embedding);
-      if (embedding) result.set(row.id as number, embedding);
-    }
-    return result;
+  async getEmbeddingsByChunkIds(ids: number[], column: string = 'embedding'): Promise<Map<number, Float32Array>> {
+    return chunksImpl.getEmbeddingsByChunkIds(unscopedExecutor(this.engineSql, 'chunks: unscoped on master (EO4 inventory)'), ids, column);
   }
 
   // v0.41.18.0: lazy-cached resolveBulkRetryOpts result. Constructor-time
@@ -2214,7 +2199,9 @@ export class PostgresEngine implements BrainEngine {
     }
   }
 
-  // Chunks
+  // Chunks SQL lives once in ./engine-sql/chunks.ts (refactor wave 1, W1-extended).
+  // The engine keeps the retry + transaction wrapper, the RLS scope
+  // transaction and the source-scope / active-column resolution.
   async upsertChunks(slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string } & BatchOpts): Promise<void> {
     if (this._chunkWritesInTransaction) return this._upsertChunksOnce(slug, chunks, opts);
     return this.batchRetry(opts?.auditSite ?? 'upsertChunks', opts?.signal,
@@ -2222,441 +2209,50 @@ export class PostgresEngine implements BrainEngine {
   }
 
   private async _upsertChunksOnce(slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string }): Promise<void> {
-    // Normalize the same way putPage does — pages.slug is stored lowercased,
-    // so a raw mixed-case slug here would miss the row it just wrote (#430).
-    slug = validateSlug(slug);
-    // Compare and persist the same canonical body bytes. JSONB rejects raw
-    // NUL/lone surrogates before the INSERT can sanitize them; identity fields
-    // remain untouched so malformed identifiers still reject the transaction.
-    chunks = chunks.map(chunk => ({ ...chunk, chunk_text: sanitizeText(chunk.chunk_text) }));
-    const sql = this.sql;
-    const sourceId = opts?.sourceId ?? 'default';
-    await this.lockPageKeys([{ sourceId, slug }]);
-    if (opts?.expectedRevision !== undefined) assertPageRevision(
-      await this.readPageSnapshot(slug, { sourceId }), { expectedRevision: opts.expectedRevision });
-
-    // Source-scope the page-id lookup. Without this filter, multi-source
-    // brains where the slug exists in 2+ sources return >1 row and the
-    // chunk replacement targets the wrong page (or fans out across pages).
-    const pages = await sql`SELECT id FROM pages WHERE slug = ${slug} AND source_id = ${sourceId} FOR UPDATE`;
-    if (pages.length === 0) throw new Error(`Page not found: ${slug} (source=${sourceId})`);
-    const pageId = pages[0].id;
-
-    // A fragment write cannot certify the full-body fence boundary. Import seals
-    // only after its complete replacement succeeds in the same transaction.
-    const invalidation = chunkWriteInvalidation(pageId, chunks);
-    await sql.unsafe(invalidation.sql, invalidation.params as never[]);
-
-    // Remove chunks that no longer exist (chunk_index beyond new count)
-    const newIndices = chunks.map(c => c.chunk_index);
-    if (newIndices.length > 0) {
-      await sql`DELETE FROM content_chunks WHERE page_id = ${pageId} AND chunk_index != ALL(${newIndices})`;
-    } else {
-      await sql`DELETE FROM content_chunks WHERE page_id = ${pageId}`;
-      return;
-    }
-
-    // Batch upsert: build a single multi-row INSERT ON CONFLICT statement.
-    // v0.19.0: includes language/symbol_name/symbol_type/start_line/end_line
-    // so code chunks carry tree-sitter metadata into the DB. Markdown chunks
-    // pass NULL for all five.
-    // v0.20.0 Cathedral II Layer 6: adds parent_symbol_path / doc_comment /
-    // symbol_name_qualified so nested-chunk emission (A3) can round-trip
-    // scope metadata through upserts.
-    // v0.27.1 (Phase 8): added `modality` + `embedding_image` to the column
-    // list. Image chunks pass embedding=null + embedding_image=Float32Array.
-    //
-    // #1262: the text-embedding column is registry-resolved, not the literal
-    // `embedding`. A caller-resolved descriptor wins; otherwise the DB-plane
-    // registry rows route the write to the SAME active column the read side
-    // searches (a Voyage-routed brain must not fail every write with a
-    // dimension mismatch against the legacy 1536d column). Config-table read
-    // failure (pre-v36 brain mid-migration) falls back to the legacy column;
-    // an unregistered `search_embedding_column` throws the resolver's loud
-    // paste-ready hint. Mirrored in pglite-engine.ts (parity).
-    // Resolution MUST stay on the local sql handle: callers (import-file)
-    // invoke this inside their own transaction — re-entering the engine's
-    // public surface via resolveActiveEmbeddingColumnFromEngine deadlocks
-    // the connection path. Same rows, same pure resolver, no re-entrancy.
-    // Mirrored in pglite-engine.ts (parity).
-    let writeCol: ResolvedColumn;
-    if (opts?.embeddingColumn) {
-      writeCol = normalizeEngineColumn(opts.embeddingColumn);
-    } else {
-      let searchEmbeddingColumn: string | null = null;
-      let embeddingColumnsJson: string | null = null;
-      try {
-        const cfgRows = await sql`SELECT key, value FROM config WHERE key IN ('search_embedding_column', 'embedding_columns')`;
-        for (const r of cfgRows) {
-          if (r.key === 'search_embedding_column') searchEmbeddingColumn = r.value as string;
-          else if (r.key === 'embedding_columns') embeddingColumnsJson = r.value as string;
-        }
-      } catch {
-        // config table unreadable — legacy column via the resolver default.
-      }
-      writeCol = resolveWriteColumnFromConfigRows({ searchEmbeddingColumn, embeddingColumnsJson });
-    }
-    const writeColId = quoteIdentifier(writeCol.name);
-    const writeCast = vectorCastSuffix(writeCol);
-
-    // #4246: embedded_text_hash records md5(chunk_text) AT EMBED TIME so a
-    // later text rewrite that keeps the vector is detectable as content
-    // drift (invalidateContentDriftEmbeddings). NULL when no embedding lands.
-    const cols = `(page_id, chunk_index, chunk_text, chunk_source, ${writeColId}, model, token_count, embedded_at, embedded_text_hash, embedding_input_hash, language, symbol_name, symbol_type, start_line, end_line, parent_symbol_path, doc_comment, symbol_name_qualified, modality, embedding_image)`;
-    const rows: string[] = [];
-    const params: unknown[] = [];
-    let paramIdx = 1;
-
-    let resolvedModel: string | null = null;
-    try {
-      // Keep the gateway lazy so module-load failure remains inside this soft
-      // fallback boundary; eager evaluation would bypass the config-row fallback.
-      const gw = await import('./ai/gateway.ts'); // engine-dynamic-import-ok
-      resolvedModel = gw.getEmbeddingModelProvenance();
-    } catch {}
-    if (!resolvedModel) {
-      try {
-        const cfg = await sql`SELECT value FROM config WHERE key = 'embedding_model'`;
-        resolvedModel = (cfg[0]?.value as string | undefined) ?? null;
-      } catch {}
-    }
-    resolvedModel = writeCol.embeddingModel || resolvedModel;
-    if (!resolvedModel && chunks.some(chunk => chunk.embedding && !chunk.model)) {
-      throw new Error('Embedding model provenance is unknown. Supply an explicit chunk model or run gbrain migrate embeddings --status before an explicit migration.');
-    }
-    if (!resolvedModel) resolvedModel = 'unconfigured';
-
-    for (const chunk of chunks) {
-      const embeddingStr = chunk.embedding
-        ? '[' + Array.from(chunk.embedding).join(',') + ']'
-        : null;
-      const embeddingImageStr = chunk.embedding_image
-        ? '[' + Array.from(chunk.embedding_image).join(',') + ']'
-        : null;
-      const parentPath = chunk.parent_symbol_path && chunk.parent_symbol_path.length > 0
-        ? chunk.parent_symbol_path
-        : null;
-      const modality = chunk.modality ?? 'text';
-
-      const embeddingPh = embeddingStr ? `$${paramIdx++}${writeCast}` : 'NULL';
-      const embeddedAtPh = embeddingStr ? 'now()' : 'NULL';
-      const embeddingImagePh = embeddingImageStr ? `$${paramIdx++}::vector` : 'NULL';
-      // #4246: hash in SQL (not JS) so stamp + drift comparison share ONE
-      // md5 implementation. Binds chunk_text a second time.
-      const embeddedTextHashPh = embeddingStr ? `md5($${paramIdx++})` : 'NULL';
-      // #5553: embedding-input provenance travels only with the vector it describes.
-      const embeddingInputHash = embeddingStr ? chunk.embedding_input_hash ?? null : null;
-      const embeddingInputHashPh = embeddingInputHash ? `$${paramIdx++}` : 'NULL';
-
-      rows.push(
-        `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, ` +
-        `${embeddingPh}, $${paramIdx++}, $${paramIdx++}, ${embeddedAtPh}, ${embeddedTextHashPh}, ${embeddingInputHashPh}, ` +
-        `$${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, ` +
-        `$${paramIdx++}::text[], $${paramIdx++}, $${paramIdx++}, ` +
-        `$${paramIdx++}, ${embeddingImagePh})`,
-      );
-
-      // Already normalized before the seal snapshot. Both storage and the
-      // embedded_text_hash input must use those same canonical bytes.
-      const sanitizedChunkText = chunk.chunk_text;
-      // Param push order MUST match placeholder allocation order.
-      if (embeddingStr) params.push(embeddingStr);
-      if (embeddingImageStr) params.push(embeddingImageStr);
-      if (embeddingStr) params.push(sanitizedChunkText); // embedded_text_hash md5() input
-      if (embeddingInputHash) params.push(embeddingInputHash);
-      params.push(
-        pageId, chunk.chunk_index, sanitizedChunkText, chunk.chunk_source,
-        chunk.model || resolvedModel, chunk.token_count || null,
-        chunk.language || null, chunk.symbol_name || null, chunk.symbol_type || null,
-        chunk.start_line ?? null, chunk.end_line ?? null,
-        parentPath, chunk.doc_comment || null, chunk.symbol_name_qualified || null,
-        modality,
-      );
-    }
-
-    // Single statement upsert: preserves existing embeddings via COALESCE when new value is NULL.
-    // CONSISTENCY: when chunk_text changes and no new embedding is supplied, BOTH embedding AND
-    // embedded_at must reset to NULL so 'embed --stale' correctly picks up the row for re-embedding.
-    // Without this, embedded_at lies (says "embedded" while embedding=NULL), and any staleness
-    // predicate on embedded_at would silently skip the row. This is why the egress fix predicates
-    // on 'embedding IS NULL' rather than `embedded_at IS NULL` — and it's why we now keep both
-    // columns honest at write time.
-    //
-    // v0.40.3.0 D24 NULL→non-NULL race fix (TODOS.md v0.35.x item).
-    // Two writers racing on the same chunk (e.g., autopilot sync + manual
-    // 'embed --stale' + contextual reindex) previously raced last-write-wins
-    // via `COALESCE(EXCLUDED.embedding, content_chunks.embedding)`. With
-    // per-chunk Haiku synopsis the cost of an overwrite jumped from
-    // ~$0.000001 to ~$0.0003. New rule for the text-unchanged branch:
-    //   - existing is NULL → take new (cold path, no race)
-    //   - new is fresher (embedded_at > existing.embedded_at) → take new
-    //   - otherwise → keep existing (slower writer with stale embedding loses)
-    // Mirrored in pglite-engine.ts; pinned by test/e2e/concurrent-embed-race.test.ts.
-    //
-    // Code-chunk metadata columns (language / symbol_name / symbol_type / line range /
-    // parent_symbol_path / doc_comment / symbol_name_qualified) follow the SAME chunk_text-gated
-    // CASE pattern as `embedding` (#769). Re-chunk (chunk_text changed) trusts EXCLUDED outright;
-    // pure re-embed (chunk_text unchanged) COALESCEs so a caller that only carries embedding
-    // doesn't clobber metadata to NULL. Without this, every embed --stale pass nuked code-def's
-    // primary index for thousands of chunks at once.
-    //
-    // #3461: `model` mirrors the `embedding` CASE branch-for-branch — the label must
-    // describe whichever vector WINS the upsert. The old COALESCE(EXCLUDED.model, …)
-    // relabeled preserved (older-model) vectors with the current gateway model on every
-    // partial re-embed, corrupting provenance without changing the vector.
-    await sql.unsafe(
-      `INSERT INTO content_chunks ${cols} VALUES ${rows.join(', ')}
-       ON CONFLICT (page_id, chunk_index) DO UPDATE SET
-         chunk_text = EXCLUDED.chunk_text,
-         chunk_source = EXCLUDED.chunk_source,
-         ${writeColId} = CASE
-           WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.${writeColId}
-           WHEN content_chunks.${writeColId} IS NULL THEN EXCLUDED.${writeColId}
-           WHEN EXCLUDED.embedded_at IS NOT NULL
-                AND (content_chunks.embedded_at IS NULL OR EXCLUDED.embedded_at > content_chunks.embedded_at)
-                THEN EXCLUDED.${writeColId}
-           ELSE content_chunks.${writeColId}
-         END,
-         model = CASE
-           WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.model
-           WHEN content_chunks.${writeColId} IS NULL THEN EXCLUDED.model
-           WHEN EXCLUDED.embedded_at IS NOT NULL
-                AND (content_chunks.embedded_at IS NULL OR EXCLUDED.embedded_at > content_chunks.embedded_at)
-                THEN EXCLUDED.model
-           ELSE content_chunks.model
-         END,
-         token_count = EXCLUDED.token_count,
-         embedded_at = CASE
-           WHEN EXCLUDED.chunk_text != content_chunks.chunk_text AND EXCLUDED.${writeColId} IS NULL THEN NULL
-           WHEN content_chunks.${writeColId} IS NULL AND EXCLUDED.${writeColId} IS NOT NULL THEN EXCLUDED.embedded_at
-           WHEN EXCLUDED.embedded_at IS NOT NULL
-                AND (content_chunks.embedded_at IS NULL OR EXCLUDED.embedded_at > content_chunks.embedded_at)
-                THEN EXCLUDED.embedded_at
-           ELSE content_chunks.embedded_at
-         END,
-         embedded_text_hash = CASE
-           WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.embedded_text_hash
-           WHEN content_chunks.${writeColId} IS NULL THEN EXCLUDED.embedded_text_hash
-           WHEN EXCLUDED.embedded_at IS NOT NULL
-                AND (content_chunks.embedded_at IS NULL OR EXCLUDED.embedded_at > content_chunks.embedded_at)
-                THEN EXCLUDED.embedded_text_hash
-           ELSE content_chunks.embedded_text_hash
-         END,
-         embedding_input_hash = CASE
-           WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.embedding_input_hash
-           WHEN content_chunks.${writeColId} IS NULL THEN EXCLUDED.embedding_input_hash
-           WHEN EXCLUDED.embedded_at IS NOT NULL
-                AND (content_chunks.embedded_at IS NULL OR EXCLUDED.embedded_at > content_chunks.embedded_at)
-                THEN EXCLUDED.embedding_input_hash
-           ELSE content_chunks.embedding_input_hash
-         END,
-         language = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.language ELSE COALESCE(EXCLUDED.language, content_chunks.language) END,
-         symbol_name = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.symbol_name ELSE COALESCE(EXCLUDED.symbol_name, content_chunks.symbol_name) END,
-         symbol_type = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.symbol_type ELSE COALESCE(EXCLUDED.symbol_type, content_chunks.symbol_type) END,
-         start_line = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.start_line ELSE COALESCE(EXCLUDED.start_line, content_chunks.start_line) END,
-         end_line = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.end_line ELSE COALESCE(EXCLUDED.end_line, content_chunks.end_line) END,
-         parent_symbol_path = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.parent_symbol_path ELSE COALESCE(EXCLUDED.parent_symbol_path, content_chunks.parent_symbol_path) END,
-         doc_comment = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.doc_comment ELSE COALESCE(EXCLUDED.doc_comment, content_chunks.doc_comment) END,
-         symbol_name_qualified = CASE WHEN EXCLUDED.chunk_text != content_chunks.chunk_text THEN EXCLUDED.symbol_name_qualified ELSE COALESCE(EXCLUDED.symbol_name_qualified, content_chunks.symbol_name_qualified) END,
-         modality = EXCLUDED.modality,
-         embedding_image = COALESCE(EXCLUDED.embedding_image, content_chunks.embedding_image)`,
-      params as Parameters<typeof sql.unsafe>[1],
-    );
+    return chunksImpl.upsertChunksOnce(this.engineSql, {
+      lockPageKeys: (keys) => this.lockPageKeys(keys),
+      readPageSnapshot: (pageSlug, snapshotOpts) => this.readPageSnapshot(pageSlug, snapshotOpts),
+    }, slug, chunks, opts);
   }
 
   async getChunks(slug: string, opts?: { sourceId?: string; sourceIds?: string[]; includeEmbedding?: boolean; excludePrivate?: boolean; requireSafeChunks?: boolean; includeUnsealed?: boolean }): Promise<Chunk[]> {
     const sourceIds = opts?.sourceIds && opts.sourceIds.length > 0 ? opts.sourceIds : undefined;
-    const scalarSourceId = opts?.sourceId ?? 'default';
-    // S2: embedding_is_null reports the registry-ACTIVE column's truth —
-    // `embed <page>` filters on it, so legacy-column truth would re-embed
-    // every chunk on every pass on a registry-routed brain.
-    const colId = await this.activeEmbeddingColId({ fallbackToLegacy: true });
-    const includeEmbedding = opts?.includeEmbedding === true;
-    // RLS scope binding (opt-in via GBRAIN_RLS_SCOPE_BINDING).
-    return await this.withScopedReadTransaction(sourceIds, sourceIds ? undefined : scalarSourceId, async (tx) => {
-      const scope = sourceIds
-        ? tx`p.source_id = ANY(${sourceIds}::text[])`
-        : tx`p.source_id = ${scalarSourceId}`;
-      // #2544: explicit non-vector column list — most callers discard
-      // embeddings, so `cc.*` shipped every vector over the wire only to be
-      // thrown away. `includeEmbedding` adds it back for the callers that
-      // consume it (embed-reuse.ts); it selects the registry-ACTIVE column
-      // (aliased AS embedding) so a reused vector always matches the column
-      // upsertChunks writes.
-      // embedding_is_null: boolean truth of the stored vector (a schema
-      // rebuild NULLs vectors without touching embedded_at).
-      const embedCol = includeEmbedding ? tx`, cc.${tx.unsafe(colId)} AS embedding` : tx``;
-      const rows = await tx`
-        SELECT cc.id, cc.page_id, cc.chunk_index, cc.chunk_text, cc.chunk_source,
-               cc.model, cc.token_count, cc.embedded_at, cc.language,
-               cc.symbol_name, cc.symbol_type, cc.start_line, cc.end_line,
-               cc.parent_symbol_path, cc.doc_comment, cc.symbol_name_qualified, cc.modality,
-               (cc.${tx.unsafe(colId)} IS NULL) AS embedding_is_null
-               ${embedCol}
-        FROM content_chunks cc
-        JOIN pages p ON p.id = cc.page_id
-        WHERE p.slug = ${slug} AND ${scope}
-          ${opts?.excludePrivate ? tx.unsafe(`AND ${privatePagesFilterFragment('p')}`) : tx``}
-          ${opts?.includeUnsealed ? tx`` : tx.unsafe(`AND ${currentTextProjectionFilter('p')}`)}
-          ${requiresSafeChunks(opts) ? tx.unsafe(`AND ${safeChunksFilter('p')}`) : tx``}
-        ORDER BY cc.chunk_index
-      `;
-      return rows.map((r: Record<string, unknown>) => rowToChunk(r, includeEmbedding));
-    });
-  }
-
-  /**
-   * Build the stale-chunk WHERE clause + positional params for sql.unsafe.
-   * `staleColRef` is the registry-ACTIVE embedding column reference
-   * (`cc."<name>"`, S2 unification — a registry-routed brain's staleness
-   * lives in the active column, never the literal legacy `cc.embedding`).
-   * embed_skip always excluded. `signature` widens "stale" to include
-   * embedding_signature drift (NULL grandfathered). `includeNullSignature`
-   * (#3391) lifts the grandfather clause so pre-stamp pages count as stale
-   * too (provider-migration paths). Shared by countStaleChunks +
-   * sumStaleChunkChars (parity with the PGLite sibling).
-   */
-  private buildStaleChunkWhere(staleColRef: string, opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean }): { where: string; params: unknown[] } {
-    const params: unknown[] = [];
-    const conds: string[] = ['p.deleted_at IS NULL'];
-    if (opts?.signature !== undefined) {
-      params.push(opts.signature);
-      conds.push(
-        opts.includeNullSignature
-          ? `(${staleColRef} IS NULL OR p.embedding_signature IS NULL OR p.embedding_signature <> $${params.length})`
-          : `(${staleColRef} IS NULL OR (p.embedding_signature IS NOT NULL AND p.embedding_signature <> $${params.length}))`,
-      );
-    } else {
-      conds.push(`${staleColRef} IS NULL`);
-    }
-    conds.push(`NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')`);
-    if (opts?.sourceId !== undefined) {
-      params.push(opts.sourceId);
-      conds.push(`p.source_id = $${params.length}`);
-    }
-    return { where: conds.join(' AND '), params };
+    const sourceId = opts?.sourceId ?? 'default';
+    const column = (await resolveActiveEmbeddingColumnFromEngine(this, { fallbackToLegacy: true })).name;
+    return this.withScopedReadTransaction(sourceIds, sourceIds ? undefined : sourceId, tx => chunksImpl.getChunks(scopedRead(this.engineSqlOn(tx)), column, slug, { sourceIds, sourceId }, opts));
   }
 
   /** S2: quoted identifier of the registry-ACTIVE embedding column for the
-   *  stale/invalidate/health plane — read-only sites pass fallbackToLegacy
-   *  so a broken registry row can't crash diagnostics (writes/invalidation
-   *  stay loud). Callers prefix the table alias themselves (`cc.${colId}`). */
+   *  health plane (getStats / getHealth) — read-only sites pass fallbackToLegacy
+   *  so a broken registry row can't crash diagnostics. Callers prefix the
+   *  table alias themselves (`cc.${colId}`). */
   private async activeEmbeddingColId(opts?: { fallbackToLegacy?: boolean }): Promise<string> {
     const col = await resolveActiveEmbeddingColumnFromEngine(this, opts);
     return quoteIdentifier(col.name);
   }
 
   async countStaleChunks(opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean }): Promise<number> {
-    // Always JOIN pages so the embed_skip + signature predicates apply.
-    // D7: source_id scoping. v0.41.31: optional signature widens staleness
-    // to embedding_signature drift (NULL grandfathered unless
-    // includeNullSignature, #3391).
-    const staleColId = await this.activeEmbeddingColId({ fallbackToLegacy: true });
-    const { where, params } = this.buildStaleChunkWhere(`cc.${staleColId}`, opts);
-    // RLS scope binding (opt-in via GBRAIN_RLS_SCOPE_BINDING).
-    return await this.withScopedReadTransaction(undefined, opts?.sourceId, async (tx) => {
-      const rows = await tx.unsafe(
-        `SELECT count(*)::int AS count
-           FROM content_chunks cc
-           JOIN pages p ON p.id = cc.page_id
-          WHERE ${where}`,
-        params as Parameters<typeof tx.unsafe>[1],
-      );
-      return Number((rows[0] as { count?: number } | undefined)?.count ?? 0);
-    });
+    const column = (await resolveActiveEmbeddingColumnFromEngine(this, { fallbackToLegacy: true })).name;
+    return this.withScopedReadTransaction(undefined, opts?.sourceId, tx => chunksImpl.countStaleChunks(scopedRead(this.engineSqlOn(tx)), column, opts));
   }
 
   async sumStaleChunkChars(opts?: { sourceId?: string; signature?: string; includeNullSignature?: boolean }): Promise<number> {
-    // Sibling of countStaleChunks: same stale predicate, summing chunk_text
-    // length for the sync cost preview. ::bigint guards int4 overflow.
-    const staleColId = await this.activeEmbeddingColId({ fallbackToLegacy: true });
-    const { where, params } = this.buildStaleChunkWhere(`cc.${staleColId}`, opts);
-    const rows = await this.sql.unsafe(
-      `SELECT COALESCE(SUM(LENGTH(cc.chunk_text)), 0)::bigint AS chars
-         FROM content_chunks cc
-         JOIN pages p ON p.id = cc.page_id
-        WHERE ${where}`,
-      params as Parameters<typeof this.sql.unsafe>[1],
-    );
-    return Number((rows[0] as { chars?: number | string } | undefined)?.chars ?? 0);
+    const column = (await resolveActiveEmbeddingColumnFromEngine(this, { fallbackToLegacy: true })).name;
+    return chunksImpl.sumStaleChunkChars(unscopedExecutor(this.engineSql, 'chunks: unscoped on master (EO4 inventory)'), column, opts);
   }
 
   async setPageEmbeddingSignature(slug: string, opts: { sourceId?: string; signature: string }): Promise<void> {
-    const sql = this.sql;
-    await sql`
-      UPDATE pages SET embedding_signature = ${opts.signature}
-      WHERE slug = ${slug} AND source_id = ${opts.sourceId ?? 'default'}
-    `;
+    return chunksImpl.setPageEmbeddingSignature(this.engineSql, slug, opts);
   }
 
   async invalidateStaleSignatureEmbeddings(opts: { signature: string; sourceId?: string; includeNullSignature?: boolean }): Promise<number> {
-    const colId = await this.activeEmbeddingColId();
-    const { model, dims } = splitEmbeddingSignature(opts.signature);
-    const params: unknown[] = [opts.signature, model, dims];
-    let srcClause = '';
-    if (opts.sourceId !== undefined) {
-      params.push(opts.sourceId);
-      srcClause = ` AND p.source_id = $${params.length}`;
-    }
-    const sigClause = opts.includeNullSignature
-      ? `(p.embedding_signature IS NULL OR p.embedding_signature <> $1)`
-      : `p.embedding_signature IS NOT NULL
-          AND p.embedding_signature <> $1`;
-    return this.transaction(async tx => {
-      params.push(await lockEmbeddingSources(tx, opts.sourceId));
-      const rows = await tx.executeRaw(
-        `UPDATE content_chunks cc
-            SET ${colId} = NULL, embedded_at = NULL
-           FROM pages p
-          WHERE cc.page_id = p.id
-            AND p.source_id=ANY($${params.length}::text[])
-            AND EXISTS (SELECT 1 FROM sources s WHERE s.id=p.source_id AND NOT s.archived)
-            AND cc.${colId} IS NOT NULL
-            AND NOT ${currentSpaceChunkPredicate(colId, 2, 3)}
-            AND ${sigClause}${srcClause}
-          RETURNING cc.page_id`,
-        params,
-      );
-      return (rows as unknown[]).length;
-    });
+    const column = (await resolveActiveEmbeddingColumnFromEngine(this)).name;
+    return chunksImpl.invalidateStaleSignatureEmbeddings(fn => this.transaction(fn), column, opts);
   }
 
   async invalidateContentDriftEmbeddings(opts?: { sourceId?: string }): Promise<number> {
-    // #4246: NULL embeddings whose stored embed-time hash no longer matches
-    // md5(chunk_text) — the vector was computed from a PREVIOUS content
-    // revision. Feeds the NULL-embedding cursor (mirrors the signature
-    // invalidation above). GRANDFATHER: NULL hash (pre-v133 rows) untouched
-    // so upgrades don't trigger a corpus-wide re-embed spike. embed_skip
-    // pages excluded — the stale selectors can't re-embed them, so NULLing
-    // would strand them (same never-NULL-what-nothing-re-embeds rule as
-    // embedding-invalidation.ts). Mirrored in pglite-engine.ts (parity).
-    // S2: keyed on the registry-ACTIVE column (loud resolver failure).
-    const colId = await this.activeEmbeddingColId();
-    const params: unknown[] = [];
-    let srcClause = '';
-    if (opts?.sourceId !== undefined) {
-      params.push(opts.sourceId);
-      srcClause = ` AND p.source_id = $${params.length}`;
-    }
-    return this.transaction(async tx => {
-      params.push(await lockEmbeddingSources(tx, opts?.sourceId));
-      const rows = await tx.executeRaw(
-        `UPDATE content_chunks cc
-            SET ${colId} = NULL, embedded_at = NULL, embedded_text_hash = NULL
-           FROM pages p
-          WHERE cc.page_id = p.id
-            AND p.source_id=ANY($${params.length}::text[])
-            AND EXISTS (SELECT 1 FROM sources s WHERE s.id=p.source_id AND NOT s.archived)
-            AND p.deleted_at IS NULL
-            AND cc.${colId} IS NOT NULL
-            AND cc.embedded_text_hash IS NOT NULL
-            AND cc.embedded_text_hash <> md5(cc.chunk_text)
-            AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')${srcClause}
-          RETURNING cc.page_id`,
-        params,
-      );
-      return (rows as unknown[]).length;
-    });
+    const column = (await resolveActiveEmbeddingColumnFromEngine(this)).name;
+    return chunksImpl.invalidateContentDriftEmbeddings(fn => this.transaction(fn), column, opts);
   }
 
   async listStaleChunks(opts?: {
@@ -2667,193 +2263,20 @@ export class PostgresEngine implements BrainEngine {
     orderBy?: 'page_id' | 'updated_desc';
     afterUpdatedAt?: string | null;
   }): Promise<StaleChunkRow[]> {
-    const limit = opts?.batchSize ?? 2000;
-    const afterPid = opts?.afterPageId ?? 0;
-    const afterIdx = opts?.afterChunkIndex ?? -1;
-    const orderBy = opts?.orderBy ?? 'page_id';
-
-    // S2: stale = NULL in the registry-ACTIVE column. Resolved BEFORE the
-    // scoped transaction; read-only listing falls back to legacy on a broken
-    // registry (the upsert it feeds throws the loud resolver error anyway).
-    const staleColId = await this.activeEmbeddingColId({ fallbackToLegacy: true });
-
-    // RLS scope binding (opt-in via GBRAIN_RLS_SCOPE_BINDING).
-    return await this.withScopedReadTransaction(undefined, opts?.sourceId, async (tx) => {
-      // v0.41.18.0 (A13, codex #9): --priority recent path. Composite cursor
-      // (updated_at DESC NULLS LAST, page_id ASC, chunk_index ASC). Backed by
-      // idx_pages_updated_at_desc + content_chunks_stale_idx partial.
-      if (orderBy === 'updated_desc') {
-        const afterUpdated = opts?.afterUpdatedAt ?? null;
-        const isFirstPage = afterUpdated === null && afterPid === 0;
-        if (opts?.sourceId === undefined) {
-          const rows = isFirstPage ? await tx`
-            SELECT p.slug, cc.chunk_index, cc.chunk_text, cc.chunk_source,
-                   cc.model, cc.token_count, p.source_id, cc.page_id,
-                   p.updated_at
-            FROM content_chunks cc
-            JOIN pages p ON p.id = cc.page_id
-            WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
-              AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
-            ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
-            LIMIT ${limit}
-          ` : await tx`
-            SELECT p.slug, cc.chunk_index, cc.chunk_text, cc.chunk_source,
-                   cc.model, cc.token_count, p.source_id, cc.page_id,
-                   p.updated_at
-            FROM content_chunks cc
-            JOIN pages p ON p.id = cc.page_id
-            WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
-              AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
-              AND (
-                p.updated_at < ${afterUpdated}::timestamptz
-                OR (p.updated_at = ${afterUpdated}::timestamptz AND p.id > ${afterPid})
-                OR (p.updated_at = ${afterUpdated}::timestamptz AND p.id = ${afterPid} AND cc.chunk_index > ${afterIdx})
-              )
-            ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
-            LIMIT ${limit}
-          `;
-          return rows as unknown as StaleChunkRow[];
-        }
-        const rows = isFirstPage ? await tx`
-          SELECT p.slug, cc.chunk_index, cc.chunk_text, cc.chunk_source,
-                 cc.model, cc.token_count, p.source_id, cc.page_id,
-                 p.updated_at
-          FROM content_chunks cc
-          JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
-            AND p.source_id = ${opts.sourceId}
-            AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
-          ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
-          LIMIT ${limit}
-        ` : await tx`
-          SELECT p.slug, cc.chunk_index, cc.chunk_text, cc.chunk_source,
-                 cc.model, cc.token_count, p.source_id, cc.page_id,
-                 p.updated_at
-          FROM content_chunks cc
-          JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
-            AND p.source_id = ${opts.sourceId}
-            AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
-            AND (
-              p.updated_at < ${afterUpdated}::timestamptz
-              OR (p.updated_at = ${afterUpdated}::timestamptz AND p.id > ${afterPid})
-              OR (p.updated_at = ${afterUpdated}::timestamptz AND p.id = ${afterPid} AND cc.chunk_index > ${afterIdx})
-            )
-          ORDER BY p.updated_at DESC NULLS LAST, p.id ASC, cc.chunk_index ASC
-          LIMIT ${limit}
-        `;
-        return rows as unknown as StaleChunkRow[];
-      }
-      // orderBy === 'page_id' — legacy stable cursor.
-      if (opts?.sourceId === undefined) {
-        const rows = await tx`
-          SELECT p.slug, cc.chunk_index, cc.chunk_text, cc.chunk_source,
-                 cc.model, cc.token_count, p.source_id, cc.page_id
-          FROM content_chunks cc
-          JOIN pages p ON p.id = cc.page_id
-          WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
-            AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
-            AND (cc.page_id, cc.chunk_index) > (${afterPid}, ${afterIdx})
-          ORDER BY cc.page_id, cc.chunk_index
-          LIMIT ${limit}
-        `;
-        return rows as unknown as StaleChunkRow[];
-      }
-      const rows = await tx`
-        SELECT p.slug, cc.chunk_index, cc.chunk_text, cc.chunk_source,
-               cc.model, cc.token_count, p.source_id, cc.page_id
-        FROM content_chunks cc
-        JOIN pages p ON p.id = cc.page_id
-        WHERE cc.${tx.unsafe(staleColId)} IS NULL AND p.deleted_at IS NULL
-          AND p.source_id = ${opts.sourceId}
-          AND NOT (COALESCE(p.frontmatter, '{}'::jsonb) ? 'embed_skip')
-          AND (cc.page_id, cc.chunk_index) > (${afterPid}, ${afterIdx})
-        ORDER BY cc.page_id, cc.chunk_index
-        LIMIT ${limit}
-      `;
-      return rows as unknown as StaleChunkRow[];
-    });
-  }
-
-  /**
-   * Shared chunkless-page-with-content predicate (mirrors PGLiteEngine).
-   * Excludes quarantined + embed_skip pages — both are intentionally
-   * chunkless by design, not drift the safety net should repair.
-   */
-  private buildChunklessPagesWhere(opts?: { sourceId?: string }): { where: string; params: unknown[] } {
-    const conds: string[] = [
-      'p.deleted_at IS NULL',
-      // healChunklessPages chunks BOTH compiled_truth and timeline (mirrors
-      // embedPage) — a timeline-only page (rare but schema-legal) has
-      // something to heal even with compiled_truth = ''.
-      `(p.compiled_truth <> '' OR p.timeline <> '')`,
-      EMBED_SKIP_FILTER_FRAGMENT,
-      QUARANTINE_FILTER_FRAGMENT,
-      'NOT EXISTS (SELECT 1 FROM content_chunks cc WHERE cc.page_id = p.id)',
-    ];
-    const params: unknown[] = [];
-    if (opts?.sourceId) {
-      params.push(opts.sourceId);
-      conds.push(`p.source_id = $${params.length}`);
-    }
-    return { where: conds.join(' AND '), params };
+    const column = (await resolveActiveEmbeddingColumnFromEngine(this, { fallbackToLegacy: true })).name;
+    return this.withScopedReadTransaction(undefined, opts?.sourceId, tx => chunksImpl.listStaleChunks(scopedRead(this.engineSqlOn(tx)), column, opts));
   }
 
   async countChunklessPagesWithContent(opts?: { sourceId?: string }): Promise<number> {
-    const { where, params } = this.buildChunklessPagesWhere(opts);
-    // RLS scope binding (opt-in via GBRAIN_RLS_SCOPE_BINDING).
-    return await this.withScopedReadTransaction(undefined, opts?.sourceId, async (tx) => {
-      const rows = await tx.unsafe(
-        `SELECT count(*)::int AS count FROM pages p WHERE ${where}`,
-        params as Parameters<typeof tx.unsafe>[1],
-      );
-      return Number((rows[0] as { count?: number } | undefined)?.count ?? 0);
-    });
+    return this.withScopedReadTransaction(undefined, opts?.sourceId, tx => chunksImpl.countChunklessPagesWithContent(scopedRead(this.engineSqlOn(tx)), opts));
   }
 
-  async listChunklessPagesWithContent(opts?: {
-    batchSize?: number;
-    afterPageId?: number;
-    sourceId?: string;
-  }): Promise<ChunklessPageRow[]> {
-    const { where, params } = this.buildChunklessPagesWhere(opts);
-    let afterClause = '';
-    if (opts?.afterPageId != null) {
-      params.push(opts.afterPageId);
-      afterClause = ` AND p.id > $${params.length}`;
-    }
-    // Small default (unlike the 2000-row chunk-metadata cursors elsewhere):
-    // each row here carries a FULL page body. See engine.ts docstring.
-    const limit = opts?.batchSize ?? 50;
-    params.push(limit);
-    const limitIdx = params.length;
-    // RLS scope binding (opt-in via GBRAIN_RLS_SCOPE_BINDING).
-    return await this.withScopedReadTransaction(undefined, opts?.sourceId, async (tx) => {
-      const rows = await tx.unsafe(
-        `SELECT p.id, p.slug, p.source_id, p.compiled_truth, p.timeline
-           FROM pages p
-          WHERE ${where}${afterClause}
-          ORDER BY p.id
-          LIMIT $${limitIdx}`,
-        params as Parameters<typeof tx.unsafe>[1],
-      );
-      return (rows as Record<string, unknown>[]).map(r => ({
-        id: r.id as number,
-        slug: r.slug as string,
-        source_id: (r.source_id as string | undefined) ?? 'default',
-        compiled_truth: (r.compiled_truth as string | null) ?? '',
-        timeline: (r.timeline as string | null) ?? '',
-      }));
-    });
+  async listChunklessPagesWithContent(opts?: { batchSize?: number; afterPageId?: number; sourceId?: string }): Promise<ChunklessPageRow[]> {
+    return this.withScopedReadTransaction(undefined, opts?.sourceId, tx => chunksImpl.listChunklessPagesWithContent(scopedRead(this.engineSqlOn(tx)), opts));
   }
 
   async deleteChunks(slug: string, opts?: { sourceId?: string }): Promise<void> {
-    const sql = this.sql;
-    const sourceId = opts?.sourceId ?? 'default';
-    await sql`
-      DELETE FROM content_chunks
-      WHERE page_id = (SELECT id FROM pages WHERE slug = ${slug} AND source_id = ${sourceId})
-    `;
+    return chunksImpl.deleteChunks(this.engineSql, slug, opts);
   }
 
   // ── v0.42.7 (#1696): link/timeline extraction freshness watermark ──
@@ -5113,22 +4536,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   async getChunksWithEmbeddings(slug: string, opts?: { sourceId?: string; includeUnsealed?: boolean }): Promise<Chunk[]> {
-    const conn = this.sql;
-    const sourceId = opts?.sourceId;
-    const rows = sourceId
-      ? await conn`
-          SELECT cc.* FROM content_chunks cc
-          JOIN pages p ON p.id = cc.page_id
-          WHERE ${this.sql.unsafe(opts?.includeUnsealed ? 'TRUE' : currentTextProjectionFilter('p'))} AND p.slug = ${slug} AND p.source_id = ${sourceId}
-          ORDER BY cc.chunk_index
-        `
-      : await conn`
-          SELECT cc.* FROM content_chunks cc
-          JOIN pages p ON p.id = cc.page_id
-          WHERE ${this.sql.unsafe(opts?.includeUnsealed ? 'TRUE' : currentTextProjectionFilter('p'))} AND p.slug = ${slug}
-          ORDER BY cc.chunk_index
-        `;
-    return rows.map((r) => rowToChunk(r as Record<string, unknown>, true));
+    return chunksImpl.getChunksWithEmbeddings(unscopedExecutor(this.engineSql, 'chunks: unscoped on master (EO4 inventory)'), slug, opts);
   }
 
   /**

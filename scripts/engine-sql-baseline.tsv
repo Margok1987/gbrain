@@ -9,6 +9,7 @@
 # `// engine-sql-ok: <reason>`.
 # docs/TESTING.md#engine-sql-ratchet
 migrated	cjk-search
+migrated	chunks
 migrated	code-edges
 migrated	facts
 migrated	files
@@ -19,16 +20,11 @@ method	src/core/pglite-engine.ts	PGLiteEngine._addLinksBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._addTimelineEntriesBatchOnce
 method	src/core/pglite-engine.ts	PGLiteEngine._connectInternal
 method	src/core/pglite-engine.ts	PGLiteEngine._putPage
-method	src/core/pglite-engine.ts	PGLiteEngine._upsertChunksOnce
 method	src/core/pglite-engine.ts	PGLiteEngine.addLink
 method	src/core/pglite-engine.ts	PGLiteEngine.addTimelineEntry
-method	src/core/pglite-engine.ts	PGLiteEngine.buildChunklessPagesWhere
 method	src/core/pglite-engine.ts	PGLiteEngine.buildStalePagesWhere
 method	src/core/pglite-engine.ts	PGLiteEngine.chronicleSelect
-method	src/core/pglite-engine.ts	PGLiteEngine.countChunklessPagesWithContent
-method	src/core/pglite-engine.ts	PGLiteEngine.countStaleChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.countStalePagesForExtraction
-method	src/core/pglite-engine.ts	PGLiteEngine.deleteChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.deleteEvalCandidatesBefore
 method	src/core/pglite-engine.ts	PGLiteEngine.deletePage
 method	src/core/pglite-engine.ts	PGLiteEngine.deletePages
@@ -40,11 +36,8 @@ method	src/core/pglite-engine.ts	PGLiteEngine.findOrphanPages
 method	src/core/pglite-engine.ts	PGLiteEngine.getAllConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.getAllSlugs
 method	src/core/pglite-engine.ts	PGLiteEngine.getBacklinks
-method	src/core/pglite-engine.ts	PGLiteEngine.getChunks
-method	src/core/pglite-engine.ts	PGLiteEngine.getChunksWithEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.getConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.getDreamVerdict
-method	src/core/pglite-engine.ts	PGLiteEngine.getEmbeddingsByChunkIds
 method	src/core/pglite-engine.ts	PGLiteEngine.getHealth
 method	src/core/pglite-engine.ts	PGLiteEngine.getIngestLog
 method	src/core/pglite-engine.ts	PGLiteEngine.getLastSeen
@@ -59,10 +52,7 @@ method	src/core/pglite-engine.ts	PGLiteEngine.getTags
 method	src/core/pglite-engine.ts	PGLiteEngine.getTimeline
 method	src/core/pglite-engine.ts	PGLiteEngine.getTimelineForDate
 method	src/core/pglite-engine.ts	PGLiteEngine.getVersions
-method	src/core/pglite-engine.ts	PGLiteEngine.invalidateContentDriftEmbeddings
-method	src/core/pglite-engine.ts	PGLiteEngine.invalidateStaleSignatureEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.listAllPageRefs
-method	src/core/pglite-engine.ts	PGLiteEngine.listChunklessPagesWithContent
 method	src/core/pglite-engine.ts	PGLiteEngine.listConfigKeys
 method	src/core/pglite-engine.ts	PGLiteEngine.listCorpusSample
 method	src/core/pglite-engine.ts	PGLiteEngine.listEvalCandidates
@@ -70,7 +60,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.listEvalCaptureFailures
 method	src/core/pglite-engine.ts	PGLiteEngine.listLinkSources
 method	src/core/pglite-engine.ts	PGLiteEngine.listPages
 method	src/core/pglite-engine.ts	PGLiteEngine.listPrefixSampledPages
-method	src/core/pglite-engine.ts	PGLiteEngine.listStaleChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.listStalePagesForExtraction
 method	src/core/pglite-engine.ts	PGLiteEngine.logEvalCandidate
 method	src/core/pglite-engine.ts	PGLiteEngine.logEvalCaptureFailure
@@ -96,10 +85,8 @@ method	src/core/pglite-engine.ts	PGLiteEngine.searchTitles
 method	src/core/pglite-engine.ts	PGLiteEngine.searchVector
 method	src/core/pglite-engine.ts	PGLiteEngine.setConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.setPageAliases
-method	src/core/pglite-engine.ts	PGLiteEngine.setPageEmbeddingSignature
 method	src/core/pglite-engine.ts	PGLiteEngine.softDeletePage
 method	src/core/pglite-engine.ts	PGLiteEngine.softDeletePages
-method	src/core/pglite-engine.ts	PGLiteEngine.sumStaleChunkChars
 method	src/core/pglite-engine.ts	PGLiteEngine.sweepDreamVerdicts
 method	src/core/pglite-engine.ts	PGLiteEngine.traverseGraph
 method	src/core/pglite-engine.ts	PGLiteEngine.traversePathsDetailed
@@ -114,16 +101,11 @@ method	src/core/postgres-engine.ts	PostgresEngine._addLinksBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._addTimelineEntriesBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._putPage
 method	src/core/postgres-engine.ts	PostgresEngine._searchKeywordCJK
-method	src/core/postgres-engine.ts	PostgresEngine._upsertChunksOnce
 method	src/core/postgres-engine.ts	PostgresEngine.addLink
 method	src/core/postgres-engine.ts	PostgresEngine.addTimelineEntry
-method	src/core/postgres-engine.ts	PostgresEngine.buildChunklessPagesWhere
 method	src/core/postgres-engine.ts	PostgresEngine.buildStalePagesWhere
 method	src/core/postgres-engine.ts	PostgresEngine.connect
-method	src/core/postgres-engine.ts	PostgresEngine.countChunklessPagesWithContent
-method	src/core/postgres-engine.ts	PostgresEngine.countStaleChunks
 method	src/core/postgres-engine.ts	PostgresEngine.countStalePagesForExtraction
-method	src/core/postgres-engine.ts	PostgresEngine.deleteChunks
 method	src/core/postgres-engine.ts	PostgresEngine.deleteEvalCandidatesBefore
 method	src/core/postgres-engine.ts	PostgresEngine.deletePage
 method	src/core/postgres-engine.ts	PostgresEngine.deletePages
@@ -135,11 +117,8 @@ method	src/core/postgres-engine.ts	PostgresEngine.findOrphanPages
 method	src/core/postgres-engine.ts	PostgresEngine.getAllConfig
 method	src/core/postgres-engine.ts	PostgresEngine.getAllSlugs
 method	src/core/postgres-engine.ts	PostgresEngine.getBacklinks
-method	src/core/postgres-engine.ts	PostgresEngine.getChunks
-method	src/core/postgres-engine.ts	PostgresEngine.getChunksWithEmbeddings
 method	src/core/postgres-engine.ts	PostgresEngine.getConfig
 method	src/core/postgres-engine.ts	PostgresEngine.getDreamVerdict
-method	src/core/postgres-engine.ts	PostgresEngine.getEmbeddingsByChunkIds
 method	src/core/postgres-engine.ts	PostgresEngine.getHealth
 method	src/core/postgres-engine.ts	PostgresEngine.getIngestLog
 method	src/core/postgres-engine.ts	PostgresEngine.getLastSeen
@@ -155,10 +134,7 @@ method	src/core/postgres-engine.ts	PostgresEngine.getTimeline
 method	src/core/postgres-engine.ts	PostgresEngine.getTimelineForDate
 method	src/core/postgres-engine.ts	PostgresEngine.getVersions
 method	src/core/postgres-engine.ts	PostgresEngine.initSchema
-method	src/core/postgres-engine.ts	PostgresEngine.invalidateContentDriftEmbeddings
-method	src/core/postgres-engine.ts	PostgresEngine.invalidateStaleSignatureEmbeddings
 method	src/core/postgres-engine.ts	PostgresEngine.listAllPageRefs
-method	src/core/postgres-engine.ts	PostgresEngine.listChunklessPagesWithContent
 method	src/core/postgres-engine.ts	PostgresEngine.listConfigKeys
 method	src/core/postgres-engine.ts	PostgresEngine.listCorpusSample
 method	src/core/postgres-engine.ts	PostgresEngine.listEvalCandidates
@@ -166,7 +142,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.listEvalCaptureFailures
 method	src/core/postgres-engine.ts	PostgresEngine.listLinkSources
 method	src/core/postgres-engine.ts	PostgresEngine.listPages
 method	src/core/postgres-engine.ts	PostgresEngine.listPrefixSampledPages
-method	src/core/postgres-engine.ts	PostgresEngine.listStaleChunks
 method	src/core/postgres-engine.ts	PostgresEngine.listStalePagesForExtraction
 method	src/core/postgres-engine.ts	PostgresEngine.logEvalCandidate
 method	src/core/postgres-engine.ts	PostgresEngine.logEvalCaptureFailure
@@ -192,10 +167,8 @@ method	src/core/postgres-engine.ts	PostgresEngine.searchTitles
 method	src/core/postgres-engine.ts	PostgresEngine.searchVector
 method	src/core/postgres-engine.ts	PostgresEngine.setConfig
 method	src/core/postgres-engine.ts	PostgresEngine.setPageAliases
-method	src/core/postgres-engine.ts	PostgresEngine.setPageEmbeddingSignature
 method	src/core/postgres-engine.ts	PostgresEngine.softDeletePage
 method	src/core/postgres-engine.ts	PostgresEngine.softDeletePages
-method	src/core/postgres-engine.ts	PostgresEngine.sumStaleChunkChars
 method	src/core/postgres-engine.ts	PostgresEngine.sweepDreamVerdicts
 method	src/core/postgres-engine.ts	PostgresEngine.traverseGraph
 method	src/core/postgres-engine.ts	PostgresEngine.traversePathsDetailed
