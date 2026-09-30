@@ -1,0 +1,3317 @@
+{
+  "golden": {
+    "chunks": {
+      "countChunklessPagesWithContent": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "countStaleChunks": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          }
+        ],
+        "signature+includeNullSignature": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "signature+sourceId": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "deleteChunks": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getChunks": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "includeEmbedding": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "includeUnsealed": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "requireSafeChunks": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getChunksWithEmbeddings": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceId+includeUnsealed": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getEmbeddingsByChunkIds": {
+        "column": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "invalidateContentDriftEmbeddings": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "invalidateStaleSignatureEmbeddings": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 4,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "sourceId+includeNullSignature": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 5,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "listChunklessPagesWithContent": {
+        "afterPageId+sourceId": [
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "listStaleChunks": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ],
+        "updated_desc": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "updated_desc+cursor": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 7,
+            "via": "tagged"
+          }
+        ],
+        "updated_desc+sourceId": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "updated_desc+sourceId+cursor": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          }
+        ]
+      },
+      "setPageEmbeddingSignature": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "sumStaleChunkChars": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          }
+        ],
+        "signature": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "upsertChunks": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 15,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "embedding": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 18,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "embeddingColumn": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 17,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "empty": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "expectedRevision": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 15,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      }
+    },
+    "cjk-search": {
+      "searchKeyword": {
+        "cjk": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 8,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "cjk+sourceIds+detailLow": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 10,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "searchKeywordChunks": {
+        "cjk": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 7,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "cjk+sourceId": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 8,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      }
+    },
+    "code-edges": {
+      "addCodeEdges": {
+        "resolved+unresolved": [
+          {
+            "paramCount": 7,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 6,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "deleteCodeEdgesForChunks": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getCalleesOf": {
+        "bareFallback": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getCallersOf": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getEdgesByChunk": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "in+edgeType": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "out": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      }
+    },
+    "facts": {
+      "consolidateFact": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "countUnconsolidatedFacts": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "deleteFactsForPage": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "excludeSourcePrefixes+preserveExpiredLegacy": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "discoverOntologyDimensions": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "expireFact": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "supersededBy": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "findCandidateDuplicates": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "embedding": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "findOntologyConflicts": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+excludePrivate": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "findTrajectory": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "event": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+metric+since+until": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getFactsHealth": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getOntology": {
+        "default": [
+          {
+            "paramCount": 7,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+excludePrivate": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "insertFact": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 20,
+            "via": "tagged"
+          }
+        ],
+        "noEntity": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 20,
+            "via": "tagged"
+          }
+        ],
+        "supersedeId+embedding": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 19,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "insertFacts": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 24,
+            "via": "tagged"
+          }
+        ],
+        "deleteForPageFirst": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 24,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 23,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listFactsByEntity": {
+        "allFilters": [
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listFactsBySession": {
+        "allFilters": [
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listFactsSince": {
+        "allFilters": [
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listSupersessions": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "since+visibility": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "mergeOntologyFact": {
+        "corroborate": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 14,
+            "via": "tagged"
+          }
+        ],
+        "insert": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 13,
+            "via": "tagged"
+          }
+        ],
+        "supersede": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 13,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "migrateFactsToCanonical": {
+        "default": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      }
+    },
+    "files": {
+      "getFile": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listFilesForPage": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "upsertFile": {
+        "default": [
+          {
+            "paramCount": 9,
+            "via": "tagged"
+          }
+        ]
+      }
+    },
+    "links": {
+      "addLink": {
+        "default": [
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ]
+      },
+      "addLinksBatch": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "findOrphanPages": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ],
+        "inbound": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+excludePrivate": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getBacklinks": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getLinks": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listLinkSources": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "removeLink": {
+        "default": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ],
+        "linkSource": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "linkType": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "linkType+linkSource": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "removeLinksByPagesAndSource": {
+        "default": [
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "replaceDerivedLinks": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "traverseGraph": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "frontierCap": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "traversePaths": {
+        "default": [
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ]
+      },
+      "traversePathsDetailed": {
+        "both": [
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ],
+        "both+sourceIds+excludePrivate": [
+          {
+            "paramCount": 14,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ],
+        "in": [
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ],
+        "out+sourceId+linkType": [
+          {
+            "paramCount": 13,
+            "via": "tagged"
+          }
+        ]
+      }
+    },
+    "pages": {
+      "countStalePagesForExtraction": {
+        "default": [
+          {
+            "paramCount": 0,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": true
+            },
+            "via": "unsafe"
+          }
+        ],
+        "versionTs+sourceId": [
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "createVersion": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 9,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "deletePage": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "deletePages": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "findByTitleFuzzy": {
+        "default": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "lowSimilarity": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "findDuplicatePage": {
+        "default": [
+          {
+            "paramCount": 7,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getAllSlugs": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getPage": {
+        "default": [
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "includeDeleted": [
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "getPageTimestamps": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getVersions": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listAllPageRefs": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listCorpusSample": {
+        "default": [
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ],
+        "seed": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listPages": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "effective_after": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "effective_before": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "includeDeleted": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "slugPrefix": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sort": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "tag": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "type": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "updatedAfterKeyset": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "updated_after": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listPrefixSampledPages": {
+        "default": [
+          {
+            "paramCount": 14,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 14,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listStalePagesForExtraction": {
+        "afterPageId+versionTs+sourceId": [
+          {
+            "paramCount": 4,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "lockPageKeys": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "markPagesExtractedBatch": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "purgeDeletedPages": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "dryRun": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "putPage": {
+        "blankBody": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 18,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 18,
+            "via": "tagged"
+          }
+        ],
+        "expectedRevision": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 18,
+            "via": "tagged"
+          }
+        ]
+      },
+      "readPageSnapshot": {
+        "default": [
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "refreshPageBody": {
+        "default": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "resolveSlugWithAlias": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "resolveSlugWithAliasDetailed": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "resolveSlugs": {
+        "exactHit": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "fuzzy": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "resolveSlugsByPaths": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "restorePage": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "revertToVersion": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "setPageAliases": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "empty": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "softDeletePage": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "softDeletePages": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "updatePageContextualRetrievalState": {
+        "default": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "updateSlug": {
+        "moved": [
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "noop": [
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      }
+    },
+    "salience": {
+      "batchLoadEmotionalInputs": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ],
+        "slugs": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "findAnomalies": {
+        "default": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getRecentSalience": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "slugPrefix+sourceId+recency": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listEnrichCandidates": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+reenrich": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "setEmotionalWeightBatch": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "empty": []
+      }
+    },
+    "sources": {
+      "listAllSources": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "updateSourceConfig": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      }
+    },
+    "tags": {
+      "addTag": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ],
+        "frontmatter": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "getTags": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate+liveOnly": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ]
+      },
+      "removeTag": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 2,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          },
+          {
+            "paramCount": 3,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      }
+    },
+    "takes": {
+      "addSynthesisEvidence": {
+        "default": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ]
+      },
+      "addTakesBatch": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "countStaleTakes": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getCalibrationCurve": {
+        "allFilters": [
+          {
+            "paramCount": 7,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 4,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getContradictionCacheEntry": {
+        "default": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getScorecard": {
+        "allFilters": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getTakeEmbeddings": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listActiveTakesForPages": {
+        "allowList": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listStaleTakes": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ]
+      },
+      "listTakes": {
+        "default": [
+          {
+            "paramCount": 20,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 21,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+excludePrivate": [
+          {
+            "paramCount": 21,
+            "via": "tagged"
+          }
+        ]
+      },
+      "loadContradictionsTrend": {
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "putContradictionCacheEntry": {
+        "default": [
+          {
+            "paramCount": 7,
+            "via": "tagged"
+          }
+        ]
+      },
+      "resolveTake": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          }
+        ]
+      },
+      "searchTakes": {
+        "default": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+excludePrivate": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "searchTakesVector": {
+        "default": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+excludePrivate": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "supersedeTake": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 10,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "sweepContradictionCache": {
+        "default": [
+          {
+            "paramCount": 0,
+            "via": "tagged"
+          }
+        ]
+      },
+      "updateTake": {
+        "default": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "weight": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "updateTakeEmbeddings": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "writeContradictionsRun": {
+        "default": [
+          {
+            "paramCount": 13,
+            "via": "tagged"
+          }
+        ]
+      }
+    },
+    "timeline": {
+      "addTimelineEntriesBatch": {
+        "default": [
+          {
+            "paramCount": 1,
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": false,
+              "simple": false
+            },
+            "via": "unsafe"
+          }
+        ]
+      },
+      "addTimelineEntry": {
+        "default": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getLastSeen": {
+        "asof+sourceId": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getOnThisDay": {
+        "date+sourceIds": [
+          {
+            "paramCount": 6,
+            "via": "tagged"
+          }
+        ],
+        "default": [
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getSince": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "kind+sourceId": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getTimeline": {
+        "default": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 2,
+            "via": "tagged"
+          }
+        ],
+        "sourceId": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+after+before": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "getTimelineForDate": {
+        "default": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "excludePrivate": [
+          {
+            "paramCount": 3,
+            "via": "tagged"
+          }
+        ],
+        "sourceIds+excludePrivate": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ],
+        "week+sourceId": [
+          {
+            "paramCount": 5,
+            "via": "tagged"
+          }
+        ]
+      },
+      "upsertEventProjection": {
+        "default": [
+          {
+            "paramCount": 8,
+            "via": "tagged"
+          }
+        ]
+      }
+    }
+  },
+  "normalizer": "sql-driver-v1"
+}
