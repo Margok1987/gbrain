@@ -1,12 +1,12 @@
 {
   "generatedBy": "scripts/generate-wave-1-moves.ts",
   "base": "f8d1e3936d90",
-  "head": "98c155835217",
+  "head": "43a9e6b10075",
   "landing": {
-    "integrationOwner": "<INTEGRATION_OWNER>",
-    "freezeStart": "<FREEZE_START>",
-    "freezeEnd": "<FREEZE_END>",
-    "freezeLiftedBy": "<FREEZE_LIFT_AUTHORITY>"
+    "integrationOwner": "the wave-1 PR author (ports upstream fixes into moved code until merge)",
+    "freezeStart": "when the wave-1 PR is marked ready for review",
+    "freezeEnd": "72 hours after the wave-1 PR merges (revert-clean window)",
+    "freezeLiftedBy": "the repository owner (@garrytan)"
   },
   "moves": [
     {
@@ -1307,12 +1307,48 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine._putPage",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:putPage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine._upsertChunksOnce",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine._upsertChunksOnce",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:upsertChunksOnce"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.addCodeEdges",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.addCodeEdges",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/code-edges.ts:addCodeEdges"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.addLink",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.addLink",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:addLink"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.addLinksBatch",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.addLinksBatch",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:addLinksBatch"
       ]
     },
     {
@@ -1331,6 +1367,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:addTakesBatch"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.addTimelineEntriesBatch",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.addTimelineEntriesBatch",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:addTimelineEntriesBatch"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.addTimelineEntry",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.addTimelineEntry",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:addTimelineEntry"
       ]
     },
     {
@@ -1353,12 +1407,49 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.buildStaleChunkWhere",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:StaleChunkOpts"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.consolidateFact",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.consolidateFact",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:consolidateFact"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.countChunklessPagesWithContent",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.countChunklessPagesWithContent",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:countChunklessPagesWithContent"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.countStaleChunks",
+      "kind": "split",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.countStaleChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:StaleChunkOpts",
+        "src/core/engine-sql/chunks.ts:countStaleChunks"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.countStalePagesForExtraction",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.countStalePagesForExtraction",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:countStalePagesForExtraction"
       ]
     },
     {
@@ -1380,6 +1471,15 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.deleteChunks",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.deleteChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:deleteChunks"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.deleteCodeEdgesForChunks",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.deleteCodeEdgesForChunks",
@@ -1395,6 +1495,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:deleteFactsForPage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.deletePage",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.deletePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:deletePage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.deletePages",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.deletePages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:deletePages"
       ]
     },
     {
@@ -1416,6 +1534,15 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.findByTitleFuzzy",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.findByTitleFuzzy",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:findByTitleFuzzy"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.findCandidateDuplicates",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.findCandidateDuplicates",
@@ -1425,12 +1552,49 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.findDuplicatePage",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.findDuplicatePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:findDuplicatePage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.findOrphanPages",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.findOrphanPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:findOrphanPages"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.findTrajectory",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.findTrajectory",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:findTrajectory"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getAllSlugs",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getAllSlugs",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:getAllSlugs"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getBacklinks",
+      "kind": "split",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getBacklinks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:getBacklinks",
+        "src/core/engine-sql/links.ts:getLinks"
       ]
     },
     {
@@ -1461,6 +1625,24 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getChunks",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:getChunks"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getChunksWithEmbeddings",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getChunksWithEmbeddings",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:getChunksWithEmbeddings"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getContradictionCacheEntry",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getContradictionCacheEntry",
@@ -1480,12 +1662,67 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getEmbeddingsByChunkIds",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getEmbeddingsByChunkIds",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getFactsHealth",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getFactsHealth",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:getFactsHealth"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getFile",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getFile",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/files.ts:getFile"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getLastSeen",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getLastSeen",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getLastSeen"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getLinks",
+      "kind": "split",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getLinks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:getBacklinks",
+        "src/core/engine-sql/links.ts:getLinks"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getOnThisDay",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getOnThisDay",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getOnThisDay"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getPageTimestamps",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getPageTimestamps",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:getPageTimestamps"
       ]
     },
     {
@@ -1507,12 +1744,57 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getSince",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getSince",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getSince"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getTags",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getTags",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/tags.ts:getTags"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.getTakeEmbeddings",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.getTakeEmbeddings",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:getTakeEmbeddings"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getTimeline",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getTimeline",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getTimeline"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getTimelineForDate",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getTimelineForDate",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getTimelineForDate"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.getVersions",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.getVersions",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:getVersions"
       ]
     },
     {
@@ -1534,12 +1816,67 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.invalidateContentDriftEmbeddings",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.invalidateContentDriftEmbeddings",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:invalidateContentDriftEmbeddings"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.invalidateStaleSignatureEmbeddings",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.invalidateStaleSignatureEmbeddings",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:invalidateStaleSignatureEmbeddings"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.listActiveTakesForPages",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.listActiveTakesForPages",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:listActiveTakesForPages"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listAllPageRefs",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listAllPageRefs",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listAllPageRefs"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listAllSources",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listAllSources",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/sources.ts:listAllSources"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listChunklessPagesWithContent",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listChunklessPagesWithContent",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:listChunklessPagesWithContent"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listCorpusSample",
+      "kind": "split",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listCorpusSample",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listCorpusSample",
+        "src/core/engine-sql/pages.ts:toDomainBankRow"
       ]
     },
     {
@@ -1579,6 +1916,61 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listFilesForPage",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listFilesForPage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/files.ts:listFilesForPage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listLinkSources",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listLinkSources",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:listLinkSources"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listPages",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listPages"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listPrefixSampledPages",
+      "kind": "split",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listPrefixSampledPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listPrefixSampledPages",
+        "src/core/engine-sql/pages.ts:toDomainBankRow"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listStaleChunks",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listStaleChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:listStaleChunks"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.listStalePagesForExtraction",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.listStalePagesForExtraction",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listStalePagesForExtraction"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.listStaleTakes",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.listStaleTakes",
@@ -1615,6 +2007,24 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.markPagesExtractedBatch",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.markPagesExtractedBatch",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:markPagesExtractedBatch"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.purgeDeletedPages",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.purgeDeletedPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:purgeDeletedPages"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.putContradictionCacheEntry",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.putContradictionCacheEntry",
@@ -1624,12 +2034,93 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.putPage",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.putPage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:putPage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.refreshPageBody",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.refreshPageBody",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:refreshPageBody"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.removeLink",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.removeLink",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:removeLink"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.removeLinksByPagesAndSource",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.removeLinksByPagesAndSource",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:removeLinksByPagesAndSource"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.resolveSlugWithAliasDetailed",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.resolveSlugWithAliasDetailed",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:resolveSlugWithAliasDetailed"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.resolveSlugs",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.resolveSlugs",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:resolveSlugs"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.resolveSlugsByPaths",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.resolveSlugsByPaths",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:resolveSlugsByPaths"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.resolveTake",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.resolveTake",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:resolveTake"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.restorePage",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.restorePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:restorePage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.revertToVersion",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.revertToVersion",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:revertToVersion"
       ]
     },
     {
@@ -1660,6 +2151,52 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.setPageAliases",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.setPageAliases",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:setPageAliases"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.setPageEmbeddingSignature",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.setPageEmbeddingSignature",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:setPageEmbeddingSignature"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.softDeletePage",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.softDeletePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:softDeletePage"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.softDeletePages",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.softDeletePages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:softDeletePages"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.sumStaleChunkChars",
+      "kind": "split",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.sumStaleChunkChars",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:StaleChunkOpts",
+        "src/core/engine-sql/chunks.ts:sumStaleChunkChars"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.supersedeTake",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.supersedeTake",
@@ -1678,6 +2215,51 @@
       ]
     },
     {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.traverseGraph",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.traverseGraph",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:traverseGraph"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.traversePathsDetailed",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.traversePathsDetailed",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:traversePathsDetailed"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.updatePageContextualRetrievalState",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.updatePageContextualRetrievalState",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:updatePageContextualRetrievalState"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.updateSlug",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.updateSlug",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:updateSlug"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.updateSourceConfig",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.updateSourceConfig",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/sources.ts:updateSourceConfig"
+      ]
+    },
+    {
       "old": "src/core/pglite-engine.ts:PGLiteEngine.updateTake",
       "kind": "moved",
       "facade": "src/core/pglite-engine.ts:PGLiteEngine.updateTake",
@@ -1693,6 +2275,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:updateTakeEmbeddings"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.upsertEventProjection",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.upsertEventProjection",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:upsertEventProjection"
+      ]
+    },
+    {
+      "old": "src/core/pglite-engine.ts:PGLiteEngine.upsertFile",
+      "kind": "moved",
+      "facade": "src/core/pglite-engine.ts:PGLiteEngine.upsertFile",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/files.ts:upsertFile"
       ]
     },
     {
@@ -2155,12 +2755,48 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine._putPage",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:putPage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine._upsertChunksOnce",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine._upsertChunksOnce",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:upsertChunksOnce"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.addCodeEdges",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.addCodeEdges",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/code-edges.ts:addCodeEdges"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.addLink",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.addLink",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:addLink"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.addLinksBatch",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.addLinksBatch",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:addLinksBatch"
       ]
     },
     {
@@ -2182,6 +2818,24 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.addTimelineEntriesBatch",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.addTimelineEntriesBatch",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:addTimelineEntriesBatch"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.addTimelineEntry",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.addTimelineEntry",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:addTimelineEntry"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.batchLoadEmotionalInputs",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.batchLoadEmotionalInputs",
@@ -2191,12 +2845,58 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.buildStaleChunkWhere",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:StaleChunkOpts"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.chronicleSourceCond",
+      "kind": "moved",
+      "facade": null,
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:chronicleSourceCond"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.consolidateFact",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.consolidateFact",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:consolidateFact"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.countChunklessPagesWithContent",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.countChunklessPagesWithContent",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:countChunklessPagesWithContent"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.countStaleChunks",
+      "kind": "split",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.countStaleChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:StaleChunkOpts",
+        "src/core/engine-sql/chunks.ts:countStaleChunks"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.countStalePagesForExtraction",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.countStalePagesForExtraction",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:countStalePagesForExtraction"
       ]
     },
     {
@@ -2218,6 +2918,15 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.deleteChunks",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.deleteChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:deleteChunks"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.deleteCodeEdgesForChunks",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.deleteCodeEdgesForChunks",
@@ -2233,6 +2942,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:deleteFactsForPage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.deletePage",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.deletePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:deletePage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.deletePages",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.deletePages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:deletePages"
       ]
     },
     {
@@ -2254,6 +2981,15 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.findByTitleFuzzy",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.findByTitleFuzzy",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:findByTitleFuzzy"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.findCandidateDuplicates",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.findCandidateDuplicates",
@@ -2263,12 +2999,49 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.findDuplicatePage",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.findDuplicatePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:findDuplicatePage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.findOrphanPages",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.findOrphanPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:findOrphanPages"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.findTrajectory",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.findTrajectory",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:findTrajectory"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getAllSlugs",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getAllSlugs",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:getAllSlugs"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getBacklinks",
+      "kind": "split",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getBacklinks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:getBacklinks",
+        "src/core/engine-sql/links.ts:getLinks"
       ]
     },
     {
@@ -2299,6 +3072,24 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getChunks",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:getChunks"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getChunksWithEmbeddings",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getChunksWithEmbeddings",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:getChunksWithEmbeddings"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.getContradictionCacheEntry",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.getContradictionCacheEntry",
@@ -2317,12 +3108,67 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getEmbeddingsByChunkIds",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getEmbeddingsByChunkIds",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.getFactsHealth",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.getFactsHealth",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/facts.ts:getFactsHealth"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getFile",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getFile",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/files.ts:getFile"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getLastSeen",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getLastSeen",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getLastSeen"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getLinks",
+      "kind": "split",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getLinks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:getBacklinks",
+        "src/core/engine-sql/links.ts:getLinks"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getOnThisDay",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getOnThisDay",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getOnThisDay"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getPageTimestamps",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getPageTimestamps",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:getPageTimestamps"
       ]
     },
     {
@@ -2344,12 +3190,57 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getSince",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getSince",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getSince"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getTags",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getTags",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/tags.ts:getTags"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.getTakeEmbeddings",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.getTakeEmbeddings",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:getTakeEmbeddings"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getTimeline",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getTimeline",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getTimeline"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getTimelineForDate",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getTimelineForDate",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:getTimelineForDate"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.getVersions",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.getVersions",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:getVersions"
       ]
     },
     {
@@ -2371,12 +3262,67 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.invalidateContentDriftEmbeddings",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.invalidateContentDriftEmbeddings",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:invalidateContentDriftEmbeddings"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.invalidateStaleSignatureEmbeddings",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.invalidateStaleSignatureEmbeddings",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:invalidateStaleSignatureEmbeddings"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.listActiveTakesForPages",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.listActiveTakesForPages",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:listActiveTakesForPages"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listAllPageRefs",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listAllPageRefs",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listAllPageRefs"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listAllSources",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listAllSources",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/sources.ts:listAllSources"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listChunklessPagesWithContent",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listChunklessPagesWithContent",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:listChunklessPagesWithContent"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listCorpusSample",
+      "kind": "split",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listCorpusSample",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listCorpusSample",
+        "src/core/engine-sql/pages.ts:toDomainBankRow"
       ]
     },
     {
@@ -2416,6 +3362,61 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listFilesForPage",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listFilesForPage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/files.ts:listFilesForPage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listLinkSources",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listLinkSources",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:listLinkSources"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listPages",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listPages"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listPrefixSampledPages",
+      "kind": "split",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listPrefixSampledPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listPrefixSampledPages",
+        "src/core/engine-sql/pages.ts:toDomainBankRow"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listStaleChunks",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listStaleChunks",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:listStaleChunks"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.listStalePagesForExtraction",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.listStalePagesForExtraction",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:listStalePagesForExtraction"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.listStaleTakes",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.listStaleTakes",
@@ -2452,6 +3453,24 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.markPagesExtractedBatch",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.markPagesExtractedBatch",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:markPagesExtractedBatch"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.purgeDeletedPages",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.purgeDeletedPages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:purgeDeletedPages"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.putContradictionCacheEntry",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.putContradictionCacheEntry",
@@ -2461,12 +3480,93 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.putPage",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.putPage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:putPage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.refreshPageBody",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.refreshPageBody",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:refreshPageBody"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.removeLink",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.removeLink",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:removeLink"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.removeLinksByPagesAndSource",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.removeLinksByPagesAndSource",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:removeLinksByPagesAndSource"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.resolveSlugWithAliasDetailed",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.resolveSlugWithAliasDetailed",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:resolveSlugWithAliasDetailed"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.resolveSlugs",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.resolveSlugs",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:resolveSlugs"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.resolveSlugsByPaths",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.resolveSlugsByPaths",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:resolveSlugsByPaths"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.resolveTake",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.resolveTake",
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:resolveTake"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.restorePage",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.restorePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:restorePage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.revertToVersion",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.revertToVersion",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:revertToVersion"
       ]
     },
     {
@@ -2497,6 +3597,52 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.setPageAliases",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.setPageAliases",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:setPageAliases"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.setPageEmbeddingSignature",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.setPageEmbeddingSignature",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:setPageEmbeddingSignature"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.softDeletePage",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.softDeletePage",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:softDeletePage"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.softDeletePages",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.softDeletePages",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:softDeletePages"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.sumStaleChunkChars",
+      "kind": "split",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.sumStaleChunkChars",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/chunks.ts:StaleChunkOpts",
+        "src/core/engine-sql/chunks.ts:sumStaleChunkChars"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.supersedeTake",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.supersedeTake",
@@ -2515,6 +3661,51 @@
       ]
     },
     {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.traverseGraph",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.traverseGraph",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:traverseGraph"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.traversePathsDetailed",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.traversePathsDetailed",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/links.ts:traversePathsDetailed"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.updatePageContextualRetrievalState",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.updatePageContextualRetrievalState",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:updatePageContextualRetrievalState"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.updateSlug",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.updateSlug",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/pages.ts:updateSlug"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.updateSourceConfig",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.updateSourceConfig",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/sources.ts:updateSourceConfig"
+      ]
+    },
+    {
       "old": "src/core/postgres-engine.ts:PostgresEngine.updateTake",
       "kind": "moved",
       "facade": "src/core/postgres-engine.ts:PostgresEngine.updateTake",
@@ -2530,6 +3721,24 @@
       "wasExported": true,
       "new": [
         "src/core/engine-sql/takes.ts:updateTakeEmbeddings"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.upsertEventProjection",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.upsertEventProjection",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/timeline.ts:upsertEventProjection"
+      ]
+    },
+    {
+      "old": "src/core/postgres-engine.ts:PostgresEngine.upsertFile",
+      "kind": "moved",
+      "facade": "src/core/postgres-engine.ts:PostgresEngine.upsertFile",
+      "wasExported": true,
+      "new": [
+        "src/core/engine-sql/files.ts:upsertFile"
       ]
     },
     {
@@ -3092,7 +4301,13 @@
     }
   ],
   "unmapped": [
+    "src/core/pglite-engine.ts:PGLiteEngine._addLinksBatchOnce",
+    "src/core/pglite-engine.ts:PGLiteEngine._addTimelineEntriesBatchOnce",
+    "src/core/pglite-engine.ts:PGLiteEngine.buildChunklessPagesWhere",
+    "src/core/pglite-engine.ts:PGLiteEngine.buildStalePagesWhere",
+    "src/core/pglite-engine.ts:PGLiteEngine.chronicleSelect",
     "src/core/pglite-engine.ts:PGLiteEngine.factsDeps",
+    "src/core/pglite-engine.ts:PGLiteEngine.pushChronicleSource",
     "src/core/pglite-engine.ts:PGLiteEngine.salienceDeps",
     "src/core/pglite-engine.ts:PGLiteEngine.takesDeps",
     "src/core/pglite-engine/cjk-search.ts:PgliteCjkSearchDeps",
@@ -3103,6 +4318,10 @@
     "src/core/pglite-engine/facts.ts:toDate",
     "src/core/pglite-engine/salience.ts:PgliteSalienceDeps",
     "src/core/pglite-engine/takes.ts:PgliteTakesDeps",
+    "src/core/postgres-engine.ts:PostgresEngine._addLinksBatchOnce",
+    "src/core/postgres-engine.ts:PostgresEngine._addTimelineEntriesBatchOnce",
+    "src/core/postgres-engine.ts:PostgresEngine.buildChunklessPagesWhere",
+    "src/core/postgres-engine.ts:PostgresEngine.buildStalePagesWhere",
     "src/core/postgres-engine.ts:PostgresEngine.codeEdgesDeps",
     "src/core/postgres-engine.ts:PostgresEngine.factsDeps",
     "src/core/postgres-engine.ts:PostgresEngine.salienceDeps",

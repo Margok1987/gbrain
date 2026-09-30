@@ -12,15 +12,15 @@ follow it. The map below is generated from the AST (`scripts/generate-wave-1-mov
 [`wave-1-moves.json`](wave-1-moves.json). Where a contribution goes today is in
 [CONTRIBUTING.md, "Where does my change go?"](../../CONTRIBUTING.md#where-does-my-change-go).
 
-Base `f8d1e3936d90`, head `98c155835217`.
+Base `f8d1e3936d90`, head `43a9e6b10075`.
 
 ## Landing window
 
-- **Integration owner:** <INTEGRATION_OWNER>. Ports upstream fixes that land on master during the window
+- **Integration owner:** the wave-1 PR author (ports upstream fixes into moved code until merge). Ports upstream fixes that land on master during the window
   into the moved code.
 - **Freeze:** target paths (the files in the map below and their new module directories) are frozen from
-  <FREEZE_START> to <FREEZE_END>. Only the integration owner merges into them.
-- **Who can lift the freeze:** <FREEZE_LIFT_AUTHORITY>.
+  when the wave-1 PR is marked ready for review to 72 hours after the wave-1 PR merges (revert-clean window). Only the integration owner merges into them.
+- **Who can lift the freeze:** the repository owner (@garrytan).
 - **Hotfix lane:** an urgent fix lands on master as usual. The integration owner ports it into the moved
   code within hours, reruns the W0 goldens and `bun run verify`, and notes the port in the wave PR.
 - **After the merge:** follow-ups on moved paths wait out a 72-hour revert-clean window; forward-fix is
@@ -265,49 +265,115 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `PGLiteEngine._putPage` | moved | **not re-exported** | `src/core/engine-sql/pages.ts:putPage` |
+| `PGLiteEngine._upsertChunksOnce` | moved | `src/core/pglite-engine.ts:PGLiteEngine._upsertChunksOnce` | `src/core/engine-sql/chunks.ts:upsertChunksOnce` |
 | `PGLiteEngine.addCodeEdges` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addCodeEdges` | `src/core/engine-sql/code-edges.ts:addCodeEdges` |
+| `PGLiteEngine.addLink` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addLink` | `src/core/engine-sql/links.ts:addLink` |
+| `PGLiteEngine.addLinksBatch` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addLinksBatch` | `src/core/engine-sql/links.ts:addLinksBatch` |
 | `PGLiteEngine.addSynthesisEvidence` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addSynthesisEvidence` | `src/core/engine-sql/takes.ts:addSynthesisEvidence` |
 | `PGLiteEngine.addTakesBatch` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addTakesBatch` | `src/core/engine-sql/takes.ts:addTakesBatch` |
+| `PGLiteEngine.addTimelineEntriesBatch` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addTimelineEntriesBatch` | `src/core/engine-sql/timeline.ts:addTimelineEntriesBatch` |
+| `PGLiteEngine.addTimelineEntry` | moved | `src/core/pglite-engine.ts:PGLiteEngine.addTimelineEntry` | `src/core/engine-sql/timeline.ts:addTimelineEntry` |
 | `PGLiteEngine.applyForwardReferenceBootstrap` | split | `src/core/pglite-engine.ts:PGLiteEngine.applyForwardReferenceBootstrap` | `src/core/engine-sql/bootstrap.ts:applyForwardReferenceBootstrap`<br>`src/core/engine-sql/bootstrap.ts:forwardReferenceGaps` |
 | `PGLiteEngine.batchLoadEmotionalInputs` | moved | `src/core/pglite-engine.ts:PGLiteEngine.batchLoadEmotionalInputs` | `src/core/engine-sql/salience.ts:batchLoadEmotionalInputs` |
+| `PGLiteEngine.buildStaleChunkWhere` | moved | **not re-exported** | `src/core/engine-sql/chunks.ts:StaleChunkOpts` |
 | `PGLiteEngine.consolidateFact` | moved | `src/core/pglite-engine.ts:PGLiteEngine.consolidateFact` | `src/core/engine-sql/facts.ts:consolidateFact` |
+| `PGLiteEngine.countChunklessPagesWithContent` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countChunklessPagesWithContent` | `src/core/engine-sql/chunks.ts:countChunklessPagesWithContent` |
+| `PGLiteEngine.countStaleChunks` | split | `src/core/pglite-engine.ts:PGLiteEngine.countStaleChunks` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:countStaleChunks` |
+| `PGLiteEngine.countStalePagesForExtraction` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countStalePagesForExtraction` | `src/core/engine-sql/pages.ts:countStalePagesForExtraction` |
 | `PGLiteEngine.countStaleTakes` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countStaleTakes` | `src/core/engine-sql/takes.ts:countStaleTakes` |
 | `PGLiteEngine.countUnconsolidatedFacts` | moved | `src/core/pglite-engine.ts:PGLiteEngine.countUnconsolidatedFacts` | `src/core/engine-sql/facts.ts:countUnconsolidatedFacts` |
+| `PGLiteEngine.deleteChunks` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deleteChunks` | `src/core/engine-sql/chunks.ts:deleteChunks` |
 | `PGLiteEngine.deleteCodeEdgesForChunks` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deleteCodeEdgesForChunks` | `src/core/engine-sql/code-edges.ts:deleteCodeEdgesForChunks` |
 | `PGLiteEngine.deleteFactsForPage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deleteFactsForPage` | `src/core/engine-sql/facts.ts:deleteFactsForPage` |
+| `PGLiteEngine.deletePage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deletePage` | `src/core/engine-sql/pages.ts:deletePage` |
+| `PGLiteEngine.deletePages` | moved | `src/core/pglite-engine.ts:PGLiteEngine.deletePages` | `src/core/engine-sql/pages.ts:deletePages` |
 | `PGLiteEngine.expireFact` | moved | `src/core/pglite-engine.ts:PGLiteEngine.expireFact` | `src/core/engine-sql/facts.ts:expireFact` |
 | `PGLiteEngine.findAnomalies` | moved | `src/core/pglite-engine.ts:PGLiteEngine.findAnomalies` | `src/core/engine-sql/salience.ts:findAnomalies` |
+| `PGLiteEngine.findByTitleFuzzy` | moved | `src/core/pglite-engine.ts:PGLiteEngine.findByTitleFuzzy` | `src/core/engine-sql/pages.ts:findByTitleFuzzy` |
 | `PGLiteEngine.findCandidateDuplicates` | moved | `src/core/pglite-engine.ts:PGLiteEngine.findCandidateDuplicates` | `src/core/engine-sql/facts.ts:findCandidateDuplicates` |
+| `PGLiteEngine.findDuplicatePage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.findDuplicatePage` | `src/core/engine-sql/pages.ts:findDuplicatePage` |
+| `PGLiteEngine.findOrphanPages` | moved | `src/core/pglite-engine.ts:PGLiteEngine.findOrphanPages` | `src/core/engine-sql/links.ts:findOrphanPages` |
 | `PGLiteEngine.findTrajectory` | moved | `src/core/pglite-engine.ts:PGLiteEngine.findTrajectory` | `src/core/engine-sql/facts.ts:findTrajectory` |
+| `PGLiteEngine.getAllSlugs` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getAllSlugs` | `src/core/engine-sql/pages.ts:getAllSlugs` |
+| `PGLiteEngine.getBacklinks` | split | `src/core/pglite-engine.ts:PGLiteEngine.getBacklinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PGLiteEngine.getCalibrationCurve` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getCalibrationCurve` | `src/core/engine-sql/takes.ts:getCalibrationCurve` |
 | `PGLiteEngine.getCalleesOf` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getCalleesOf` | `src/core/engine-sql/code-edges.ts:getCalleesOf` |
 | `PGLiteEngine.getCallersOf` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getCallersOf` | `src/core/engine-sql/code-edges.ts:getCallersOf` |
+| `PGLiteEngine.getChunks` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getChunks` | `src/core/engine-sql/chunks.ts:getChunks` |
+| `PGLiteEngine.getChunksWithEmbeddings` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getChunksWithEmbeddings` | `src/core/engine-sql/chunks.ts:getChunksWithEmbeddings` |
 | `PGLiteEngine.getContradictionCacheEntry` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getContradictionCacheEntry` | `src/core/engine-sql/takes.ts:getContradictionCacheEntry` |
 | `PGLiteEngine.getEdgesByChunk` | split | `src/core/pglite-engine.ts:PGLiteEngine.getEdgesByChunk` | `src/core/engine-sql/code-edges.ts:getEdgesByChunk`<br>`src/core/pglite-engine/code-edges.ts:getEdgesByChunk` |
+| `PGLiteEngine.getEmbeddingsByChunkIds` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getEmbeddingsByChunkIds` | `src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds` |
 | `PGLiteEngine.getFactsHealth` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getFactsHealth` | `src/core/engine-sql/facts.ts:getFactsHealth` |
+| `PGLiteEngine.getFile` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getFile` | `src/core/engine-sql/files.ts:getFile` |
+| `PGLiteEngine.getLastSeen` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getLastSeen` | `src/core/engine-sql/timeline.ts:getLastSeen` |
+| `PGLiteEngine.getLinks` | split | `src/core/pglite-engine.ts:PGLiteEngine.getLinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
+| `PGLiteEngine.getOnThisDay` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getOnThisDay` | `src/core/engine-sql/timeline.ts:getOnThisDay` |
+| `PGLiteEngine.getPageTimestamps` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getPageTimestamps` | `src/core/engine-sql/pages.ts:getPageTimestamps` |
 | `PGLiteEngine.getRecentSalience` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getRecentSalience` | `src/core/engine-sql/salience.ts:getRecentSalience` |
 | `PGLiteEngine.getScorecard` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getScorecard` | `src/core/engine-sql/takes.ts:getScorecard` |
+| `PGLiteEngine.getSince` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getSince` | `src/core/engine-sql/timeline.ts:getSince` |
+| `PGLiteEngine.getTags` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTags` | `src/core/engine-sql/tags.ts:getTags` |
 | `PGLiteEngine.getTakeEmbeddings` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTakeEmbeddings` | `src/core/engine-sql/takes.ts:getTakeEmbeddings` |
+| `PGLiteEngine.getTimeline` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTimeline` | `src/core/engine-sql/timeline.ts:getTimeline` |
+| `PGLiteEngine.getTimelineForDate` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getTimelineForDate` | `src/core/engine-sql/timeline.ts:getTimelineForDate` |
+| `PGLiteEngine.getVersions` | moved | `src/core/pglite-engine.ts:PGLiteEngine.getVersions` | `src/core/engine-sql/pages.ts:getVersions` |
 | `PGLiteEngine.insertFact` | moved | `src/core/pglite-engine.ts:PGLiteEngine.insertFact` | `src/core/engine-sql/facts.ts:insertFact` |
 | `PGLiteEngine.insertFacts` | moved | `src/core/pglite-engine.ts:PGLiteEngine.insertFacts` | `src/core/engine-sql/facts.ts:insertFacts` |
+| `PGLiteEngine.invalidateContentDriftEmbeddings` | moved | `src/core/pglite-engine.ts:PGLiteEngine.invalidateContentDriftEmbeddings` | `src/core/engine-sql/chunks.ts:invalidateContentDriftEmbeddings` |
+| `PGLiteEngine.invalidateStaleSignatureEmbeddings` | moved | `src/core/pglite-engine.ts:PGLiteEngine.invalidateStaleSignatureEmbeddings` | `src/core/engine-sql/chunks.ts:invalidateStaleSignatureEmbeddings` |
 | `PGLiteEngine.listActiveTakesForPages` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listActiveTakesForPages` | `src/core/engine-sql/takes.ts:listActiveTakesForPages` |
+| `PGLiteEngine.listAllPageRefs` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listAllPageRefs` | `src/core/engine-sql/pages.ts:listAllPageRefs` |
+| `PGLiteEngine.listAllSources` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listAllSources` | `src/core/engine-sql/sources.ts:listAllSources` |
+| `PGLiteEngine.listChunklessPagesWithContent` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listChunklessPagesWithContent` | `src/core/engine-sql/chunks.ts:listChunklessPagesWithContent` |
+| `PGLiteEngine.listCorpusSample` | split | `src/core/pglite-engine.ts:PGLiteEngine.listCorpusSample` | `src/core/engine-sql/pages.ts:listCorpusSample`<br>`src/core/engine-sql/pages.ts:toDomainBankRow` |
 | `PGLiteEngine.listEnrichCandidates` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listEnrichCandidates` | `src/core/engine-sql/salience.ts:listEnrichCandidates` |
 | `PGLiteEngine.listFactsByEntity` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listFactsByEntity` | `src/core/engine-sql/facts.ts:listFactsByEntity` |
 | `PGLiteEngine.listFactsBySession` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listFactsBySession` | `src/core/engine-sql/facts.ts:listFactsBySession` |
 | `PGLiteEngine.listFactsSince` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listFactsSince` | `src/core/engine-sql/facts.ts:listFactsSince` |
+| `PGLiteEngine.listFilesForPage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listFilesForPage` | `src/core/engine-sql/files.ts:listFilesForPage` |
+| `PGLiteEngine.listLinkSources` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listLinkSources` | `src/core/engine-sql/links.ts:listLinkSources` |
+| `PGLiteEngine.listPages` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listPages` | `src/core/engine-sql/pages.ts:listPages` |
+| `PGLiteEngine.listPrefixSampledPages` | split | `src/core/pglite-engine.ts:PGLiteEngine.listPrefixSampledPages` | `src/core/engine-sql/pages.ts:listPrefixSampledPages`<br>`src/core/engine-sql/pages.ts:toDomainBankRow` |
+| `PGLiteEngine.listStaleChunks` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listStaleChunks` | `src/core/engine-sql/chunks.ts:listStaleChunks` |
+| `PGLiteEngine.listStalePagesForExtraction` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listStalePagesForExtraction` | `src/core/engine-sql/pages.ts:listStalePagesForExtraction` |
 | `PGLiteEngine.listStaleTakes` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listStaleTakes` | `src/core/engine-sql/takes.ts:listStaleTakes` |
 | `PGLiteEngine.listSupersessions` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listSupersessions` | `src/core/engine-sql/facts.ts:listSupersessions` |
 | `PGLiteEngine.listTakes` | moved | `src/core/pglite-engine.ts:PGLiteEngine.listTakes` | `src/core/engine-sql/takes.ts:listTakes` |
 | `PGLiteEngine.loadContradictionsTrend` | moved | `src/core/pglite-engine.ts:PGLiteEngine.loadContradictionsTrend` | `src/core/engine-sql/takes.ts:loadContradictionsTrend` |
+| `PGLiteEngine.markPagesExtractedBatch` | moved | `src/core/pglite-engine.ts:PGLiteEngine.markPagesExtractedBatch` | `src/core/engine-sql/pages.ts:markPagesExtractedBatch` |
+| `PGLiteEngine.purgeDeletedPages` | moved | `src/core/pglite-engine.ts:PGLiteEngine.purgeDeletedPages` | `src/core/engine-sql/pages.ts:purgeDeletedPages` |
 | `PGLiteEngine.putContradictionCacheEntry` | moved | `src/core/pglite-engine.ts:PGLiteEngine.putContradictionCacheEntry` | `src/core/engine-sql/takes.ts:putContradictionCacheEntry` |
+| `PGLiteEngine.putPage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.putPage` | `src/core/engine-sql/pages.ts:putPage` |
+| `PGLiteEngine.refreshPageBody` | moved | `src/core/pglite-engine.ts:PGLiteEngine.refreshPageBody` | `src/core/engine-sql/pages.ts:refreshPageBody` |
+| `PGLiteEngine.removeLink` | moved | `src/core/pglite-engine.ts:PGLiteEngine.removeLink` | `src/core/engine-sql/links.ts:removeLink` |
+| `PGLiteEngine.removeLinksByPagesAndSource` | moved | `src/core/pglite-engine.ts:PGLiteEngine.removeLinksByPagesAndSource` | `src/core/engine-sql/links.ts:removeLinksByPagesAndSource` |
+| `PGLiteEngine.resolveSlugWithAliasDetailed` | moved | `src/core/pglite-engine.ts:PGLiteEngine.resolveSlugWithAliasDetailed` | `src/core/engine-sql/pages.ts:resolveSlugWithAliasDetailed` |
+| `PGLiteEngine.resolveSlugs` | moved | `src/core/pglite-engine.ts:PGLiteEngine.resolveSlugs` | `src/core/engine-sql/pages.ts:resolveSlugs` |
+| `PGLiteEngine.resolveSlugsByPaths` | moved | `src/core/pglite-engine.ts:PGLiteEngine.resolveSlugsByPaths` | `src/core/engine-sql/pages.ts:resolveSlugsByPaths` |
 | `PGLiteEngine.resolveTake` | moved | `src/core/pglite-engine.ts:PGLiteEngine.resolveTake` | `src/core/engine-sql/takes.ts:resolveTake` |
+| `PGLiteEngine.restorePage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.restorePage` | `src/core/engine-sql/pages.ts:restorePage` |
+| `PGLiteEngine.revertToVersion` | moved | `src/core/pglite-engine.ts:PGLiteEngine.revertToVersion` | `src/core/engine-sql/pages.ts:revertToVersion` |
 | `PGLiteEngine.searchTakes` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchTakes` | `src/core/engine-sql/takes.ts:searchTakes` |
 | `PGLiteEngine.searchTakesVector` | moved | `src/core/pglite-engine.ts:PGLiteEngine.searchTakesVector` | `src/core/engine-sql/takes.ts:searchTakesVector` |
 | `PGLiteEngine.setEmotionalWeightBatch` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setEmotionalWeightBatch` | `src/core/engine-sql/salience.ts:setEmotionalWeightBatch` |
+| `PGLiteEngine.setPageAliases` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setPageAliases` | `src/core/engine-sql/pages.ts:setPageAliases` |
+| `PGLiteEngine.setPageEmbeddingSignature` | moved | `src/core/pglite-engine.ts:PGLiteEngine.setPageEmbeddingSignature` | `src/core/engine-sql/chunks.ts:setPageEmbeddingSignature` |
+| `PGLiteEngine.softDeletePage` | moved | `src/core/pglite-engine.ts:PGLiteEngine.softDeletePage` | `src/core/engine-sql/pages.ts:softDeletePage` |
+| `PGLiteEngine.softDeletePages` | moved | `src/core/pglite-engine.ts:PGLiteEngine.softDeletePages` | `src/core/engine-sql/pages.ts:softDeletePages` |
+| `PGLiteEngine.sumStaleChunkChars` | split | `src/core/pglite-engine.ts:PGLiteEngine.sumStaleChunkChars` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:sumStaleChunkChars` |
 | `PGLiteEngine.supersedeTake` | moved | `src/core/pglite-engine.ts:PGLiteEngine.supersedeTake` | `src/core/engine-sql/takes.ts:supersedeTake` |
 | `PGLiteEngine.sweepContradictionCache` | moved | `src/core/pglite-engine.ts:PGLiteEngine.sweepContradictionCache` | `src/core/engine-sql/takes.ts:sweepContradictionCache` |
+| `PGLiteEngine.traverseGraph` | moved | `src/core/pglite-engine.ts:PGLiteEngine.traverseGraph` | `src/core/engine-sql/links.ts:traverseGraph` |
+| `PGLiteEngine.traversePathsDetailed` | moved | `src/core/pglite-engine.ts:PGLiteEngine.traversePathsDetailed` | `src/core/engine-sql/links.ts:traversePathsDetailed` |
+| `PGLiteEngine.updatePageContextualRetrievalState` | moved | `src/core/pglite-engine.ts:PGLiteEngine.updatePageContextualRetrievalState` | `src/core/engine-sql/pages.ts:updatePageContextualRetrievalState` |
+| `PGLiteEngine.updateSlug` | moved | `src/core/pglite-engine.ts:PGLiteEngine.updateSlug` | `src/core/engine-sql/pages.ts:updateSlug` |
+| `PGLiteEngine.updateSourceConfig` | moved | `src/core/pglite-engine.ts:PGLiteEngine.updateSourceConfig` | `src/core/engine-sql/sources.ts:updateSourceConfig` |
 | `PGLiteEngine.updateTake` | moved | `src/core/pglite-engine.ts:PGLiteEngine.updateTake` | `src/core/engine-sql/takes.ts:updateTake` |
 | `PGLiteEngine.updateTakeEmbeddings` | moved | `src/core/pglite-engine.ts:PGLiteEngine.updateTakeEmbeddings` | `src/core/engine-sql/takes.ts:updateTakeEmbeddings` |
+| `PGLiteEngine.upsertEventProjection` | moved | `src/core/pglite-engine.ts:PGLiteEngine.upsertEventProjection` | `src/core/engine-sql/timeline.ts:upsertEventProjection` |
+| `PGLiteEngine.upsertFile` | moved | `src/core/pglite-engine.ts:PGLiteEngine.upsertFile` | `src/core/engine-sql/files.ts:upsertFile` |
 | `PGLiteEngine.writeContradictionsRun` | moved | `src/core/pglite-engine.ts:PGLiteEngine.writeContradictionsRun` | `src/core/engine-sql/takes.ts:writeContradictionsRun` |
 
 ### `src/core/pglite-engine/cjk-search.ts`
@@ -394,48 +460,115 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 | Old symbol | Kind | Still importable from | New location(s) |
 |---|---|---|---|
+| `PostgresEngine._putPage` | moved | **not re-exported** | `src/core/engine-sql/pages.ts:putPage` |
+| `PostgresEngine._upsertChunksOnce` | moved | `src/core/postgres-engine.ts:PostgresEngine._upsertChunksOnce` | `src/core/engine-sql/chunks.ts:upsertChunksOnce` |
 | `PostgresEngine.addCodeEdges` | moved | `src/core/postgres-engine.ts:PostgresEngine.addCodeEdges` | `src/core/engine-sql/code-edges.ts:addCodeEdges` |
+| `PostgresEngine.addLink` | moved | `src/core/postgres-engine.ts:PostgresEngine.addLink` | `src/core/engine-sql/links.ts:addLink` |
+| `PostgresEngine.addLinksBatch` | moved | `src/core/postgres-engine.ts:PostgresEngine.addLinksBatch` | `src/core/engine-sql/links.ts:addLinksBatch` |
 | `PostgresEngine.addSynthesisEvidence` | moved | `src/core/postgres-engine.ts:PostgresEngine.addSynthesisEvidence` | `src/core/engine-sql/takes.ts:addSynthesisEvidence` |
 | `PostgresEngine.addTakesBatch` | moved | `src/core/postgres-engine.ts:PostgresEngine.addTakesBatch` | `src/core/engine-sql/takes.ts:addTakesBatch` |
+| `PostgresEngine.addTimelineEntriesBatch` | moved | `src/core/postgres-engine.ts:PostgresEngine.addTimelineEntriesBatch` | `src/core/engine-sql/timeline.ts:addTimelineEntriesBatch` |
+| `PostgresEngine.addTimelineEntry` | moved | `src/core/postgres-engine.ts:PostgresEngine.addTimelineEntry` | `src/core/engine-sql/timeline.ts:addTimelineEntry` |
 | `PostgresEngine.batchLoadEmotionalInputs` | moved | `src/core/postgres-engine.ts:PostgresEngine.batchLoadEmotionalInputs` | `src/core/engine-sql/salience.ts:batchLoadEmotionalInputs` |
+| `PostgresEngine.buildStaleChunkWhere` | moved | **not re-exported** | `src/core/engine-sql/chunks.ts:StaleChunkOpts` |
+| `PostgresEngine.chronicleSourceCond` | moved | **not re-exported** | `src/core/engine-sql/timeline.ts:chronicleSourceCond` |
 | `PostgresEngine.consolidateFact` | moved | `src/core/postgres-engine.ts:PostgresEngine.consolidateFact` | `src/core/engine-sql/facts.ts:consolidateFact` |
+| `PostgresEngine.countChunklessPagesWithContent` | moved | `src/core/postgres-engine.ts:PostgresEngine.countChunklessPagesWithContent` | `src/core/engine-sql/chunks.ts:countChunklessPagesWithContent` |
+| `PostgresEngine.countStaleChunks` | split | `src/core/postgres-engine.ts:PostgresEngine.countStaleChunks` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:countStaleChunks` |
+| `PostgresEngine.countStalePagesForExtraction` | moved | `src/core/postgres-engine.ts:PostgresEngine.countStalePagesForExtraction` | `src/core/engine-sql/pages.ts:countStalePagesForExtraction` |
 | `PostgresEngine.countStaleTakes` | moved | `src/core/postgres-engine.ts:PostgresEngine.countStaleTakes` | `src/core/engine-sql/takes.ts:countStaleTakes` |
 | `PostgresEngine.countUnconsolidatedFacts` | moved | `src/core/postgres-engine.ts:PostgresEngine.countUnconsolidatedFacts` | `src/core/engine-sql/facts.ts:countUnconsolidatedFacts` |
+| `PostgresEngine.deleteChunks` | moved | `src/core/postgres-engine.ts:PostgresEngine.deleteChunks` | `src/core/engine-sql/chunks.ts:deleteChunks` |
 | `PostgresEngine.deleteCodeEdgesForChunks` | moved | `src/core/postgres-engine.ts:PostgresEngine.deleteCodeEdgesForChunks` | `src/core/engine-sql/code-edges.ts:deleteCodeEdgesForChunks` |
 | `PostgresEngine.deleteFactsForPage` | moved | `src/core/postgres-engine.ts:PostgresEngine.deleteFactsForPage` | `src/core/engine-sql/facts.ts:deleteFactsForPage` |
+| `PostgresEngine.deletePage` | moved | `src/core/postgres-engine.ts:PostgresEngine.deletePage` | `src/core/engine-sql/pages.ts:deletePage` |
+| `PostgresEngine.deletePages` | moved | `src/core/postgres-engine.ts:PostgresEngine.deletePages` | `src/core/engine-sql/pages.ts:deletePages` |
 | `PostgresEngine.expireFact` | moved | `src/core/postgres-engine.ts:PostgresEngine.expireFact` | `src/core/engine-sql/facts.ts:expireFact` |
 | `PostgresEngine.findAnomalies` | moved | `src/core/postgres-engine.ts:PostgresEngine.findAnomalies` | `src/core/engine-sql/salience.ts:findAnomalies` |
+| `PostgresEngine.findByTitleFuzzy` | moved | `src/core/postgres-engine.ts:PostgresEngine.findByTitleFuzzy` | `src/core/engine-sql/pages.ts:findByTitleFuzzy` |
 | `PostgresEngine.findCandidateDuplicates` | moved | `src/core/postgres-engine.ts:PostgresEngine.findCandidateDuplicates` | `src/core/engine-sql/facts.ts:findCandidateDuplicates` |
+| `PostgresEngine.findDuplicatePage` | moved | `src/core/postgres-engine.ts:PostgresEngine.findDuplicatePage` | `src/core/engine-sql/pages.ts:findDuplicatePage` |
+| `PostgresEngine.findOrphanPages` | moved | `src/core/postgres-engine.ts:PostgresEngine.findOrphanPages` | `src/core/engine-sql/links.ts:findOrphanPages` |
 | `PostgresEngine.findTrajectory` | moved | `src/core/postgres-engine.ts:PostgresEngine.findTrajectory` | `src/core/engine-sql/facts.ts:findTrajectory` |
+| `PostgresEngine.getAllSlugs` | moved | `src/core/postgres-engine.ts:PostgresEngine.getAllSlugs` | `src/core/engine-sql/pages.ts:getAllSlugs` |
+| `PostgresEngine.getBacklinks` | split | `src/core/postgres-engine.ts:PostgresEngine.getBacklinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
 | `PostgresEngine.getCalibrationCurve` | moved | `src/core/postgres-engine.ts:PostgresEngine.getCalibrationCurve` | `src/core/engine-sql/takes.ts:getCalibrationCurve` |
 | `PostgresEngine.getCalleesOf` | moved | `src/core/postgres-engine.ts:PostgresEngine.getCalleesOf` | `src/core/engine-sql/code-edges.ts:getCalleesOf` |
 | `PostgresEngine.getCallersOf` | moved | `src/core/postgres-engine.ts:PostgresEngine.getCallersOf` | `src/core/engine-sql/code-edges.ts:getCallersOf` |
+| `PostgresEngine.getChunks` | moved | `src/core/postgres-engine.ts:PostgresEngine.getChunks` | `src/core/engine-sql/chunks.ts:getChunks` |
+| `PostgresEngine.getChunksWithEmbeddings` | moved | `src/core/postgres-engine.ts:PostgresEngine.getChunksWithEmbeddings` | `src/core/engine-sql/chunks.ts:getChunksWithEmbeddings` |
 | `PostgresEngine.getContradictionCacheEntry` | moved | `src/core/postgres-engine.ts:PostgresEngine.getContradictionCacheEntry` | `src/core/engine-sql/takes.ts:getContradictionCacheEntry` |
 | `PostgresEngine.getEdgesByChunk` | moved | `src/core/postgres-engine.ts:PostgresEngine.getEdgesByChunk` | `src/core/engine-sql/code-edges.ts:getEdgesByChunk` |
+| `PostgresEngine.getEmbeddingsByChunkIds` | moved | `src/core/postgres-engine.ts:PostgresEngine.getEmbeddingsByChunkIds` | `src/core/engine-sql/chunks.ts:getEmbeddingsByChunkIds` |
 | `PostgresEngine.getFactsHealth` | moved | `src/core/postgres-engine.ts:PostgresEngine.getFactsHealth` | `src/core/engine-sql/facts.ts:getFactsHealth` |
+| `PostgresEngine.getFile` | moved | `src/core/postgres-engine.ts:PostgresEngine.getFile` | `src/core/engine-sql/files.ts:getFile` |
+| `PostgresEngine.getLastSeen` | moved | `src/core/postgres-engine.ts:PostgresEngine.getLastSeen` | `src/core/engine-sql/timeline.ts:getLastSeen` |
+| `PostgresEngine.getLinks` | split | `src/core/postgres-engine.ts:PostgresEngine.getLinks` | `src/core/engine-sql/links.ts:getBacklinks`<br>`src/core/engine-sql/links.ts:getLinks` |
+| `PostgresEngine.getOnThisDay` | moved | `src/core/postgres-engine.ts:PostgresEngine.getOnThisDay` | `src/core/engine-sql/timeline.ts:getOnThisDay` |
+| `PostgresEngine.getPageTimestamps` | moved | `src/core/postgres-engine.ts:PostgresEngine.getPageTimestamps` | `src/core/engine-sql/pages.ts:getPageTimestamps` |
 | `PostgresEngine.getRecentSalience` | moved | `src/core/postgres-engine.ts:PostgresEngine.getRecentSalience` | `src/core/engine-sql/salience.ts:getRecentSalience` |
 | `PostgresEngine.getScorecard` | moved | `src/core/postgres-engine.ts:PostgresEngine.getScorecard` | `src/core/engine-sql/takes.ts:getScorecard` |
+| `PostgresEngine.getSince` | moved | `src/core/postgres-engine.ts:PostgresEngine.getSince` | `src/core/engine-sql/timeline.ts:getSince` |
+| `PostgresEngine.getTags` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTags` | `src/core/engine-sql/tags.ts:getTags` |
 | `PostgresEngine.getTakeEmbeddings` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTakeEmbeddings` | `src/core/engine-sql/takes.ts:getTakeEmbeddings` |
+| `PostgresEngine.getTimeline` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTimeline` | `src/core/engine-sql/timeline.ts:getTimeline` |
+| `PostgresEngine.getTimelineForDate` | moved | `src/core/postgres-engine.ts:PostgresEngine.getTimelineForDate` | `src/core/engine-sql/timeline.ts:getTimelineForDate` |
+| `PostgresEngine.getVersions` | moved | `src/core/postgres-engine.ts:PostgresEngine.getVersions` | `src/core/engine-sql/pages.ts:getVersions` |
 | `PostgresEngine.insertFact` | moved | `src/core/postgres-engine.ts:PostgresEngine.insertFact` | `src/core/engine-sql/facts.ts:insertFact` |
 | `PostgresEngine.insertFacts` | moved | `src/core/postgres-engine.ts:PostgresEngine.insertFacts` | `src/core/engine-sql/facts.ts:insertFacts` |
+| `PostgresEngine.invalidateContentDriftEmbeddings` | moved | `src/core/postgres-engine.ts:PostgresEngine.invalidateContentDriftEmbeddings` | `src/core/engine-sql/chunks.ts:invalidateContentDriftEmbeddings` |
+| `PostgresEngine.invalidateStaleSignatureEmbeddings` | moved | `src/core/postgres-engine.ts:PostgresEngine.invalidateStaleSignatureEmbeddings` | `src/core/engine-sql/chunks.ts:invalidateStaleSignatureEmbeddings` |
 | `PostgresEngine.listActiveTakesForPages` | moved | `src/core/postgres-engine.ts:PostgresEngine.listActiveTakesForPages` | `src/core/engine-sql/takes.ts:listActiveTakesForPages` |
+| `PostgresEngine.listAllPageRefs` | moved | `src/core/postgres-engine.ts:PostgresEngine.listAllPageRefs` | `src/core/engine-sql/pages.ts:listAllPageRefs` |
+| `PostgresEngine.listAllSources` | moved | `src/core/postgres-engine.ts:PostgresEngine.listAllSources` | `src/core/engine-sql/sources.ts:listAllSources` |
+| `PostgresEngine.listChunklessPagesWithContent` | moved | `src/core/postgres-engine.ts:PostgresEngine.listChunklessPagesWithContent` | `src/core/engine-sql/chunks.ts:listChunklessPagesWithContent` |
+| `PostgresEngine.listCorpusSample` | split | `src/core/postgres-engine.ts:PostgresEngine.listCorpusSample` | `src/core/engine-sql/pages.ts:listCorpusSample`<br>`src/core/engine-sql/pages.ts:toDomainBankRow` |
 | `PostgresEngine.listEnrichCandidates` | moved | `src/core/postgres-engine.ts:PostgresEngine.listEnrichCandidates` | `src/core/engine-sql/salience.ts:listEnrichCandidates` |
 | `PostgresEngine.listFactsByEntity` | moved | `src/core/postgres-engine.ts:PostgresEngine.listFactsByEntity` | `src/core/engine-sql/facts.ts:listFactsByEntity` |
 | `PostgresEngine.listFactsBySession` | moved | `src/core/postgres-engine.ts:PostgresEngine.listFactsBySession` | `src/core/engine-sql/facts.ts:listFactsBySession` |
 | `PostgresEngine.listFactsSince` | moved | `src/core/postgres-engine.ts:PostgresEngine.listFactsSince` | `src/core/engine-sql/facts.ts:listFactsSince` |
+| `PostgresEngine.listFilesForPage` | moved | `src/core/postgres-engine.ts:PostgresEngine.listFilesForPage` | `src/core/engine-sql/files.ts:listFilesForPage` |
+| `PostgresEngine.listLinkSources` | moved | `src/core/postgres-engine.ts:PostgresEngine.listLinkSources` | `src/core/engine-sql/links.ts:listLinkSources` |
+| `PostgresEngine.listPages` | moved | `src/core/postgres-engine.ts:PostgresEngine.listPages` | `src/core/engine-sql/pages.ts:listPages` |
+| `PostgresEngine.listPrefixSampledPages` | split | `src/core/postgres-engine.ts:PostgresEngine.listPrefixSampledPages` | `src/core/engine-sql/pages.ts:listPrefixSampledPages`<br>`src/core/engine-sql/pages.ts:toDomainBankRow` |
+| `PostgresEngine.listStaleChunks` | moved | `src/core/postgres-engine.ts:PostgresEngine.listStaleChunks` | `src/core/engine-sql/chunks.ts:listStaleChunks` |
+| `PostgresEngine.listStalePagesForExtraction` | moved | `src/core/postgres-engine.ts:PostgresEngine.listStalePagesForExtraction` | `src/core/engine-sql/pages.ts:listStalePagesForExtraction` |
 | `PostgresEngine.listStaleTakes` | moved | `src/core/postgres-engine.ts:PostgresEngine.listStaleTakes` | `src/core/engine-sql/takes.ts:listStaleTakes` |
 | `PostgresEngine.listSupersessions` | moved | `src/core/postgres-engine.ts:PostgresEngine.listSupersessions` | `src/core/engine-sql/facts.ts:listSupersessions` |
 | `PostgresEngine.listTakes` | moved | `src/core/postgres-engine.ts:PostgresEngine.listTakes` | `src/core/engine-sql/takes.ts:listTakes` |
 | `PostgresEngine.loadContradictionsTrend` | moved | `src/core/postgres-engine.ts:PostgresEngine.loadContradictionsTrend` | `src/core/engine-sql/takes.ts:loadContradictionsTrend` |
+| `PostgresEngine.markPagesExtractedBatch` | moved | `src/core/postgres-engine.ts:PostgresEngine.markPagesExtractedBatch` | `src/core/engine-sql/pages.ts:markPagesExtractedBatch` |
+| `PostgresEngine.purgeDeletedPages` | moved | `src/core/postgres-engine.ts:PostgresEngine.purgeDeletedPages` | `src/core/engine-sql/pages.ts:purgeDeletedPages` |
 | `PostgresEngine.putContradictionCacheEntry` | moved | `src/core/postgres-engine.ts:PostgresEngine.putContradictionCacheEntry` | `src/core/engine-sql/takes.ts:putContradictionCacheEntry` |
+| `PostgresEngine.putPage` | moved | `src/core/postgres-engine.ts:PostgresEngine.putPage` | `src/core/engine-sql/pages.ts:putPage` |
+| `PostgresEngine.refreshPageBody` | moved | `src/core/postgres-engine.ts:PostgresEngine.refreshPageBody` | `src/core/engine-sql/pages.ts:refreshPageBody` |
+| `PostgresEngine.removeLink` | moved | `src/core/postgres-engine.ts:PostgresEngine.removeLink` | `src/core/engine-sql/links.ts:removeLink` |
+| `PostgresEngine.removeLinksByPagesAndSource` | moved | `src/core/postgres-engine.ts:PostgresEngine.removeLinksByPagesAndSource` | `src/core/engine-sql/links.ts:removeLinksByPagesAndSource` |
+| `PostgresEngine.resolveSlugWithAliasDetailed` | moved | `src/core/postgres-engine.ts:PostgresEngine.resolveSlugWithAliasDetailed` | `src/core/engine-sql/pages.ts:resolveSlugWithAliasDetailed` |
+| `PostgresEngine.resolveSlugs` | moved | `src/core/postgres-engine.ts:PostgresEngine.resolveSlugs` | `src/core/engine-sql/pages.ts:resolveSlugs` |
+| `PostgresEngine.resolveSlugsByPaths` | moved | `src/core/postgres-engine.ts:PostgresEngine.resolveSlugsByPaths` | `src/core/engine-sql/pages.ts:resolveSlugsByPaths` |
 | `PostgresEngine.resolveTake` | moved | `src/core/postgres-engine.ts:PostgresEngine.resolveTake` | `src/core/engine-sql/takes.ts:resolveTake` |
+| `PostgresEngine.restorePage` | moved | `src/core/postgres-engine.ts:PostgresEngine.restorePage` | `src/core/engine-sql/pages.ts:restorePage` |
+| `PostgresEngine.revertToVersion` | moved | `src/core/postgres-engine.ts:PostgresEngine.revertToVersion` | `src/core/engine-sql/pages.ts:revertToVersion` |
 | `PostgresEngine.searchTakes` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchTakes` | `src/core/engine-sql/takes.ts:searchTakes` |
 | `PostgresEngine.searchTakesVector` | moved | `src/core/postgres-engine.ts:PostgresEngine.searchTakesVector` | `src/core/engine-sql/takes.ts:searchTakesVector` |
 | `PostgresEngine.setEmotionalWeightBatch` | moved | `src/core/postgres-engine.ts:PostgresEngine.setEmotionalWeightBatch` | `src/core/engine-sql/salience.ts:setEmotionalWeightBatch` |
+| `PostgresEngine.setPageAliases` | moved | `src/core/postgres-engine.ts:PostgresEngine.setPageAliases` | `src/core/engine-sql/pages.ts:setPageAliases` |
+| `PostgresEngine.setPageEmbeddingSignature` | moved | `src/core/postgres-engine.ts:PostgresEngine.setPageEmbeddingSignature` | `src/core/engine-sql/chunks.ts:setPageEmbeddingSignature` |
+| `PostgresEngine.softDeletePage` | moved | `src/core/postgres-engine.ts:PostgresEngine.softDeletePage` | `src/core/engine-sql/pages.ts:softDeletePage` |
+| `PostgresEngine.softDeletePages` | moved | `src/core/postgres-engine.ts:PostgresEngine.softDeletePages` | `src/core/engine-sql/pages.ts:softDeletePages` |
+| `PostgresEngine.sumStaleChunkChars` | split | `src/core/postgres-engine.ts:PostgresEngine.sumStaleChunkChars` | `src/core/engine-sql/chunks.ts:StaleChunkOpts`<br>`src/core/engine-sql/chunks.ts:sumStaleChunkChars` |
 | `PostgresEngine.supersedeTake` | moved | `src/core/postgres-engine.ts:PostgresEngine.supersedeTake` | `src/core/engine-sql/takes.ts:supersedeTake` |
 | `PostgresEngine.sweepContradictionCache` | moved | `src/core/postgres-engine.ts:PostgresEngine.sweepContradictionCache` | `src/core/engine-sql/takes.ts:sweepContradictionCache` |
+| `PostgresEngine.traverseGraph` | moved | `src/core/postgres-engine.ts:PostgresEngine.traverseGraph` | `src/core/engine-sql/links.ts:traverseGraph` |
+| `PostgresEngine.traversePathsDetailed` | moved | `src/core/postgres-engine.ts:PostgresEngine.traversePathsDetailed` | `src/core/engine-sql/links.ts:traversePathsDetailed` |
+| `PostgresEngine.updatePageContextualRetrievalState` | moved | `src/core/postgres-engine.ts:PostgresEngine.updatePageContextualRetrievalState` | `src/core/engine-sql/pages.ts:updatePageContextualRetrievalState` |
+| `PostgresEngine.updateSlug` | moved | `src/core/postgres-engine.ts:PostgresEngine.updateSlug` | `src/core/engine-sql/pages.ts:updateSlug` |
+| `PostgresEngine.updateSourceConfig` | moved | `src/core/postgres-engine.ts:PostgresEngine.updateSourceConfig` | `src/core/engine-sql/sources.ts:updateSourceConfig` |
 | `PostgresEngine.updateTake` | moved | `src/core/postgres-engine.ts:PostgresEngine.updateTake` | `src/core/engine-sql/takes.ts:updateTake` |
 | `PostgresEngine.updateTakeEmbeddings` | moved | `src/core/postgres-engine.ts:PostgresEngine.updateTakeEmbeddings` | `src/core/engine-sql/takes.ts:updateTakeEmbeddings` |
+| `PostgresEngine.upsertEventProjection` | moved | `src/core/postgres-engine.ts:PostgresEngine.upsertEventProjection` | `src/core/engine-sql/timeline.ts:upsertEventProjection` |
+| `PostgresEngine.upsertFile` | moved | `src/core/postgres-engine.ts:PostgresEngine.upsertFile` | `src/core/engine-sql/files.ts:upsertFile` |
 | `PostgresEngine.writeContradictionsRun` | moved | `src/core/postgres-engine.ts:PostgresEngine.writeContradictionsRun` | `src/core/engine-sql/takes.ts:writeContradictionsRun` |
 
 ### `src/core/postgres-engine/cjk-search.ts`
@@ -536,7 +669,13 @@ module path when it keeps exporting the name; "module-private" means the old mod
 
 Deleted with their callers, or rewritten beyond token matching. Search the new module directories by behavior.
 
+- `src/core/pglite-engine.ts:PGLiteEngine._addLinksBatchOnce`
+- `src/core/pglite-engine.ts:PGLiteEngine._addTimelineEntriesBatchOnce`
+- `src/core/pglite-engine.ts:PGLiteEngine.buildChunklessPagesWhere`
+- `src/core/pglite-engine.ts:PGLiteEngine.buildStalePagesWhere`
+- `src/core/pglite-engine.ts:PGLiteEngine.chronicleSelect`
 - `src/core/pglite-engine.ts:PGLiteEngine.factsDeps`
+- `src/core/pglite-engine.ts:PGLiteEngine.pushChronicleSource`
 - `src/core/pglite-engine.ts:PGLiteEngine.salienceDeps`
 - `src/core/pglite-engine.ts:PGLiteEngine.takesDeps`
 - `src/core/pglite-engine/cjk-search.ts:PgliteCjkSearchDeps`
@@ -547,6 +686,10 @@ Deleted with their callers, or rewritten beyond token matching. Search the new m
 - `src/core/pglite-engine/facts.ts:toDate`
 - `src/core/pglite-engine/salience.ts:PgliteSalienceDeps`
 - `src/core/pglite-engine/takes.ts:PgliteTakesDeps`
+- `src/core/postgres-engine.ts:PostgresEngine._addLinksBatchOnce`
+- `src/core/postgres-engine.ts:PostgresEngine._addTimelineEntriesBatchOnce`
+- `src/core/postgres-engine.ts:PostgresEngine.buildChunklessPagesWhere`
+- `src/core/postgres-engine.ts:PostgresEngine.buildStalePagesWhere`
 - `src/core/postgres-engine.ts:PostgresEngine.codeEdgesDeps`
 - `src/core/postgres-engine.ts:PostgresEngine.factsDeps`
 - `src/core/postgres-engine.ts:PostgresEngine.salienceDeps`
