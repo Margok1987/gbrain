@@ -72,12 +72,7 @@ export const DOMAIN_OF: Record<string, string> = {
   'connRetry': OOS.helper,
   'resolveFactsEmbeddingCast': OOS.helper,
   'activeEmbeddingColId': OOS.helper,
-  'buildStalePagesWhere': OOS.helper,
-  'chronicleSourceCond': OOS.helper,
-  '_putPage': OOS.helper,
   '_upsertChunksOnce': OOS.helper,
-  '_addLinksBatchOnce': OOS.helper,
-  '_addTimelineEntriesBatchOnce': OOS.helper,
   '_searchKeywordCJK': OOS.helper,
 
   // pages

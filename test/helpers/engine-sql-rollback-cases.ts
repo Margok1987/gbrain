@@ -25,6 +25,7 @@ export interface RollbackCase {
 }
 
 const SLUG = 'notes/engine-sql-rollback-alice-example';
+const LINK_TARGET = 'notes/engine-sql-rollback-target-alice-example';
 
 async function seedPage(engine: BrainEngine): Promise<void> {
   await engine.putPage(SLUG, { type: 'note', title: 'Rollback probe', compiled_truth: 'body' });
@@ -164,6 +165,63 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       const rows = await engine.executeRaw<{ s: string | null }>(
         `SELECT embedding_signature AS s FROM pages WHERE slug = $1 AND source_id = 'default'`, [SLUG]);
       return rows[0]?.s ?? null;
+    },
+  },
+  {
+    domain: 'pages',
+    async seed(engine) {
+      await seedPage(engine);
+    },
+    async write(tx) {
+      const page = await tx.putPage(SLUG, { type: 'note', title: 'Rollback probe', compiled_truth: 'rolled-back body' });
+      expect(page.compiled_truth).toBe('rolled-back body');
+      expect(await tx.softDeletePage(SLUG, { sourceId: 'default' })).toEqual({ slug: SLUG });
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ body: string; deleted: boolean }>(
+        `SELECT compiled_truth AS body, deleted_at IS NOT NULL AS deleted FROM pages WHERE slug = $1 AND source_id = 'default'`, [SLUG]);
+      return rows[0] ? { body: rows[0].body, deleted: rows[0].deleted } : null;
+    },
+  },
+  {
+    domain: 'tags',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.addTag(SLUG, 'seeded-tag');
+    },
+    async write(tx) {
+      await tx.addTag(SLUG, 'rolled-back-tag');
+    },
+    async observe(engine) {
+      return engine.getTags(SLUG, { sourceId: 'default' });
+    },
+  },
+  {
+    domain: 'links',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.putPage(LINK_TARGET, { type: 'note', title: 'Rollback link target', compiled_truth: 'target' });
+      await engine.addLink(SLUG, LINK_TARGET, 'seeded context', 'mentions', 'manual');
+    },
+    async write(tx) {
+      await tx.addLink(SLUG, LINK_TARGET, 'rolled-back context', 'mentions', 'manual');
+    },
+    async observe(engine) {
+      return (await engine.getLinks(SLUG, { sourceId: 'default' }))
+        .filter((l) => l.to_slug === LINK_TARGET).map((l) => `${l.link_type}:${l.context}`).sort();
+    },
+  },
+  {
+    domain: 'timeline',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.addTimelineEntry(SLUG, { date: '2026-01-02', source: 'test:rollback', summary: 'seeded entry' });
+    },
+    async write(tx) {
+      expect(await tx.addTimelineEntry(SLUG, { date: '2026-01-03', source: 'test:rollback', summary: 'rolled-back entry' })).toBe(true);
+    },
+    async observe(engine) {
+      return (await engine.getTimeline(SLUG, { sourceId: 'default' })).map((e) => e.summary).sort();
     },
   },
 ];

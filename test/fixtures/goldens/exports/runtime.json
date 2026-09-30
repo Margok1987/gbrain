@@ -2,13 +2,10 @@
   "golden": {
     "prototypes": {
       "PGLiteEngine": [
-        "_addLinksBatchOnce",
-        "_addTimelineEntriesBatchOnce",
         "_attachDatabase",
         "_closeInternal",
         "_connectInternal",
         "_connectWithRootRegistration",
-        "_putPage",
         "_searchKeywordCJK",
         "_upsertChunksOnce",
         "activeEmbeddingColId",
@@ -23,7 +20,6 @@
         "applyForwardReferenceBootstrap",
         "batchLoadEmotionalInputs",
         "batchRetry",
-        "buildStalePagesWhere",
         "codeEdgesDeps",
         "connect",
         "connectForRestore",
@@ -129,7 +125,6 @@
         "mergeOntologyFact",
         "migrateFactsToCanonical",
         "purgeDeletedPages",
-        "pushChronicleSource",
         "putContradictionCacheEntry",
         "putDreamVerdict",
         "putPage",
@@ -187,9 +182,6 @@
         "writeContradictionsRun"
       ],
       "PostgresEngine": [
-        "_addLinksBatchOnce",
-        "_addTimelineEntriesBatchOnce",
-        "_putPage",
         "_searchKeywordCJK",
         "_upsertChunksOnce",
         "activeEmbeddingColId",
@@ -204,8 +196,6 @@
         "applyForwardReferenceBootstrap",
         "batchLoadEmotionalInputs",
         "batchRetry",
-        "buildStalePagesWhere",
-        "chronicleSourceCond",
         "connRetry",
         "connect",
         "consolidateFact",

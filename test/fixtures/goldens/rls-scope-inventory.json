@@ -3234,9 +3234,6 @@
       },
       "helper": "withScopedReadTransaction",
       "scoping": {
-        "_addLinksBatchOnce": "none",
-        "_addTimelineEntriesBatchOnce": "none",
-        "_putPage": "none",
         "_searchKeywordCJK": "direct",
         "_upsertChunksOnce": "via:readPageSnapshot",
         "activeEmbeddingColId": "none",
@@ -3251,8 +3248,6 @@
         "applyForwardReferenceBootstrap": "none",
         "batchLoadEmotionalInputs": "none",
         "batchRetry": "none",
-        "buildStalePagesWhere": "none",
-        "chronicleSourceCond": "none",
         "connRetry": "none",
         "connect": "none",
         "consolidateFact": "none",

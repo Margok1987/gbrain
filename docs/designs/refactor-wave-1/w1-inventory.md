@@ -144,6 +144,79 @@ DDL batch (whitespace-normalized) and the stderr line. PGLite traces are byte-id
 except the recorded probe call form (tagged template vs `unsafe` with tagged-template options); on a single direct
 connection both leave the probe as a named prepared statement.
 
+# W1-extended (lane a): pages, tags, links, timeline
+
+Same classes and rules as above; compared at `origin/refactor/wave-1` 98c155835 (master text unchanged by W1-core for
+these domains). The unified statement text is PostgresEngine's text, pinned by
+`test/fixtures/goldens/sql-text/{pages,tags,links,timeline}.json`. Members listed as "already one copy" carry no SQL
+in the engines (their SQL lives in a shared module the engines call with themselves) and have no baseline row; they
+stay in the engines unchanged. No method in these four domains keeps dialect-specific SQL in the engines.
+
+RLS scoping is unchanged per method (`rls-scope-inventory.json`): the eleven members that called
+`withScopedReadTransaction` on master (`readPageSnapshot`, `findDuplicatePage`, `listPages`, `getAllSlugs`,
+`listPrefixSampledPages`, `listCorpusSample`, `countStalePagesForExtraction`, `listStalePagesForExtraction`,
+`getLinks`, `getBacklinks`, `listLinkSources`) still call it directly in PostgresEngine and hand the engine-sql
+function a `ScopedRead` over the scoped handle (PGLite: `scopedRead(this.engineSql)`); every other read takes
+`LegacyUnscopedRead`. `listCorpusSample` keeps `alwaysTransaction` when seeded (setseed pins the connection).
+
+## pages (`engine-sql/pages.ts`)
+
+| Method | Class | Notes |
+|---|---|---|
+| `getPage`, `readPageSnapshot` | already one copy | SQL in `page-state/snapshot.ts`; transport differs (Postgres: scoped `tx.unsafe`, PGLite: `executeRaw`). Hot path left untouched. |
+| `lockPageKeys`, `createVersion`, `putPage` (outer transaction, page-key lock, `assertPageRevision`) | already one copy / dialect-specific orchestration without SQL | Page-state guards (`page-state/guards.ts`, `versions.ts`, `types.ts`); PGLite tracks held keys in-process, Postgres locks `page_write_guards` rows. Stays in the engines. |
+| `_putPage` (row upsert) | identical SQL, different driver post-processing | PGLite cast `$8::jsonb`, `$10::timestamptz`, `$18::timestamptz` and pre-serialized `effective_date` / `ingested_at` to ISO strings; the unified text has no casts (column context types the binds; frontmatter binds through `jsonbParam`). Nested `sql.unsafe(bodyWriteChunkVersion(...))` becomes trusted text. PGLite can return zero rows from `INSERT ... ON CONFLICT DO UPDATE ... RETURNING` in trigger edge cases: its re-read fallback is kept as a PGLite-only hook (Postgres keeps `rowToPage(rows[0])`). Blank-body data-loss guard read is identical. |
+| `deletePage`, `deletePages`, `resolveSlugsByPaths`, `softDeletePages`, `updatePageContextualRetrievalState`, `getPageTimestamps` | identical-after-normalization | Placeholder numbering / whitespace only. |
+| `softDeletePage`, `restorePage` | identical-after-normalization | PGLite joined a WHERE array; same optional `source_id` predicate. |
+| `purgeDeletedPages` | identical SQL, different driver post-processing | Same statements; both coerce `deleted_at` to `Date`. |
+| `refreshPageBody` | identical-after-normalization | Both splice `bodyWriteChunkVersion('$1', '$2')`, which reuses the first two binds (compiled_truth, timeline); the unified fragment keeps them first so the reuse still points at them (same 5 params). |
+| `findDuplicatePage` | identical-after-normalization | PGLite reused `$3`/`$4`; Postgres binds each occurrence with `::text` casts. |
+| `listPages` | identical-after-normalization | PGLite built a WHERE array (no `1=1`), same predicates, `PAGE_SORT_SQL` allowlist, limit/offset bound. |
+| `getAllSlugs`, `listAllPageRefs` | identical SQL, different driver post-processing | `listAllPageRefs` coerces `updated_at` to `Date` on both. |
+| `listPrefixSampledPages`, `listCorpusSample` | identical SQL, different driver post-processing | PGLite reused `$n`; Postgres binds per occurrence. PGLite converted `last_retrieved_at` to `Date`; the unified mapper declares it a `date` column (Postgres already returns `Date`). Seeded `setseed` runs on the same executor before the sample. |
+| `resolveSlugs` | identical-after-normalization | PGLite substituted `__N__` placeholders; same exact-then-fuzzy statements. |
+| `countStalePagesForExtraction`, `listStalePagesForExtraction` (+ private `buildStalePagesWhere`) | identical-after-normalization | Both engines built the same predicate text and ran it raw (Postgres `tx.unsafe`, PGLite `db.query`); the predicate is now a `sqlFragment` rendered once and run through the executor's `unsafe` path (master's direct `unsafe`, unchanged driver options). |
+| `markPagesExtractedBatch` | identical-after-normalization | PGLite appended `RETURNING 1` and counted rows; Postgres read `.count`. Unified on Postgres's text + `affectedRows` (EO18). |
+| `getVersions` | identical-after-normalization | |
+| `revertToVersion` | identical-after-normalization | Same spliced `bodyWriteChunkVersion('pv.compiled_truth', 'pages.timeline')`. |
+| `updateSlug` | identical | Same `executeRaw` text on both, inside `engine.transaction()` with `recordRenameAlias` / `moveSlugBindings`; the statement moves, the transaction and alias bookkeeping stay in the engines. |
+| `setPageAliases` | identical | Same `executeRaw` statements after the page-key lock; the lock and transaction stay in the engines. |
+| `resolveSlugWithAlias` | already one copy | Delegates to `resolveSlugWithAliasDetailed`. |
+| `resolveSlugWithAliasDetailed` | identical-after-normalization | PGLite expanded `source_id IN ($2, ...)`, ordered by `id` and stable-sorted by source position in JS; Postgres binds `= ANY($n::text[])` and orders by `array_position(...), id` (same order). Unified on Postgres's statement (EO8 list binding). The multi-match warning text is Postgres's (`returning first by sourceOrSources order.`); PGLite's said `returning first.` |
+
+## tags (`engine-sql/tags.ts`)
+
+| Method | Class | Notes |
+|---|---|---|
+| `getTags` | identical-after-normalization | Same scope precedence, privacy and live filters; PGLite numbered the scope bind `$2`. |
+| `addTag`, `removeTag` | already one copy | `mutatePageTag` (page-state guarded) runs identical `executeRaw` SQL on both engines. |
+
+## links (`engine-sql/links.ts`)
+
+| Method | Class | Notes |
+|---|---|---|
+| `addLink` | identical-after-normalization | Postgres locks endpoint rows `FOR KEY SHARE` inside the upsert snapshot (#4109); PGLite omitted it. PGLite is a single-connection database, so the lock has no concurrent writer to order; the unified text keeps the clause. |
+| `addLinksBatch` (+ private `_addLinksBatchOnce`) | identical | Same `executeRawJsonb` text (PGLite also early-returned on empty input, which the public wrapper already does); keeps master's `executeRaw` path and re-resolves the executor on each `batchRetry` attempt. |
+| `removeLinksByPagesAndSource` | identical | Same `executeRawJsonb` statement. |
+| `removeLink` | identical-after-normalization | Four branches, same statements. |
+| `getLinks`, `getBacklinks` | identical-after-normalization | Three branches (federated, scalar, unscoped), same privacy text. |
+| `listLinkSources` | identical-after-normalization | Postgres always inner-joins `pages f`; PGLite joined only when scoped. `links.from_page_id` is `NOT NULL REFERENCES pages(id) ON DELETE CASCADE`, so the unscoped join drops no row. |
+| `findOrphanPages` | identical-after-normalization | |
+| `traverseGraph` | identical-after-normalization | PGLite inlined `TRAVERSE_WALK_ROW_CAP`; Postgres binds it. |
+| `traversePathsDetailed` | identical SQL, different driver post-processing | PGLite emitted `AND l.link_type = $3` only when a type was given; Postgres binds `(${!linkTypeMatches} OR l.link_type = ...)` (same predicate). PGLite read `depth` as-is, Postgres `Number(depth)` (int4 on both). |
+| `traversePaths` | already one copy | Delegates to `traversePathsDetailed`. |
+| `replaceDerivedLinks` | already one copy | `derived-links.ts`. |
+
+## timeline (`engine-sql/timeline.ts`)
+
+| Method | Class | Notes |
+|---|---|---|
+| `addTimelineEntry` | identical-after-normalization | `FOR KEY SHARE` as in `addLink` (Postgres only on master; no effect on single-connection PGLite). |
+| `addTimelineEntriesBatch` (+ private `_addTimelineEntriesBatchOnce`) | identical | As `addLinksBatch`. |
+| `getTimeline` | identical-after-normalization | PGLite put the privacy predicates before the date/scope predicates; AND order has no semantic effect. |
+| `getTimelineForDate`, `getSince`, `getOnThisDay`, `getLastSeen` (+ PostgresEngine `chronicleSourceCond`, PGLiteEngine `pushChronicleSource` / `chronicleSelect`) | identical-after-normalization | Same chronicle shape, scope precedence and event-page scope; PGLite reused `$1`. |
+| `upsertEventProjection` | identical-after-normalization | PGLite reused `$6` for both source predicates. |
+
 # W1-extended (lane b): sources, files, chunks
 
 Same classes and rules as W1-core above. Sources compared: `PostgresEngine` / `PGLiteEngine` at
