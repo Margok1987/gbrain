@@ -6798,6 +6798,7 @@
       {
         "kind": "interface",
         "members": [
+          "abstained?: ThinkAbstention | undefined",
           "answer: string",
           "citations: ParsedCitation[]",
           "cost_usd?: number | undefined",
