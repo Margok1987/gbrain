@@ -877,7 +877,7 @@ per-file rules. They do not cache passing results. Candidate scanner failures
 fail the guard, and matching files retain the same allowlists and diagnostics.
 
 `scripts/guards-manifest.tsv` is THE single registry of `scripts/check-*`
-guards (currently 58), each classified `scanner` (greps/parses repo sources —
+guards (currently 61), each classified `scanner` (greps/parses repo sources —
 must eventually carry fixtures), `buildfresh`, or `repostate` (build/freshness
 guards are exempt-with-reason, not fixture-tested).
 `scripts/guard-self-test.sh` (`bun run check:guard-self-test`, wired into
@@ -989,6 +989,40 @@ guard fails on:
 
 Fixtures: `test/fixtures/guards/check-engine-sql-dynamic.ts/`; forms are
 driven in `test/scripts/engine-sql-dynamic.test.ts`.
+
+#### Engine-sql brands
+
+`scripts/check-engine-sql-brands.ts` (`bun run check:engine-sql-brands`, in
+`bun run verify`) keeps the RLS read brands in
+`src/core/engine-sql/brands.ts` unforgeable. `ScopedRead` records a read that
+ran inside `withScopedReadTransaction` on master and `LegacyUnscopedRead` one
+that ran unscoped on the pool (EO4), so a forged brand silently changes how a
+read is scoped. The guard fails on:
+
+- a brand key (any `__obtainVia...` name) in a text file under `src/`,
+  `test/` or `scripts/` other than `brands.ts` and the guard's own script,
+  fixtures and test: get a branded executor from `scopedRead(tx)` inside
+  `withScopedReadTransaction`, or from `unscopedExecutor(executor, '<reason>')`;
+- in `src/`, a cast onto `ScopedRead` or `LegacyUnscopedRead` outside
+  `brands.ts`, an `as unknown as T` where `T` names `SqlExecutor`,
+  `ScopedRead` or `LegacyUnscopedRead`, or a double cast passed straight to
+  `scopedRead(` or `unscopedExecutor(`. Driver-handle casts such as
+  `tx as unknown as PgConn` in `dialect-postgres.ts` pass;
+- an import of `unscopedExecutor` or `LegacyUnscopedRead` (value, type,
+  alias, re-export or `import('...').X` type) from outside engine-sql, the two
+  engine façades, doctor (`src/commands/doctor.ts`, `src/commands/doctor/**`,
+  `src/core/doctor*`), maintenance (`src/core/maintenance/**`), admin
+  (`src/commands/admin*.ts`, `src/core/admin/**`), migrations
+  (`src/core/migrate.ts`, `src/core/schema-migrations/**`,
+  `src/commands/migrations/**`) and `test/`; an import of `scopedRead` from
+  outside engine-sql, the façades and `test/`; or a namespace, dynamic or
+  `require` import of `brands.ts` from outside that `scopedRead` list.
+  `src/core/ops/**`, the MCP-facing surface, is always denied. Take the
+  branded executor from the engine façade instead.
+
+The allowlists live in the script. Fixtures:
+`test/fixtures/guards/check-engine-sql-brands.ts/`; forms are driven in
+`test/scripts/engine-sql-brands.test.ts`.
 
 ### Placeholder assertions
 
