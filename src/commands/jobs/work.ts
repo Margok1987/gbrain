@@ -5,7 +5,7 @@ import { resolveChildCliInvocation } from '../../core/minions/job-isolation.ts';
 import { checkWorkerStartup, reportWorkerConfiguration, reportWorkerReady, reportWorkerStarting } from '../jobs-readiness.ts';
 import { LocalConfigurationError, isLocalConfigurationError } from '../../core/minions/configuration-error.ts';
 import { WORKER_EXIT_CONFIGURATION, WORKER_EXIT_RSS_WATCHDOG } from '../../core/minions/worker-exit-codes.ts';
-import { MinionWorker } from '../../core/minions/worker.ts';
+import { MinionWorker, type UnhealthyReason } from '../../core/minions/worker.ts';
 import type { MinionQueue } from '../../core/minions/queue.ts';
 
 export async function maybeRunWorkerStartupRecovery(
@@ -206,56 +206,7 @@ export async function runJobsWork({ args, engine, queue }: JobsCommandContext): 
   // (worker.ts) never calls process.exit directly so it stays embeddable;
   // this CLI layer is the right place to terminate the process and let
   // the external PM (systemd, Docker, cron watchdog) restart cleanly.
-  worker.on('unhealthy', (info) => {
-    if (info.reason === 'client_misconfigured') {
-      reportWorkerConfiguration(info.error);
-      setTimeout(() => {
-        console.error('[health] release-unconfirmed: shutdown exceeded its deadline; lease expiry may consume stall budget.');
-        process.exit(WORKER_EXIT_CONFIGURATION);
-      }, 31_000);
-      return;
-    }
-    if (info.reason === 'db_dead') {
-      // issue #6: name the failing LAYER, not just "DB unreachable" —
-      // that message sent operators chasing database capacity while the
-      // real fault was client-side pool exhaustion. Exiting is still
-      // correct recovery either way (it frees every client-held slot).
-      if (info.verdict === 'pool_starved') {
-        console.error(
-          `[health] FATAL: connection-pool path saturated after ${info.consecutiveFailures} probes — ` +
-          `the database server itself is reachable. (${info.message}) ` +
-          `Likely causes: long-running handler queries holding pool slots, or too-small GBRAIN_POOL_SIZE ` +
-          `for this workload. Consider --job-isolation process for long-running handlers ` +
-          `(handler connections then die with each job's child process). ` +
-          `Exiting for process-manager restart (frees all client-held slots).`,
-        );
-      } else if (info.verdict === 'server_unreachable') {
-        console.error(
-          `[health] FATAL: database server unreachable after ${info.consecutiveFailures} probes ` +
-          `(both pooler and direct lanes failed). (${info.message}) ` +
-          `Exiting for process-manager restart.`,
-        );
-      } else {
-        console.error(
-          `[health] FATAL: DB probe failed ${info.consecutiveFailures} consecutive times (${info.message}). ` +
-          `Exiting for process-manager restart.`,
-        );
-      }
-    } else if (info.reason === 'child_spawn_failing') {
-      console.error(
-        `[health] FATAL: ${info.consecutiveFailures} consecutive job-child spawn/bootstrap ` +
-        `failures (${info.message}). The child CLI is deterministically broken — fix the ` +
-        `worker's child CLI configuration (or GBRAIN_JOB_CHILD_CLI). Exiting for ` +
-        `process-manager restart.`,
-      );
-    } else {
-      console.error(
-        `[health] FATAL: Worker stalled — ${info.waitingCount} waiting job(s) for ` +
-        `registered handlers, ${info.idleMinutes}m idle. Exiting for process-manager restart.`,
-      );
-    }
-    process.exit(1);
-  });
+  worker.on('unhealthy', exitOnUnhealthy);
 
   const isSupervisedChild = process.env.GBRAIN_SUPERVISED === '1';
   let watchdogNote = '';
@@ -337,4 +288,59 @@ export async function runJobsWork({ args, engine, queue }: JobsCommandContext): 
       process.exit(WORKER_EXIT_RSS_WATCHDOG);
     }
   }
+}
+
+/**
+ * `jobs work` listener for the worker's self-health failures: report the
+ * failing layer and exit so the process manager restarts the worker.
+ */
+function exitOnUnhealthy(info: UnhealthyReason): void {
+  if (info.reason === 'client_misconfigured') {
+    reportWorkerConfiguration(info.error);
+    setTimeout(() => {
+      console.error('[health] release-unconfirmed: shutdown exceeded its deadline; lease expiry may consume stall budget.');
+      process.exit(WORKER_EXIT_CONFIGURATION);
+    }, 31_000);
+    return;
+  }
+  if (info.reason === 'db_dead') {
+    // issue #6: name the failing LAYER, not just "DB unreachable" —
+    // that message sent operators chasing database capacity while the
+    // real fault was client-side pool exhaustion. Exiting is still
+    // correct recovery either way (it frees every client-held slot).
+    if (info.verdict === 'pool_starved') {
+      console.error(
+        `[health] FATAL: connection-pool path saturated after ${info.consecutiveFailures} probes — ` +
+        `the database server itself is reachable. (${info.message}) ` +
+        `Likely causes: long-running handler queries holding pool slots, or too-small GBRAIN_POOL_SIZE ` +
+        `for this workload. Consider --job-isolation process for long-running handlers ` +
+        `(handler connections then die with each job's child process). ` +
+        `Exiting for process-manager restart (frees all client-held slots).`,
+      );
+    } else if (info.verdict === 'server_unreachable') {
+      console.error(
+        `[health] FATAL: database server unreachable after ${info.consecutiveFailures} probes ` +
+        `(both pooler and direct lanes failed). (${info.message}) ` +
+        `Exiting for process-manager restart.`,
+      );
+    } else {
+      console.error(
+        `[health] FATAL: DB probe failed ${info.consecutiveFailures} consecutive times (${info.message}). ` +
+        `Exiting for process-manager restart.`,
+      );
+    }
+  } else if (info.reason === 'child_spawn_failing') {
+    console.error(
+      `[health] FATAL: ${info.consecutiveFailures} consecutive job-child spawn/bootstrap ` +
+      `failures (${info.message}). The child CLI is deterministically broken — fix the ` +
+      `worker's child CLI configuration (or GBRAIN_JOB_CHILD_CLI). Exiting for ` +
+      `process-manager restart.`,
+    );
+  } else {
+    console.error(
+      `[health] FATAL: Worker stalled — ${info.waitingCount} waiting job(s) for ` +
+      `registered handlers, ${info.idleMinutes}m idle. Exiting for process-manager restart.`,
+    );
+  }
+  process.exit(1);
 }
