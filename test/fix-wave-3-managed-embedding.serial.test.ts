@@ -14,7 +14,7 @@
  * and `gbrain embed` paths on an unmanaged brain only. (4) The provider is the
  * gateway's process-global transport seam, so this file is serial.
  */
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import type { OperationContext } from '../src/core/ops/contract.ts';
 import { operations } from '../src/core/operations.ts';
@@ -24,17 +24,19 @@ import { managedBrain } from './helpers/managed-brain.ts';
 import { testBackends } from './helpers/test-backends.ts';
 
 const DIMS = 1536;
-beforeAll(() => {
+// Installed per test, not in beforeAll: the Postgres arm imports this file beside suites that reset the gateway.
+function installProvider() {
   configureGateway({ embedding_model: 'openai:text-embedding-3-large', embedding_dimensions: DIMS, env: { ...process.env, OPENAI_API_KEY: 'sk-test-fake' } });
   __setEmbedTransportForTests((async (input: { values: string[] }) => ({
     embeddings: input.values.map(text => new Array(DIMS).fill(text.includes('DEGENERATE') ? 0 : 0.01)), usage: { tokens: input.values.length },
   })) as never);
-});
+}
 afterAll(() => { __setEmbedTransportForTests(null); resetGateway(); });
 
 const section = (n: number, marker = '') => `## Section ${n}\n\n${Array.from({ length: 120 }, (_, i) => `Example sentence ${n}.${i} about the plan${marker}.`).join(' ')}\n`;
 
 for (const backend of testBackends()) test(`${backend}: a degenerate vector in a managed embedding effect refuses only its chunk and delivers the recovery command`, async () => {
+  installProvider();
   await managedBrain(async ({ engine, ctx: base }) => {
     const ctx = { ...base, config: { engine: engine.kind } } as OperationContext;
     const slug = 'notes/zero-norm-example';
