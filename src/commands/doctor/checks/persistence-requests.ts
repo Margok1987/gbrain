@@ -73,13 +73,15 @@ export async function requestGrowthCheck(engine: BrainEngine): Promise<Check> {
         exhaustion_date: daysLeft === null ? null : new Date(now + daysLeft * 86_400_000).toISOString().slice(0, 10) });
     }
     const soon = scopes.filter(scope => scope.days_to_exhaustion !== null && scope.days_to_exhaustion < WARN_DAYS);
-    const commands: string[] = [];
+    // Every principal shares one brain-wide key, so each key gets the largest value any scope needs.
+    const needed = new Map<string, number>();
     for (const scope of soon) {
       const value = await oneYearCapacity(engine, scope.scope, 'LifetimeIds', scope.lifetime_ids, scope.limit);
-      commands.push(`gbrain config set ${scope.config_key} ${value}`);
+      needed.set(scope.config_key, Math.max(needed.get(scope.config_key) ?? 0, value));
     }
+    const commands = [...needed].map(([key, value]) => `gbrain config set ${key} ${value}`);
     const details = { rows: Number(table?.rows ?? 0), rows_exact: engine.kind !== 'postgres', window_days: WINDOW_DAYS, scopes,
-      commands: [...new Set(commands)], verify: 'gbrain doctor --json (check persistence_request_growth)', docs };
+      commands, verify: 'gbrain doctor --json (check persistence_request_growth)', docs };
     const rows = `${details.rows_exact ? '' : '~'}${details.rows} request row(s)`;
     if (!soon.length) return { name: 'persistence_request_growth', status: 'ok', details,
       message: `${rows}; no scope exhausts its lifetime request IDs within ${WARN_DAYS} days at its last-${WINDOW_DAYS}-day rate.` };

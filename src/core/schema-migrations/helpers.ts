@@ -77,8 +77,8 @@ export type OnlineIndexOutcome = 'present' | 'created' | 'rebuilt' | 'building';
  * one another session is still building, drops an INVALID leftover of an
  * interrupted concurrent build, then runs `CREATE INDEX CONCURRENTLY IF NOT
  * EXISTS` on a dedicated connection with a bounded lock wait and no statement
- * timeout. Callers build one index at a time; a lock timeout leaves an INVALID
- * index that the next call drops and rebuilds.
+ * timeout, then confirms the index is valid. Callers build one index at a time;
+ * a lock timeout leaves an INVALID index that the next call drops and rebuilds.
  */
 export async function buildIndexOnline(
   engine: BrainEngine,
@@ -115,5 +115,8 @@ export async function buildIndexOnline(
       await conn.executeRaw('RESET statement_timeout');
     }
   });
+  // IF NOT EXISTS also skips an INVALID index a concurrent caller's failed build left behind.
+  const [built] = await engine.executeRaw<{ valid: boolean }>('SELECT indisvalid AS valid FROM pg_index WHERE indexrelid = to_regclass($1)', [index.name]);
+  if (!built?.valid) throw new Error(`Index ${index.name} is not valid after its concurrent build; rerun: gbrain repair request-indexes --apply`);
   return row ? 'rebuilt' : 'created';
 }

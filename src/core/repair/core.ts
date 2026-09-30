@@ -22,7 +22,7 @@ import { getWriteRequest } from '../persistence/journal.ts';
 import { initializeLocalPersistence, requestPrincipalForContext } from '../persistence/page-mutations.ts';
 import { lookupEmbeddingPrice, estimateCostFromChars } from '../embedding-pricing.ts';
 
-export const REPAIR_KINDS = ['request-indexes', 'timeline', 'visibility', 'safe-chunks', 'contextual-mode', 'connector-checkpoints'] as const;
+export const REPAIR_KINDS = ['timeline', 'visibility', 'safe-chunks', 'contextual-mode', 'connector-checkpoints', 'request-indexes'] as const;
 export type RepairKind = typeof REPAIR_KINDS[number];
 
 export interface RepairScope { brain_id: string; source_ids: string[] }

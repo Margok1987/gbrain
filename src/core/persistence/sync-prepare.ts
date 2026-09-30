@@ -29,6 +29,8 @@ import { companyBrainPolicyFingerprint } from '../company-brain/policy.ts';
 import { isUnboundSourcePage, UNBOUND_COLLISION_MESSAGE } from './unbound-source.ts';
 import { findIncompleteSyncReceipt } from './checkpoint-validation.ts';
 
+/** The options that select a managed sync cursor (its key), recorded so a refusal can print the exact retry. */
+export interface SyncCursorOptions { full: boolean; workingTree: boolean; srcSubpath: string | null; exclude: string[]; includeHidden: string[]; strategy: string | null }
 export interface SyncIntent extends Record<string, unknown> {
   companyApproval?: { schema: NonNullable<CompanyBrainPlan['schema']>; planDigest: string; extractorVersion: string; policyFingerprint: string };
   kind: 'managed_sync_import' | 'managed_sync_delete' | 'managed_sync_checkpoint';
@@ -38,6 +40,9 @@ export interface SyncIntent extends Record<string, unknown> {
   working?: boolean;
   renameFrom?: SyncRename;
   processingOptions?: SyncProcessingOptions;
+  syncOptions?: SyncCursorOptions;
+  /** #5522: another cursor of this source imported entries of this run, so the source may already sit at the target. */
+  overtaken?: boolean;
   syncAuthority: SyncAuthority; cursorKey: string; runId: string; index: number;
   from: string | null; target: string; total: number; slugMode: 'git-root' | 'source-root';
 }
@@ -130,11 +135,11 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     if (!manifest || Number(manifest.count) !== p.total) throw new OperationError('storage_error', 'The immutable sync manifest is incomplete.');
     const incomplete = await findIncompleteSyncReceipt(tx, row.worktree_id!, p.runId);
     if (incomplete) throw new OperationError('recovery_required', `An incomplete page receipt (request ${incomplete}) still blocks the sync checkpoint.`);
-    // #5522: another cursor of this source may already have checkpointed this exact target.
+    // #5522: an overtaken run accepts a source another cursor already checkpointed at this exact target.
     const changed = await tx.executeRaw(`UPDATE sources SET last_commit=$3,last_sync_at=now(),config=jsonb_set(${SOURCE_CONFIG_OBJECT_SQL},'{slug_root_mode}',to_jsonb($5::text)),
       newest_content_at=(SELECT MAX(updated_at) FROM pages WHERE source_id=$1 AND deleted_at IS NULL)
-      WHERE id=$1 AND incarnation=$2::uuid AND (last_commit IS NOT DISTINCT FROM $4 OR last_commit=$3)
-      AND (config->>'slug_root_mode' IS NULL OR config->>'slug_root_mode'=$5) RETURNING id`, [row.source_id, row.source_incarnation, p.target, p.from, p.slugMode]);
+      WHERE id=$1 AND incarnation=$2::uuid AND (last_commit IS NOT DISTINCT FROM $4 OR ($6::boolean AND last_commit=$3))
+      AND (config->>'slug_root_mode' IS NULL OR config->>'slug_root_mode'=$5) RETURNING id`, [row.source_id, row.source_incarnation, p.target, p.from, p.slugMode, p.overtaken === true]);
     if (!changed.length) throw new OperationError('revision_conflict', 'The source checkpoint changed during this sync.');
     await tx.executeRaw("UPDATE op_checkpoints SET completed_keys=jsonb_set(completed_keys,'{0,done}','true'::jsonb),updated_at=now() WHERE op='managed-sync' AND fingerprint=$1", [p.cursorKey]);
     return { status: 'synced', source_id: row.source_id, committed_pages: p.total };

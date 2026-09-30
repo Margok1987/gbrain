@@ -94,8 +94,9 @@ async function publicReceipt(ctx: OperationContext, row: WriteRequest, facts?: W
   const { publicEffectsForRequest } = await import('../persistence/effect-journal.ts');
   const { receiptDeliveredHint } = await import('../persistence/connector-errors.ts');
   const { CHECKPOINT_VALIDATION_TIMEOUT, checkpointTimeoutHint } = await import('../persistence/checkpoint-validation.ts');
+  const intent = row.intent as Pick<import('../persistence/sync-prepare.ts').SyncIntent, 'processingOptions' | 'syncOptions'> | null;
   const checkpoint = row.error_code === CHECKPOINT_VALIDATION_TIMEOUT ? await checkpointTimeoutHint(ctx.engine, { requestId: row.request_id, sourceId: row.source_id,
-    processingOptions: (row.intent as { processingOptions?: Record<string, boolean> } | null)?.processingOptions }) : null;
+    processingOptions: intent?.processingOptions, syncOptions: intent?.syncOptions }) : null;
   return {
     ...publicWriteReceipt(receiptFor(row, facts)),
     operation: row.operation, source_id: row.source_id, slug: row.slug,

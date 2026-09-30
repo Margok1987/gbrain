@@ -12,7 +12,7 @@ import { assertPersistenceAccepting, foregroundWriteCompletions, startPersistenc
 import { assertSyncEntryOrigin, discoverManagedSync, resolveManagedSyncContext, readSyncContent, readSyncFile, syncGit, type SyncDiscovery } from './sync-discovery.ts';
 import { assertSyncPageOrigin, sameSyncOrigin, syncOriginScope } from './sync-origin.ts';
 import { assertManagedSyncActive, assertSyncDispatchActive, managedSyncAuthority, validateSyncAuthority, validateManagedSyncOptions, syncProcessingOptions, SYNC_PROCESSING_KEYS, type SyncAuthority, type SyncProcessingOptions } from './sync-authority.ts';
-import { prepareManagedSyncMutation, type SyncIntent } from './sync-prepare.ts';
+import { prepareManagedSyncMutation, type SyncCursorOptions, type SyncIntent } from './sync-prepare.ts';
 import { inspectUnchanged, screeningRequest, type NoopKernelWaiver } from './noop-kernel.ts';
 import type { GBrainConfig } from '../config.ts';
 import { join } from 'node:path';
@@ -41,9 +41,9 @@ export interface ManagedSyncWriteDiagnostic {
   docs?: string;
 }
 
-interface Pending { requestId: string; slug: string; pageId: number | null; intent: SyncIntent; }
+interface Pending { requestId: string; slug: string; pageId: number | null; intent: SyncIntent; rebound?: true; }
 interface Cursor extends SyncDiscovery { runId: string; index: number; authority: SyncAuthority; pending?: Pending; done?: boolean; companyReceiptId?: string;
-  processingOptions?: SyncProcessingOptions;
+  processingOptions?: SyncProcessingOptions; syncOptions?: SyncCursorOptions; overtaken?: true;
   counts: { added: number; modified: number; deleted: number; chunks: number; renamed?: number;
     /** #5751: unchanged working-tree files skipped only because a no-op publication could never resolve their admit reason. */
     skippedContextualMode?: number; skippedCanonicalBytes?: number }; }
@@ -151,7 +151,7 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
   const entry = cursor.entries[cursor.index];
   let slug = '__managed_sync_checkpoint__', pageId: number | null = null, revision: string | null = null;
   let content: string | null = null, rawHash: string | null = null;
-  let lineEndingOnly = false;
+  let lineEndingOnly = false, occupantRebound = false;
   if (entry) {
     assertSyncEntryOrigin(cursor, entry);
     const originScope = syncOriginScope(cursor);
@@ -175,6 +175,7 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
     if (occupant && !await sameContentAtOrigin(engine, cursor, entry, key, snapshot, content!, rawHash, lineEndingOnly)) {
       throw new OperationError('page_identity_changed', 'The imported origin no longer identifies exactly the accepted page.');
     }
+    occupantRebound = occupant !== null;
     const moved = entry.renameFrom;
     const recorded = moved?.slug === slug ? moved.sourcePath : entry.sourcePath;
     if ((snapshot?.page.id ?? null) !== pageId || (snapshot?.revision ?? null) !== revision ||
@@ -192,10 +193,11 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
   }
   await validateSyncAuthority(engine, cursor.authority, slug);
   assertActive();
-  return { requestId: randomUUID(), slug, pageId, intent: { kind: !entry ? 'managed_sync_checkpoint' : entry.action === 'import' ? 'managed_sync_import' : 'managed_sync_delete',
+  return { requestId: randomUUID(), slug, pageId, ...(occupantRebound ? { rebound: true as const } : {}), intent: { kind: !entry ? 'managed_sync_checkpoint' : entry.action === 'import' ? 'managed_sync_import' : 'managed_sync_delete',
     expected_revision: revision, sourcePath: entry?.sourcePath ?? null, path: entry?.path ?? null, rawHash, content, lineEndingOnly,
     ...(entry?.renameFrom ? { renameFrom: entry.renameFrom } : {}),
     processingOptions: cursor.processingOptions,
+    ...(!entry && cursor.syncOptions ? { syncOptions: cursor.syncOptions } : {}), ...(!entry && cursor.overtaken ? { overtaken: true } : {}),
     ownerEpoch: String(cursor.binding.owner_epoch), syncAuthority: cursor.authority, cursorKey: key, runId: cursor.runId,
     slugMode: cursor.slugMode, index: cursor.index, total: cursor.entries.length, from: cursor.from, target: cursor.target, working: entry?.working ?? false,
     ...(cursor.companyPlan ? { companyApproval: { schema: cursor.companyPlan.schema!, planDigest: cursor.companyPlan.plan_digest, extractorVersion: cursor.companyPlan.extractor_version,
@@ -235,7 +237,7 @@ async function sameContentAtOrigin(engine: BrainEngine, cursor: Cursor, entry: C
   try {
     const prepared = await prepareManagedSyncMutation(engine, screeningRequest({ source_id: cursor.sourceId, source_incarnation: cursor.incarnation, slug: snapshot.page.slug,
       page_id: snapshot.page.id, worktree_id: cursor.binding.worktree_id, authority: cursor.authority.writer, intent }), { engine: engine.kind });
-    return prepared.contentUnchanged === true && !prepared.file && prepared.observedRevision === snapshot.revision;
+    return (prepared.contentUnchanged === true || prepared.noop === true) && !prepared.file && prepared.observedRevision === snapshot.revision;
   } catch {
     return false;
   }
@@ -253,9 +255,10 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
   const authority = await managedSyncAuthority(engine, context.sourceId, context.incarnation, opts.repoPath ?? context.root);
   const company = currentCompanyBrainSync(context.sourceId);
   const processingOptions = syncProcessingOptions(opts);
+  const syncOptions: SyncCursorOptions = { full: opts.full ?? false, workingTree: opts.workingTree ?? false, srcSubpath: opts.srcSubpath ?? null,
+    exclude: opts.exclude ?? [], includeHidden: opts.includeHidden ?? [], strategy: opts.strategy ?? null };
   const key = digest({ source: context.incarnation, principal: authority.writer.principal, authority, ...(company ? { company: { receiptId: company.receiptId, planDigest: company.plan.plan_digest } } : {}),
-    options: { full: opts.full ?? false, workingTree: opts.workingTree ?? false, srcSubpath: opts.srcSubpath ?? null,
-      exclude: opts.exclude ?? [], includeHidden: opts.includeHidden ?? [], strategy: opts.strategy ?? null } });
+    options: syncOptions });
   let cursor: Cursor | null = null;
   let missingManifestCursor: CursorHeader | null = null;
   let phase: ManagedSyncFailure['phase'] = 'resume';
@@ -289,7 +292,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       discoveryTarget = syncGit(context.gitRoot, ['rev-parse', 'HEAD']).trim();
       const discovery = await discoverManagedSync(engine, opts, context);
       assertActive();
-      cursor = await replaceCursor(engine, key, error.cursor, { ...discovery, authority, processingOptions, runId: discoveryRun, index: 0, counts: { added: 0, modified: 0, deleted: 0, chunks: 0 } }, assertActive);
+      cursor = await replaceCursor(engine, key, error.cursor, { ...discovery, authority, processingOptions, syncOptions, runId: discoveryRun, index: 0, counts: { added: 0, modified: 0, deleted: 0, chunks: 0 } }, assertActive);
     }
     assertActive();
     if (company && opts.retryFailed && cursor && !cursor.done && !opts.dryRun) {
@@ -318,7 +321,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
           discoveryTarget = syncGit(context.gitRoot, ['rev-parse', 'HEAD']).trim();
           const discovery = await discoverManagedSync(engine, opts, context);
           assertActive();
-          cursor = await replaceCursor(engine, key, header(cursor), { ...discovery, authority, processingOptions, runId: discoveryRun, index: 0, counts: { added: 0, modified: 0, deleted: 0, chunks: 0 } }, assertActive);
+          cursor = await replaceCursor(engine, key, header(cursor), { ...discovery, authority, processingOptions, syncOptions, runId: discoveryRun, index: 0, counts: { added: 0, modified: 0, deleted: 0, chunks: 0 } }, assertActive);
         }
       }
     }
@@ -346,7 +349,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       discoveryTarget = company?.plan.revision?.commit ?? syncGit(context.gitRoot, ['rev-parse', 'HEAD']).trim();
       const discovery = await discoverManagedSync(engine, opts, context);
       assertActive();
-      const fresh: Cursor = { ...discovery, authority, processingOptions, runId: discoveryRun, index: 0, counts: { added: 0, modified: 0, deleted: 0, chunks: 0 }, ...(company ? { companyReceiptId: company.receiptId } : {}) };
+      const fresh: Cursor = { ...discovery, authority, processingOptions, syncOptions, runId: discoveryRun, index: 0, counts: { added: 0, modified: 0, deleted: 0, chunks: 0 }, ...(company ? { companyReceiptId: company.receiptId } : {}) };
       if (opts.dryRun) return result(fresh, 'dry_run');
       if (!fresh.entries.length && fresh.from === fresh.target) {
         await clearManagedSyncFailureAfterSuccess(engine, key);
@@ -407,7 +410,8 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         }
         foregroundWaitStart = 0;
         phase = 'freeze';
-        cursor = await saveCursor(engine, key, cursor, { ...cursor, pending: await freezeEntry(engine, cursor, key, assertActive) }, false, assertActive);
+        const frozen = await freezeEntry(engine, cursor, key, assertActive);
+        cursor = await saveCursor(engine, key, cursor, { ...cursor, ...(frozen.rebound ? { overtaken: true as const } : {}), pending: frozen }, false, assertActive);
       }
       if (!cursor.pending) continue; // another owner-loop advanced the cursor
       const pending = cursor.pending;
@@ -455,7 +459,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         first_seen: new Date(done.completed_at ?? done.updated_at).toISOString() });
         // #5762: the hint is built after the failed transaction, from a fresh read of the request indexes.
         const hint = done.error_code === CHECKPOINT_VALIDATION_TIMEOUT && !authority.writer.remote ? await checkpointTimeoutHint(engine,
-          { requestId: pending.requestId, sourceId: cursor.sourceId, processingOptions: pending.intent.processingOptions, workingTree: opts.workingTree === true }) : null;
+          { requestId: pending.requestId, sourceId: cursor.sourceId, processingOptions: pending.intent.processingOptions, syncOptions: pending.intent.syncOptions ?? syncOptions }) : null;
         return { ...result(cursor, 'blocked_by_failures'), failedFiles: 1,
           failureCodes: [{ code: failure.code, count: 1 }], ...(authority.writer.remote ? {} : { failures: [failure],
             managedWrite: { ...writeDiagnostic(cursor, pending, done), ...hint, ledger_recorded: ledgerRecorded } }) };

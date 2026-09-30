@@ -125,6 +125,23 @@ test('#5762 gbrain repair request-indexes rebuilds a dropped and an INVALID inde
   expect(await runRepair(ctx(), requestIndexesRepair, scope, { apply: true })).toMatchObject({ affected: 0, applied: 0, complete: true });
 }), 120_000);
 
+test('#5762 a build that leaves the index INVALID (a concurrent caller failed first) is reported, never counted as built', async () => withEnv(env, async () => {
+  const { buildIndexOnline } = await import('../../src/core/schema-migrations/helpers.ts');
+  const index = { ...PERSISTENCE_SYNC_RUN_INDEXES[0], table: 'persistence_requests' };
+  await engine.executeRaw(`DROP INDEX ${index.name}`);
+  const reserve = engine.withReservedConnection.bind(engine);
+  // Another caller's failed build lands between this caller's check and its CREATE ... IF NOT EXISTS, which then skips it.
+  engine.withReservedConnection = (async (fn: Parameters<PostgresEngine['withReservedConnection']>[0]) => reserve(async conn => {
+    await conn.executeRaw(index.sql);
+    await conn.executeRaw(`UPDATE pg_index SET indisvalid=false WHERE indexrelid='${index.name}'::regclass`);
+    return fn(conn);
+  })) as PostgresEngine['withReservedConnection'];
+  try { await expect(buildIndexOnline(engine, 0, index)).rejects.toThrow(`Index ${index.name} is not valid after its concurrent build`); }
+  finally { engine.withReservedConnection = reserve; }
+  expect(await buildIndexOnline(engine, 0, index)).toBe('rebuilt');
+  expect((await readRequestIndexStates(engine)).map(state => state.state)).toEqual(['valid', 'valid']);
+}), 60_000);
+
 test('#5762 recovery journey: a checkpoint timeout with a dropped index is fixed by the two printed commands', async () => withEnv(env, async () => {
   const f = await fixture();
   await engine.executeRaw('DROP INDEX persistence_requests_sync_run_committed');

@@ -60,9 +60,6 @@
       "facts.facts_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "facts.facts_superseded_by_fkey": "f FOREIGN KEY (superseded_by) REFERENCES facts(id) ON DELETE SET NULL",
       "facts.facts_visibility_check": "c CHECK ((visibility = ANY (ARRAY['private'::text, 'world'::text])))",
-      "file_migration_ledger.chk_ledger_status": "c CHECK ((status = ANY (ARRAY['pending'::text, 'copy_done'::text, 'db_updated'::text, 'complete'::text, 'failed'::text])))",
-      "file_migration_ledger.file_migration_ledger_file_id_fkey": "f FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE",
-      "file_migration_ledger.file_migration_ledger_pkey": "p PRIMARY KEY (file_id)",
       "files.files_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE SET NULL",
       "files.files_pkey": "p PRIMARY KEY (id)",
       "files.files_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
@@ -116,7 +113,6 @@
       "minion_self_fix_log.minion_self_fix_log_child_id_fkey": "f FOREIGN KEY (child_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "minion_self_fix_log.minion_self_fix_log_parent_id_fkey": "f FOREIGN KEY (parent_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
       "minion_self_fix_log.minion_self_fix_log_pkey": "p PRIMARY KEY (id)",
-      "oauth_clients.fk_oauth_clients_bound_source": "f FOREIGN KEY (bound_source_id) REFERENCES sources(id) ON DELETE SET NULL",
       "oauth_clients.oauth_clients_complete_agent_grant": "c CHECK (((NOT (COALESCE(scope, ''::text) ~ '(^|[[:space:]])agent([[:space:]]|$)'::text)) OR ((COALESCE(cardinality(bound_tools), 0) > 0) AND (source_id IS NOT NULL) AND (bound_source_id IS NOT NULL) AND (bound_source_id = source_id) AND COALESCE((source_id = ANY (federated_read)), false) AND (((delegated_namespace = 'job'::text) AND (delegated_slug_prefixes IS NULL)) OR ((delegated_namespace = 'prefixes'::text) AND (COALESCE(cardinality(delegated_slug_prefixes), 0) > 0))) AND (bound_max_concurrent > 0))))",
       "oauth_clients.oauth_clients_pkey": "p PRIMARY KEY (client_id)",
       "oauth_clients.oauth_clients_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE RESTRICT",
@@ -278,12 +274,10 @@
     },
     "extensions": [
       "pg_trgm",
-      "pgcrypto",
       "plpgsql",
       "vector"
     ],
     "functions": {
-      "auto_enable_rls()": "RETURNS event_trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=5e5e0a0ee902f481f07da929c5fd39c2a16671869535b12a1e2270543a5a30eb",
       "bump_page_generation_clock_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=d3359bcd09cccd881585abd9eee81c3dcf4161d935164f7953f2e9fdef73ed3e",
       "bump_page_generation_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=78059745996cfbb72586a2e0e161635b96a62a5db9d0be5c710f4d437d994431",
       "enforce_minion_queue_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e0b3db944d3b4281b9483ce77aa734e0c9aa5b0d46bb5dcb5284b6469441a1b8",
@@ -302,9 +296,8 @@
       "gbrain_queue_page_projection()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=6c544b9c129b6a17dcabeb5ee8d44a2b0e0af9d02ca3fe47c7d7f22ec313042c",
       "gbrain_require_managed_writer()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=9f7ebd3894599fd125d255f78ada3d945b14b15a114e340a43da0414a3de4208",
       "gbrain_require_persistence_protocol(required integer)": "RETURNS void kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=af07b7fac60dec0a4fe568217931ac449d32f73b3a53a047b3b02a5f59cb5058",
-      "notify_minion_job_change()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=17f7c36408688409c80befd0a9ef9314e597d78a195418d1b94426e3d0b662f8",
-      "update_chunk_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e099e8a1d30bd74b7632b6055d3edffe753c00c00183e3bdac34d28d23347555",
-      "update_page_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=078bd418f597924b56e631887aaddc41d98c231b3d27c6a52a9460b0ef252dd9"
+      "update_chunk_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e12c37d5489202aaf708560db42e6c0c7c8886d198d412e1c5d915c3ae782559",
+      "update_page_search_vector()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=1ff2515e6d6626907c0a6b660e31bd13bf51fe38fc585f7380d57ed746dc3357"
     },
     "grants": {
       "access_tokens": [
@@ -383,9 +376,6 @@
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "facts": [
-        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
-      ],
-      "file_migration_ledger": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
       "files": [
@@ -640,7 +630,6 @@
       "fact_withdrawals_pkey": "CREATE UNIQUE INDEX fact_withdrawals_pkey ON public.fact_withdrawals USING btree (source_id, visibility, subject, fact_hash)",
       "facts_pkey": "CREATE UNIQUE INDEX facts_pkey ON public.facts USING btree (id)",
       "facts_typed_claim_idx": "CREATE INDEX facts_typed_claim_idx ON public.facts USING btree (entity_slug, claim_metric, valid_from) WHERE (claim_metric IS NOT NULL)",
-      "file_migration_ledger_pkey": "CREATE UNIQUE INDEX file_migration_ledger_pkey ON public.file_migration_ledger USING btree (file_id)",
       "files_pkey": "CREATE UNIQUE INDEX files_pkey ON public.files USING btree (id)",
       "files_storage_path_key": "CREATE UNIQUE INDEX files_storage_path_key ON public.files USING btree (storage_path)",
       "gbrain_cycle_locks_pkey": "CREATE UNIQUE INDEX gbrain_cycle_locks_pkey ON public.gbrain_cycle_locks USING btree (id)",
@@ -685,7 +674,6 @@
       "idx_facts_since_event_time": "CREATE INDEX idx_facts_since_event_time ON public.facts USING btree (source_id, COALESCE(valid_from, created_at) DESC) WHERE (expired_at IS NULL)",
       "idx_facts_unconsolidated": "CREATE INDEX idx_facts_unconsolidated ON public.facts USING btree (source_id, entity_slug) WHERE ((consolidated_at IS NULL) AND (expired_at IS NULL))",
       "idx_facts_withdrawal_fingerprint": "CREATE INDEX idx_facts_withdrawal_fingerprint ON public.facts USING btree (source_id, visibility, gbrain_fact_fingerprint(fact))",
-      "idx_file_migration_ledger_status": "CREATE INDEX idx_file_migration_ledger_status ON public.file_migration_ledger USING btree (status) WHERE (status <> 'complete'::text)",
       "idx_files_hash": "CREATE INDEX idx_files_hash ON public.files USING btree (content_hash)",
       "idx_files_page": "CREATE INDEX idx_files_page ON public.files USING btree (page_slug)",
       "idx_files_page_id": "CREATE INDEX idx_files_page_id ON public.files USING btree (page_id)",
@@ -772,7 +760,6 @@
       "minion_inbox_pkey": "CREATE UNIQUE INDEX minion_inbox_pkey ON public.minion_inbox USING btree (id)",
       "minion_jobs_budget_owner_idx": "CREATE INDEX minion_jobs_budget_owner_idx ON public.minion_jobs USING btree (budget_owner_job_id) WHERE (budget_owner_job_id IS NOT NULL)",
       "minion_jobs_budget_root_owner_idx": "CREATE INDEX minion_jobs_budget_root_owner_idx ON public.minion_jobs USING btree (budget_root_owner_id) WHERE (budget_root_owner_id IS NOT NULL)",
-      "minion_jobs_doctor_run_id_idx": "CREATE INDEX minion_jobs_doctor_run_id_idx ON public.minion_jobs USING gin (data jsonb_path_ops) WHERE (data ? 'doctor_run_id'::text)",
       "minion_jobs_pkey": "CREATE UNIQUE INDEX minion_jobs_pkey ON public.minion_jobs USING btree (id)",
       "minion_lease_pressure_log_job_idx": "CREATE INDEX minion_lease_pressure_log_job_idx ON public.minion_lease_pressure_log USING btree (job_id)",
       "minion_lease_pressure_log_pkey": "CREATE UNIQUE INDEX minion_lease_pressure_log_pkey ON public.minion_lease_pressure_log USING btree (id)",
@@ -829,8 +816,6 @@
       "persistence_requests_principal_kind_principal_id_request_id_key": "CREATE UNIQUE INDEX persistence_requests_principal_kind_principal_id_request_id_key ON public.persistence_requests USING btree (principal_kind, principal_id, request_id)",
       "persistence_requests_recovery": "CREATE INDEX persistence_requests_recovery ON public.persistence_requests USING btree (worktree_id, sequence) WHERE (recovery IS NOT NULL)",
       "persistence_requests_sequence_key": "CREATE UNIQUE INDEX persistence_requests_sequence_key ON public.persistence_requests USING btree (sequence)",
-      "persistence_requests_sync_run_committed": "CREATE INDEX persistence_requests_sync_run_committed ON public.persistence_requests USING btree (source_id, ((intent ->> 'runId'::text)), ((intent ->> 'index'::text))) WHERE ((state = 'committed'::text) AND (intent ? 'runId'::text))",
-      "persistence_requests_sync_run_open": "CREATE INDEX persistence_requests_sync_run_open ON public.persistence_requests USING btree (worktree_id, ((intent ->> 'runId'::text))) WHERE ((state <> 'committed'::text) AND ((intent ->> 'kind'::text) = ANY (ARRAY['managed_sync_import'::text, 'managed_sync_delete'::text])))",
       "persistence_source_bindings_pkey": "CREATE UNIQUE INDEX persistence_source_bindings_pkey ON public.persistence_source_bindings USING btree (source_id)",
       "persistence_topology_changes_pkey": "CREATE UNIQUE INDEX persistence_topology_changes_pkey ON public.persistence_topology_changes USING btree (id)",
       "persistence_topology_changes_principal_id_request_id_key": "CREATE UNIQUE INDEX persistence_topology_changes_principal_id_request_id_key ON public.persistence_topology_changes USING btree (principal_id, request_id)",
@@ -963,7 +948,7 @@
           "7 revoked_at timestamp with time zone/timestamptz NULL",
           "8 permissions jsonb/jsonb NOT NULL DEFAULT '{\"takes_holders\": [\"world\"]}'::jsonb"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "budget_ledger": {
         "columns": [
@@ -976,7 +961,7 @@
           "7 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "8 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "budget_reservations": {
         "columns": [
@@ -989,7 +974,7 @@
           "7 expires_at timestamp with time zone/timestamptz NOT NULL",
           "8 status text/text NOT NULL DEFAULT 'held'::text"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "calibration_profiles": {
         "columns": [
@@ -1013,7 +998,7 @@
           "18 cost_usd numeric/numeric NULL",
           "19 judge_model_agreement real/float4 NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "chat_usage_log": {
         "columns": [
@@ -1028,7 +1013,7 @@
           "9 cache_write_tokens integer/int4 NOT NULL DEFAULT 0",
           "10 cost_usd double precision/float8 NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "code_edges_chunk": {
         "columns": [
@@ -1042,7 +1027,7 @@
           "8 source_id text/text NULL",
           "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "code_edges_symbol": {
         "columns": [
@@ -1055,7 +1040,7 @@
           "7 source_id text/text NULL",
           "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "code_traversal_cache": {
         "columns": [
@@ -1069,14 +1054,14 @@
           "8 cluster_generation bigint/int8 NOT NULL DEFAULT 0",
           "9 computed_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "config": {
         "columns": [
           "1 key text/text NOT NULL",
           "2 value text/text NOT NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "content_chunks": {
         "columns": [
@@ -1097,16 +1082,16 @@
           "15 symbol_type text/text NULL",
           "16 start_line integer/int4 NULL",
           "17 end_line integer/int4 NULL",
-          "18 parent_symbol_path ARRAY/_text NULL",
-          "19 doc_comment text/text NULL",
-          "20 symbol_name_qualified text/text NULL",
-          "21 search_vector tsvector/tsvector NULL",
-          "22 modality text/text NOT NULL DEFAULT 'text'::text",
-          "23 embedding_image USER-DEFINED/vector NULL",
-          "24 embedding_multimodal USER-DEFINED/vector NULL",
+          "18 modality text/text NOT NULL DEFAULT 'text'::text",
+          "19 embedding_image USER-DEFINED/vector NULL",
+          "20 embedding_multimodal USER-DEFINED/vector NULL",
+          "21 parent_symbol_path ARRAY/_text NULL",
+          "22 doc_comment text/text NULL",
+          "23 symbol_name_qualified text/text NULL",
+          "24 search_vector tsvector/tsvector NULL",
           "25 edges_backfilled_at timestamp with time zone/timestamptz NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "context_volunteer_events": {
         "columns": [
@@ -1121,7 +1106,7 @@
           "9 turn integer/int4 NULL",
           "10 volunteered_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "conversation_parser_llm_cache": {
         "columns": [
@@ -1131,7 +1116,7 @@
           "4 value_json jsonb/jsonb NOT NULL",
           "5 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "dream_synthesis_completions": {
         "columns": [
@@ -1139,7 +1124,7 @@
           "2 idempotency_key text/text NOT NULL",
           "3 completed_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "dream_verdicts": {
         "columns": [
@@ -1170,7 +1155,7 @@
           "8 applied_at timestamp with time zone/timestamptz NULL",
           "9 applied_by text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "entity_identities": {
         "columns": [
@@ -1183,7 +1168,7 @@
           "7 established_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "8 canonical boolean/bool NOT NULL DEFAULT false"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "eval_candidates": {
         "columns": [
@@ -1213,7 +1198,7 @@
           "24 embedding_column text/text NULL",
           "25 schema_pack_per_source jsonb/jsonb NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "eval_capture_failures": {
         "columns": [
@@ -1221,7 +1206,7 @@
           "2 ts timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "3 reason text/text NOT NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "eval_contradictions_cache": {
         "columns": [
@@ -1234,7 +1219,7 @@
           "7 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "8 expires_at timestamp with time zone/timestamptz NOT NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "eval_contradictions_runs": {
         "columns": [
@@ -1254,7 +1239,7 @@
           "14 source_tier_breakdown jsonb/jsonb NOT NULL",
           "15 report_json jsonb/jsonb NOT NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "eval_takes_quality_runs": {
         "columns": [
@@ -1272,7 +1257,7 @@
           "12 receipt_disk_path text/text NULL",
           "13 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "extract_atoms_page_state": {
         "columns": [
@@ -1294,7 +1279,7 @@
           "5 tombstoned boolean/bool NOT NULL DEFAULT false",
           "6 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "extract_rollup_7d": {
         "columns": [
@@ -1310,7 +1295,7 @@
           "10 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "11 expected_limit_count integer/int4 NOT NULL DEFAULT 0"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "fact_withdrawals": {
         "columns": [
@@ -1320,7 +1305,7 @@
           "4 fact_hash text/text NOT NULL",
           "5 withdrawn_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "facts": {
         "columns": [
@@ -1358,18 +1343,7 @@
           "32 embedding_model text/text NULL",
           "33 embedded_text_hash text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
-      },
-      "file_migration_ledger": {
-        "columns": [
-          "1 file_id integer/int4 NOT NULL",
-          "2 storage_path_old text/text NOT NULL",
-          "3 storage_path_new text/text NOT NULL",
-          "4 status text/text NOT NULL DEFAULT 'pending'::text",
-          "5 error text/text NULL",
-          "6 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
-        ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "files": {
         "columns": [
@@ -1385,7 +1359,7 @@
           "10 metadata jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
           "11 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "gbrain_cycle_locks": {
         "columns": [
@@ -1397,7 +1371,7 @@
           "6 last_refreshed_at timestamp with time zone/timestamptz NULL",
           "7 acquisition_token uuid/uuid NOT NULL DEFAULT gen_random_uuid()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "ingest_log": {
         "columns": [
@@ -1409,7 +1383,7 @@
           "6 summary text/text NOT NULL DEFAULT ''::text",
           "7 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "links": {
         "columns": [
@@ -1425,7 +1399,7 @@
           "10 resolution_type text/text NULL",
           "11 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "loop_suppressions": {
         "columns": [
@@ -1435,7 +1409,7 @@
           "4 value text/text NOT NULL",
           "5 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "mcp_request_log": {
         "columns": [
@@ -1449,7 +1423,7 @@
           "8 error_message text/text NULL",
           "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "mcp_spend_log": {
         "columns": [
@@ -1462,7 +1436,7 @@
           "7 model text/text NULL",
           "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "mcp_spend_reservations": {
         "columns": [
@@ -1480,7 +1454,7 @@
           "12 estimate_known boolean/bool NOT NULL DEFAULT true",
           "13 usage_unknown_reason text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "migration_impact_log": {
         "columns": [
@@ -1498,7 +1472,7 @@
           "12 applied_by text/text NULL",
           "13 details jsonb/jsonb NULL DEFAULT '{}'::jsonb"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "minion_attachments": {
         "columns": [
@@ -1512,7 +1486,7 @@
           "8 sha256 text/text NOT NULL",
           "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "minion_budget_log": {
         "columns": [
@@ -1525,7 +1499,7 @@
           "7 model text/text NULL",
           "8 occurred_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "minion_inbox": {
         "columns": [
@@ -1536,7 +1510,7 @@
           "5 sent_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "6 read_at timestamp with time zone/timestamptz NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "minion_jobs": {
         "columns": [
@@ -1564,21 +1538,21 @@
           "22 tokens_input integer/int4 NOT NULL DEFAULT 0",
           "23 tokens_output integer/int4 NOT NULL DEFAULT 0",
           "24 tokens_cache_read integer/int4 NOT NULL DEFAULT 0",
-          "25 result jsonb/jsonb NULL",
-          "26 progress jsonb/jsonb NULL",
-          "27 error_text text/text NULL",
-          "28 stacktrace jsonb/jsonb NULL DEFAULT '[]'::jsonb",
-          "29 depth integer/int4 NOT NULL DEFAULT 0",
-          "30 max_children integer/int4 NULL",
-          "31 timeout_ms integer/int4 NULL",
-          "32 lock_duration_ms integer/int4 NULL",
-          "33 timeout_at timestamp with time zone/timestamptz NULL",
-          "34 remove_on_complete boolean/bool NOT NULL DEFAULT false",
-          "35 remove_on_fail boolean/bool NOT NULL DEFAULT false",
-          "36 idempotency_key text/text NULL",
-          "37 private_queue_owner_job_id integer/int4 NULL",
-          "38 private_queue_owner_token text/text NULL",
-          "39 private_queue_lease_until timestamp with time zone/timestamptz NULL",
+          "25 depth integer/int4 NOT NULL DEFAULT 0",
+          "26 max_children integer/int4 NULL",
+          "27 timeout_ms integer/int4 NULL",
+          "28 lock_duration_ms integer/int4 NULL",
+          "29 timeout_at timestamp with time zone/timestamptz NULL",
+          "30 remove_on_complete boolean/bool NOT NULL DEFAULT false",
+          "31 remove_on_fail boolean/bool NOT NULL DEFAULT false",
+          "32 idempotency_key text/text NULL",
+          "33 private_queue_owner_job_id integer/int4 NULL",
+          "34 private_queue_owner_token text/text NULL",
+          "35 private_queue_lease_until timestamp with time zone/timestamptz NULL",
+          "36 result jsonb/jsonb NULL",
+          "37 progress jsonb/jsonb NULL",
+          "38 error_text text/text NULL",
+          "39 stacktrace jsonb/jsonb NULL DEFAULT '[]'::jsonb",
           "40 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "41 started_at timestamp with time zone/timestamptz NULL",
           "42 finished_at timestamp with time zone/timestamptz NULL",
@@ -1589,7 +1563,7 @@
           "47 budget_owner_job_id bigint/int8 NULL",
           "48 budget_root_owner_id bigint/int8 NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "minion_lease_pressure_log": {
         "columns": [
@@ -1605,7 +1579,7 @@
           "10 provider text/text NULL",
           "11 root_owner_id bigint/int8 NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "minion_self_fix_log": {
         "columns": [
@@ -1618,7 +1592,7 @@
           "7 outcome text/text NULL",
           "8 occurred_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "oauth_clients": {
         "columns": [
@@ -1679,7 +1653,7 @@
           "7 after_grant jsonb/jsonb NOT NULL",
           "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "oauth_tokens": {
         "columns": [
@@ -1700,7 +1674,7 @@
           "3 path text/text NOT NULL",
           "4 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "op_checkpoints": {
         "columns": [
@@ -1709,7 +1683,7 @@
           "3 completed_keys jsonb/jsonb NOT NULL DEFAULT '[]'::jsonb",
           "4 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "open_loops": {
         "columns": [
@@ -1735,7 +1709,7 @@
           "20 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "21 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "page_aliases": {
         "columns": [
@@ -1745,14 +1719,14 @@
           "4 slug text/text NOT NULL",
           "5 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "page_generation_clock": {
         "columns": [
           "1 id integer/int4 NOT NULL",
           "2 value bigint/int8 NOT NULL DEFAULT 0"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "page_projection_jobs": {
         "columns": [
@@ -1762,7 +1736,7 @@
           "4 reason text/text NOT NULL",
           "5 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "page_versions": {
         "columns": [
@@ -1778,14 +1752,14 @@
           "10 tags jsonb/jsonb NULL",
           "11 is_deleted boolean/bool NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "page_write_guards": {
         "columns": [
           "1 source_incarnation uuid/uuid NOT NULL",
           "2 slug text/text NOT NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "pages": {
         "columns": [
@@ -1825,7 +1799,7 @@
           "34 source_kind text/text NULL",
           "35 embedding_signature text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_brain": {
         "columns": [
@@ -1837,7 +1811,7 @@
           "6 skill_bundles_enabled boolean/bool NOT NULL DEFAULT false",
           "7 writer_version_cutoff timestamp with time zone/timestamptz NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_counters": {
         "columns": [
@@ -1848,7 +1822,7 @@
           "5 terminal_bytes bigint/int8 NOT NULL DEFAULT 0",
           "6 recovery_bytes bigint/int8 NOT NULL DEFAULT 0"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_effects": {
         "columns": [
@@ -1871,7 +1845,7 @@
           "17 recovery jsonb/jsonb NULL",
           "18 recovery_bytes bigint/int8 NOT NULL DEFAULT 0"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_host_bindings": {
         "columns": [
@@ -1880,7 +1854,7 @@
           "3 local_path text/text NOT NULL",
           "4 coordination_path text/text NOT NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_local_writers": {
         "columns": [
@@ -1891,7 +1865,7 @@
           "5 revoked_at timestamp with time zone/timestamptz NULL",
           "6 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_requests": {
         "columns": [
@@ -1934,7 +1908,7 @@
           "37 consumer_host_id uuid/uuid NULL",
           "38 published_at timestamp with time zone/timestamptz NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_source_bindings": {
         "columns": [
@@ -1944,7 +1918,7 @@
           "4 relative_path text/text NOT NULL DEFAULT ''::text",
           "5 topology_generation bigint/int8 NOT NULL DEFAULT 1"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_topology_changes": {
         "columns": [
@@ -1965,7 +1939,7 @@
           "15 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "16 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_worktrees": {
         "columns": [
@@ -1978,7 +1952,7 @@
           "7 heartbeat_at timestamp with time zone/timestamptz NULL",
           "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "persistence_writer_protocols": {
         "columns": [
@@ -2006,7 +1980,7 @@
           "12 page_generations jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
           "13 max_generation_at_store bigint/int8 NOT NULL DEFAULT 0"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "raw_data": {
         "columns": [
@@ -2016,7 +1990,7 @@
           "4 data jsonb/jsonb NOT NULL",
           "5 fetched_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "search_telemetry": {
         "columns": [
@@ -2037,7 +2011,7 @@
           "15 rank1_solid integer/int4 NOT NULL DEFAULT 0",
           "16 rank1_high integer/int4 NOT NULL DEFAULT 0"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "session_context_state": {
         "columns": [
@@ -2050,7 +2024,7 @@
           "7 last_wake_at timestamp with time zone/timestamptz NULL",
           "8 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "shared_skill_delivery_batches": {
         "columns": [
@@ -2186,7 +2160,7 @@
           "5 notes text/text NULL",
           "6 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "source_ingestion_receipts": {
         "columns": [
@@ -2210,7 +2184,7 @@
           "18 discarded_at timestamp with time zone/timestamptz NULL",
           "19 policy_fingerprint text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "sources": {
         "columns": [
@@ -2220,17 +2194,17 @@
           "4 last_commit text/text NULL",
           "5 last_sync_at timestamp with time zone/timestamptz NULL",
           "6 config jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
-          "7 chunker_version text/text NULL",
-          "8 archived boolean/bool NOT NULL DEFAULT false",
-          "9 archived_at timestamp with time zone/timestamptz NULL",
-          "10 archive_expires_at timestamp with time zone/timestamptz NULL",
-          "11 contextual_retrieval_mode text/text NULL",
-          "12 trust_frontmatter_overrides boolean/bool NOT NULL DEFAULT false",
-          "13 newest_content_at timestamp with time zone/timestamptz NULL",
-          "14 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
-          "15 incarnation uuid/uuid NOT NULL DEFAULT gen_random_uuid()"
+          "7 archived boolean/bool NOT NULL DEFAULT false",
+          "8 archived_at timestamp with time zone/timestamptz NULL",
+          "9 archive_expires_at timestamp with time zone/timestamptz NULL",
+          "10 contextual_retrieval_mode text/text NULL",
+          "11 trust_frontmatter_overrides boolean/bool NOT NULL DEFAULT false",
+          "12 newest_content_at timestamp with time zone/timestamptz NULL",
+          "13 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "14 incarnation uuid/uuid NOT NULL DEFAULT gen_random_uuid()",
+          "15 chunker_version text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "subagent_messages": {
         "columns": [
@@ -2248,7 +2222,7 @@
           "12 model text/text NULL",
           "13 ended_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "subagent_rate_leases": {
         "columns": [
@@ -2258,7 +2232,7 @@
           "4 acquired_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "5 expires_at timestamp with time zone/timestamptz NOT NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "subagent_tool_executions": {
         "columns": [
@@ -2278,7 +2252,7 @@
           "14 started_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "15 ended_at timestamp with time zone/timestamptz NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "synthesis_evidence": {
         "columns": [
@@ -2288,7 +2262,7 @@
           "4 citation_index integer/int4 NOT NULL",
           "5 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "tags": {
         "columns": [
@@ -2297,7 +2271,7 @@
           "3 tag text/text NOT NULL",
           "4 tag_source text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "take_domain_assignments": {
         "columns": [
@@ -2308,7 +2282,7 @@
           "5 confidence real/float4 NOT NULL DEFAULT 1.0",
           "6 assigned_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "take_grade_cache": {
         "columns": [
@@ -2323,7 +2297,7 @@
           "9 applied boolean/bool NOT NULL DEFAULT false",
           "10 cost_usd numeric/numeric NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "take_nudge_log": {
         "columns": [
@@ -2336,7 +2310,7 @@
           "7 channel text/text NOT NULL DEFAULT 'stderr'::text",
           "8 wave_version text/text NOT NULL DEFAULT 'v0.36.1.0'::text"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "take_proposals": {
         "columns": [
@@ -2362,7 +2336,7 @@
           "20 predicted_brier real/float4 NULL",
           "21 predicted_brier_bucket_n integer/int4 NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "takes": {
         "columns": [
@@ -2390,7 +2364,7 @@
           "22 updated_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
           "23 resolved_quality text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "think_ab_results": {
         "columns": [
@@ -2405,7 +2379,7 @@
           "9 model_id text/text NULL",
           "10 notes text/text NULL"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       },
       "timeline_entries": {
         "columns": [
@@ -2418,14 +2392,13 @@
           "7 event_page_id integer/int4 NULL",
           "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
-        "flags": "relkind=r rls=true force_rls=false"
+        "flags": "relkind=r rls=false force_rls=false"
       }
     },
     "triggers": {
       "content_chunks.chunk_search_vector_trigger": "CREATE TRIGGER chunk_search_vector_trigger BEFORE INSERT OR UPDATE OF chunk_text, doc_comment, symbol_name_qualified ON public.content_chunks FOR EACH ROW EXECUTE FUNCTION update_chunk_search_vector()",
       "facts.facts_preserve_withdrawal": "CREATE TRIGGER facts_preserve_withdrawal BEFORE INSERT OR UPDATE OF fact, source_id, visibility, entity_slug, expired_at ON public.facts FOR EACH ROW EXECUTE FUNCTION gbrain_preserve_fact_withdrawal()",
       "facts.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.facts FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
-      "minion_jobs.minion_job_notify": "CREATE TRIGGER minion_job_notify AFTER INSERT OR UPDATE OF status ON public.minion_jobs FOR EACH ROW EXECUTE FUNCTION notify_minion_job_change()",
       "minion_jobs.minion_queue_protocol": "CREATE TRIGGER minion_queue_protocol BEFORE INSERT OR UPDATE ON public.minion_jobs FOR EACH ROW EXECUTE FUNCTION enforce_minion_queue_protocol()",
       "page_aliases.managed_writer_guard": "CREATE TRIGGER managed_writer_guard BEFORE INSERT OR DELETE OR UPDATE ON public.page_aliases FOR EACH ROW EXECUTE FUNCTION gbrain_require_managed_writer()",
       "pages.bump_page_generation_clock_trg": "CREATE TRIGGER bump_page_generation_clock_trg AFTER INSERT OR DELETE OR UPDATE ON public.pages FOR EACH STATEMENT EXECUTE FUNCTION bump_page_generation_clock_fn()",

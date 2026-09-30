@@ -68,7 +68,7 @@ gbrain repair --all --apply                    # every kind in order
 any other option the table below does not list, including `--max-usd`: a
 refused run changes nothing. To cap paid embedding work, run the repairs
 through `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. `--all`
-runs `request-indexes`, then `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, and stops at the
 first kind that stops.
 
 Each item is re-checked against the page's current state just before it is

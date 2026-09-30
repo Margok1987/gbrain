@@ -22,6 +22,7 @@ import { OperationError } from '../ops/contract.ts';
 import { PERSISTENCE_SYNC_RUN_INDEXES } from './schema.ts';
 import { docsAnchor } from './connector-errors.ts';
 import type { SyncProcessingOptions } from './sync-authority.ts';
+import type { SyncCursorOptions } from './sync-prepare.ts';
 
 export const CHECKPOINT_VALIDATION_TIMEOUT = 'checkpoint_validation_timeout';
 export const CHECKPOINT_VALIDATION_TIMEOUT_MESSAGE = 'The sync checkpoint validation timed out on a large request table; the checkpoint did not commit.';
@@ -78,18 +79,24 @@ export async function readRequestIndexStates(engine: Pick<BrainEngine, 'executeR
         : { name: row.name, state: 'invalid' });
 }
 
-/** The exact retry for the failed checkpoint: same source, recorded processing options, and --working-tree when known. */
-export function checkpointRetryCommand(input: { sourceId: string; processingOptions?: Partial<SyncProcessingOptions> | null; workingTree?: boolean }): string {
+const shellWord = (value: string) => /^[\w./@:=+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+
+/** The exact retry for the failed checkpoint: same source and cursor-selecting options, plus the recorded processing flags. */
+export function checkpointRetryCommand(input: { sourceId: string; processingOptions?: Partial<SyncProcessingOptions> | null; syncOptions?: SyncCursorOptions | null }): string {
   const options = input.processingOptions ?? {};
-  return `gbrain sync --source ${input.sourceId} --no-pull --retry-failed${options.noEmbed ? ' --no-embed' : ''}${options.noExtract ? ' --no-extract' : ''}`
-    + `${options.noSchemaPack ? ' --no-schema-pack' : ''}${input.workingTree ? ' --working-tree' : ''}`;
+  const cursor = input.syncOptions;
+  return [`gbrain sync --source ${shellWord(input.sourceId)} --no-pull --retry-failed`, options.noEmbed ? '--no-embed' : '', options.noExtract ? '--no-extract' : '',
+    options.noSchemaPack ? '--no-schema-pack' : '', cursor?.full ? '--full' : '', cursor?.workingTree ? '--working-tree' : '',
+    cursor?.srcSubpath ? `--src-subpath ${shellWord(cursor.srcSubpath)}` : '', ...(cursor?.exclude ?? []).map(pattern => `--exclude ${shellWord(pattern)}`),
+    ...(cursor?.includeHidden ?? []).map(pattern => `--include-hidden ${shellWord(pattern)}`), cursor?.strategy ? `--strategy ${shellWord(cursor.strategy)}` : '']
+    .filter(Boolean).join(' ');
 }
 
 export interface CheckpointTimeoutHint { reason: string; message: string; suggestion: string; detail: 'index_building' | 'index_missing' | 'indexes_valid'; docs: string }
 
 /** The one formatter for the refusal: a three-state hint from the index state, plus the filled retry command. */
 export function formatCheckpointTimeoutHint(indexes: RequestIndexState[], input: { requestId: string | null; sourceId: string;
-  processingOptions?: Partial<SyncProcessingOptions> | null; workingTree?: boolean }): CheckpointTimeoutHint {
+  processingOptions?: Partial<SyncProcessingOptions> | null; syncOptions?: SyncCursorOptions | null }): CheckpointTimeoutHint {
   const retry = checkpointRetryCommand(input);
   const base = { reason: CHECKPOINT_VALIDATION_TIMEOUT, message: CHECKPOINT_VALIDATION_TIMEOUT_MESSAGE, docs: docsAnchor(CHECKPOINT_VALIDATION_TIMEOUT) };
   const building = indexes.filter(index => index.state === 'building');

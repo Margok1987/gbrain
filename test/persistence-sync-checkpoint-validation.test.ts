@@ -11,7 +11,7 @@ import { claimWorktree, getWorktreeBinding } from '../src/core/persistence/owner
 import { performManagedSync } from '../src/core/persistence/sync-run.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
-import { INCOMPLETE_SYNC_RECEIPT_SQL, findIncompleteSyncReceipt, formatCheckpointTimeoutHint, readRequestIndexStates } from '../src/core/persistence/checkpoint-validation.ts';
+import { INCOMPLETE_SYNC_RECEIPT_SQL, checkpointRetryCommand, findIncompleteSyncReceipt, formatCheckpointTimeoutHint, readRequestIndexStates } from '../src/core/persistence/checkpoint-validation.ts';
 import { persistenceOperations } from '../src/core/ops/persistence.ts';
 import { printManagedSyncDiagnostic } from '../src/commands/sync-diagnostics.ts';
 import { WRITE_ERROR_CODES } from '../src/core/persistence/types.ts';
@@ -163,7 +163,8 @@ test('#5762 a lock timeout in the validation stays transient contention', async 
 }), 180_000);
 
 test('#5762 the hint names one of three index states and keeps the saved processing flags', async () => {
-  const input = { requestId: 'req-1', sourceId: 'notes', processingOptions: { noEmbed: true, noExtract: false, noSchemaPack: true }, workingTree: true };
+  const syncOptions = { full: false, workingTree: true, srcSubpath: null, exclude: [], includeHidden: [], strategy: null };
+  const input = { requestId: 'req-1', sourceId: 'notes', processingOptions: { noEmbed: true, noExtract: false, noSchemaPack: true }, syncOptions };
   const retry = 'gbrain sync --source notes --no-pull --retry-failed --no-embed --no-schema-pack --working-tree';
   const building = formatCheckpointTimeoutHint([{ name: 'persistence_requests_sync_run_open', state: 'building',
     progress: { phase: 'building index: scanning table', blocks_done: 10, blocks_total: 40 } }], input);
@@ -179,6 +180,10 @@ test('#5762 the hint names one of three index states and keeps the saved process
   expect(valid.suggestion).toBe(`The request indexes are valid, so there is nothing to wait for. Run: ${retry}. If it times out again, report request req-1 `
     + 'and attach the persistence_request_indexes and persistence_request_growth entries of gbrain doctor --json.');
   expect(WRITE_ERROR_CODES).toContain('checkpoint_validation_timeout');
+  // Every option that selects the cursor is printed, so the retry resumes the same cursor.
+  expect(checkpointRetryCommand({ sourceId: 'notes', processingOptions: null, syncOptions: { full: true, workingTree: false, srcSubpath: 'docs/team a',
+    exclude: ['drafts/**', "it's"], includeHidden: ['.notes'], strategy: 'markdown' } })).toBe(
+    "gbrain sync --source notes --no-pull --retry-failed --full --src-subpath 'docs/team a' --exclude 'drafts/**' --exclude 'it'\\''s' --include-hidden .notes --strategy markdown");
 });
 
 test('#5762 a dropped index reads as missing and the hint then names the rebuild command', async () => each(async engine => {

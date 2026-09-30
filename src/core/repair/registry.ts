@@ -35,11 +35,6 @@ export interface RepairKindSpec {
 }
 
 const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
-  'request-indexes': {
-    handler: requestIndexesRepair, embeds: 'none', checks: ['persistence_request_indexes'],
-    summary: 'Create a missing managed sync request index, or drop an INVALID one and rebuild it (#5762), so sync checkpoints validate within their '
-      + 'statement budget. Postgres builds CONCURRENTLY, one index at a time. No journal admission and no user data changes. Brain-wide.',
-  },
   timeline: {
     handler: timelineRepair, embeds: 'effect', checks: ['timeline_history'],
     summary: 'Write database-only timeline rows back into their pages as marked bullets (#5567). Rows that cannot round-trip are kept and counted. Each repaired page is re-embedded by its publication.',
@@ -62,6 +57,11 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     handler: connectorCheckpointsRepair, embeds: 'none', checks: ['connector_checkpoints'],
     summary: 'Delete connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days (#5686). '
       + 'Cleanup only; no journal admission. Rows a pending write still references are kept. Brain-wide.',
+  },
+  'request-indexes': {
+    handler: requestIndexesRepair, embeds: 'none', checks: ['persistence_request_indexes'],
+    summary: 'Create a missing managed sync request index, or drop an INVALID one and rebuild it (#5762), so sync checkpoints validate within their '
+      + 'statement budget. Postgres builds CONCURRENTLY, one index at a time. No journal admission and no user data changes. Brain-wide.',
   },
 };
 

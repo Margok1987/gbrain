@@ -20,19 +20,22 @@ beforeAll(async () => { engine = new PGLiteEngine(); await engine.connect({}); a
 afterAll(async () => { await engine.disconnect(); });
 
 test('#5762 the indexes are in the PGLite blob and v151, and filtered out of the Postgres blob', () => {
+  // test-reads-source-ok[structural]: the generated blobs are the artifact under test; the plan requires the names absent from the Postgres blob and present in PGLite's.
   const postgresBlob = readFileSync('src/core/schema-embedded.generated.ts', 'utf8');
   const pgliteBlob = readFileSync('src/core/pglite-schema.generated.ts', 'utf8');
+  // test-reads-source-ok[structural]: src/schema.sql is the generated Postgres blob source; the index must never be built during blob replay.
+  const schemaSql = readFileSync('src/schema.sql', 'utf8');
   for (const name of NAMES) {
     expect(postgresBlob).not.toContain(name);
-    expect(readFileSync('src/schema.sql', 'utf8')).not.toContain(name);
+    expect(schemaSql).not.toContain(name);
     expect(pgliteBlob).toContain(name);
     expect(v151.sql).toContain(name);
   }
   for (const index of PERSISTENCE_SYNC_RUN_INDEXES) expect(PERSISTENCE_SCHEMA_STATEMENTS).toContain(index.sql);
 });
 
-test('#5762 gbrain repair request-indexes rebuilds a dropped index inline on PGLite; a second run is a no-op; --all runs it first', async () => {
-  expect(REPAIR_KINDS[0]).toBe('request-indexes');
+test('#5762 gbrain repair request-indexes rebuilds a dropped index inline on PGLite; a second run is a no-op; --all includes it', async () => {
+  expect(REPAIR_KINDS).toContain('request-indexes');
   expect(repairForCheck('persistence_request_indexes')?.kind).toBe('request-indexes');
   expect(WAVE_CHECKS.find(spec => spec.id === 'persistence_request_indexes')).toMatchObject({ resolution: 'repair', registration: 'wave' });
   expect((await requestIndexesCheck(engine)).status).toBe('ok');
@@ -69,10 +72,20 @@ test('persistence_request_growth reports rows, the 7-day rate, lifetime-id use a
     expect(Number(command.split(' ').pop())).toBeGreaterThanOrEqual(20_000);
     expect(warn.message).toContain(`principal:local_cli:growth-example admits 100/day over the last 7 day(s) and reaches persistence.limits.principal_lifetime_ids=10000 (9000 used) around ${scope.exhaustion_date}`);
     expect(warn.message).toContain(`Run on the brain host: ${command} — then verify with gbrain doctor --json (check persistence_request_growth).`);
+    // A second warning principal shares the same key: one command, with the largest value either needs.
+    await engine.executeRaw(`INSERT INTO persistence_requests(principal_kind,principal_id,request_id,operation,source_id,source_incarnation,slug,digest,authority,
+        intent_bytes,terminal_reservation,state,created_at)
+      SELECT 'local_cli','growth-other',gen_random_uuid(),'submit_job','default',$1::uuid,'q-'||g,'d','{}'::jsonb,1,16384,'committed',now()-(g||' minutes')::interval
+      FROM generate_series(1,70) g`, [source.incarnation]);
+    await engine.executeRaw("INSERT INTO persistence_counters(key,lifetime_ids) VALUES('principal:local_cli:growth-other',9990)");
+    const both = await requestGrowthCheck(engine);
+    const commands = both.details!.commands as string[];
+    expect(commands).toHaveLength(1);
+    expect(Number(commands[0].split(' ').pop())).toBeGreaterThanOrEqual(Number(command.split(' ').pop()));
   } finally {
     await engine.executeRaw("DELETE FROM config WHERE key='persistence.limits.principal_lifetime_ids'");
-    await engine.executeRaw("DELETE FROM persistence_requests WHERE principal_id='growth-example'");
-    await engine.executeRaw("DELETE FROM persistence_counters WHERE key='principal:local_cli:growth-example'");
+    await engine.executeRaw("DELETE FROM persistence_requests WHERE principal_id IN ('growth-example','growth-other')");
+    await engine.executeRaw("DELETE FROM persistence_counters WHERE key IN ('principal:local_cli:growth-example','principal:local_cli:growth-other')");
   }
 }, 60_000);
 
