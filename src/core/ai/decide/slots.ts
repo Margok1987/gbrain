@@ -74,7 +74,7 @@ export const SLOT_SPECS: Readonly<Record<DecideSlot, SlotSpec>> = {
   conflict: {
     slot: 'conflict', lane: 'background', questionKind: 'choice', harmful: false, thresholded: true, callSites: ['sweep'],
     egressClasses: ['facts'], shadowSample: 1, whatIfReproducible: false, questionVersion: 1,
-    failDirection: 'no proposal; the fact stays as written', wired: false,
+    failDirection: 'no proposal; the fact stays as written', wired: true,
   },
 };
 

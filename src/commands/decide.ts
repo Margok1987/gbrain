@@ -158,6 +158,7 @@ const COST_UNITS: Partial<Record<DecideSlot, { unit: string; questions: number; 
   evidence: { unit: 'queries', questions: 20 },
   triage: { unit: 'transcripts', questions: 20, unpacked: true },
   grounding: { unit: 'dream pages', questions: 10, unpacked: true },
+  conflict: { unit: 'swept facts', questions: 5 },
 };
 
 /** Estimated USD per 1,000 units: from the last 24 h of receipts, else the planner estimate for a typical input. */
@@ -343,6 +344,11 @@ async function enableRerank(engine: BrainEngine, state: DecideState, provider: s
   return [['search.reranker.model', pinned], ['search.reranker.enabled', 'true']];
 }
 
+async function conflictShareLine(engine: BrainEngine, fate: string): Promise<string> {
+  const share = await (await import('../core/ai/decide/proposals-store.ts')).privateFactShare(engine);
+  return `Facts: ${share.private} of ${share.total} active facts are private and ${fate}; an llm: route (decide.slots.conflict.provider llm:<provider:model>) keeps them with your chat provider.`;
+}
+
 async function cmdEnable(engine: BrainEngine, args: string[]): Promise<number> {
   const json = has(args, '--json');
   const state = await loadDecideState(engine);
@@ -367,6 +373,7 @@ async function cmdEnable(engine: BrainEngine, args: string[]): Promise<number> {
   if (typesafe && slot !== 'rerank') for (const c of classes) writes.push([`decide.egress.typesafe.${c}`, 'allow']);
   if (typesafe && PRIVATE_SLOTS.includes(slot) && state.cfg.egressPrivate === 'deny' && state.cfg.egressFallback === 'none') {
     console.error(`${refusalLine('egress_private_denied', slot)}\nMissing keys: decide.egress.private=allow, or decide.slots.${slot}.provider llm:<provider:model>, or decide.egress_fallback llm:<provider:model>`);
+    if (slot === 'conflict') console.error(await conflictShareLine(engine, 'would be refused'));
     return 1;
   }
   writes.push([`decide.slots.${slot}.mode`, mode]);
@@ -386,6 +393,7 @@ async function cmdEnable(engine: BrainEngine, args: string[]): Promise<number> {
     slot === 'rerank'
       ? 'Data that leaves this machine: query and candidate text go to TypeSafe as the search reranker, exactly as with any configured reranker (Voyage today).'
       : `Data that leaves this machine: ${classes.join(', ')} text to ${typesafe ? 'TypeSafe' : 'your configured chat provider'}; private pages stay local unless decide.egress.private=allow.`,
+    ...(slot === 'conflict' && typesafe ? [await conflictShareLine(engine, state.cfg.egressPrivate === 'allow' ? 'are sent (decide.egress.private=allow)' : 'go to decide.egress_fallback')] : []),
     ...(cost.usd !== null ? [`Estimated cost: ~$${cost.usd.toFixed(4)} per 1,000 ${COST_UNITS[slot]?.unit ?? 'units'}; daily cap $${nextCfg.dailyUsd.toFixed(2)} (decide.budget.daily_usd${slot === 'rerank' ? '; S1 on uses reranker spend controls' : ''}).`] : []),
     `Writes: ${[...writes, ...(slot === 'rerank' ? [['search.reranker.model', provider], ['search.reranker.enabled', 'true']] : [])].map(([k, v]) => `${k}=${v}`).join(', ')}`,
   ];

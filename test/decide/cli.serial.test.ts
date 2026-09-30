@@ -36,6 +36,8 @@ describe('gbrain decide CLI', () => {
       expect(r.exitCode).toBe(0);
       expect(r.stdout).toContain('Usage: gbrain decide');
       expect(r.stdout).toContain('enable <slot>');
+      expect(r.stdout).toContain('sweep --slot conflict');
+      expect(r.stdout).toContain('proposals list');
     } finally { rmSync(empty, { recursive: true, force: true }); }
   });
 
@@ -71,6 +73,22 @@ describe('gbrain decide CLI', () => {
     const off = await cli(['decide', 'disable', '--all']);
     expect(off.exitCode).toBe(0);
     expect(off.stdout).toContain('Every slot is off');
+  }, 120_000);
+
+  test('sweep and proposals on an all-off brain change nothing', async () => {
+    const sweep = await cli(['decide', 'sweep', '--slot', 'conflict']);
+    expect(sweep.exitCode).toBe(1);
+    expect(sweep.stdout).toContain('the contradiction slot is off');
+    const json = JSON.parse((await cli(['decide', 'sweep', '--slot', 'conflict', '--json'])).stdout);
+    expect(json.sweeps.every((s: { mode: string; facts: number; proposals: number }) => s.mode === 'off' && s.facts === 0 && s.proposals === 0)).toBe(true);
+    const badSlot = await cli(['decide', 'sweep', '--slot', 'triage']);
+    expect(badSlot.exitCode).toBe(1);
+    const list = await cli(['decide', 'proposals', 'list', '--json']);
+    expect(list.exitCode).toBe(0);
+    expect(JSON.parse(list.stdout)).toEqual({ status: 'pending', proposals: [] });
+    const missing = await cli(['decide', 'proposals', 'accept', '999']);
+    expect(missing.exitCode).toBe(1);
+    expect(missing.stdout).toContain('proposal 999: not found');
   }, 120_000);
 
   test('receipts --what-if-threshold replays seeded S3 receipts, including a binding min_keep', async () => {
