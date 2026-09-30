@@ -287,7 +287,9 @@ and it automatically appears in the CLI, MCP server, and tools-json:
 
 For CLI-only commands (init, upgrade, import, export, files, embed, doctor, sync):
 1. Create `src/commands/mycommand.ts`
-2. Add the case to `src/cli.ts`
+2. Add a record to `src/cli/command-table.ts` and its dispatch module
+   `src/cli/commands/mycommand.ts` (`run(args, ctx)` for pre-connect,
+   `run(engine, args, ctx)` for post-connect)
 3. Regenerate the flag registry: `bun run build:flag-registry`. The CLI rejects
    unknown flags before dispatch; each CLI-only command's legal flag set is
    derived from its source into `src/core/cli-flag-registry.generated.ts`.
