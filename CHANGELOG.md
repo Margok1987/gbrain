@@ -10,6 +10,33 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.14.0] - 2026-09-30
+
+<!-- Fix wave 4 placeholder entry. Lane B (connectors) section below; the integrator merges every lane into one entry and finalizes the date. -->
+
+### Connectors: one bad item no longer wedges a source (lane B)
+
+**One email with an emoji at the wrong place, or one GitHub issue that always fails, used to stop a connector forever. Now the item is held, the sync moves on, and every surface tells you what is held and how to retry it.**
+
+- **#5752.** Gmail cut message bodies on a UTF-16 code unit, so an emoji at the 8 KB cap left half a character that Postgres rejects. Both body caps now cut on a character boundary, and connector renders clean up prose text before it is stored. An id, path or account with a bad character is refused as `invalid_connector_text` instead of being rewritten.
+- **Held items (#5752, #5740).** An item that fails three syncs in a row is held: the sync's cursor moves past it, and it shows in `gbrain sources status` (up to 10 per source, then `+N more`), the doctor check `connector_held_items`, the sync summary and, for Gmail, `gbrain waiting`. Rate limits and source-wide errors never count, and a provider outage (at least 5 items tried and half failing) counts nothing. Transient failures are retried after 1 h, 6 h, 24 h, then daily for a week. At most 100 items are held per source (`connector_holds_exhausted`). Re-attempt with `gbrain sources retry-held <id> [--dry-run] [--json]`, then `gbrain sync --source <id>`. The thresholds are fixed and documented in the Google and GitHub guides.
+- **#5740.** One permanently failing GitHub item pinned the sweep cursor, so every sync re-enumerated everything, and the partial sweep still stamped the source fresh. The item is now held and the cursor advances; a partial sweep no longer stamps `last_sync_at`.
+- **#5739.** GitHub item, repo and rate-limit failures now print their reason on stderr.
+- **#5581, #5438.** Gmail syncs current mail first: the history delta and any expired-token gap run before the deep backfill, and the source counts as fresh once the delta is drained, no gap is open and the last 14 days are imported. An aborted delta banks the threads it landed. Widening `g_history_days` resumes the backfill below what was covered. The parked thread list is capped at 1,000 ids or 64 KB; a bigger delta walks its window again instead of dropping ids.
+- **`gbrain waiting` reports partial coverage.** When a held Gmail thread falls in the last 14 days (or its date is unknown), `waiting` and `open_loops` return `completeness: "partial"` with each held thread and the retry command, and an empty answer says coverage is partial instead of "You are clean".
+- **Fences below the timeline.** A connector re-render that would drop a facts or takes fence kept below a page's timeline is refused (`connector_fence_below_timeline`) instead of expiring those rows. `gbrain repair connector-fences --source <id>` moves the fence into the body.
+- **User timeline bullets on regenerated pages.** `add_timeline_entry` now marks the bullet on dream-generated pages, Life Chronicle event pages and drift reports too, so the writer that regenerates them keeps it.
+
+#### Behavior changes (lane B)
+
+- Autopilot dispatches a Google or GitHub source only after its first recorded sync attempt. A source that has never synced stays idle and prints one notice; run `gbrain sync --source <id>` once to enable it. Sources autopilot already synced are recorded by migration v179 and keep syncing. Opt out as before with `syncEnabled=false`.
+- `gbrain sync --source <id> --full` clears holds on GitHub as well as Gmail.
+- Held items do not block a source's freshness; `gbrain waiting` reports them as partial coverage.
+- `gbrain sources status` lists held items.
+- A managed connector sync that fails on an item now records the failure count in its checkpoint (the cursor does not move), and a page write's identity no longer includes the holds, so an ordinary rerun still replays the same receipt.
+
+Credit: the Gmail recent-first and banked-drain work is adopted from #5581 by @tarush1989; the GitHub freshness fix from #5741 by @drakeo338; the GitHub failure logging from #5744 by @javieraldape.
+
 ## [0.60.13.0] - 2026-09-30
 
 **Two things: your agent can now ask search for the whole conversation, section or page around each hit in the same call (off by default until a matched study shows it helps), and seven correctness fixes land, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**

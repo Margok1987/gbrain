@@ -1730,7 +1730,12 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   preview `gbrain doctor --remediation-plan` (or `gbrain repair`), then, after the
   user agrees, `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`
   or `gbrain repair <kind> --apply` on the brain host. After an upgrade, follow
-  [recover after upgrading](./docs/guides/repair.md#recover-after-upgrading-to-this-release). A refused
+  [recover after upgrading](./docs/guides/repair.md#recover-after-upgrading-to-this-release).
+  A Google or GitHub item held after repeated failures (doctor
+  `connector_held_items`, `gbrain waiting` says coverage is partial):
+  `gbrain sources status <id>`, fix the cause, then after the user agrees
+  `gbrain sources retry-held <id>` and `gbrain sync --source <id>`
+  ([held items](./docs/guides/google-connect.md#held-items)). A refused
   write names its reason and recovery command
   ([write refusal reasons](./docs/guides/write-refusals.md)).
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
@@ -6164,6 +6169,55 @@ Three layers, fastest to cheapest:
 Every page carries `synced_at` and the API `updated_at` in frontmatter, so
 staleness is measurable and the next sweep skips fresh pages.
 
+A sweep with a failing item is partial: it keeps its cursor and does not stamp
+the source as freshly synced, so `gbrain doctor`'s `sync_freshness` shows it.
+An item that fails three sweeps in a row is held (below) and the cursor moves
+past it. Autopilot keeps a source synced after its first sync; a source that
+has never synced stays idle until you run `gbrain sync --source <id>` once.
+
+## Held items
+
+A connector item that fails with an item-scoped error on three consecutive
+syncs is **held**: it is recorded in the source's cursor state, and the sync
+moves on past it instead of wedging the whole source. A held item is never
+skipped silently:
+
+- `gbrain sources status` lists up to 10 held items per source (key, sender and
+  subject or title when known, error code, class, first and last failure,
+  attempts, next automatic retry), then `+N more; --json lists all`;
+- `gbrain doctor` reports a per-source count in the `connector_held_items`
+  check;
+- the sync summary prints the held count and the retry command;
+
+A held item does not block the source's freshness stamp. To re-attempt:
+
+```bash
+gbrain sources status <id>          # what is held and why
+gbrain sources retry-held <id>      # schedule every held item (add --dry-run to preview)
+gbrain sync --source <id>           # run the re-attempt now
+gbrain sources status <id>          # a recovered item leaves the list
+```
+
+`gbrain sync --source <id> --full` also clears every hold. A held item whose
+upstream copy changes is re-attempted once automatically.
+
+**The thresholds are fixed** so every brain behaves the same way and a held
+item always means the same thing:
+
+| Rule | Value | Why it is fixed |
+| --- | --- | --- |
+| Hold after | 3 consecutive attempted syncs that failed for that item, at the same upstream version | Long enough to ride out a flaky run, short enough that one bad item cannot pin the cursor for days |
+| Never counted | Rate limits, and source-level errors (auth, config, writer coordination, lock and statement timeouts, database contention) | They say nothing about the item |
+| Circuit breaker | A sync with at least 5 attempted items counts nothing when at least half of them failed transiently, or when at least 5 and at least half failed with the same error code | A provider outage must not hold healthy items |
+| Transient retry | A held item whose error was transient (5xx, network, unknown) is retried after 1 h, 6 h, 24 h, then daily, for 7 days; after that it stays held like a content error | Recovers on its own from a provider incident |
+| Cap | 100 held items per source; a sync that would hold more stops advancing its cursor and fails with `connector_holds_exhausted` | Many held items means something is wrong with the source, not with items |
+
+The overrides are `gbrain sources retry-held <id>` and
+`gbrain sync --source <id> --full`. See
+[write refusal reasons](write-refusals.md) for `connector_holds_exhausted`,
+`invalid_connector_text` and `connector_fence_below_timeline`.
+
+
 ## Webhook (recommended: instant sync)
 
 Point GitHub webhooks at your `gbrain serve --http` instance:
@@ -8593,6 +8647,7 @@ should also check `results[].complete`.
 | --- | --- | --- | --- |
 | `timeline` | `timeline_history` | Re-saves each page with its current body through a revision-bound `put_page`. The save writes each database-only timeline entry back into the page as a bullet preceded by `<!-- gbrain:materialized v1 <hash> -->`. | `kept_unrenderable_rows`: entries that would change if written as a bullet (for example an empty source). They stay in the database. |
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
+| `connector-fences` | none (a `connector_fence_below_timeline` refusal names it) | Moves a facts or takes fence that sits below the timeline sentinel of a Google or GitHub page into the page body through a revision-bound `put_page`, so the connector's next re-render carries the fence instead of refusing. Then re-attempt the held item with `gbrain sources retry-held <source>`. | `kept_ambiguous_pages`: pages whose fences are duplicated, unbalanced or unparseable. Move the fence by hand: read the page, place the fence above the `<!-- timeline -->` line, and save it with the current `expected_revision`. |
 | `connector-checkpoints` | `connector_checkpoints` | Deletes managed connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days. They accumulate after a content setting such as `g_history_days` changes, or when a connector host older than v0.60.11.0 runs during an upgrade. Cleanup only: it never copies or re-keys a checkpoint, takes no journal admission and runs brain-wide (`--source` does not narrow it). | Rows a queued or running connector write, or a connector's recorded pending set, still references. |
 | `safe-chunks` | `safe_index_pending` (also `contextual_retrieval_coverage`, `details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 | `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync or a connector source before this release), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. `embed_skip`: pages marked to skip embedding keep their stored vectors and are not stamped. |
@@ -8658,6 +8713,20 @@ pending writes, and re-walks the configured window once. Existing pages stay,
 unchanged ones take no admission, and the account pin is kept. It refuses on a
 Git-backed source and while the account differs
 ([`connector_account_changed`](write-refusals.md#connector-account-changed)).
+
+<a id="connector-held-items"></a>
+### Connector held items
+
+The doctor check `connector_held_items` counts Google and GitHub items held
+after three consecutive failed syncs. It is not a repair kind: fix the cause
+the item's error code names, then re-attempt. See
+[held items](google-connect.md#held-items) for the rules.
+
+| Symptom | Preview | Apply | Verify |
+| --- | --- | --- | --- |
+| `connector_held_items` warns, or `gbrain waiting` says coverage is partial | `gbrain sources status <source>` | `gbrain sources retry-held <source>`, then `gbrain sync --source <source>` | `gbrain sources status <source>` (a recovered item leaves the list) |
+| A sync fails with `connector_holds_exhausted` | `gbrain sources status <source> --json` | Fix the cause, then `gbrain sources retry-held <source>` and `gbrain sync --source <source>` | `gbrain doctor` |
+| A sync refuses with `connector_fence_below_timeline` | `gbrain repair connector-fences --source <source>` | `gbrain repair connector-fences --source <source> --apply`, then `gbrain sources retry-held <source>` | `gbrain sync --source <source>` succeeds |
 
 ## Resume
 
@@ -8923,6 +8992,9 @@ of making a duplicate.
 | `queue_capacity` | `queue_capacity` | Admission would exceed a write-journal limit. Existing requests keep their place; nothing is evicted. For the cumulative limits (lifetime request IDs and receipt bytes), `detail` names the limit, for example `principal_lifetime_ids`. | For a cumulative limit, run the printed `gbrain config set persistence.limits.<limit> <value>` (sized for about one more year at the current rate), then retry with the **same** request ID. For outstanding-request, queued-byte or recovery-byte limits, let outstanding requests finish and check `gbrain sources writer status`. See [bounded admission and retention](concurrent-writes.md#bounded-admission-and-retention). |
 | <a id="connector-account-changed"></a>`account_changed`, `account_unresolved` | `connector_account_changed` | A managed Google or GitHub connector's credential resolves to a different account than the one pinned for the source (Google email, GitHub App installation or login), or to no account at all. Google checks every enabled service before any service runs. Nothing was imported. No reset flag authorizes an account change. | The suggestion gives two branches with real values. (A) Restore the credential for the pinned account (the configured `g_token_env`, `g_token_command`, vault credential, `gh_token_env` or GitHub App key), then `gbrain sync --source <source>`. (B) For a deliberate change, add a new source for the new account (`gbrain google setup --account <email>`, or `gbrain sources add <new-id> --kind github … --app-install <id>`), then `gbrain sources archive <source>`; existing pages stay under the old source. |
 | <a id="connector-intent-outdated"></a>`pre_upgrade` | `connector_intent_outdated` | A connector write was admitted in the intent format retired in v0.60.11.0. With detail `pre_upgrade` it was admitted before this brain's upgrade; otherwise a connector host older than v0.60.11.0 admitted it. The consumer recovers any file publication in progress first, then fails the request. | `pre_upgrade`: nothing to do; the item is fetched again on the next `gbrain sync --source <source>` under a new request ID. Otherwise: `gbrain upgrade` on the host that runs connector jobs, then `gbrain sync --source <source>`. |
+| <a id="invalid-connector-text"></a>`invalid_connector_text` | `invalid_connector_text` | A Google or GitHub item's identity field (a path, item id or account) contains a NUL or an unpaired UTF-16 surrogate, which cannot be stored. Prose (bodies, subjects, titles) is cleaned at render time and never refused. The item is counted toward a hold; the rest of the sync continues. | Nothing to run for one refusal. Once the item is held, `gbrain sources status <source>` names it; after the provider data is fixed, `gbrain sources retry-held <source>`, then `gbrain sync --source <source>`. |
+| <a id="connector-holds-exhausted"></a>`connector_holds_exhausted` | `connector_holds_exhausted` | A Google or GitHub source already holds 100 items and this sync would hold another. The sync stopped without advancing its cursor. So many held items usually means a source-wide problem (a broken renderer, a revoked scope), not bad items. | `gbrain sources status <source>` to see the held items and their error codes, fix the cause, then `gbrain sources retry-held <source>` and `gbrain sync --source <source>`. `gbrain sync --source <source> --full` also clears every hold. |
+| <a id="connector-fence-below-timeline"></a>`fence_not_carried` | `connector_fence_below_timeline` | A managed connector re-render would have dropped a facts or takes fence the stored page keeps below its timeline sentinel, or one that is duplicated, unbalanced or unparseable. The write was refused so those rows are not expired; the item is counted toward a hold. | Preview `gbrain repair connector-fences --source <source>`, apply it after review with `--apply`, then `gbrain sources retry-held <source>`. A page the repair counts as ambiguous needs a manual edit (see [repair](repair.md)). |
 | <a id="unsupported-mutation-protocol"></a>`consumer_upgrade_required` | `unsupported_mutation_protocol` | A v0.60.11.0 connector sent a `connector_v2_*` write to a persistence consumer older than v0.60.11.0, which does not know the format. Other `permission_denied` refusals on connector receipts are never relabeled as upgrades. | `gbrain upgrade` on every consumer and worktree-owner host, then `gbrain sync --source <source>`. Upgrade those hosts before connector hosts. |
 | `unbound_source` | `owner_unavailable` | On Postgres, a page write went to a source that has a checkout path but no canonical owner. It is refused by default because another host may own the files. The same reason appears when the source was bound, or the page gained a canonical file, after a database-only write was accepted, and (as a `source_changed` sync failure) when a canonical file appears at the path of a page written while the source was unbound. | Bind the source (`gbrain sources writer status <source> --json`, then `gbrain sources writer claim <source> --path <checkout> --admin-intent writer_claim --expected-state <admin_state>`), or opt in with `gbrain config set persistence.unbound_write database_only`. See [unbound sources on Postgres](#unbound-sources-on-postgres). |
 | <a id="embedding_zero_norm"></a>`zero_norm`, `non_finite` or `empty_input` | `embedding_zero_norm` | The embedding provider returned a vector with no direction (all zeros, NaN or infinity) for a chunk, or the chunk text was empty. A vector index silently skips such a row, so gbrain refuses to store it. Only that chunk is refused: the page text and every other chunk's vector are saved, and the page is left for `gbrain embed --stale`. It is never retried as a rate limit or network error. | Inspect the named page's chunk text (empty, whitespace- or symbol-only chunks are the usual cause) or the embedding provider, fix it, then run `gbrain embed <slug>` (add `--source <source>` for a non-default source). If normal text also returns zero vectors, the provider or model is broken; check it with `gbrain doctor`. |
