@@ -884,6 +884,33 @@ the generated registry array so the W3 split must reproduce the original
 `Mechanical-Rename: yes` commits. Failures print `FAIL: <file:line>` with the
 first differing token. Pinned by `test/scripts/verify-move-only.test.ts`.
 
+### Schema migration registry
+
+Schema migrations live one per file in `src/core/schema-migrations/v<NNN>-<name>.ts`
+(NNN zero-padded to 3, `name` = the slug with `-` → `_`, one
+`export const v<NNN>: Migration = {...}` per file). `bun run new:migration <snake_name>`
+scaffolds the next version; `bun run build:schema-migrations` regenerates the committed
+static-import registry `registry.generated.ts` (regenerate, never hand-merge). The
+array order is master's historical order (`HISTORICAL_ARRAY_ORDER` in
+`scripts/build-schema-migrations.ts`), then ascending; the runner sorts by version.
+Two guards run in `bun run verify`:
+
+- `check:schema-migrations` (`scripts/check-schema-migrations-fresh.sh`) regenerates
+  the registry into a temp file and diffs it; the generator also fails on a
+  filename/version/name mismatch and on a version defined twice, naming both files
+  with the `git mv` + `version:` + regenerate recipe.
+- `check:schema-migration-order` (`scripts/check-schema-migration-order.ts`) fails
+  when a migration origin/master does not have is numbered at or below origin/master's
+  latest version (it would be skipped forever on current brains) or reuses a version
+  with a different name. Base ref: `GBRAIN_MIGRATION_BASE_REF` (default
+  `origin/master`); skipped with a notice when the ref is missing, failed under `CI=true`.
+
+Collision recovery: an unapplied branch migration is renumbered (`git mv`, edit
+`version`, regenerate); one already applied to a disposable dev DB means rebuilding
+that DB and replaying; one applied to retained data needs explicit `schema_version`
+reconciliation, never just a counter edit. Pinned by
+`test/scripts/build-schema-migrations.test.ts` and `test/migrations-golden.test.ts`.
+
 ### Guard registry and self-test
 
 The privacy and test-isolation guards use `scripts/lib/guard-candidates.sh` to
