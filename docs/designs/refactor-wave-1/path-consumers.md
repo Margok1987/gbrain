@@ -251,8 +251,8 @@ Regenerate the raw list with, for example,
 
 ## `src/core/migrate.ts` (W3 → src/core/schema-migrations/)
 
-- [ ] `.github/workflows/e2e.yml` — CI cache key (hashFiles): W3 snapshot-consistency test (EO7) adds the new inputs to every key
-- [ ] `.github/workflows/test.yml` — CI cache key (hashFiles): W3 snapshot-consistency test (EO7) adds the new inputs to every key
+- [x] `.github/workflows/e2e.yml` — CI cache key (hashFiles): globbed in W3; `test/snapshot-inputs-closure.test.ts` (EO7) checks every key covers the hash inputs
+- [x] `.github/workflows/test.yml` — CI cache key (hashFiles): globbed in W3; `test/snapshot-inputs-closure.test.ts` (EO7) checks every key covers the hash inputs
 - [ ] `CLAUDE.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/TESTING.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/architecture/canonical-writers.tsv` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
@@ -271,14 +271,14 @@ Regenerate the raw list with, for example,
 - [ ] `docs/test-audit/2026-09-29/lane-seams/bundled-src.txt` — historical record: no action (describes past state)
 - [ ] `docs/test-audit/2026-09-29/lane-seams/test-only-exports.tsv` — historical record: no action (describes past state)
 - [x] `scripts/check-engine-dynamic-import.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
-- [x] `scripts/check-jsonb-params.mjs` — scanner guard: scans src/ and scripts/ recursively (new dirs included); the migrate.ts mention is the JSONB column list comment — update the pointer in W3
+- [x] `scripts/check-jsonb-params.mjs` — scanner guard: scans src/ and scripts/ recursively (new dirs included); the JSONB column list comment points at src/core/schema-migrations/ (W3)
 - [x] `scripts/check-jsonb-pattern.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [x] `scripts/check-layering.ts` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [x] `scripts/check-source-config-leak.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [ ] `scripts/coverage-baseline.json` — coverage data: exemptions and baseline rows transfer with moved code (net shrink)
-- [ ] `scripts/coverage-gate-exemptions.txt` — coverage data: exemptions and baseline rows transfer with moved code (net shrink)
+- [x] `scripts/coverage-gate-exemptions.txt` — coverage data: the migrate.ts exemption transfers to `src/core/schema-migrations/` (W3)
 - [x] `scripts/e2e-test-map.ts` — E2E selector map: engine-sql/** mapped to both engines in W0b; moving lanes add rows for new modules
-- [ ] `scripts/module-size-limits.tsv` — ratchet data: lower/transfer ceilings with the moved code (C24); notes trimmed in W0b
+- [x] `scripts/module-size-limits.tsv` — ratchet data: migrate.ts 723 region-exempt -> 599 ratchet (W3)
 - [x] `scripts/select-e2e.ts` — E2E selector: schema-migrations/ escape hatch added in W0b
 - [ ] `test/helpers/executor-binding-matrix.ts` — test helper (import): façade keeps its exports: no action
 - [x] `test/helpers/extract-added-columns.ts` — test helper (reads migrate text): reads surfaceSource('migrate') since W0b, so split migrations stay in its ADD COLUMN scan
@@ -287,8 +287,8 @@ Regenerate the raw list with, for example,
 
 ## `src/core/pglite-schema.ts` (W2 → pglite-schema.generated.ts)
 
-- [ ] `.github/workflows/e2e.yml` — CI cache key (hashFiles): W3 snapshot-consistency test (EO7) adds the new inputs to every key
-- [ ] `.github/workflows/test.yml` — CI cache key (hashFiles): W3 snapshot-consistency test (EO7) adds the new inputs to every key
+- [x] `.github/workflows/e2e.yml` — CI cache key (hashFiles): globbed in W3; `test/snapshot-inputs-closure.test.ts` (EO7) checks every key covers the hash inputs
+- [x] `.github/workflows/test.yml` — CI cache key (hashFiles): globbed in W3; `test/snapshot-inputs-closure.test.ts` (EO7) checks every key covers the hash inputs
 - [ ] `CLAUDE.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/ENGINES.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/TESTING.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
@@ -302,8 +302,8 @@ Regenerate the raw list with, for example,
 - [x] `scripts/check-jsonb-pattern.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [x] `scripts/check-search-path.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [x] `scripts/e2e-test-map.ts` — E2E selector map: engine-sql/** mapped to both engines in W0b; moving lanes add rows for new modules
-- [ ] `test/helpers/schema-diff.test.ts` — test helper (hint text): W2: point the "mirror in ..." hints at the canonical source per the generated-schema graph
-- [ ] `test/helpers/schema-diff.ts` — test helper (hint text): W2: point the "mirror in ..." hints at the canonical source per the generated-schema graph
+- [x] `test/helpers/schema-diff.test.ts` — test helper (hint text): hints point at src/schema.sql + `bun run build:schema` (W2)
+- [x] `test/helpers/schema-diff.ts` — test helper (hint text): hints point at src/schema.sql, the PGLite rules and `bun run build:schema` (W2)
 
 ## `src/schema.sql` (W2 → generated fragment regions)
 
@@ -320,17 +320,17 @@ Regenerate the raw list with, for example,
 - [ ] `docs/designs/VECTOR_BACKENDS.md` — historical record: no action (describes past state)
 - [ ] `docs/guides/rls-and-you.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/test-audit/2026-09-29/lane-source-grep/pertest.json` — historical record: no action (describes past state)
-- [ ] `scripts/build-schema.sh` — schema generator: W2 replaces it with the generated-schema chain (EO12)
+- [x] `scripts/build-schema.sh` — schema generator: one-line wrapper around `scripts/build-schema.ts`, the generated-schema chain (W2, EO12)
 - [x] `scripts/check-jsonb-pattern.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [x] `scripts/check-search-path.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [x] `scripts/e2e-test-map.ts` — E2E selector map: engine-sql/** mapped to both engines in W0b; moving lanes add rows for new modules
 - [x] `scripts/select-e2e.ts` — E2E selector: schema-migrations/ escape hatch added in W0b
-- [ ] `test/helpers/schema-diff.ts` — test helper (hint text): W2: point the "mirror in ..." hints at the canonical source per the generated-schema graph
+- [x] `test/helpers/schema-diff.ts` — test helper (hint text): hints point at src/schema.sql, the PGLite rules and `bun run build:schema` (W2)
 
 ## `src/core/pglite-engine.ts + src/core/pglite-engine/` (W1 → src/core/engine-sql/)
 
-- [ ] `.github/workflows/e2e.yml` — CI cache key (hashFiles): W3 snapshot-consistency test (EO7) adds the new inputs to every key
-- [ ] `.github/workflows/test.yml` — CI cache key (hashFiles): W3 snapshot-consistency test (EO7) adds the new inputs to every key
+- [x] `.github/workflows/e2e.yml` — CI cache key (hashFiles): globbed in W3; `test/snapshot-inputs-closure.test.ts` (EO7) checks every key covers the hash inputs
+- [x] `.github/workflows/test.yml` — CI cache key (hashFiles): globbed in W3; `test/snapshot-inputs-closure.test.ts` (EO7) checks every key covers the hash inputs
 - [ ] `CLAUDE.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `CONTRIBUTING.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
 - [ ] `docs/ENGINES.md` — reference doc: update the path when the move lands (W7 docs rewrite; key-files entries)
@@ -360,7 +360,7 @@ Regenerate the raw list with, for example,
 - [ ] `docs/test-audit/2026-09-29/lane-source-grep/source-grep.md` — historical record: no action (describes past state)
 - [ ] `package.json` — package exports / scripts: exports subpaths point at façades that keep their surface (O13 export golden): no change
 - [ ] `scripts/bench-grandfather-5530.ts` — import consumer: façade keeps its exports: no action
-- [ ] `scripts/build-pglite-snapshot.ts` — snapshot builder: W3/E1: snapshot hash inputs come from the import closure (EO7)
+- [x] `scripts/build-pglite-snapshot.ts` — snapshot builder: hash inputs come from the import closure (`src/core/snapshot-schema-inputs.ts`, W3); E1 adds the engine-sql bootstrap root
 - [x] `scripts/check-engine-dynamic-import.sh` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each
 - [ ] `scripts/check-fuzz-purity.sh` — buildfresh guard (forbidden-import list): add src/core/engine-sql/ to the forbidden list when W1 creates it
 - [x] `scripts/check-layering.ts` — scanner guard: re-pointed in W0b: scans the new dirs, bad fixture inside each

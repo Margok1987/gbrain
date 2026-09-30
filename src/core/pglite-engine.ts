@@ -11,6 +11,7 @@ import { moveSlugBindings, recordRenameAlias } from './page-state/rename-alias.t
 import { composablePgliteTransaction } from './page-state/transactions.ts';
 import { dropRowTypeArrayParsers, PgliteStatementCache } from './pglite-statements.ts';
 import { GRANT_COLUMNS_SQL } from './grants/schema.ts';
+import { snapshotSchemaInputs } from './snapshot-schema-inputs.ts';
 import type { PageReadScope } from './types.ts';
 import type { PageReadPolicy } from './types.ts';
 import { readRelationalFanout, readAliases, readBacklinkCounts, readAdjacencyBoosts, readContentFlags, readExtractionStates, readEffectiveDates, readSalienceScores } from './search/read-enrichment.ts';
@@ -339,25 +340,22 @@ export function computeSnapshotSchemaHash(
   fs: typeof import('node:fs'),
 ): string | null {
   // Raw file bytes remain identical under coverage instrumentation, unlike
-  // Function.toString(). Include imported SQL and migration helpers: hashing
-  // only the two entry modules silently reused old grant CHECK constraints.
-  // Keep CI's snapshot cache inputs in sync when adding a schema dependency.
+  // Function.toString(). The inputs are the static import closure of the
+  // schema roots plus the bootstrap (src/core/snapshot-schema-inputs.ts), so a
+  // new schema helper is hashed without editing a list; CI's pglite-snapshot
+  // cache keys must cover the same files (test/snapshot-inputs-closure.test.ts).
   // Unreadable sources (compiled binary) safely disable this test optimization.
   try {
+    const at = (file: string) => new URL(`./${file}`, import.meta.url);
+    const files = snapshotSchemaInputs(
+      (file) => fs.existsSync(at(file)),
+      (file) => fs.readFileSync(at(file), 'utf8'),
+    );
     const hash = crypto.createHash('sha256');
-    hash.update('files:v3\n');
-    for (const file of [
-      'migrate.ts', 'pglite-schema.ts', 'fts-language.ts', 'vector-index.ts', 'ai/defaults.ts',
-      'search/projection-statistics.ts',
-      'company-brain/receipt-schema.ts',
-      'shared-skills/schema-all.ts', 'shared-skills/schema.ts', 'shared-skills/membership-schema.ts', 'shared-skills/persistence-schema.ts',
-      'shared-skills/access-schema.ts',
-      'timeline-dedup-repair.ts', 'pages-upsert-arbiter.ts', 'link-extraction.ts',
-      'grants/schema.ts', 'grants/migration.ts', 'grants/model.ts', 'grants/service.ts', 'grants/profiles.ts',
-      'page-state/schema.ts', 'lease-schema.ts', 'page-state/projection-schema.ts', 'persistence/schema.ts', 'persistence/effect-schema.ts', 'persistence/writer-guard-schema.ts', 'persistence/topology-schema.ts', 'scope.ts', 'sql-query.ts', 'minions/tools/brain-allowlist.ts', 'facts/withdrawal-schema.ts',
-    ]) {
+    hash.update('files:v4\n');
+    for (const file of files) {
       hash.update(`${file}\n`);
-      hash.update(fs.readFileSync(new URL(`./${file}`, import.meta.url)));
+      hash.update(fs.readFileSync(at(file)));
       hash.update('\n--\n');
     }
     return hash.digest('hex');
