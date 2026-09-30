@@ -91,3 +91,51 @@ exec ${realGit} "$@"
     await expect(commitGitTargets(root, ['a.md'])).rejects.toMatchObject({ code: 'git_index_locked' });
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(bin, { recursive: true, force: true }); }
 }, 60_000);
+
+/** A git whose `add` exits 128 with the given refusal (written by the shim script); every other command is the real git. */
+function refusingGit(refusal: string): { bin: string; path: string } {
+  const bin = mkdtempSync(join(tmpdir(), 'gbrain-refusing-git-'));
+  const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
+  writeFileSync(join(bin, 'git'), `#!/bin/sh
+root=""; prev=""
+for a in "$@"; do [ "$prev" = "-C" ] && root="$a"; prev="$a"; done
+for a in "$@"; do if [ "$a" = "add" ]; then ${refusal}; exit 128; fi; done
+exec ${realGit} "$@"
+`, { mode: 0o755 });
+  return { bin, path: `${bin}:${process.env.PATH}` };
+}
+
+test('a checkout path with an apostrophe still resolves its index lock', async () => {
+  const parent = mkdtempSync(join(tmpdir(), 'gbrain-apostrophe-'));
+  const root = join(parent, "owner's-brain");
+  try {
+    execFileSync('mkdir', [root]);
+    git(root, 'init', '-q');
+    git(root, 'config', 'user.name', 'Example'); git(root, 'config', 'user.email', 'example@example.invalid');
+    writeFileSync(join(root, 'a.md'), 'first\n'); git(root, 'add', '-A'); git(root, 'commit', '-qm', 'seed');
+    writeFileSync(join(root, 'a.md'), 'second\n');
+    writeFileSync(join(root, '.git', 'index.lock'), '');
+    await expect(commitGitTargets(root, ['a.md'])).rejects.toMatchObject({ code: 'git_index_locked' });
+  } finally { rmSync(parent, { recursive: true, force: true }); }
+});
+
+test('git runs untranslated: a localized refusal under the operator locale is still detected', async () => {
+  const root = repo();
+  // Stands in for a translated git: it answers in German unless the child environment pins LC_ALL=C.
+  const shim = refusingGit(`if [ "$LC_ALL" = "C" ]; then echo "fatal: Unable to create '$root/.git/index.lock': File exists." >&2; `
+    + `else echo "fatal: Konnte '$root/.git/index.lock' nicht erstellen: Datei existiert bereits." >&2; fi`);
+  try {
+    writeFileSync(join(root, '.git', 'index.lock'), '');
+    await expect(withEnv({ PATH: shim.path, LC_ALL: 'de_DE.UTF-8', LANG: 'de_DE.UTF-8' }, () => commitGitTargets(root, ['a.md'])))
+      .rejects.toMatchObject({ code: 'git_index_locked' });
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(shim.bin, { recursive: true, force: true }); }
+});
+
+test('a ref lock with the same wording is not the checkout index lock', async () => {
+  const root = repo();
+  const shim = refusingGit(`echo "fatal: Unable to create '$root/.git/refs/heads/index.lock': File exists." >&2`);
+  try {
+    writeFileSync(join(root, '.git', 'refs', 'heads', 'index.lock'), '');
+    await expect(withEnv({ PATH: shim.path }, () => commitGitTargets(root, ['a.md']))).rejects.toMatchObject({ code: 'git_unavailable' });
+  } finally { rmSync(root, { recursive: true, force: true }); rmSync(shim.bin, { recursive: true, force: true }); }
+});

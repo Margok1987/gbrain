@@ -7,17 +7,33 @@ import { nativeFileTarget } from './native-file-target.ts';
 
 /** An index lock younger than this is contention; an older one is reported as stale. */
 const INDEX_LOCK_GRACE_MS = 10 * 60 * 1000;
-const INDEX_LOCK_REFUSAL = /Unable to create '([^']*index\.lock)': File exists/;
+/** Git's lock refusal (LC_ALL=C below keeps it untranslated); greedy so a path may contain apostrophes. */
+const LOCK_REFUSAL = /Unable to create '(.*)': File exists/;
+
+const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never', GIT_GLOB_PATHSPECS: '0', GIT_NOGLOB_PATHSPECS: '0',
+  GIT_ICASE_PATHSPECS: '0', LC_ALL: 'C' };
+
+async function run(root: string, hooks: string, args: string[], signal?: AbortSignal) {
+  return execFileBounded('git', ['--literal-pathspecs', '-C', root, '-c', `core.hooksPath=${hooks}`, '-c', 'commit.gpgsign=false', ...args], {
+    timeout: 20_000, maxBuffer: 1024 * 1024, signal, env: { ...process.env, ...GIT_ENV },
+  });
+}
 
 /**
- * Git refused because another process holds the index lock (the path comes from git's own message, so
- * linked worktrees resolve too). The lock is never removed here: its holder may be a live git of the user
- * or of this owner, and a timestamp cannot prove otherwise. A fresh lock is contention; one older than the
- * grace, or dated in the future, is `git_index_stale`, which counts toward parking and names the lock.
+ * Git refused because another process holds this checkout's index lock. Only the checkout's own index lock
+ * (`git rev-parse --git-path index.lock`, so linked worktrees resolve) qualifies; a ref or remote lock with
+ * the same wording does not. The lock is never removed here: its holder may be a live git of the user or of
+ * this owner, and a timestamp cannot prove otherwise. A fresh lock is contention; one older than the grace,
+ * or dated in the future, is `git_index_stale`, which counts toward parking and names the lock.
  */
-function indexLockError(stderr: string): OperationError | null {
-  const lock = INDEX_LOCK_REFUSAL.exec(stderr)?.[1];
-  if (!lock) return null;
+async function indexLockError(root: string, hooks: string, stderr: string): Promise<OperationError | null> {
+  const refused = LOCK_REFUSAL.exec(stderr)?.[1];
+  if (!refused) return null;
+  const located = await run(root, hooks, ['rev-parse', '--git-path', 'index.lock']);
+  if (located.error) return null;
+  const reported = located.stdout.trim();
+  const lock = resolvePath(root, reported);
+  if (resolvePath(root, refused) !== lock) return null;
   let age: number;
   try { age = Date.now() - statSync(lock).mtimeMs; } catch { return null; }
   if (age >= 0 && age < INDEX_LOCK_GRACE_MS) {
@@ -28,14 +44,10 @@ function indexLockError(stderr: string): OperationError | null {
 }
 
 async function git(root: string, hooks: string, args: string[], signal?: AbortSignal): Promise<{ stdout: string; code: number }> {
-  const { error, stdout, stderr } = await execFileBounded('git', ['--literal-pathspecs', '-C', root, '-c', `core.hooksPath=${hooks}`, '-c', 'commit.gpgsign=false', ...args], {
-    timeout: 20_000, maxBuffer: 1024 * 1024, signal,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never',
-      GIT_GLOB_PATHSPECS: '0', GIT_NOGLOB_PATHSPECS: '0', GIT_ICASE_PATHSPECS: '0' },
-  });
+  const { error, stdout, stderr } = await run(root, hooks, args, signal);
   if (error && (error.killed || typeof error.code !== 'number')) throw new OperationError('git_unavailable', 'Git execution did not finish within its bounded attempt.');
   const code = error?.code as number ?? 0;
-  if (code !== 0) { const locked = indexLockError(stderr); if (locked) throw locked; }
+  if (code !== 0) { const locked = await indexLockError(root, hooks, stderr); if (locked) throw locked; }
   return { stdout, code };
 }
 
