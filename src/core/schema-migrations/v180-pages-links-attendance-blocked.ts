@@ -9,7 +9,9 @@ export const v180: Migration = {
   // an edit changes the revision and the page counts as lag again. Derived
   // columns outside the managed writer guard's tracked set. Nullable, no
   // backfill, no index (bootstrap-coverage: column-only). Fresh installs get
-  // them from src/schema.sql.
+  // them from this migration too (not src/schema.sql): pages columns added by
+  // earlier migrations precede them, so fresh and upgraded brains share
+  // their ordinals.
   version: 180,
   name: 'pages_links_attendance_blocked',
   idempotent: true,

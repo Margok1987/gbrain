@@ -63,8 +63,6 @@ CREATE TABLE IF NOT EXISTS pages (
   salience_touched_at   TIMESTAMPTZ,
   last_retrieved_at     TIMESTAMPTZ,
   links_extracted_at    TIMESTAMPTZ,
-  links_attendance_blocked_revision UUID,
-  links_attendance_blocked_at       TIMESTAMPTZ,
   database_only_reason  TEXT,
   contextual_retrieval_mode  TEXT,
   corpus_generation          TEXT,

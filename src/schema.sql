@@ -134,13 +134,9 @@ CREATE TABLE IF NOT EXISTS pages (
   -- path). Powers `gbrain extract --stale` + the `links_extraction_lag` doctor
   -- check. NULL = never extracted.
   links_extracted_at    TIMESTAMPTZ,
-  -- #5761 (migration v180): attendance marker. The knowledge revision at
-  -- which extraction found every other link ready but an attendee unresolved;
-  -- cleared when extraction publishes the page's links. `links_extraction_lag`
-  -- reports a page whose marker equals knowledge_revision as attendance-blocked,
-  -- not lag. NULL = not blocked.
-  links_attendance_blocked_revision UUID,
-  links_attendance_blocked_at       TIMESTAMPTZ,
+  -- #5761: links_attendance_blocked_revision / _at (the attendance marker) are
+  -- added by migration v180 on every install, after the migration-added pages
+  -- columns, so fresh and upgraded brains share their ordinals.
   -- #5254 (migration v177): 'unbound_source' marks a page written database-only
   -- while its filesystem source had no canonical owner. Writes and sync after
   -- binding keep it database-only. NULL for every other page.

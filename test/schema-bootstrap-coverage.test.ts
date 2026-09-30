@@ -1020,6 +1020,12 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   // and nullable; no index in either schema blob references it, and every
   // reader treats NULL as an ordinary page.
   'pages.database_only_reason',
+  // #5761 (migration v180) — attendance marker. Deliberately absent from both
+  // schema blobs so fresh and upgraded brains share its ordinals; column-only
+  // and nullable, no index or function in either blob references it, and the
+  // doctor reader probes for the column on older brains.
+  'pages.links_attendance_blocked_revision',
+  'pages.links_attendance_blocked_at',
 ]);
 
 test('every ALTER TABLE ADD COLUMN in MIGRATIONS is covered by applyForwardReferenceBootstrap (column-only class)', async () => {

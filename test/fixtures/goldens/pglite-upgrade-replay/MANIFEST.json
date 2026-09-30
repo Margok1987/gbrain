@@ -1,7 +1,7 @@
 {
-  "gbrain_version": "0.60.14.0",
-  "schema_version": 179,
-  "latest_migration_version": 179,
+  "gbrain_version": "0.60.11.0",
+  "schema_version": 178,
+  "latest_migration_version": 178,
   "pglite_version": "0.4.3",
   "embedding_model": "openai:text-embedding-3-large",
   "embedding_dimensions": 1536,
