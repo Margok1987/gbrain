@@ -80,16 +80,22 @@ const SPEND_COLUMNS = [
   ['lane', 'text'], ['remote', 'boolean'], ['input_tokens', 'int'], ['cost_usd', 'float8'], ['outcome', 'text'],
 ] as const;
 
-/** Multi-row insert via unnest of one array per column (fixed param count). */
+/**
+ * Multi-row insert via unnest of one array per column (fixed param count).
+ * Every column binds as text[] and casts server-side: postgres.js cannot
+ * serialize boolean/number arrays for a typed array cast, PGLite can; text
+ * arrays behave the same on both engines.
+ */
 async function insertRows(engine: BrainEngine, table: string, columns: readonly (readonly [string, string])[], rows: readonly object[], conflict = ''): Promise<void> {
   if (rows.length === 0) return;
   const defaults: Record<string, unknown> = { protected: false, remote: false };
   const params = columns.map(([name]) => rows.map((r) => {
     const v = (r as Record<string, unknown>)[name];
-    return v === undefined ? (defaults[name] ?? null) : v;
+    const value = v === undefined ? (defaults[name] ?? null) : v;
+    return value === null ? null : String(value);
   }));
   const names = columns.map(([name]) => name).join(', ');
-  const casts = columns.map(([, type], i) => `$${i + 1}::${type}[]`).join(', ');
+  const casts = columns.map(([, type], i) => (type === 'text' ? `$${i + 1}::text[]` : `$${i + 1}::text[]::${type}[]`)).join(', ');
   await engine.executeRaw(`INSERT INTO ${table} (${names}) SELECT * FROM unnest(${casts}) ${conflict}`, params);
 }
 
