@@ -208,6 +208,7 @@ else
   DATABASE_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \
   GBRAIN_PGBOUNCER_URL=postgresql://postgres:postgres@pgbouncer:5432/gbrain_pgbouncer_test \
   GBRAIN_PGBOUNCER_DIRECT_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \
+  GBRAIN_PGBOUNCER_E2E_URL="postgresql://postgres:postgres@pgbouncer:5432/gbrain_test?prepare=false" \
   GBRAIN_CI_REQUIRE_PGBOUNCER=1 \
   GBRAIN_TEST_DB=1 \
   xargs -a /tmp/e2e-selected.txt bash scripts/run-e2e.sh
@@ -226,6 +227,7 @@ echo "[runner] e2e (unsharded)"
 DATABASE_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \
 GBRAIN_PGBOUNCER_URL=postgresql://postgres:postgres@pgbouncer:5432/gbrain_pgbouncer_test \
 GBRAIN_PGBOUNCER_DIRECT_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \
+GBRAIN_PGBOUNCER_E2E_URL="postgresql://postgres:postgres@pgbouncer:5432/gbrain_test?prepare=false" \
 GBRAIN_CI_REQUIRE_PGBOUNCER=1 \
 GBRAIN_TEST_DB=1 \
 bash scripts/run-e2e.sh'
@@ -279,11 +281,15 @@ printf '%s\\n' 1 2 3 4 | xargs -P4 -I{} sh -c '
     exit \$unit_exit
   fi
   echo \"[shard \${shard}] e2e phase (SHARD=\${shard}/4, DATABASE_URL=postgres-\${shard})\" >> \$log
+  # Backend-matrix PgBouncer pass: the one pooler fronts postgres-1, so each
+  # shard gets its own pooled database there (scripts/e2e-backend-matrix.txt).
+  bun scripts/lib/ensure-e2e-database.ts postgresql://postgres:postgres@postgres-1:5432/gbrain_test gbrain_pooled_\${shard}_test >> \$log 2>&1
   if [ -s /tmp/e2e-selected.txt ]; then
     SHARD=\${shard}/4 \\
     DATABASE_URL=postgresql://postgres:postgres@postgres-\${shard}:5432/gbrain_test \\
     GBRAIN_PGBOUNCER_URL=postgresql://postgres:postgres@pgbouncer:5432/gbrain_pgbouncer_test \\
     GBRAIN_PGBOUNCER_DIRECT_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \\
+    GBRAIN_PGBOUNCER_E2E_URL=\"postgresql://postgres:postgres@pgbouncer:5432/gbrain_pooled_\${shard}_test?prepare=false\" \\
     GBRAIN_CI_REQUIRE_PGBOUNCER=1 \\
     GBRAIN_TEST_DB=1 \\
     xargs -a /tmp/e2e-selected.txt bash scripts/run-e2e.sh >> \$log 2>&1
@@ -292,6 +298,7 @@ printf '%s\\n' 1 2 3 4 | xargs -P4 -I{} sh -c '
     DATABASE_URL=postgresql://postgres:postgres@postgres-\${shard}:5432/gbrain_test \\
     GBRAIN_PGBOUNCER_URL=postgresql://postgres:postgres@pgbouncer:5432/gbrain_pgbouncer_test \\
     GBRAIN_PGBOUNCER_DIRECT_URL=postgresql://postgres:postgres@postgres-1:5432/gbrain_test \\
+    GBRAIN_PGBOUNCER_E2E_URL=\"postgresql://postgres:postgres@pgbouncer:5432/gbrain_pooled_\${shard}_test?prepare=false\" \\
     GBRAIN_CI_REQUIRE_PGBOUNCER=1 \\
     GBRAIN_TEST_DB=1 \\
     bash scripts/run-e2e.sh >> \$log 2>&1
