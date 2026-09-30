@@ -55,7 +55,12 @@ describe('autopilot wiring: nightly quality probe', () => {
     // We verify the structural pattern: the probe call is inside a try block,
     // the catch block calls logError, and consecutiveErrors is not bumped inside the catch.
     expect(PROBES_SOURCE).toMatch(/try\s*\{\s*[^}]*nightly_quality_probe/);
-    expect(PROBES_SOURCE).toMatch(/catch[\s\S]*?autopilot\.nightly_probe[\s\S]*?do NOT bump consecutiveErrors/);
+    // Anchored to the nightly probe's own catch block: logError, then only
+    // comments (one of them the do-NOT-bump note), then the closing brace. A
+    // lazy [\s\S]*? span would reach the parser probe's identical comment.
+    expect(PROBES_SOURCE).toMatch(
+      /\}\s*catch\s*\(e\)\s*\{\s*logError\('autopilot\.nightly_probe', e\);\s*\/\/[^\n]*do NOT bump consecutiveErrors[^\n]*\n(\s*\/\/[^\n]*\n)*\s*\}/,
+    );
   });
 
   test('DI shape: isEnabled / hasEmbeddingProvider / resolveMaxUsd / resolveRepoRoot / runLongMemEval / runCrossModalBatch / now', () => {

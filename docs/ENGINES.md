@@ -28,7 +28,9 @@ The engine interface means we don't have to choose. PGLite is the zero-friction 
 feature — do NOT work from any snapshot of it, including an old copy of
 this doc. Read the interface itself, and let
 `test/e2e/engine-parity.test.ts` + `test/pglite-engine.test.ts` tell you
-whether both engines agree.
+whether both engines agree. A method in a migrated storage domain has its
+SQL once in `src/core/engine-sql/` (see "Storage domains and engine-sql"
+below).
 
 The method families, to orient you before opening the file:
 
@@ -56,9 +58,63 @@ The method families, to orient you before opening the file:
 
 **Chunking is NOT in the engine.** Same logic. `src/core/chunkers/` handles chunking. The engine stores and retrieves chunks. All engines share the same chunkers.
 
-**Search returns `SearchResult[]`, not raw rows.** The engine is responsible for its own search implementation (tsvector vs FTS5, pgvector vs sqlite-vss) but must return a uniform result type. RRF fusion and dedup happen above the engine, in `src/core/search/hybrid.ts`.
+**Search returns `SearchResult[]`, not raw rows.** The engine is responsible for its own search implementation (tsvector vs FTS5, pgvector vs sqlite-vss) but must return a uniform result type. RRF fusion and dedup happen above the engine, in `src/core/search/hybrid.ts` and its stages under `src/core/search/hybrid/`.
 
 **`traverseGraph` exists but is engine-specific.** Postgres uses recursive CTEs. SQLite would use a loop with depth tracking. The interface is the same: give me a slug and max depth, return the graph.
+
+## Storage domains and engine-sql
+
+Both engines speak the same SQL dialect, so a storage domain's SQL is written
+once. `src/core/engine-sql/<domain>.ts` holds it; each engine method in that
+domain is a one-line delegation. The domains migrated so far are the
+`migrated` rows of `scripts/engine-sql-baseline.tsv`; the remaining rows of
+that file are the engine members that still carry their own SQL, and the file
+only shrinks (`check:engine-sql-ratchet` fails on a new SQL-bearing engine
+member).
+
+```
+PGLiteEngine / PostgresEngine   one-line delegations; RLS scoping per method
+      | get engineSql()         fresh adapter per access, never stored
+      v
+engine-sql/<domain>.ts          the domain's SQL once; sqlFragment composition;
+      |                         ScopedRead / LegacyUnscopedRead brands; row kinds
+      v
+engine-sql/executor.ts          SqlExecutor: query / run / executeRaw / unsafe /
+      |                         transaction; results as { rows, affectedRows }
+      +--> dialect-pglite.ts    db.query on the engine's checkpoint-admitted handle
+      +--> dialect-postgres.ts  runUnsafe(conn, sql, params, { prepare: true, simple: false })
+```
+
+The contract, each part pinned by a test listed in
+[docs/TESTING.md, "Engine-sql"](TESTING.md#engine-sql):
+
+- **Lifetime.** `engineSql` reads the engine's current connection on every
+  access. `transaction()` clones the engine with a swapped connection, so a
+  stored executor would write outside the transaction.
+- **Parameters.** Positional only, composed with `sqlFragment` (placeholders
+  are numbered at render time). Arrays bind as `= ANY($n::type[])`, JSONB
+  through `jsonbParam()`, vectors as a text literal with a `::vector` cast.
+  Only constant text may be spliced (`check:engine-sql-dynamic`).
+- **Results and errors.** `{ rows, affectedRows }`; driver errors pass through
+  unchanged. Columns whose decoding differs between drivers are declared once
+  per statement with `compileRowNormalizer`.
+- **Capabilities.** Real engine differences are capabilities on the executor
+  (`maxBindParamsPerStatement`, `transactionAdvisoryLocks`,
+  `probesEmbeddingCast`), never `if (engine === ...)` in domain code.
+- **RLS scope.** Every read declares how it is scoped: `ScopedRead` (runs
+  inside `withScopedReadTransaction` on Postgres, see the RLS section below)
+  or `LegacyUnscopedRead` (runs on the pool, obtained with
+  `unscopedExecutor(executor, reason)`). The brands are unforgeable
+  (`check:engine-sql-brands`).
+- **Layering.** Nothing under `engine-sql/` imports an engine façade
+  (`check:layering`); take the executor as a parameter.
+
+Code that is genuinely dialect-specific stays in the engine or in
+`src/core/pglite-engine/` / `src/core/postgres-engine/`, marked
+`// engine-sql-ok: <reason>`. The forward-reference bootstrap both engines run
+before replaying the schema blob is `engine-sql/bootstrap.ts`. A step-by-step
+read and write example is in
+[CONTRIBUTING.md, "Worked example"](../CONTRIBUTING.md#worked-example-an-engine-sql-read-and-write).
 
 ## How search works across engines
 
@@ -158,6 +214,15 @@ per-request scope binding — unwrapped paths (writes, admin/maintenance reads)
 run under the role default and are not backstopped per caller. This is layer 2;
 the app-layer source filters remain layer 1 and stay mandatory. Behavioral pins
 live in `test/postgres-engine-rls-scope.test.ts`.
+
+**In engine-sql.** A read in a migrated domain takes a `ScopedRead` when it
+runs through this helper and a `LegacyUnscopedRead` when it runs on the pool
+(`src/core/engine-sql/brands.ts`); the engine obtains the branded executor, so
+the type system keeps each read's scoping as it is. Moving a read from
+unscoped to scoped adds a transaction and a pool hold per read with the flag
+on, so it is a deliberate change with its own load test, never a drive-by.
+The non-owner `NOBYPASSRLS` isolation test is
+`test/e2e/engine-sql-rls-scope.test.ts`.
 
 ## Local Postgres
 
@@ -496,6 +561,7 @@ real Postgres — `col ->> 'k'` returns NULL, `jsonb_array_elements` throws, and
 |---|---|
 | Template tag: `` sql`... ${sql.json(obj)}` `` (postgres-engine only) | ✅ native jsonb serialization |
 | Positional raw call, raw object: `executeRawJsonb(engine, sql, scalars, [obj])` | ✅ object reaches the wire as jsonb |
+| engine-sql domain code: `` sqlFragment`... ${jsonbParam(obj)}` `` | ✅ bound as `sql.json` on Postgres, serialized for PGLite's native text→jsonb parse |
 | Positional raw call, stringified: `executeRaw(\`... $N::text::jsonb\`, [JSON.stringify(x)])` | ✅ binds as text, the cast parses it |
 | Positional raw call, BARE cast: `executeRaw(\`... $N::jsonb\`, [JSON.stringify(x)])` | ❌ **double-encodes** under postgres.js `.unsafe()` |
 | Template literal interpolation: `` `... ${JSON.stringify(x)}::jsonb` `` | ❌ double-encodes |
@@ -539,9 +605,18 @@ and assert `jsonb_typeof` — the assertion PGLite cannot make.
    ```
    The factory uses dynamic imports so an engine's dependencies (e.g. the
    PGLite WASM blob) are only loaded when that engine is selected.
-3. Store engine type in `~/.gbrain/config.json`: `{ "engine": "myengine", ... }`
-4. Add tests. The test suite should be engine-agnostic where possible... same test cases, different engine constructor.
-5. Document in this file + add a design doc in `docs/`
+3. If the engine speaks the Postgres dialect, add a dialect adapter that
+   implements `SqlExecutor` (`src/core/engine-sql/executor.ts`) beside
+   `dialect-pglite.ts` and `dialect-postgres.ts`, expose it through a private
+   `engineSql` getter over the current connection, and delegate every method
+   of a migrated domain to `src/core/engine-sql/<domain>.ts` the way both
+   engines do. Declare its capabilities honestly. The E5 binding matrix
+   (`test/helpers/executor-binding-matrix.ts`) and the engine-sql contract
+   tests tell you whether the adapter binds, counts, fails and cancels like the
+   others. A non-SQL engine implements every method itself.
+4. Store engine type in `~/.gbrain/config.json`: `{ "engine": "myengine", ... }`
+5. Add tests. The test suite should be engine-agnostic where possible... same test cases, different engine constructor.
+6. Document in this file + add a design doc in `docs/`
 
 ### What you DON'T need to touch
 
@@ -549,7 +624,8 @@ and assert `jsonb_typeof` — the assertion PGLite cannot make.
 - `src/mcp/server.ts` (same)
 - `src/core/chunkers/*` (shared across engines)
 - `src/core/embedding.ts` (shared across engines)
-- `src/core/search/hybrid.ts`, `expansion.ts`, `dedup.ts` (shared, operate on SearchResult[])
+- `src/core/search/hybrid.ts` + `hybrid/`, `expansion.ts`, `dedup.ts` (shared, operate on SearchResult[])
+- `src/core/engine-sql/<domain>.ts` (shared domain SQL, when your engine has a Postgres-dialect adapter)
 - `skills/*` (fat markdown, engine-agnostic)
 
 ### What you DO need to implement

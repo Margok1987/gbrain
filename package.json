@@ -138,6 +138,7 @@
     "check:sync-run-state": "bun scripts/check-sync-run-state.ts",
     "check:schema-migrations": "bash scripts/check-schema-migrations-fresh.sh",
     "check:schema-fresh": "bash scripts/check-schema-fresh.sh",
+    "check:retired-phrases": "bash scripts/check-retired-phrases.sh",
     "check:schema-migration-order": "bun scripts/check-schema-migration-order.ts",
     "check:compile-autoload": "bash scripts/check-compile-autoload.sh",
     "check:structural-manifest": "bash scripts/check-structural-manifest.sh",

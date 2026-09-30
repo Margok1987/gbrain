@@ -66,24 +66,28 @@ existing.
 
 ## Migration shape
 
+Scaffold it with `bun run new:migration frontmatter_scan_state`, which takes the
+next free version, writes `src/core/schema-migrations/v<NNN>-frontmatter-scan-state.ts`
+and regenerates the registry; then fill in the DDL:
+
 ```ts
-// src/core/migrate.ts — append after the CURRENT last entry in the
-// MIGRATIONS array (take the next unused version number at implementation
-// time; the numbers below are placeholders, not a reserved slot)
-const migrations = [
-  // ...existing entries...
-  {
-    version: NEXT_VERSION, // next unused number in the MIGRATIONS array
-    name: 'frontmatter_scan_state',
-    sql: `
-      CREATE TABLE IF NOT EXISTS frontmatter_scan_state (...);
-      CREATE INDEX IF NOT EXISTS frontmatter_scan_state_has_issues_idx ...;
-    `,
-  },
-];
+// src/core/schema-migrations/v<NNN>-frontmatter-scan-state.ts (<NNN> = the
+// version the scaffold picked; not a reserved slot)
+import type { Migration } from './types.ts';
+
+export const v<NNN>: Migration = {
+  version: <NNN>,
+  name: 'frontmatter_scan_state',
+  idempotent: true,
+  sql: `
+    CREATE TABLE IF NOT EXISTS frontmatter_scan_state (...);
+    CREATE INDEX IF NOT EXISTS frontmatter_scan_state_has_issues_idx ...;
+  `,
+};
 ```
 
-Plus the forward-reference probe entries in both engine bootstraps. Plus
+Fresh installs get the table from its `CREATE TABLE` in `src/schema.sql`
+(then `bun run build:schema`). Plus any forward-reference probe entries in `src/core/engine-sql/bootstrap.ts`. Plus
 the `REQUIRED_BOOTSTRAP_COVERAGE` extension in
 `test/schema-bootstrap-coverage.test.ts`.
 
