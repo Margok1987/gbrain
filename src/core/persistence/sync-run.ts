@@ -13,7 +13,7 @@ import { assertSyncEntryOrigin, discoverManagedSync, resolveManagedSyncContext, 
 import { assertSyncPageOrigin, sameSyncOrigin, syncOriginScope } from './sync-origin.ts';
 import { assertManagedSyncActive, assertSyncDispatchActive, managedSyncAuthority, validateSyncAuthority, validateManagedSyncOptions, syncProcessingOptions, SYNC_PROCESSING_KEYS, type SyncAuthority, type SyncProcessingOptions } from './sync-authority.ts';
 import { prepareManagedSyncMutation, type SyncIntent } from './sync-prepare.ts';
-import { inspectUnchanged, screeningRequest } from './noop-kernel.ts';
+import { inspectUnchanged, screeningRequest, type NoopKernelWaiver } from './noop-kernel.ts';
 import type { GBrainConfig } from '../config.ts';
 import { join } from 'node:path';
 import { currentCompanyBrainSync, getCompanyBrainProfile, readCompanyBrainPlan } from '../company-brain/profile.ts';
@@ -44,7 +44,9 @@ export interface ManagedSyncWriteDiagnostic {
 interface Pending { requestId: string; slug: string; pageId: number | null; intent: SyncIntent; }
 interface Cursor extends SyncDiscovery { runId: string; index: number; authority: SyncAuthority; pending?: Pending; done?: boolean; companyReceiptId?: string;
   processingOptions?: SyncProcessingOptions;
-  counts: { added: number; modified: number; deleted: number; chunks: number; renamed?: number }; }
+  counts: { added: number; modified: number; deleted: number; chunks: number; renamed?: number;
+    /** #5751: unchanged working-tree files skipped only because a no-op publication could never resolve their admit reason. */
+    skippedContextualMode?: number; skippedCanonicalBytes?: number }; }
 const OP = 'managed-sync';
 type CursorHeader = Omit<Cursor, 'entries' | 'companyPlan'> & { total: number };
 const header = ({ entries, companyPlan: _plan, ...value }: Cursor): CursorHeader => ({ ...value, total: entries.length });
@@ -115,7 +117,9 @@ function result(cursor: Cursor | CursorHeader, status: SyncResult['status'], rea
     toCommit: cursor.authority.writer.remote ? '' : cursor.target, added: cursor.counts.added, modified: cursor.counts.modified,
     deleted: cursor.counts.deleted, renamed: cursor.counts.renamed ?? 0, chunksCreated: cursor.counts.chunks, embedded: 0, pagesAffected: [],
     ...(cursor.slugCollisions?.length ? { slugCollisions: cursor.slugCollisions } : {}),
-    filesImported: cursor.index, bankedFiles: cursor.index, ...(cursor.uncommitted ? { uncommitted: cursor.uncommitted } : {}), ...(reason ? { reason } : {}) };
+    filesImported: cursor.index, bankedFiles: cursor.index, ...(cursor.uncommitted ? { uncommitted: cursor.uncommitted } : {}), ...(reason ? { reason } : {}),
+    ...(cursor.counts.skippedContextualMode || cursor.counts.skippedCanonicalBytes ? { legacySkips: {
+      contextualMode: cursor.counts.skippedContextualMode ?? 0, canonicalBytes: cursor.counts.skippedCanonicalBytes ?? 0 } } : {}) };
 }
 function writeDiagnostic(cursor: Cursor, pending: Pending, row: WriteRequest): ManagedSyncWriteDiagnostic {
   const terminal = isTerminalWriteState(row.state);
@@ -368,8 +372,11 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       const prior = await getWriteRequest(engine, cursor.authority.writer.principal, pending.requestId);
       assertActive();
       // #5470: a frozen import whose publication would change nothing advances the cursor without an admission.
-      if (!prior && await unchangedSyncImport(engine, cursor, pending, config)) {
+      const waived = prior ? null : await unchangedSyncImport(engine, cursor, pending, config);
+      if (waived) {
         const skipped: Cursor = { ...cursor, index: cursor.index + 1, counts: { ...cursor.counts } }; delete skipped.pending;
+        if (waived.includes('contextual_mode')) skipped.counts.skippedContextualMode = (skipped.counts.skippedContextualMode ?? 0) + 1;
+        if (waived.includes('canonical_file_differs')) skipped.counts.skippedCanonicalBytes = (skipped.counts.skippedCanonicalBytes ?? 0) + 1;
         cursor = await saveCursor(engine, key, cursor, skipped);
         opts.onProgress?.({ phase: 'managed_sync.page_committed', bankedFiles: cursor.index });
         assertActive();
@@ -466,24 +473,30 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
 
 /**
  * #5470 no-op screen for working-tree and company-profile sync: runs the sync
- * preparer on the frozen, unadmitted entry. A rename, a canonical overlay or a
- * working-tree file that differs from the imported bytes is always admitted.
+ * preparer on the frozen, unadmitted entry. A rename or a canonical overlay is
+ * always admitted. Returns null to admit, or the kernel waivers the skip used.
+ * #5751: a managed working-tree entry waives the two admit reasons its no-op
+ * publication can never resolve (a pending contextual-mode stamp, and file
+ * bytes that differ from the prepared content yet parse to the same page), so
+ * an unchanged legacy file stops taking a request ID on every run.
  */
-async function unchangedSyncImport(engine: BrainEngine, cursor: Cursor, pending: Pending, config: GBrainConfig): Promise<boolean> {
+async function unchangedSyncImport(engine: BrainEngine, cursor: Cursor, pending: Pending, config: GBrainConfig): Promise<NoopKernelWaiver[] | null> {
   const intent = pending.intent;
-  if (intent.kind !== 'managed_sync_import' || intent.renameFrom || pending.pageId === null || typeof intent.path !== 'string' || typeof intent.content !== 'string') return false;
+  if (intent.kind !== 'managed_sync_import' || intent.renameFrom || pending.pageId === null || typeof intent.path !== 'string' || typeof intent.content !== 'string') return null;
   try {
     const snapshot = await engine.readPageSnapshot(pending.slug, { sourceId: cursor.sourceId, includeDeleted: true });
     const row = screeningRequest({ source_id: cursor.sourceId, source_incarnation: cursor.incarnation, slug: pending.slug, page_id: pending.pageId,
       worktree_id: cursor.binding.worktree_id, authority: cursor.authority.writer, intent, request_id: pending.requestId });
     const prepared = await prepareManagedSyncMutation(engine, row, config);
-    if (prepared.file || prepared.target === 'skill_bundle') return false;
+    if (prepared.file || prepared.target === 'skill_bundle') return null;
     const file = { root: cursor.root, path: join(cursor.root, intent.path), content: intent.content };
-    if ((await inspectUnchanged(engine, { prepared: { ...prepared, target: 'page', file }, snapshot, sourcePath: intent.sourcePath, databaseOnly: false,
-      embeddingRequested: !prepared.deferEmbedding && !config.embedding_disabled && !!config.embedding_model?.trim() })).admitReason) return false;
+    const inspected = await inspectUnchanged(engine, { prepared: { ...prepared, target: 'page', file }, snapshot, sourcePath: intent.sourcePath, databaseOnly: false,
+      embeddingRequested: !prepared.deferEmbedding && !config.embedding_disabled && !!config.embedding_model?.trim(),
+      waive: intent.working === true ? ['contextual_mode', 'canonical_file_differs'] : undefined });
+    if (inspected.admitReason) return null;
     await prepared.validate?.(engine);
-    return true;
+    return inspected.waived ?? [];
   } catch {
-    return false;
+    return null;
   }
 }
