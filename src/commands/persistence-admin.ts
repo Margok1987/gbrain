@@ -33,7 +33,9 @@ Explicit noninteractive administration is supported. Stale state is rejected.
 Use --brain <id> to select a database. Prepare drains the current owner and records
 an exact manifest; accept requires that epoch and matching bytes on the successor.
 Before activation, upgrade and stop older writers on every host, claim every
-filesystem source, and inspect/release remaining legacy locks. --confirm-quiesced
+filesystem source, and inspect/release remaining legacy locks. A claim alone
+fences legacy sync, sources push and lint --fix for that checkout; claim output
+says so while persistence is not activated. --confirm-quiesced
 attests quiescence but does not grant administration intent. --dry-run never enables.
 Self-transfer is opt-in on both phases and only repairs this host's recorded
 canonical root; it never relocates a checkout. Inspect status again after prepare.

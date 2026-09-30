@@ -5,7 +5,7 @@
  * Every applied item is one coordinated page write (a `put_page` bound to the
  * page's current revision), so a repair never bypasses the persistence
  * coordinator and each item commits or fails on its own. A kind that only
- * rebuilds derived projections (`safe-chunks`) takes no admission instead: its
+ * rebuilds derived projections (`safe-chunks`, `contextual-mode`) takes no admission instead: its
  * items cost no lifetime IDs or receipt bytes and never hit the capacity stop.
  * Items are processed in
  * a stable order and the cursor after the last committed item is stored in
@@ -22,7 +22,7 @@ import { getWriteRequest } from '../persistence/journal.ts';
 import { initializeLocalPersistence, requestPrincipalForContext } from '../persistence/page-mutations.ts';
 import { lookupEmbeddingPrice, estimateCostFromChars } from '../embedding-pricing.ts';
 
-export const REPAIR_KINDS = ['timeline', 'visibility', 'safe-chunks', 'connector-checkpoints'] as const;
+export const REPAIR_KINDS = ['timeline', 'visibility', 'safe-chunks', 'contextual-mode', 'connector-checkpoints'] as const;
 export type RepairKind = typeof REPAIR_KINDS[number];
 
 export interface RepairScope { brain_id: string; source_ids: string[] }

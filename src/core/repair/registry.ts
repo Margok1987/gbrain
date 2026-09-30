@@ -19,6 +19,7 @@ import { REPAIR_KINDS, runRepair, type RepairHandler, type RepairKind, type Repa
 import { timelineRepair } from './timeline.ts';
 import { visibilityRepair } from './visibility.ts';
 import { safeChunksRepair } from './safe-chunks.ts';
+import { contextualModeRepair } from './contextual-mode.ts';
 import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
 
 export interface RepairKindSpec {
@@ -45,6 +46,11 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     handler: safeChunksRepair, embeds: 'inline', checks: ['safe_index_pending'],
     summary: 'Re-seal pages of every kind (markdown and code) chunked before the safe-chunk fence, which remote/MCP search withholds (#5050, #5247). '
       + 'Projection-only: no page write and no journal admission. Unchanged vectors are kept; the rest are embedded unless --no-embed.',
+  },
+  'contextual-mode': {
+    handler: contextualModeRepair, embeds: 'inline', checks: ['contextual_retrieval_coverage'],
+    summary: 'Stamp the contextual retrieval mode on markdown pages imported without one (#5621), exactly as a fresh import would. '
+      + 'Projection-only. Vectors whose embedding input is unchanged are kept; a page whose input changes is re-embedded once unless --no-embed.',
   },
   'connector-checkpoints': {
     handler: connectorCheckpointsRepair, embeds: 'none', checks: ['connector_checkpoints'],

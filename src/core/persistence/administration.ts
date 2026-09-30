@@ -65,6 +65,12 @@ async function registrationGrant(engine: BrainEngine, params: Record<string, unk
   return { sourceIds, scopes, operations, slugPrefixes };
 }
 
+/** Shown by `writer claim` (and its dry run) while persistence is not activated. */
+export const CLAIM_BEFORE_ACTIVATION_NOTICE = 'Persistence is not activated. After this claim, gbrain sync refuses this source with '
+  + 'writer_coordinator_required until activation, and legacy file writers in its checkout (sources push, lint --fix and other '
+  + 'file-writing maintenance) refuse while the checkout is managed. Stop older writers, review gbrain sources writer status, '
+  + 'then activate deliberately.';
+
 export async function runPersistenceAdministration(engine: BrainEngine, operation: PersistenceAdminOperation,
   params: Record<string, unknown>, config?: GBrainConfig, embeddingRetryPolicy: 'owner' | 'mounted_database' = 'owner'): Promise<Record<string, unknown>> {
   if (operation === 'writer_reconcile_preview') return (await import('./reconcile.ts')).runReconcilePreview(engine, params);
@@ -169,9 +175,12 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
   if (operation === 'writer_claim') {
     keys(params, ['source_id', 'path', 'dry_run', 'admin_intent', 'expected_state']);
     const sourceId = source(params.source_id), root = path(params.path);
-    if (params.dry_run) return { dry_run: true, action: operation, source_id: sourceId, path: root, current: await getWorktreeBinding(engine, sourceId, existingLocalHostId()) };
+    // #5198: say at claim time what the claim retires, before and after the fact.
+    const [brain] = await engine.executeRaw<{ enabled: boolean }>('SELECT enabled FROM persistence_brain WHERE singleton=1');
+    const notice = brain?.enabled ? {} : { activation_required: CLAIM_BEFORE_ACTIVATION_NOTICE };
+    if (params.dry_run) return { dry_run: true, action: operation, source_id: sourceId, path: root, current: await getWorktreeBinding(engine, sourceId, existingLocalHostId()), ...notice };
     const expectedState = await requireWriterAdminIntent(engine, operation, params);
-    return { claimed: true, binding: await claimWorktree(engine, sourceId, root, undefined, expectedState) };
+    return { claimed: true, binding: await claimWorktree(engine, sourceId, root, undefined, expectedState), ...notice };
   }
   if (operation === 'writer_activate') {
     keys(params, ['confirm_quiesced', 'dry_run', 'shared_skills', 'admin_intent', 'expected_state', 'cleanup_dead_local_locks']);

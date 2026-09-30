@@ -7,6 +7,7 @@
 import type { Recipe } from './types.ts';
 import { resolveRecipe } from './model-resolver.ts';
 import { truncateUtf8 } from '../text-safe.ts';
+import { sendableEmbeddingInputs } from './embedding-guard.ts';
 
 /** Per-input character cap applied before any embedding request. */
 export const EMBED_MAX_CHARS = 8000;
@@ -120,11 +121,14 @@ export function embedRequestMaxInputTokens(texts: string[], recipe: Recipe, mode
   return texts.reduce((sum, text) => sum + Math.min(Math.max(1, Buffer.byteLength(text, 'utf8')), perInput), 0);
 }
 
-/** Per-request input ceilings `embed()` would reserve for these texts on `modelStr`, at the declared safety factor. */
+/** Per-request input ceilings `embed()` would reserve for these texts on `modelStr`, at the declared safety factor (empty inputs are never sent, #4616). */
 export function embedRequestCeilings(texts: ReadonlyArray<string>, modelStr: string, envMaxBatchTokens?: number): number[] {
   const { parsed, recipe } = resolveRecipe(modelStr);
   const safety = recipe.touchpoints?.embedding?.safety_factor ?? DEFAULT_SAFETY_FACTOR;
-  return planEmbedRequests(truncateEmbedInputs(texts), recipe, safety, envMaxBatchTokens)
+  const truncated = truncateEmbedInputs(texts);
+  const sent = sendableEmbeddingInputs(truncated);
+  if (!sent.length) return [];
+  return planEmbedRequests(sent.map(i => truncated[i]!), recipe, safety, envMaxBatchTokens)
     .map(batch => embedRequestMaxInputTokens(batch, recipe, parsed.modelId));
 }
 

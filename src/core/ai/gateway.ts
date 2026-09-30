@@ -58,6 +58,7 @@ import type { BrainEngine } from '../engine.ts';
 import { dimsProviderOptions } from './dims.ts';
 import { hasAnthropicKey, stashGatewayAnthropicKeyFromEnv } from './anthropic-key.ts';
 import { AIConfigError, AITransientError, isStructuredOutputRejection, normalizeAIError } from './errors.ts';
+import { isEmbeddingZeroNormError, screenAlignedEmbeddings, screenEmbeddings, sendableEmbeddingInputs } from './embedding-guard.ts';
 import { getProviderCapabilities } from './capabilities.ts';
 import { runGuardrails, hasGuardrails, type GuardrailHook } from '../guardrails.ts';
 import { loadConfig } from '../config.ts';
@@ -1579,7 +1580,9 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
   // C3), never process.env at call time; invalid values are ignored.
   const envCapRaw = parseInt(cfg.env?.GBRAIN_EMBED_MAX_BATCH_TOKENS ?? '', 10);
   const envCap = Number.isFinite(envCapRaw) && envCapRaw > 0 ? envCapRaw : undefined;
-  const batches = planEmbedRequests(truncated, recipe, effectiveSafetyFactor(recipe), envCap);
+  // #4616: empty inputs never reach the provider; screenEmbeddings refuses them per item.
+  const sent = sendableEmbeddingInputs(truncated);
+  const batches = sent.length ? planEmbedRequests(sent.map(i => truncated[i]!), recipe, effectiveSafetyFactor(recipe), envCap) : [];
 
   const allEmbeddings: Float32Array[] = [];
   let _embedThrew = false;
@@ -1588,7 +1591,7 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
       const result = await embedSubBatch(batch, model, providerOpts, expected, recipe, modelId, opts);
       allEmbeddings.push(...result);
     }
-    return allEmbeddings;
+    return screenEmbeddings(truncated, sent, allEmbeddings, `${recipe.id}:${modelId}`);
   } catch (err) {
     _embedThrew = true;
     throw err;
@@ -1948,7 +1951,7 @@ export async function embedMultimodal(
     }
   }
 
-  return allEmbeddings;
+  return screenAlignedEmbeddings(allEmbeddings, `${recipe.id}:${parsed.modelId}`);
 }
 
 // Documentation pointer: callers must size-check before calling. Voyage caps
@@ -2109,7 +2112,7 @@ async function embedMultimodalOpenAICompat(
     allEmbeddings.push(new Float32Array(row.embedding));
   }
 
-  return allEmbeddings;
+  return screenAlignedEmbeddings(allEmbeddings, `${recipe.id}:${modelId}`);
 }
 
 // ---- v0.36 cross-modal wave: query-side multimodal embedding + safe variant ----
@@ -2204,6 +2207,10 @@ export async function embedMultimodalSafe(
     } catch (err) {
       if (isAIInvocationPolicyError(err)) throw err;
       lastError = err instanceof Error ? err : new Error(String(err));
+      if (isEmbeddingZeroNormError(err)) {
+        err.vectors.forEach((v, i) => { if (v) embeddings[startIdx + i] = v; else failedIndices.push(startIdx + i); });
+        return;
+      }
       // AIConfigError = permanent misconfig. Retrying smaller won't help.
       if (lastError instanceof AIConfigError) {
         for (let i = 0; i < items.length; i++) failedIndices.push(startIdx + i);

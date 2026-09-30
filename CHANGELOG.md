@@ -129,6 +129,47 @@ Run `gbrain upgrade` on the brain host. Migration v182 adds one nullable column 
 - **Embedding migration budget (#5680).** Each provider request is charged at its maximum size and then settled to what the provider reported, once per attempt, summed across retries and splits; usage above the reservation stops further requests. A request's maximum is now sized to its own texts instead of the provider's whole batch limit. The plan prints a worst-case authorization next to the estimate. When `--max-cost-usd` is below it, the migration stops before touching any vector and prints your cap, the worst case and the exact command that covers it (error `embedding_budget_below_worst_case`).
 
 Thanks to @akinduroifedayo, whose PR #5631 supplied the concept and chronicle publication approach adopted here.
+**Embedding providers can no longer hide pages from vector search, pages imported without embeddings get the same contextual wrapping as everything else, and upgrading a large managed brain stops making one Git commit per page.**
+
+Some embedding providers return an all-zero or broken vector for odd input, like a chunk that is only whitespace or symbols. gbrain used to store it. The vector index silently skips such a row, so the page showed up in keyword search and `gbrain get` but never in semantic search, and doctor said everything was fine. gbrain now refuses those vectors one chunk at a time: the rest of the page still gets its vectors, and the failure names the page and the command to fix it. After a PGLite crash repair, the notice now says indexes were not rebuilt and gives you the one command that rebuilds them.
+
+Pages imported with `--no-embed` (big syncs, connector sources) never recorded their contextual retrieval mode, so every later embedding pass embedded them raw. New imports record it, and `gbrain repair contextual-mode` stamps the pages you already have, re-embedding only the ones whose embedding input actually changes.
+
+Upgrading a managed brain with a pushed canonical repository used to commit and push once per page during the grandfather step. It now groups the Git work:
+
+| 250 pages, hardened repo with a local remote | Before | After |
+| --- | --- | --- |
+| PGLite, seconds per page | 0.456 | 0.060 |
+| Postgres, seconds per page | 0.821 | 0.070 |
+| Git commits | about 248 | 16 to 20 |
+
+### To take advantage of v0.60.11.0
+
+`gbrain upgrade` does the rest. There is no schema migration. On the brain host, preview and then apply the new repair when doctor's `contextual_retrieval_coverage` check reports pages never evaluated against the contextual retrieval ladder:
+
+```bash
+gbrain repair contextual-mode              # preview
+gbrain repair contextual-mode --apply      # stamp; re-embeds only pages whose input changed
+```
+
+If your PGLite brain was auto-repaired after a crash, run `gbrain reindex --vectors`.
+
+### Itemized changes
+
+- **Degenerate vectors are refused per chunk.** The embedding gateway refuses a zero-norm, NaN or infinite vector with `embedding_zero_norm` and never sends an empty or whitespace-only input to the provider. Only the affected chunk fails: `gbrain embed --stale`, imports and code imports keep every other vector of the batch, leave the refused chunk for a later pass, and do not stamp the page's embedding signature. The error is never retried as a rate limit or network failure, and it names `gbrain embed <slug>` and its row in `docs/guides/write-refusals.md`.
+- **`gbrain reindex --vectors`** rebuilds every HNSW vector index from the stored vectors, with no re-embedding and no cost (concurrently on Postgres). The PGLite WAL-repair notice and `gbrain pglite-repair` now say indexes are not rebuilt and name it.
+- **`--no-embed` imports record their contextual retrieval mode.** Every markdown import stamps the mode and corpus generation it resolves, so later embed passes wrap the page. A failed source-policy read now fails the import instead of stamping the global mode. Contributed by @woprrr (#5630).
+- **`gbrain repair contextual-mode`** stamps existing pages that have no mode, exactly as a fresh import would. It writes projections only (no page write and no request ID), keeps every vector whose embedding input is unchanged, and re-embeds a changed page once, or leaves it for `gbrain embed --stale` under `--no-embed`. `gbrain repair --all` runs it after `safe-chunks`, and doctor's `contextual_retrieval_coverage` check names it.
+- **Grandfathering groups its Git work.** The effect runner commits up to 100 ready single-file Git effects of a worktree together and pushes each root once per pass. A failed path fails only its own effect; a failed push leaves the group queued and the next pass pushes once. The v0.13.1 step admits pages in windows of 50, and short groups yield briefly to queued publications so their Git work lands together.
+- **`embed --stale --dry-run` matches the live run.** Chunks whose vectors are already in the current embedding space and only need a restamp are reported as `would_restamp`, not as work to embed.
+- **Managed-worktree refusals show up in push status.** A `gbrain sources push` refused by the managed-worktree guard records the refusal instead of leaving the last success on record. Contributed by @cheRoma (#5614).
+- **`writer claim` says what it fences.** Before persistence is activated, the claim and its dry run return `activation_required`, naming the sync and file writers that now refuse. Contributed by @cheRoma (#5617).
+- **Autopilot skips sync for claimed sources awaiting activation.** The freshness loop and the per-source fan-out drop the sync phase (and its pull) for those sources and report the reason once, instead of queueing a sync that fails on every tick. Contributed by @cheRoma (#5613).
+
+### For contributors
+
+- `.github/workflows/macos-validation.yml` runs nightly, on dispatch and on pull requests labelled `macos-validation`, on a pinned `macos-26` runner with no secrets. It covers the APFS device-identity re-stamp, the PGLite checkpoint harness on a store of at least 2 GiB, and the signed release binary. The security matrix, the darwin release build and the darwin native-lock cells pin `macos-26` and `macos-26-intel`.
+- The checkpoint harness gains `--min-store-gb` and samples worker CPU with `ps` off Linux. `scripts/bench-grandfather-5530.ts` reproduces the grandfather numbers above (`--no-harden` and `--no-push` isolate the Git share).
 
 ## [0.60.10.0] - 2026-09-29
 

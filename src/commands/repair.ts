@@ -36,7 +36,7 @@ Options:
   --apply        Write the repair (no prompt). Without it, only preview.
   --source <id>  Limit to one source (default: every active source).
   --limit <n>    Repair at most n items; rerun the same command to continue.
-  --no-embed     safe-chunks: re-seal text only; embed later with gbrain embed --stale.
+  --no-embed     safe-chunks, contextual-mode: no provider call; embed later with gbrain embed --stale.
   --all          Run every kind in order (${REPAIR_KINDS.join(', ')}).
   --json         Machine-readable output with a stable shape.
 

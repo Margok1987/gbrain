@@ -2882,7 +2882,9 @@ upgrade every process that writes to the brain, then follow the
 [v0.60.5.0 steps](skills/migrations/v0.60.5.0.md): one full `gbrain doctor`,
 then preview `gbrain repair` and apply only after the user agrees
 ([repair guide](docs/guides/repair.md)). For v0.60.6.0, also follow the
-[one-time timeline prune and slug-collision steps](skills/migrations/v0.60.6.0.md).
+[one-time timeline prune and slug-collision steps](skills/migrations/v0.60.6.0.md). For v0.60.11.0, preview
+`gbrain repair contextual-mode` and rebuild PGLite vector indexes after a crash
+repair ([steps](skills/migrations/v0.60.11.0.md)).
 
 For v0.53.0.0, follow the
 [mechanical shared-skills migration](skills/migrations/v0.53.0.0.md) on the host,
@@ -3934,9 +3936,12 @@ version bump changes it.
    backs up `pg_wal/` + `pg_control` into a sibling
    `<dataDir>.wal-repair-backup-<ts>/` dir, resets the WAL in place
    (pg_resetwal semantics — data files preserved; transactions not
-   checkpointed before the corruption may be lost), and retries once. On
-   success it prints a loud stderr notice naming the backup and recommending
-   `gbrain doctor`. Safety bounds: repair only runs under a cleanly-acquired
+   checkpointed before the corruption may be lost), and retries once. The
+   reset does not rebuild indexes, so a page written just before the crash
+   can be missing from vector search while keyword search still finds it.
+   On success it prints a loud stderr notice naming the backup and the next
+   commands: `gbrain reindex --vectors` (rebuilds every HNSW index from the
+   stored vectors, no re-embedding) and then `gbrain doctor`. Safety bounds: repair only runs under a cleanly-acquired
    data-dir lock (never after reaping another process's lock), skips for a
    cooldown window after a failed attempt
    (`GBRAIN_PGLITE_WAL_REPAIR_COOLDOWN_SECONDS`, default 3600), reuses one
@@ -8409,7 +8414,7 @@ timeline: 12 item(s) to repair
   it leaves alone (see [What each kind fixes](#what-each-kind-fixes)).
 - **Cost** is what an apply of the pending items would consume: one permanent
   request ID and 16 KiB of reserved receipt space per page for `timeline` and
-  `visibility`, and nothing for `safe-chunks`. When an embedding model is
+  `visibility`, and nothing for `safe-chunks` or `contextual-mode`. When an embedding model is
   configured and priced, the line adds an estimated embedding cost in dollars.
 - **Capacity** shows the write-journal counters the run draws on and the 90%
   line where it stops (see [Capacity stop](#capacity-stop)).
@@ -8424,6 +8429,7 @@ gbrain repair timeline --apply
 gbrain repair visibility --apply
 gbrain repair safe-chunks --apply
 gbrain repair safe-chunks --apply --no-embed   # re-seal text now, embed later
+gbrain repair contextual-mode --apply
 gbrain repair --all --apply                    # every kind in order
 ```
 
@@ -8551,7 +8557,7 @@ STOPPED: Stopped before crossing 90% of brain lifetime_ids (...). Run: gbrain co
 
 Raise the limit on the brain host only if you agree, then rerun. Raised limits
 are brain-wide; request IDs stay permanent replay protection. `safe-chunks`
-takes no journal admission and never hits this stop. The limits and their
+and `contextual-mode` take no journal admission and never hits this stop. The limits and their
 defaults are in [bounded admission and retention](concurrent-writes.md#bounded-admission-and-retention).
 
 ## Where it runs
