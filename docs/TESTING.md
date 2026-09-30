@@ -716,12 +716,17 @@ Measured effect: ~3.5x per PGLite-booting file (a cold boot replays every
 migration, ~3.1s each on a CI shard). Properties:
 
 - **Idempotent.** A hash short-circuit exits in ~40ms when the snapshot is
-  fresh, and REBUILDS a stale one. The hash covers the raw file bytes of
-  `migrate.ts`, `pglite-schema.ts`, and their schema/migration helpers,
-  including grant constraints and withdrawal triggers. Imported SQL and
-  handler changes invalidate the fixture; coverage instrumentation does not
-  change the hash. Keep the dependency list in `computeSnapshotSchemaHash`
-  and the CI cache keys aligned when adding another schema helper.
+  fresh, and REBUILDS a stale one. The hash covers the raw file bytes of the
+  static import closure of `pglite-schema.ts`, the schema-migration registry
+  and `migrate.ts`, plus the bootstrap file (`src/core/snapshot-schema-inputs.ts`
+  computes the list; no hand list). Imported SQL and handler changes
+  invalidate the fixture; coverage instrumentation does not change the hash.
+  `test/snapshot-inputs-closure.test.ts` checks that list against an
+  independent TS-AST closure, requires every literal dynamic import in the
+  closure to be classified, and discovers all 13 `pglite-snapshot-*` CI cache
+  keys: identical `hashFiles` inputs covering every hash input, each profile
+  restoring its own tar. A failure names the missing file and both workflow
+  files to edit.
 - **Concurrency-safe.** Each profile has its own lock with a PID/token owner
   and host/process-namespace identity. Only a confirmed dead local owner using
   the current retirement protocol can be reclaimed. Both normal release and
@@ -885,6 +890,56 @@ with recorders and asserts, per mode (default, `--fast`, `--fix`,
 the run stopped, which engine calls happened and which mutations landed (the
 SKILL.md DRY auto-repair, the dead-holder lock reap). The W0 registry,
 early-stop and `--json` goldens pin the output itself.
+
+### Move-only verifier
+
+`scripts/verify-move-only.ts` proves a commit tagged `Move-Only: yes` moves code
+without editing it: every top-level statement of every touched TS file on the
+base side reappears token for token on the head side (tokens from
+`scripts/lib/normalize-tokens.ts`, so whitespace and comments are ignored and
+string/SQL text is exact). Imports, `export ... from` lines and toggling the
+`export` modifier on a moved statement are allowed and counted. Run
+`bun scripts/verify-move-only.ts <commit>` (default `HEAD~1..HEAD`);
+`--wrapper migration` inlines `export const vNNN: Migration = {...}` files into
+the generated registry array so the W3 split must reproduce the original
+`MIGRATIONS` array, and `--rename-map <json>` applies identifier rewrites for
+`Mechanical-Rename: yes` commits. Failures print `FAIL: <file:line>` with the
+first differing token. Pinned by `test/scripts/verify-move-only.test.ts`.
+
+### Schema migration registry
+
+Schema migrations live one per file in `src/core/schema-migrations/v<NNN>-<name>.ts`
+(NNN zero-padded to 3, `name` = the slug with `-` → `_`, one
+`export const v<NNN>: Migration = {...}` per file). `bun run new:migration <snake_name>`
+scaffolds the next version; `bun run build:schema-migrations` regenerates the committed
+static-import registry `registry.generated.ts` (regenerate, never hand-merge). The
+array order is master's historical order (`HISTORICAL_ARRAY_ORDER` in
+`scripts/build-schema-migrations.ts`), then ascending; the runner sorts by version.
+Two guards run in `bun run verify`:
+
+- `check:schema-migrations` (`scripts/check-schema-migrations-fresh.sh`) regenerates
+  the registry into a temp file and diffs it; the generator also fails on a
+  filename/version/name mismatch and on a version defined twice, naming both files
+  with the `git mv` + `version:` + regenerate recipe.
+- `check:schema-migration-order` (`scripts/check-schema-migration-order.ts`) fails
+  when a migration origin/master does not have is numbered at or below origin/master's
+  latest version (it would be skipped forever on current brains) or reuses a version
+  with a different name. Base ref: `GBRAIN_MIGRATION_BASE_REF` (default
+  `origin/master`); skipped with a notice when the ref is missing, failed under `CI=true`.
+
+Collision recovery: an unapplied branch migration is renumbered (`git mv`, edit
+`version`, regenerate); one already applied to a disposable dev DB means rebuilding
+that DB and replaying; one applied to retained data needs explicit `schema_version`
+reconciliation, never just a counter edit. Pinned by
+`test/scripts/build-schema-migrations.test.ts` and `test/migrations-golden.test.ts`.
+
+### Schema generator freshness
+
+`check:schema-fresh` (`scripts/check-schema-fresh.sh`) runs `scripts/build-schema.ts
+--out-dir <tmp>` (fragments -> `src/schema.sql` regions -> `schema-embedded.generated.ts`
+-> `pglite-schema.generated.ts`) and diffs every output, naming the source to edit.
+Canonical sources and PGLite capability rules: `docs/ENGINES.md#canonical-schema-sources`.
+Pinned by `test/scripts/build-schema.test.ts`; the end state by the E4 catalog goldens.
 
 ### Guard registry and self-test
 
