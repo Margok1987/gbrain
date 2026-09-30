@@ -385,7 +385,7 @@ async function cmdPropose(engine: BrainEngine, args: string[], sourceId: string)
     const dirArg = flagValue(args, '--dir');
     const brainDir = await resolveBrainDir(engine, dirArg ?? null);
     try {
-      const { proposal, rowNum } = await acceptProposal({ engine, brainDir, sourceId, actedBy }, id);
+      const { proposal, rowNum } = await acceptProposal({ engine, brainDir, sourceId, actedBy, config: loadConfig() ?? { engine: 'pglite' } }, id);
       console.log(`Accepted proposal #${id} → take #${rowNum} on ${proposal.page_slug}.`);
     } catch (err) {
       if (err instanceof TakeProposalError) {

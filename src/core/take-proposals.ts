@@ -6,20 +6,31 @@
  * canonical fence is explicit operator accept. This module is that path:
  *
  *   - listPendingProposals — source-scoped pending queue (newest first).
- *   - acceptProposal       — promote via addTakeToPage (markdown-canonical
- *                            write-through), then stamp status='accepted' +
+ *   - acceptProposal       — promote via a coordinated `takes_add` mutation
+ *                            (submitPageMutation, the same path `gbrain
+ *                            takes add` uses), then stamp status='accepted' +
  *                            promoted_row_num + acted_at/acted_by.
  *   - rejectProposal       — stamp status='rejected' + acted_at/acted_by.
  *
  * All reads/writes are parameterized and scoped to the caller's source when
- * one is provided (the CLI always resolves one via resolveSourceId). The
- * accept write goes through the SAME shared write-through core the takes_*
- * ops use, so the fence lock, holder fence, injection guards and DB mirror
- * all apply.
+ * one is provided (the CLI always resolves one via resolveSourceId).
+ *
+ * The promote write goes through submitPageMutation (the SAME coordinated
+ * pipeline `takes add`/`takes update`/`takes supersede`/`takes resolve` use),
+ * not the uncoordinated addTakeToPage — a managed brain (persistence_brain
+ * enabled: Postgres/Supabase with a coordinator-owned worktree) refuses any
+ * direct file write outside that pipeline with 'writer_coordinator_required'
+ * ("This file belongs to a managed canonical worktree."). Calling
+ * addTakeToPage directly here made every `takes propose --accept` fail on a
+ * managed brain — including the Slack report-lane's accept-before-correct
+ * step, so a corrective reply on a pending proposal could never land.
  */
 
+import { randomUUID } from 'node:crypto';
 import type { BrainEngine, TakeKind } from './engine.ts';
-import { addTakeToPage } from './takes-write.ts';
+import type { GBrainConfig } from './config.ts';
+import type { OperationContext } from './ops/contract.ts';
+import { submitPageMutation } from './persistence/page-mutations.ts';
 
 export interface TakeProposalRow {
   id: number;
@@ -150,6 +161,49 @@ export interface ProposalActionTarget {
   sourceId?: string;
   /** Recorded in acted_by. Defaults to 'cli'. */
   actedBy?: string;
+  /** Threaded into the coordinated takes_add mutation accept performs. */
+  config: GBrainConfig;
+}
+
+/**
+ * Promotes an accepted proposal into the page's fence via the SAME
+ * coordinated `takes_add` mutation `gbrain takes add` uses — never the
+ * uncoordinated addTakeToPage — so a managed brain's writer-coordinator
+ * guard (assertManagedFilesystemWrite) sees this write the same way it sees
+ * every other takes mutation, instead of refusing it as an uncoordinated
+ * legacy writer.
+ *
+ * No `local_dir` param: the mutation resolves its own write root from the
+ * proposal's source (source.local_path / sync.repo_path), same as a plain
+ * `gbrain takes add <slug>` with no `--dir`. `target.brainDir` is used only
+ * for the pre-flight "a brain directory must be configured" guard below —
+ * threading it through as `local_dir` would additionally require it to
+ * match the coordinator's own resolved canonical root byte-for-byte
+ * (page-mutations.ts's local_dir check), which is unnecessary here.
+ */
+async function promoteProposalViaTakesAdd(
+  target: ProposalActionTarget,
+  proposal: TakeProposalRow,
+): Promise<number> {
+  const ctx: OperationContext = {
+    engine: target.engine,
+    config: target.config,
+    remote: false,
+    sourceId: proposal.source_id,
+    dryRun: false,
+    logger: { info: message => console.error(message), warn: message => console.error(message), error: message => console.error(message) },
+  };
+  const params: Record<string, unknown> = {
+    slug: proposal.page_slug,
+    claim: proposal.claim_text,
+    kind: coerceProposalKind(proposal.kind),
+    holder: proposal.holder,
+    weight: typeof proposal.weight === 'number' ? proposal.weight : Number(proposal.weight),
+    source_id: proposal.source_id,
+    request_id: randomUUID(),
+  };
+  const result = await submitPageMutation(ctx, { operation: 'takes_add', params });
+  return Number(result.row_num);
 }
 
 /**
@@ -192,22 +246,10 @@ export async function acceptProposal(
   }
   let rowNum: number;
   try {
-    ({ rowNum } = await addTakeToPage(
-      {
-        engine,
-        slug: proposal.page_slug,
-        brainDir: target.brainDir,
-        // The row's OWN source, never the caller's — the scoped load above
-        // already proved they agree when a caller scope was provided.
-        sourceId: proposal.source_id,
-      },
-      {
-        claim: proposal.claim_text,
-        kind: coerceProposalKind(proposal.kind),
-        holder: proposal.holder,
-        weight: typeof proposal.weight === 'number' ? proposal.weight : Number(proposal.weight),
-      },
-    ));
+    // The row's OWN source, never the caller's, is what promoteProposalViaTakesAdd
+    // scopes the mutation to — the scoped load above already proved they agree
+    // when a caller scope was provided.
+    rowNum = await promoteProposalViaTakesAdd(target, proposal);
   } catch (e) {
     // Fence write failed — release the claim so the row stays actionable.
     // Best-effort: a failed rollback (or a crash before this catch) leaves
