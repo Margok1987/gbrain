@@ -78,6 +78,8 @@ interface ConnectorRetry {
   requestId: string;
   retryOf: string;
   attempt: number;
+  /** Written by `gbrain sources retry-held` (fix wave 4): approved, but nothing is admitted under `requestId` yet. */
+  pending?: boolean;
 }
 interface ConnectorIntent extends Record<string, unknown> {
   kind: ConnectorIntentKind;
@@ -248,6 +250,8 @@ export class ManagedConnectorSync {
   private stopped = false;
   private blockedByCheckpoint = false;
   private pendingCheckpoint: ConnectorPendingEntry | null = null;
+  /** Page slugs of held connector items: their terminal, recovery-free failed receipts leave the automatic retry set. */
+  private heldSlugs = new Set<string>();
   /** True when this run ended with accepted writes pending, so its checkpoint did not advance. */
   deferred = false;
   readonly counts: Omit<ConnectorRunCounts, 'finished_at' | 'pending' | 'stopped_on_wait_budget'> & { created: number; updated: number; deleted: number } = {
@@ -579,7 +583,9 @@ export class ManagedConnectorSync {
     const dropUnreached = complete && this.fullSweep && !this.targeted;
     const unresolved = dropUnreached ? [] : unreached;
     if (dropUnreached) this.counts.dropped_upstream += unreached.filter(entry => entry.itemRef !== CHECKPOINT_SLUG).length;
+    const released = await this.releasableHeldEntries([...unresolved, ...this.failedPending]).catch(() => new Set<string>());
     const pending = [...new Map([...unresolved, ...this.failedPending, ...outstanding, ...(this.pendingCheckpoint ? [this.pendingCheckpoint] : [])]
+      .filter(entry => !released.has(entry.requestId))
       .map(entry => [entry.requestId, entry])).values()];
     if (outstanding.length || this.failedPending.length || this.pendingCheckpoint || this.stopped) this.deferred = true;
     const recovery = this.connectorState.upgrade_recovery === 'rewalking_once' && complete ? 'none' : this.connectorState.upgrade_recovery;
@@ -587,6 +593,41 @@ export class ManagedConnectorSync {
       page_admissions: this.counts.page_admissions, skipped_unchanged: this.counts.skipped_unchanged, pending: pending.length,
       checkpoint_admissions: this.counts.checkpoint_admissions, stopped_on_wait_budget: this.stopped, dropped_upstream: this.counts.dropped_upstream, finished_at: now } };
     await this.writeState();
+  }
+  /**
+   * Fix wave 4: marks connector items held by this run. Only their terminal,
+   * recovery-free failed receipts leave the automatic retry set; a queued,
+   * running or recovering receipt stays outstanding.
+   */
+  holdSlugs(slugs: Iterable<string>): void {
+    for (const slug of slugs) this.heldSlugs.add(slugifyPath(`${slug}.md`));
+  }
+  private async releasableHeldEntries(entries: ConnectorPendingEntry[]): Promise<Set<string>> {
+    const candidates = entries.filter(entry => entry.itemRef !== CHECKPOINT_SLUG && this.heldSlugs.has(entry.itemRef));
+    if (!candidates.length) return new Set();
+    const rows = await this.engine.executeRaw<{ request_id: string }>(`SELECT request_id::text AS request_id FROM persistence_requests
+      WHERE request_id=ANY($1::uuid[]) AND source_id=$2 AND state IN ('failed','conflict','cancelled') AND recovery IS NULL`,
+    [candidates.map(entry => entry.requestId), this.sourceId]);
+    return new Set(rows.map(row => row.request_id));
+  }
+  /**
+   * Fix wave 4 abort path: publishes one checkpoint whose state is the last
+   * committed cursor state plus the updated `item_holds`, so the cursor never
+   * moves past an uncommitted receipt. A stale publication is refused by the
+   * `checkpointBefore` digest; any failure records nothing and returns false.
+   */
+  async publishHolds(empty: Record<string, unknown>, holds: unknown): Promise<boolean> {
+    if (this.resetRequested || this.stopped) return false;
+    const committed = (this.checkpoint[0] as { state?: Record<string, unknown> | null } | undefined)?.state ?? null;
+    const state = { ...empty, ...(committed ?? {}), item_holds: holds };
+    const next = [{ generation: Number((this.checkpoint[0] as { generation?: number } | undefined)?.generation ?? 0) + 1, state }];
+    try {
+      await this.submit('connector_v2_checkpoint', CHECKPOINT_SLUG, null, { checkpointAfter: next, receipts: [], fresh: false });
+      this.checkpoint = next;
+      return true;
+    } catch {
+      return false;
+    }
   }
   /** One statement: the state row changes only while this run still holds the connector sync lease. */
   private async writeState(): Promise<void> {
@@ -664,7 +705,7 @@ export class ManagedConnectorSync {
       if (row) {
         await authorizeStoredRequest(engine, row);
         assertReplayIntent(row, intentDigest(input));
-      } else if (retry) throw new OperationError('storage_error', 'The approved connector retry receipt is unavailable.');
+      } else if (retry && !retry.pending) throw new OperationError('storage_error', 'The approved connector retry receipt is unavailable.');
       return { retry, input, row };
     };
     const automatic = this.autoRetry.has(baseRequestId);
@@ -722,7 +763,11 @@ export class ManagedConnectorSync {
       }
       row = await this.engine.transaction(async tx => {
         await this.assertLease(tx);
-        return admitWriteInTransaction(tx, prior.input);
+        const accepted = await admitWriteInTransaction(tx, prior.input);
+        // A `retry-held` approval is consumed by this admission under its new request identity.
+        if (prior.retry?.pending) await tx.executeRaw(`INSERT INTO op_checkpoints(op,fingerprint,completed_keys) VALUES('managed-connector-retry',$1,$2::text::jsonb)
+          ON CONFLICT(op,fingerprint) DO UPDATE SET completed_keys=EXCLUDED.completed_keys,updated_at=now()`, [baseRequestId, JSON.stringify([{ ...prior.retry, pending: undefined }])]);
+        return accepted;
       });
       admitted = true;
     }

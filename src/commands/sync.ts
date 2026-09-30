@@ -91,6 +91,8 @@ export interface SyncResult {
    * everything," the exact misdiagnosis in the #1794 recurrence report.
    */
   bankedFiles?: number;
+  /** Fix wave 4: connector items held after repeated item-scoped failures (not blocking freshness). */
+  connectorHolds?: { held: number; newly_held: number; retry_command: string };
 }
 
 // The cost-gate / token-estimate cluster (estimateSourceTreeTokens,
