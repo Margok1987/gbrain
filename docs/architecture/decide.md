@@ -121,6 +121,17 @@ daily cap sums `decide_spend` for the UTC day (third-party only; cached 60 s;
 soft in both directions); remote-triggered spend is capped by
 `decide.budget.remote_share`.
 
+### S9 proposals and sweep state
+
+`decide_proposals` rows (`pending | accepted | rejected | stale | undone`)
+are never pruned by receipt retention. The sweep keeps one internal
+`decide_state` key per source (`conflict_watermark:<source>`) and retries
+transient skips from `decide_sweep_deferred` (at most 5 attempts). Accept
+and undo are the only S9 writes to facts: a checked supersede that stores
+before/after state (`expired_at`, `valid_until`, `superseded_by`, the fence
+row, the page revision) and applies the database and fence changes as one
+unit; on managed brains it is the coordinator mutation `decide_proposal`.
+
 ### Outcome vocabulary (canonical: `src/core/ai/decide/outcomes.ts`)
 
 <!-- decide-outcomes:begin -->
