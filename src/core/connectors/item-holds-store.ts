@@ -30,7 +30,8 @@ type Exec = Pick<BrainEngine, 'executeRaw'>;
 export interface ConnectorSourceRow { id: string; incarnation: string; local_path: string | null; config: Record<string, unknown> }
 
 export async function managedBrain(engine: Exec): Promise<boolean> {
-  const [brain] = await engine.executeRaw<{ enabled: boolean }>('SELECT enabled FROM persistence_brain WHERE singleton=1').catch(() => []);
+  // A failed mode query propagates: guessing "unmanaged" would read a stale state file and report no holds.
+  const [brain] = await engine.executeRaw<{ enabled: boolean }>('SELECT enabled FROM persistence_brain WHERE singleton=1');
   return brain?.enabled === true;
 }
 

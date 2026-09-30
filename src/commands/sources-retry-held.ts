@@ -35,8 +35,9 @@ export async function retryHeld(engine: BrainEngine, sourceId: string, opts: { d
   if (!held.length) return { source_id: sourceId, dry_run: dryRun, scheduled: 0, items: [], next_action: `No held items for ${sourceId}.` };
   const managed = await managedBrain(engine);
   if (!dryRun) {
-    await requestHoldRetry(engine, sourceId, source.incarnation, held.map(record => record.key));
+    // Pointers first: a sync that sees the retry request must already find the replacement identity.
     if (managed) for (const record of held) if (record.request_id) await writeHeldRetryPointer(engine, sourceId, record.request_id);
+    await requestHoldRetry(engine, sourceId, source.incarnation, held.map(record => record.key));
   }
   const already = new Set(dryRun ? await readHoldRetryKeys(engine, sourceId, source.incarnation) : []);
   const items = held.map(record => ({ key: record.key, code: record.code,
