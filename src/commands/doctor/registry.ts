@@ -134,12 +134,9 @@ export const DOCTOR_CHECK_REGISTRY: readonly DoctorEntry[] = [
  * Run the registry in order. A STOP_DOCTOR result ends the run with the checks
  * gathered so far; a completed run finishes the DB-checks progress phase.
  */
-export async function runDoctorRegistry(
-  ctx: DoctorContext,
-  registry: readonly DoctorEntry[] = DOCTOR_CHECK_REGISTRY,
-): Promise<Check[]> {
+export async function runDoctorRegistry(ctx: DoctorContext): Promise<Check[]> {
   const checks: Check[] = [];
-  for (const entry of registry) {
+  for (const entry of DOCTOR_CHECK_REGISTRY) {
     const result = await entry.run(ctx);
     if (result === STOP_DOCTOR) return checks;
     checks.push(...result);

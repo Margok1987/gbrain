@@ -869,6 +869,23 @@ commit: `GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <file>` (the switch carries the
 overrides). Performance baselines are a bench, not a test:
 `docs/designs/refactor-wave-1/perf-baseline.md`.
 
+### Doctor check registry
+
+`gbrain doctor` runs `DOCTOR_CHECK_REGISTRY` (`src/commands/doctor/registry.ts`)
+in order: one `{ name, emits, run(ctx) }` entry per topic block under
+`src/commands/doctor/checks/`, each returning its checks or `STOP_DOCTOR`.
+`test/doctor-registry.test.ts` fails with a `FAIL` / `Why` / `Fix` / `See`
+block when an entry's `name` or any `emits[]` name is missing from
+`src/core/doctor-categories.ts`, when `emits[]` differs from what the entry's
+`run` can push (AST walk in `test/helpers/doctor-registry-ast.ts`), or when a
+STOP gate moves away from where master's `buildChecks` returned early.
+`test/doctor-mode-matrix.serial.test.ts` wraps every entry and the engine
+with recorders and asserts, per mode (default, `--fast`, `--fix`,
+`--fix --dry-run`, no engine, connection failure), which entries ran, where
+the run stopped, which engine calls happened and which mutations landed (the
+SKILL.md DRY auto-repair, the dead-holder lock reap). The W0 registry,
+early-stop and `--json` goldens pin the output itself.
+
 ### Guard registry and self-test
 
 The privacy and test-isolation guards use `scripts/lib/guard-candidates.sh` to
@@ -1584,6 +1601,8 @@ Unit tests and what they cover:
 - `test/check-resolvable.test.ts` — resolver reachability, MECE overlap, gap detection, proximity-based DRY detection, `extractDelegationTargets` coverage.
 - `test/dry-fix.test.ts` — auto-fix: three shape-aware expander pure-function tests; five guards (working-tree-dirty, no-git-backup, inside-code-fence, already-delegated within 40 lines, ambiguous-multi-match, block-is-callout).
 - `test/doctor-fix.test.ts` — `gbrain doctor --fix` CLI integration: dry-run preview, apply path, JSON output shape.
+- `test/doctor-registry.test.ts` — doctor check registry contract: every entry name and emitted check categorized (FAIL/Why/Fix/See), `emits[]` equals the AST-walked names of each entry's `run`, runtime registry equals the static walk, STOP gates at master's early returns.
+- `test/doctor-mode-matrix.serial.test.ts` — doctor mode matrix through the registry runner: entries run, STOP position, engine calls and `--fix` mutations for default, `--fast`, `--fix`, `--fix --dry-run`, no engine and connection failure.
 - `test/backoff.test.ts` — load-aware throttling, concurrency limits, active hours.
 - `test/transcription.test.ts` — provider detection, format validation, API key errors.
 - `test/enrichment-service.test.ts` — entity slugification, extraction, tier escalation.
