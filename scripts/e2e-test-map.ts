@@ -354,13 +354,14 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   ],
   // Both engines route CJK queries through the shared branch since #3986
   // (src/core/search/cjk-keyword-sql.ts). The cross-engine parity is pinned — any change here must re-run the pin. (Matches
-  // src/core/pglite-engine/** too; selector unions the entries.)
-  "src/core/pglite-engine/cjk-search.ts": ["test/e2e/engine-parity-cjk.test.ts"],
+  // src/core/engine-sql/** too; selector unions the entries.)
+  "src/core/engine-sql/cjk-search.ts": ["test/e2e/engine-parity-cjk.test.ts"],
   // D7 parity batch: the code-edge read paths (getCallersOf / getCalleesOf /
-  // getEdgesByChunk) live in the peeled engine modules; both modules key the
-  // cross-engine read-parity suite directly. (The engine-dir ** globs above
-  // match these files too; the selector unions the entries.)
-  "src/core/postgres-engine/code-edges.ts": ["test/e2e/code-edges-read-parity.test.ts"],
+  // getEdgesByChunk) live in engine-sql/code-edges.ts (PGLite's getEdgesByChunk
+  // stays in its engine module dir); both key the cross-engine read-parity
+  // suite directly. (The ** globs match these files too; the selector unions
+  // the entries.)
+  "src/core/engine-sql/code-edges.ts": ["test/e2e/code-edges-read-parity.test.ts"],
   "src/core/pglite-engine/code-edges.ts": ["test/e2e/code-edges-read-parity.test.ts"],
   // D7 parity batch: chronicle ontology merge (mergeOntologyFact helpers in
   // chronicle/ontology.ts) + event projection (only production caller:

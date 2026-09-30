@@ -20,6 +20,7 @@ test/e2e/engine-sql-prepare-parity.test.ts
 test/e2e/engine-sql-normalize-parity.test.ts
 test/e2e/engine-sql-transaction-parity.test.ts
 test/e2e/engine-sql-capabilities-parity.test.ts
+test/e2e/engine-sql-rls-scope.test.ts
 test/phantom-redirect-engine-parity.test.ts
 test/e2e/autopilot-cooldown-parity.test.ts
 test/e2e/backup-coverage-parity.test.ts

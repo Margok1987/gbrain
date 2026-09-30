@@ -121,11 +121,11 @@ import * as takesImpl from './engine-sql/takes.ts';
 import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
 import { hasCJK } from './cjk.ts';
-import { searchKeywordCJK as searchKeywordCJKImpl } from './postgres-engine/cjk-search.ts';
+import { searchKeywordCJK as searchKeywordCJKImpl } from './engine-sql/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
 import { postgresExecutor, type RunUnsafeOpts } from './engine-sql/dialect-postgres.ts';
 import type { SqlExecutor } from './engine-sql/executor.ts';
-import { unscopedExecutor } from './engine-sql/brands.ts';
+import { scopedRead, unscopedExecutor } from './engine-sql/brands.ts';
 
 function escapeSqlStringLiteral(value: string): string {
   return value.replace(/'/g, "''");
@@ -1926,14 +1926,17 @@ export class PostgresEngine implements BrainEngine {
    * #3986: CJK keyword fallback (parity port of PGLite's v0.32.7 branch).
    * SQL builds in the shared cjk-keyword-sql.ts; execution goes through the
    * same scoped read transaction (RLS scope binding + 8s statement timeout)
-   * as the FTS keyword paths. See src/core/postgres-engine/cjk-search.ts.
+   * as the FTS keyword paths. See src/core/engine-sql/cjk-search.ts.
    */
   private async _searchKeywordCJK(query: string, ctx: CjkKeywordCtx): Promise<SearchResult[]> {
     return searchKeywordCJKImpl(
-      async (sqlText, params) =>
+      async (read) =>
         await this.withScopedReadTransaction(ctx.opts?.sourceIds, ctx.opts?.sourceId, async (tx) => {
           await tx`SET LOCAL statement_timeout = '8s'`;
-          return await tx.unsafe(sqlText, params as Parameters<typeof tx.unsafe>[1]) as unknown as Record<string, unknown>[];
+          return await read(scopedRead(postgresExecutor(tx, {
+            runUnsafe: (conn, sql, params, opts) => this.runUnsafe(conn, sql, params, opts),
+            gauge: this.checkoutGauge,
+          })));
         }, { alwaysTransaction: true }),
       query,
       ctx,

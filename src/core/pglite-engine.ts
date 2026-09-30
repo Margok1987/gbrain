@@ -137,11 +137,11 @@ import * as takesImpl from './engine-sql/takes.ts';
 import { PgliteCheckpointGuard } from './pglite-engine/checkpoint-guard.ts';
 import { pgliteExecutor } from './engine-sql/dialect-pglite.ts';
 import type { SqlExecutor } from './engine-sql/executor.ts';
-import { unscopedExecutor } from './engine-sql/brands.ts';
+import { scopedRead, unscopedExecutor } from './engine-sql/brands.ts';
 import * as codeEdgesImpl from './engine-sql/code-edges.ts';
 import { getEdgesByChunk as getEdgesByChunkPglite, type PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
 import * as salienceImpl from './engine-sql/salience.ts';
-import { searchKeywordCJK } from './pglite-engine/cjk-search.ts';
+import { searchKeywordCJK } from './engine-sql/cjk-search.ts';
 
 /**
  * #4284 — opt-in out-of-band watchdog for a PGLite disconnect with a live
@@ -2760,7 +2760,7 @@ export class PGLiteEngine implements BrainEngine {
       dedup: boolean;
     },
   ): Promise<SearchResult[]> {
-    return searchKeywordCJK({ db: this.db }, query, ctx);
+    return searchKeywordCJK(async (read) => read(scopedRead(this.engineSql)), query, ctx);
   }
 
   /**
