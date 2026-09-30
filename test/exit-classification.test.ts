@@ -11,7 +11,9 @@ import { surfaceSource } from './helpers/source-surface.ts';
 const readSiteSource = (path: string): string =>
   path === 'src/commands/doctor.ts'
     ? doctorSource()
-    : readFileSync(join(import.meta.dir, '..', path), 'utf8');
+    : path === 'src/commands/jobs.ts'
+      ? surfaceSource('jobs')
+      : readFileSync(join(import.meta.dir, '..', path), 'utf8');
 
 describe('classifyWorkerExit', () => {
   it('code=0 → clean_exit', () => {

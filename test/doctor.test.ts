@@ -1407,7 +1407,8 @@ describe('supervisor crash classifier wiring (v0.35.x)', () => {
   });
 
   test('jobs.ts supervisor status uses summarizeCrashes — same wiring as doctor', async () => {
-    const source = surfaceFileSource('jobs', 'src/commands/jobs.ts');
+    // W4 jobs: `jobs supervisor status` lives in src/commands/jobs/supervisor.ts.
+    const source = surfaceFileSource('jobs', 'src/commands/jobs/supervisor.ts');
     // Both surfaces MUST go through the shared helper. Without this, the two
     // CLI commands report drifting crash counts (the bug class codex caught
     // during the eng review outside-voice pass).
