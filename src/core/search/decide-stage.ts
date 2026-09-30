@@ -67,6 +67,8 @@ export interface DecideSearchOpts {
   rerankOnly?: boolean;
   /** Run today's pipeline with every slot off (decide probe --query baseline). */
   off?: boolean;
+  /** S6 fire retrieval (turn context): take the keyword-only return path, no embedding call. */
+  keywordOnly?: boolean;
 }
 
 /** Max candidates the S3 request judges (fixed by design; the unjudged tail is kept). */
@@ -102,7 +104,7 @@ export function evidenceCoPackedSlots(cfg: DecideConfig): DecideSlot[] {
 const CACHE_MS = 60_000;
 let calibrationCache = new WeakMap<BrainEngine, { at: number; rows: CalibrationRow[]; resolved: Record<string, string> }>();
 
-async function calibrationState(engine: BrainEngine): Promise<{ rows: CalibrationRow[]; resolved: Record<string, string> }> {
+export async function calibrationState(engine: BrainEngine): Promise<{ rows: CalibrationRow[]; resolved: Record<string, string> }> {
   const hit = calibrationCache.get(engine);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit;
   const [rows, recent] = await Promise.all([
