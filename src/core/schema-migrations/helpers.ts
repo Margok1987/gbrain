@@ -76,15 +76,15 @@ export type OnlineIndexOutcome = 'present' | 'created' | 'rebuilt' | 'building';
  * `CREATE INDEX IF NOT EXISTS`. Postgres leaves a valid index alone, reports
  * one another session is still building, drops an INVALID leftover of an
  * interrupted concurrent build, then runs `CREATE INDEX CONCURRENTLY IF NOT
- * EXISTS` on a dedicated connection (with a bounded lock wait and no statement
- * timeout when that connection is session-stable), then confirms the index is valid. Callers build one index at a time;
+ * EXISTS` on a dedicated connection under the session's startup timeouts, then
+ * confirms the index is valid. Callers build one index at a time;
  * a lock timeout leaves an INVALID index that the next call drops and rebuilds.
  */
 export async function buildIndexOnline(
   engine: BrainEngine,
   version: number,
   index: { name: string; table: string; sql: string },
-  opts: { lockTimeout?: string; notice?: (line: string) => void } = {},
+  opts: { notice?: (line: string) => void } = {},
 ): Promise<OnlineIndexOutcome> {
   if (engine.kind !== 'postgres') {
     const [row] = await engine.executeRaw<{ present: boolean }>('SELECT to_regclass($1) IS NOT NULL AS present', [index.name]);
@@ -105,24 +105,10 @@ export async function buildIndexOnline(
     'SELECT GREATEST(reltuples, 0)::bigint AS rows FROM pg_class WHERE oid = to_regclass($1)', [index.table]);
   opts.notice?.(`  building ${index.name} on ~${Number(size?.rows ?? 0)} rows; this can take minutes; it is safe to leave running; `
     + 'if interrupted, gbrain doctor names the rebuild command\n');
-  // Session SETs are safe only on a session-stable backend: through a transaction pooler they would leak to
-  // another client. The direct route (split pools) or a URL that is not a known transaction pooler qualifies.
-  const mode = (engine as { connectionManager?: { describeMode(): { mode: string } } | null }).connectionManager?.describeMode().mode;
-  const sessionStable = mode === 'split' || mode === 'single (non-supabase)';
-  await engine.withReservedConnection(async conn => {
-    if (sessionStable) {
-      await conn.executeRaw(`SET lock_timeout = '${opts.lockTimeout ?? '60s'}'`);
-      await conn.executeRaw('SET statement_timeout = 0');
-    }
-    try {
-      await conn.executeRaw(index.sql.replace('CREATE INDEX', 'CREATE INDEX CONCURRENTLY'));
-    } finally {
-      if (sessionStable) {
-        await conn.executeRaw('RESET lock_timeout');
-        await conn.executeRaw('RESET statement_timeout');
-      }
-    }
-  });
+  // No session SET: a reservation can fall back to a transaction-pooled connection, where a SET or RESET
+  // reaches another client's backend. The build runs under the session's startup timeouts; one that times
+  // out leaves an INVALID index, which the next call drops and rebuilds.
+  await engine.withReservedConnection(conn => conn.executeRaw(index.sql.replace('CREATE INDEX', 'CREATE INDEX CONCURRENTLY')));
   // IF NOT EXISTS also skips an INVALID index a concurrent caller's failed build left behind.
   const [built] = await engine.executeRaw<{ valid: boolean }>('SELECT indisvalid AS valid FROM pg_index WHERE indexrelid = to_regclass($1)', [index.name]);
   if (!built?.valid) throw new Error(`Index ${index.name} is not valid after its concurrent build; rerun: gbrain repair request-indexes --apply`);

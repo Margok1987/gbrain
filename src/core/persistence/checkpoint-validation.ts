@@ -84,8 +84,9 @@ const shellWord = (value: string) => /^[\w./@:=+-]+$/.test(value) ? value : `'${
 /** The exact retry for the failed checkpoint: same source and cursor-selecting options, plus the recorded processing flags. */
 export function checkpointRetryCommand(input: { sourceId: string; processingOptions?: Partial<SyncProcessingOptions> | null; syncOptions?: SyncCursorOptions | null; repoPath?: string | null }): string {
   const base = `gbrain sync --source ${shellWord(input.sourceId)} --no-pull --retry-failed`;
-  // A compacted receipt no longer carries its intent; never print assumed defaults for work it cannot name.
-  if (!input.processingOptions && !input.syncOptions) return `${base} with the same options as the failed run (this receipt no longer records them)`;
+  // A compacted receipt (intent cleared) or a checkpoint admitted before the options were recorded
+  // cannot name its cursor; never print assumed defaults for it.
+  if (!input.syncOptions) return `${base} with the same options as the failed run (this receipt no longer records them)`;
   const options = input.processingOptions ?? {};
   const cursor = input.syncOptions;
   return [base, input.repoPath ? `--repo ${shellWord(input.repoPath)}` : '', options.noEmbed ? '--no-embed' : '', options.noExtract ? '--no-extract' : '',

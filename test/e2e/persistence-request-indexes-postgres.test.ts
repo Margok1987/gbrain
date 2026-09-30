@@ -103,7 +103,7 @@ test('#5762 the Postgres blob never builds the indexes; v179 builds them concurr
   }))) as PostgresEngine['withReservedConnection'];
   try { await v179.handler!(engine); } finally { engine.withReservedConnection = reserve; }
   expect(statements.filter(sql => sql.startsWith('CREATE INDEX CONCURRENTLY IF NOT EXISTS')).map(sql => sql.split(/\s+/)[6])).toEqual(NAMES);
-  expect(statements.some(sql => /^SET lock_timeout = '\d+s'$/.test(sql))).toBe(true);
+  expect(statements.filter(sql => /^(SET|RESET)\b/i.test(sql))).toEqual([]);
   expect((await readRequestIndexStates(engine)).map(index => index.state)).toEqual(['valid', 'valid']);
 }), 120_000);
 

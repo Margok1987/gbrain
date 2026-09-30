@@ -188,7 +188,9 @@ test('#5762 the hint names one of three index states and keeps the saved process
   expect(checkpointRetryCommand({ sourceId: 'notes', processingOptions: { noEmbed: true, noExtract: true, noSchemaPack: false },
     syncOptions: { ...syncOptions, workingTree: false, srcSubpath: 'guides' }, repoPath: '/work/repo/docs' }))
     .toBe('gbrain sync --source notes --no-pull --retry-failed --repo /work/repo/docs --no-embed --no-extract --src-subpath guides');
-  // A compacted receipt has no intent: no assumed defaults.
+  // A compacted receipt, or a checkpoint admitted before its cursor options were recorded: no assumed defaults.
+  expect(checkpointRetryCommand({ sourceId: 'notes', processingOptions: { noEmbed: true, noExtract: false, noSchemaPack: false } }))
+    .toBe('gbrain sync --source notes --no-pull --retry-failed with the same options as the failed run (this receipt no longer records them)');
   expect(checkpointRetryCommand({ sourceId: 'notes' })).toBe('gbrain sync --source notes --no-pull --retry-failed with the same options as the failed run (this receipt no longer records them)');
 });
 
