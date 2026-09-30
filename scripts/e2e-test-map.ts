@@ -290,6 +290,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/jsonb-roundtrip.test.ts",
     "test/e2e/engine-parity.test.ts",
     "test/e2e/schema-drift.test.ts",
+    "test/e2e/schema-catalog-golden.test.ts",
     // #3391: includeNullSignature stale predicates (engine parity).
     "test/e2e/migrate-embeddings-postgres.test.ts",
     // getHealth islanded-liveness + entity-coverage floor (#4153/#4147).
@@ -314,6 +315,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/postgres-bootstrap.test.ts",
     "test/e2e/engine-parity.test.ts",
     "test/e2e/schema-drift.test.ts",
+    "test/e2e/schema-catalog-golden.test.ts",
     "test/e2e/health-parity-postgres.test.ts",
   ],
   // Engine method modules peeled from the façades carry the same blast
@@ -328,6 +330,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/jsonb-roundtrip.test.ts",
     "test/e2e/engine-parity.test.ts",
     "test/e2e/schema-drift.test.ts",
+    "test/e2e/schema-catalog-golden.test.ts",
     "test/e2e/migrate-embeddings-postgres.test.ts",
     "test/e2e/health-parity-postgres.test.ts",
     "test/e2e/source-boundary-mutation-postgres.test.ts",
@@ -368,11 +371,13 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/chronicle-event-projection-parity.test.ts",
   ],
   // Schema source of truth: any change must pass the cross-engine drift gate.
-  "src/schema.sql": ["test/e2e/schema-drift.test.ts"],
-  "src/core/pglite-schema.ts": ["test/e2e/schema-drift.test.ts"],
+  "src/schema.sql": ["test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
+  "src/core/pglite-schema.ts": ["test/e2e/schema-drift.test.ts", "test/e2e/schema-catalog-golden.test.ts"],
   "src/core/migrate.ts": [
     "test/e2e/migration-vector-replay-postgres.test.ts",
     "test/e2e/schema-drift.test.ts",
+    // Refactor wave 1 E4: catalog-level goldens (both engines, both init paths).
+    "test/e2e/schema-catalog-golden.test.ts",
     "test/e2e/migrate-chain.test.ts",
     "test/e2e/link-source-check-repair-postgres.test.ts",
   ],
