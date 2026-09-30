@@ -460,6 +460,41 @@ per-file cap; `!path<TAB>reason` records a parity file deliberately left out.
 `test/scripts/e2e-backend-matrix.test.ts` pins the list's completeness, the CI
 wiring and the runner's count assertion.
 
+### Engine-sql
+
+The engine-sql executor (`src/core/engine-sql/`, refactor wave 1 W1) is pinned
+by these tests; the `*-parity` and RLS files run on every backend in the matrix
+above, and each E2E file keeps a PGLite arm in the unit lane.
+
+- `test/executor-binding-matrix.test.ts` / `test/e2e/executor-binding-matrix.test.ts`:
+  the E5 case table runs twice per backend, through `engine.executeRaw` and
+  through the dialect adapters (`engineSqlExecutor` factory), so the adapters
+  bind, count, fail and cancel exactly like master's raw path.
+- `test/engine-sql-executor.test.ts`: `sqlFragment` renders the same text and
+  values as the postgres.js tagged template (vendored serializer); Postgres
+  driver options (`prepare: true, simple: false` for converted statements,
+  master's options for `executeRaw` / `unsafe`), gauge bypass, EO1 transaction
+  lane, brand `@ts-expect-error` fixtures.
+- `test/e2e/engine-sql-prepare-parity.test.ts`: `pg_prepared_statements` holds a
+  converted statement on direct Postgres and nothing through PgBouncer; a
+  zero-parameter multi-statement string is rejected on every backend.
+- `test/engine-sql-transaction.test.ts` / `test/e2e/engine-sql-transaction-parity.test.ts`:
+  per-domain write-then-throw rollback through `engine.transaction()` and
+  `transactionDirect()` (dual pool on Postgres), with a concurrent pool read.
+  Add a case to `test/helpers/engine-sql-rollback-cases.ts` for every migrated
+  domain write. A mutation that caches the executor on the engine fails it
+  (`DISCRIMINATE_BASE=<mutation> bash scripts/check-test-discriminates.sh`).
+- `test/engine-sql-capabilities.test.ts` / `test/e2e/engine-sql-capabilities-parity.test.ts`:
+  each dialect capability with a boundary-size and a concurrent-write case.
+- `test/e2e/engine-sql-normalize-parity.test.ts`: every declared column kind
+  of `normalize.ts` decodes to one shape on each backend.
+- `test/e2e/engine-sql-rls-scope.test.ts`: `ScopedRead` reads under a
+  non-owner `NOBYPASSRLS` role (cross-source denial, concurrent isolation,
+  nested rollback restoration, connection reuse).
+- SQL text: `test/engine-sql-sql-text.test.ts` goldens must stay byte-identical
+  after a conversion; only `sql-text/_driver.json` moves (tagged ->
+  `runUnsafe`).
+
 ### Native writer locks
 
 `bun test test/native-lock.test.ts test/scripts/native-lock-prebuilds.test.ts`
