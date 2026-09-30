@@ -218,10 +218,32 @@ export async function dispatchAutopilotTick(
   return cycleOk;
 }
 
+const connectorNoticePrinted = new Set<string>();
+
+/**
+ * DX O1 (fix wave 4) dispatch gate, shared by the freshness loop and the
+ * per-source fan-out: a connector source with no recorded sync attempt stays
+ * idle, spends nothing, and gets a one-time notice naming the enable command.
+ * An unreadable gate fails closed for connectors only.
+ */
+export function connectorAwaitingFirstSync(src: { id: string; config: unknown }, attempted: Set<string> | null, jsonMode: boolean,
+  write: (line: string) => void = (line) => process.stderr.write(line + '\n')): boolean {
+  const kind = (src.config as { kind?: unknown } | null)?.kind;
+  if (kind !== 'google' && kind !== 'github') return false;
+  if (attempted?.has(src.id)) return false;
+  if (!connectorNoticePrinted.has(src.id)) {
+    connectorNoticePrinted.add(src.id);
+    const command = `gbrain sync --source ${src.id}`;
+    write(jsonMode ? JSON.stringify({ event: 'connector_awaiting_first_sync', source_id: src.id, command })
+      : `[dispatch] ${src.id}: ${kind} source has never synced; autopilot keeps it synced after its first sync. Enable it with: ${command}`);
+  }
+  return true;
+}
+
 /**
  * v0.40 D17 freshness: runs first each tick, independent of the score gate.
  */
-async function dispatchFreshnessSyncs(
+export async function dispatchFreshnessSyncs(
   engine: BrainEngine,
   queue: MinionQueue,
   { baseInterval, slot, timeoutMs, jsonMode }: { baseInterval: number; slot: string; timeoutMs: number; jsonMode: boolean },
@@ -234,12 +256,18 @@ async function dispatchFreshnessSyncs(
   try {
     const { isFederatedV2Enabled } = await import('../core/feature-flags.ts');
     if (await isFederatedV2Enabled(engine)) {
+      const { attemptedConnectorSourceIds } = await import('../core/persistence/connector-state.ts');
+      const attempted = await attemptedConnectorSourceIds(engine).catch(() => null);
       const sources = await loadAllSources(engine);
       const activationPending = await loadActivationPendingSourceIds(engine);
       const intervalMs = baseInterval * 1000;
       const now = Date.now();
       for (const src of sources) {
         if (!src.local_path) continue;
+        // DX O1 (fix wave 4): automatic capture is opt-in, so a Google or
+        // GitHub source is dispatched only after its first recorded sync
+        // attempt (one explicit `gbrain sync --source <id>`).
+        if (connectorAwaitingFirstSync(src, attempted, jsonMode)) continue;
         // #4399: config.syncEnabled=false excludes a source from AUTOMATIC
         // sync (this loop, the full-cycle fan-out, `sync --all`); an
         // explicit `gbrain sync --source <id>` is unaffected.

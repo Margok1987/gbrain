@@ -22,6 +22,7 @@ import { safeChunksRepair } from './safe-chunks.ts';
 import { contextualModeRepair } from './contextual-mode.ts';
 import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
 import { requestIndexesRepair } from './request-indexes.ts';
+import { connectorFencesRepair } from './connector-fences.ts';
 
 export interface RepairKindSpec {
   kind: RepairKind;
@@ -62,6 +63,12 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     handler: requestIndexesRepair, embeds: 'none', checks: ['persistence_request_indexes'],
     summary: 'Create a missing managed sync request index, or drop an INVALID one and rebuild it (#5762), so sync checkpoints validate within their '
       + 'statement budget. Postgres builds CONCURRENTLY, one index at a time. No journal admission and no user data changes. Brain-wide.',
+  },
+  'connector-fences': {
+    handler: connectorFencesRepair, embeds: 'effect', checks: [],
+    summary: 'Move facts and takes fences that sit below the timeline sentinel of Google and GitHub pages into the page body, so connector re-renders '
+      + 'carry them instead of refusing with connector_fence_below_timeline (fix wave 4). Ambiguous fences are kept and counted for a manual edit. '
+      + 'Each repaired page is re-embedded by its publication.',
   },
 };
 

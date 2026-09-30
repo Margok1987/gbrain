@@ -48,6 +48,13 @@ export interface ConnectorState {
   upgrade_recovery: UpgradeRecovery;
   resumed_from: string | null;
   last_run: ConnectorRunCounts | null;
+  /**
+   * Fix wave 4 (DX O1, #5673): the first recorded sync attempt, written before
+   * the first provider call of an explicit or scheduled sync (managed and
+   * unmanaged), including one that later fails. Autopilot dispatches only
+   * connector sources that have one; checkpoint-row existence never counts.
+   */
+  first_attempt_at?: string | null;
 }
 
 export const emptyConnectorState = (): ConnectorState => ({ version: 1, account: null, pinned_at: null, continuity_unverified: false,
@@ -79,6 +86,47 @@ export async function writeManagedConnectorState(engine: Pick<BrainEngine, 'exec
     ON CONFLICT(op,fingerprint) DO UPDATE SET completed_keys=EXCLUDED.completed_keys,updated_at=now() RETURNING op`,
   [CONNECTOR_STATE_OP, connectorStateKey(sourceId, incarnation), JSON.stringify([state]), lease?.id ?? null, lease?.token ?? null, lease?.acquiredAt ?? null]);
   return rows.length > 0;
+}
+
+/**
+ * Records the source's first sync attempt once (idempotent). Called before any
+ * provider call, on managed brains while the connector sync lease is held.
+ */
+export async function recordConnectorSyncAttempt(engine: Pick<BrainEngine, 'executeRaw'>, sourceId: string, at = new Date().toISOString()): Promise<void> {
+  const [source] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation::text AS incarnation FROM sources WHERE id=$1', [sourceId]);
+  if (!source) return;
+  const state = await readManagedConnectorState(engine, sourceId, source.incarnation);
+  if (state.first_attempt_at) return;
+  await writeManagedConnectorState(engine, sourceId, source.incarnation, { ...state, first_attempt_at: at });
+}
+
+/**
+ * v181 (fix wave 4): records an attempt for every connector source the
+ * pre-upgrade freshness loop dispatched (non-null local_path and not
+ * `syncEnabled=false`), so the new gate idles no source autopilot synced.
+ */
+export async function seedConnectorDispatchAttempts(engine: Pick<BrainEngine, 'executeRaw'>): Promise<number> {
+  const rows = await engine.executeRaw<{ id: string; config: unknown }>(`SELECT id,config FROM sources
+    WHERE config->>'kind' IN ('google','github') AND local_path IS NOT NULL`);
+  let seeded = 0;
+  const at = new Date().toISOString();
+  for (const row of rows) {
+    // Same predicate as isSyncDisabledConfig (sync-policy.ts), inlined so the schema-migration closure stays small.
+    const config = (typeof row.config === 'string' ? JSON.parse(row.config) : row.config) as { syncEnabled?: unknown } | null;
+    if (config?.syncEnabled === false) continue;
+    await recordConnectorSyncAttempt(engine, row.id, at);
+    seeded++;
+  }
+  return seeded;
+}
+
+/** Connector source ids (google, github) with a recorded sync attempt: the autopilot dispatch gate. */
+export async function attemptedConnectorSourceIds(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Set<string>> {
+  const rows = await engine.executeRaw<{ id: string; incarnation: string }>(
+    "SELECT id,incarnation::text AS incarnation FROM sources WHERE config->>'kind' IN ('google','github')");
+  const attempted = new Set<string>();
+  for (const row of rows) if ((await readManagedConnectorState(engine, row.id, row.incarnation)).first_attempt_at) attempted.add(row.id);
+  return attempted;
 }
 
 /** Account pins compare the resolved identity only; the recorded display never includes credentials. */

@@ -181,6 +181,7 @@ import { v177 } from './v177-pages-database-only-reason.ts';
 import { v178 } from './v178-persistence-writer-version-stamps.ts';
 import { v179 } from './v179-persistence-request-sync-run-indexes.ts';
 import { v180 } from './v180-pages-links-attendance-blocked.ts';
+import { v181 } from './v181-connector-dispatch-attempts.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -360,4 +361,5 @@ export const MIGRATIONS: Migration[] = [
   v178,
   v179,
   v180,
+  v181,
 ];

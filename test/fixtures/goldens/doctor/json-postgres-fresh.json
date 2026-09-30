@@ -567,6 +567,17 @@
         {
           "category": "brain",
           "details": {
+            "docs": "docs/guides/repair.md#connector-held-items",
+            "held": 0,
+            "sources": []
+          },
+          "message": "No connector items are held.",
+          "name": "connector_held_items",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
             "sources": [],
             "total": 0
           },

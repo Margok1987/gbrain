@@ -457,7 +457,7 @@ async function runAdd(engine: BrainEngine, args: string[]): Promise<void> {
     console.log(`  clone path: ${created.local_path}`);
   }
   console.log(
-    `  federated: ${fed}${fed ? ' — appears in cross-source default search' : ' — only searched when explicitly named via --source'}`,
+    `  federated: ${fed}${fed ? ' — appears in cross-source default search' : ' — only searched when explicitly named via --source'}${gKind || ghKind ? `\n  first sync: gbrain sync --source ${id} (autopilot keeps the source synced after its first sync)` : ''}`,
   );
 
   // v0.42.44 — auto-harden managed clones for git durability the moment a brain
@@ -1880,6 +1880,7 @@ export async function runSources(engine: BrainEngine, args: string[]): Promise<v
     case 'set-cr-mode': return runSetCrMode(engine, rest);
     // #4739 non-destructive local_path pointer repair
     case 'set-path':   { const { runSetPath } = await import('./sources-set-path.ts'); return runSetPath(engine, rest); }
+    case 'retry-held': { const { runRetryHeld } = await import('./sources-retry-held.ts'); return runRetryHeld(engine, rest); }
     case 'audit':      return runAudit(engine, rest);
     // v0.46 github-source demo (offline, privacy-clean fixtures)
     case 'demo':       { const { runSourcesDemo } = await import('./sources-demo.ts'); return runSourcesDemo(engine, rest); }
@@ -1956,6 +1957,8 @@ Subcommands:
                                     Rejects a missing source or a path that
                                     doesn't exist. See gbrain doctor's
                                     default_source_local_path check.
+  retry-held <id> [--dry-run] [--json]
+                                    Re-attempt a Google or GitHub source's held items on its next sync.
   webhook <set|show|rotate|clear> <id> [options]
                                     v0.40 — per-source webhook secret management.
                                     Run 'sources webhook --help' for subcommand detail.

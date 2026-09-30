@@ -268,6 +268,7 @@ export const timelineHistoryEntry: DoctorEntry = {
     'connector_checkpoints',
     'persistence_request_indexes',
     'persistence_request_growth',
+    'connector_held_items',
     'unbound_source',
     'writer_version',
     'self_capture',
