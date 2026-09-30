@@ -127,6 +127,8 @@ import type { PgSalienceDeps } from './postgres-engine/salience.ts';
 import { hasCJK } from './cjk.ts';
 import { searchKeywordCJK as searchKeywordCJKImpl } from './postgres-engine/cjk-search.ts';
 import type { CjkKeywordCtx } from './search/cjk-keyword-sql.ts';
+import { postgresExecutor, type RunUnsafeOpts } from './engine-sql/dialect-postgres.ts';
+import type { SqlExecutor } from './engine-sql/executor.ts';
 
 function escapeSqlStringLiteral(value: string): string {
   return value.replace(/'/g, "''");
@@ -238,6 +240,18 @@ export class PostgresEngine implements BrainEngine {
       );
     }
     return db.getConnection();
+  }
+
+  /**
+   * Engine-sql executor over the CURRENT connection (EO1): a fresh adapter on
+   * every access, never stored, so a transaction clone (whose `sql` getter
+   * returns the tx handle) runs migrated domain SQL inside its transaction.
+   */
+  private get engineSql(): SqlExecutor {
+    return postgresExecutor(this.sql, {
+      runUnsafe: (conn, sql, params, opts) => this.runUnsafe(conn, sql, params, opts),
+      gauge: this.checkoutGauge,
+    });
   }
 
   // Source-scope binding for Postgres RLS — opt-in via env var.
@@ -5341,7 +5355,7 @@ export class PostgresEngine implements BrainEngine {
     conn: ReturnType<typeof postgres>,
     sql: string,
     params?: unknown[],
-    opts?: { signal?: AbortSignal },
+    opts?: RunUnsafeOpts,
   ): Promise<T[]> {
     if (opts?.signal?.aborted) {
       throw new DOMException('aborted', 'AbortError');
@@ -5360,7 +5374,12 @@ export class PostgresEngine implements BrainEngine {
         owner = reserved ?? conn as unknown as postgres.TransactionSql;
         if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
         if (signal && !hasPostgresCancellationCapability(owner)) throw postgresCancellationUnavailable();
-        pending = conn.unsafe(sql, params as Parameters<typeof conn.unsafe>[1], { cancelFence: !!signal });
+        // prepare/simple are forwarded only when a caller sets them (the
+        // engine-sql adapter, EO2); executeRaw/executeRawDirect never do.
+        const driverOpts = opts?.prepare === undefined && opts?.simple === undefined
+          ? { cancelFence: !!signal }
+          : { cancelFence: !!signal, prepare: opts.prepare, simple: opts.simple };
+        pending = conn.unsafe(sql, params as Parameters<typeof conn.unsafe>[1], driverOpts);
         return await pending as unknown as T[];
       } finally {
         signal?.removeEventListener('abort', onAbort);

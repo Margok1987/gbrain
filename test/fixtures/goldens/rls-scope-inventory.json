@@ -3274,6 +3274,7 @@
         "disconnect": "none",
         "disconnectInternal": "none",
         "discoverOntologyDimensions": "none",
+        "engineSql": "none",
         "executeRaw": "none",
         "executeRawDirect": "none",
         "expireFact": "none",

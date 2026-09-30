@@ -135,6 +135,8 @@ import * as factsImpl from './pglite-engine/facts.ts';
 import type { PgliteFactsDeps } from './pglite-engine/facts.ts';
 import * as takesImpl from './pglite-engine/takes.ts';
 import { PgliteCheckpointGuard } from './pglite-engine/checkpoint-guard.ts';
+import { pgliteExecutor } from './engine-sql/dialect-pglite.ts';
+import type { SqlExecutor } from './engine-sql/executor.ts';
 import type { PgliteTakesDeps } from './pglite-engine/takes.ts';
 import * as codeEdgesImpl from './pglite-engine/code-edges.ts';
 import type { PgliteCodeEdgesDeps } from './pglite-engine/code-edges.ts';
@@ -745,6 +747,15 @@ export class PGLiteEngine implements BrainEngine {
   get db(): PGLiteDB {
     if (!this._db) throw new Error('PGLite not connected. Call connect() first.');
     return this._db;
+  }
+
+  /**
+   * Engine-sql executor over the CURRENT handle (EO1): a fresh adapter on
+   * every access, never stored, so a transaction clone (whose `db` getter
+   * returns the tx handle) runs migrated domain SQL inside its transaction.
+   */
+  private get engineSql(): SqlExecutor {
+    return pgliteExecutor(this.db);
   }
 
   // Lifecycle

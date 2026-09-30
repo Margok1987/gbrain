@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import postgres from '#postgres';
 import { messages } from '@electric-sql/pglite';
 import type { BrainEngine } from '../../src/core/engine.ts';
+import type { SqlExecutor } from '../../src/core/engine-sql/executor.ts';
 import { isDeadlockError } from '../../src/core/migrate.ts';
 
 export type BindingBackend = 'pglite' | 'postgres-direct' | 'pgbouncer';
@@ -56,6 +57,26 @@ export function executeRawExecutor(engine: BrainEngine, family: EngineFamily): E
     },
     transaction(fn) {
       return engine.transaction((tx) => fn(executeRawExecutor(tx, family)));
+    },
+  };
+}
+
+/**
+ * The engine-sql dialect adapters (refactor wave 1, C9). Resolves the engine's
+ * `engineSql` getter on EVERY call, and `transaction` runs through
+ * `engine.transaction()` so the clone's getter yields the transaction handle
+ * (EO1). The adapters report `affectedRows` on every backend (EO18).
+ */
+export function engineSqlExecutor(engine: BrainEngine, family: EngineFamily): ExecutorUnderTest {
+  const executor = () => (engine as unknown as { engineSql: SqlExecutor }).engineSql;
+  return {
+    reportsAffectedRows: true,
+    async run(sql, params, opts) {
+      const res = await executor().query<Record<string, unknown>>(sql, params, opts);
+      return { rows: [...res.rows], affectedRows: res.affectedRows };
+    },
+    transaction(fn) {
+      return engine.transaction((tx) => fn(engineSqlExecutor(tx, family)));
     },
   };
 }
@@ -457,13 +478,16 @@ export function defineExecutorBindingMatrix(opts: {
   backend: BindingBackend;
   getEngine: () => BrainEngine;
   makeExecutor?: (engine: BrainEngine, family: EngineFamily) => ExecutorUnderTest;
+  /** Suffix naming a non-default executor in the describe title. */
+  executorName?: string;
 }): void {
   const family: EngineFamily = opts.backend === 'pglite' ? 'pglite' : 'postgres';
   const makeExecutor = opts.makeExecutor ?? executeRawExecutor;
   let executed = 0;
   let exec: ExecutorUnderTest;
 
-  describe(`E5 executor binding matrix [${opts.backend}]`, () => {
+  const title = `E5 executor binding matrix [${opts.backend}]${opts.executorName ? ` (${opts.executorName})` : ''}`;
+  describe(title, () => {
     beforeAll(async () => {
       exec = makeExecutor(opts.getEngine(), family);
       await exec.run(`DROP TABLE IF EXISTS ${TABLE}`);

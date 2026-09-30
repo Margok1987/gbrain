@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
-import { defineExecutorBindingMatrix } from './helpers/executor-binding-matrix.ts';
+import { defineExecutorBindingMatrix, engineSqlExecutor } from './helpers/executor-binding-matrix.ts';
 
 let engine: PGLiteEngine;
 
@@ -20,3 +20,4 @@ afterAll(async () => {
 });
 
 defineExecutorBindingMatrix({ backend: 'pglite', getEngine: () => engine });
+defineExecutorBindingMatrix({ backend: 'pglite', getEngine: () => engine, makeExecutor: engineSqlExecutor, executorName: 'engine-sql' });

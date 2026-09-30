@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { resolvePrepare } from '../../src/core/db.ts';
 import type { PostgresEngine } from '../../src/core/postgres-engine.ts';
-import { defineExecutorBindingMatrix, type BindingBackend } from '../helpers/executor-binding-matrix.ts';
+import { defineExecutorBindingMatrix, engineSqlExecutor, type BindingBackend } from '../helpers/executor-binding-matrix.ts';
 import { hasDatabase, setupDB, teardownDB } from './helpers.ts';
 
 const backend = (process.env.GBRAIN_TEST_BACKEND ?? 'postgres-direct') as BindingBackend;
@@ -37,4 +37,5 @@ describeDb(`executor binding matrix on ${backend}`, () => {
   });
 
   defineExecutorBindingMatrix({ backend, getEngine: () => engine });
+  defineExecutorBindingMatrix({ backend, getEngine: () => engine, makeExecutor: engineSqlExecutor, executorName: 'engine-sql' });
 });
