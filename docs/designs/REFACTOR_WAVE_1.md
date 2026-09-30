@@ -202,8 +202,10 @@ landing window slips.
 - Public API: W0 export-surface golden (sorted runtime export names for every `package.json` exports subpath touched,
   plus `PGLiteEngine`/`PostgresEngine` prototype method names, plus a .d.ts snapshot) and an external consumer fixture
   importing through package names, typechecked against the candidate. Downstream users need zero import edits, zero new
-  config, zero special commands. Every moved exported symbol stays importable from its old module (CLAUDE.md facade rule,
-  unconditional, not "where useful"). `ScopedExecutor` and adapter types stay internal.
+  config, zero special commands. Every symbol exported by a façade or a `package.json` exports subpath stays importable from its old module
+  (CLAUDE.md façade rule, unconditional). Internal per-engine peel modules merged into `engine-sql/` (their exports took
+  engine-shaped deps no caller outside the engines used) are removed rather than stubbed; `docs/architecture/wave-1-moves.json`
+  maps each removed symbol to its engine-sql replacement. `ScopedExecutor` and adapter types stay internal.
 - Always-loaded docs rewritten in the same PR: CLAUDE.md (engine parity, migrations, `region-exempt`, peeled facades
   list), CONTRIBUTING (tree, "Adding a new engine"), `docs/ENGINES.md`, `docs/guides/rls-and-you.md`,
   `docs/architecture/infra-layer.md`, `KEY_FILES.md` + `key-files/*`; rg-sweep for retired phrases returns nothing;
