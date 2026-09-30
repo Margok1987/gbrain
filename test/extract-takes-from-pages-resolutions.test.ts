@@ -54,4 +54,38 @@ for (const backend of testBackends()) {
       writeFileSync(path, serializePageToMarkdown(snapshot.page, snapshot.tags));
     } });
   }, 120_000);
+
+  const refusals: Array<[string, string, (engine: import('../src/core/engine.ts').BrainEngine, pageId: number) => Promise<void>, string]> = [
+    ['a resolution without a quality', 'invalid_input', async (engine, id) => {
+      await engine.executeRaw("UPDATE takes SET resolved_at=now(), resolved_value=42, resolved_unit='USD' WHERE page_id=$1 AND row_num=1", [id]);
+    }, ''],
+    ['multi-line resolution evidence', 'invalid_input', async (engine, id) => {
+      await engine.resolveTake(id, 1, { quality: 'correct', source: 'Line one\nLine two', resolvedBy: 'system' });
+    }, ''],
+    ['a malformed fence row beside the graded one', 'fence_unparsed', async (engine, id) => {
+      await engine.resolveTake(id, 1, { quality: 'correct', source: 'grader note', resolvedBy: 'system' });
+    }, '| 2 | a malformed row | bet | system | not-a-weight |  | manual |\n'],
+  ];
+  for (const [name, code, grade, extraRow] of refusals) {
+    test(`${backend}: ${name} refuses the page instead of clearing its database resolution`, async () => {
+      await managedBrain(async ({ engine, root }) => {
+        const before = await engine.executeRaw('SELECT row_num, resolved_at, resolved_quality, resolved_source, resolved_value, resolved_unit FROM takes ORDER BY row_num');
+        const file = readFileSync(join(root, `${SLUG}.md`), 'utf8');
+        const result = await extractTakesFromPages(engine, { bootstrapEnabled: true, sourceIdFilter: 'default', maxPages: 1, includeCovered: true });
+        expect(result).toMatchObject({ claims_extracted: 0, pages_skipped: 1, skipped: [{ slug: SLUG, reason: code }] });
+        expect(await engine.executeRaw('SELECT row_num, resolved_at, resolved_quality, resolved_source, resolved_value, resolved_unit FROM takes ORDER BY row_num')).toEqual(before);
+        expect(readFileSync(join(root, `${SLUG}.md`), 'utf8')).toBe(file);
+      }, { databaseUrl, setup: async ({ engine, root }) => {
+        const compiledTruth = `${BODY}\n\n## Takes\n\n<!--- gbrain:takes:begin -->\n| # | claim | kind | who | weight | since | source |\n|---|-------|------|-----|--------|-------|--------|\n| 1 | an earlier graded take | bet | system | 0.6 |  | manual |\n${extraRow}<!--- gbrain:takes:end -->`;
+        const page = await engine.putPage(SLUG, { type: 'concept', title: SLUG, compiled_truth: compiledTruth, timeline: '', frontmatter: {} });
+        await engine.executeRaw('UPDATE pages SET source_path=$1 WHERE id=$2', [`${SLUG}.md`, page.id]);
+        await engine.addTakesBatch([{ page_id: page.id, row_num: 1, claim: 'an earlier graded take', kind: 'bet', holder: 'system', weight: 0.6, source: 'manual', active: true, superseded_by: null }]);
+        await grade(engine, page.id);
+        const snapshot = (await engine.readPageSnapshot(SLUG, { sourceId: 'default' }))!;
+        const path = join(root, `${SLUG}.md`);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(path, serializePageToMarkdown(snapshot.page, snapshot.tags));
+      } });
+    }, 120_000);
+  }
 }
