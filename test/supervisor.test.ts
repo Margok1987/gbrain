@@ -604,10 +604,11 @@ describe('MinionSupervisor', () => {
   // classifier's reference heuristic can't leak onto sibling suites).
   describe('recovery hook timeout bound (structural)', () => {
     it('the hook bounds recovery in a Promise.race with a 30_000ms timeout', () => {
-      const supervisorSource = surfaceFileSource('jobs', 'src/commands/jobs.ts');
+      // W4 jobs: the hook moved with its only caller into src/commands/jobs/work.ts.
+      const supervisorSource = surfaceFileSource('jobs', 'src/commands/jobs/work.ts');
       const hookStart = supervisorSource.indexOf('export async function maybeRunWorkerStartupRecovery');
       expect(hookStart).toBeGreaterThan(-1);
-      const hookEnd = supervisorSource.indexOf('export async function runJobs(');
+      const hookEnd = supervisorSource.indexOf('export async function runJobsWork(');
       expect(hookEnd).toBeGreaterThan(hookStart);
       const body = supervisorSource.slice(hookStart, hookEnd);
       expect(body).toContain('Promise.race');

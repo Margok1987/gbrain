@@ -438,7 +438,8 @@ describe('autopilot wiring: chat-unavailable boot warning (#2608)', () => {
     // spawns a real engine + worker supervisor, so it isn't practical to
     // drive end-to-end in a unit test. Pin the wiring instead — the warning
     // logic itself is covered by the direct chatBootWarning() tests above.
-    const src = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
+    // W4 autopilot: the daemon boot lives in src/commands/autopilot-daemon.ts.
+    const src = surfaceFileSource('autopilot', 'src/commands/autopilot-daemon.ts');
 
     const startingIdx = src.indexOf('Autopilot starting. Repo:');
     const chatCheckIdx = src.indexOf(`isAvailable('chat')`);

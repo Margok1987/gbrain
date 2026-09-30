@@ -19,9 +19,11 @@
  * these static-shape regressions pin the load-bearing wiring instead.
  */
 import { describe, expect, it } from 'bun:test';
-import { surfaceFileSource } from './helpers/source-surface.ts';
+import { surfaceFileSource, surfaceSource } from './helpers/source-surface.ts';
 
-const AUTOPILOT_SRC = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
+// W4 autopilot: containment reads the autopilot surface; positional spans name the module that holds the daemon code.
+const AUTOPILOT_SRC = surfaceSource('autopilot');
+const DAEMON_SRC = surfaceFileSource('autopilot', 'src/commands/autopilot-daemon.ts');
 
 describe('autopilot.ts graceful engine shutdown (#1872)', () => {
   it('registers an engine-close callback in the process-cleanup registry (SIGTERM path)', () => {
@@ -39,7 +41,7 @@ describe('autopilot.ts graceful engine shutdown (#1872)', () => {
   it('closeEngine aborts the in-flight inline cycle then disconnects the engine', () => {
     // Abort first (runCycle checks the signal between phases and threads it
     // into phase sub-work), bounded drain, then disconnect.
-    expect(AUTOPILOT_SRC).toMatch(
+    expect(DAEMON_SRC).toMatch(
       /const closeEngine = async \(\) => \{[\s\S]{0,900}shutdownAbort\.abort\([\s\S]{0,900}engine\.disconnect\(\)/,
     );
   });
@@ -52,7 +54,7 @@ describe('autopilot.ts graceful engine shutdown (#1872)', () => {
   });
 
   it('shutdown() awaits closeEngine() before process.exit (SIGINT + internal-stop path)', () => {
-    expect(AUTOPILOT_SRC).toMatch(
+    expect(DAEMON_SRC).toMatch(
       /await closeEngine\(\);[\s\S]{0,400}process\.exit\(/,
     );
   });

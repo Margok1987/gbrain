@@ -122,7 +122,8 @@ describe('maybeRunWorkerStartupRecovery', () => {
 // reference heuristic can't leak onto sibling suites).
 describe('work-handler recovery placement (structural)', () => {
   test('the work handler awaits recovery right after ensureSchema, before the worker spawns', () => {
-    const jobsSource = surfaceFileSource('jobs', 'src/commands/jobs.ts');
+    // W4 jobs: the work handler is src/commands/jobs/work.ts.
+    const jobsSource = surfaceFileSource('jobs', 'src/commands/jobs/work.ts');
     const callSite = 'await maybeRunWorkerStartupRecovery(queue, process.env, true);';
     const callIdx = jobsSource.indexOf(callSite);
     expect(callIdx).toBeGreaterThan(-1);

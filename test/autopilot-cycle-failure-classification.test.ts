@@ -28,9 +28,11 @@
 
 import { describe, test, expect } from 'bun:test';
 import { readFileSync } from 'fs';
-import { surfaceFileSource } from './helpers/source-surface.ts';
+import { surfaceFileSource, surfaceSource } from './helpers/source-surface.ts';
 
-const autopilotSource = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
+// W4 autopilot: containment reads the autopilot surface; positional spans name the module that holds the daemon code.
+const autopilotSource = surfaceSource('autopilot');
+const daemonSource = surfaceFileSource('autopilot', 'src/commands/autopilot-daemon.ts');
 const cycleSource = readFileSync(
   new URL('../src/core/cycle.ts', import.meta.url),
   'utf8',
@@ -39,12 +41,12 @@ const cycleSource = readFileSync(
 describe("autopilot cycle-failure classification — only 'failed' trips the circuit breaker", () => {
   test("the inline-cycle path does NOT treat 'partial' as cycleOk=false", () => {
     // Find the inline-cycle block (the catch-and-inspect on `report`)
-    const inlineBlockStart = autopilotSource.indexOf("event: 'cycle-inline'");
+    const inlineBlockStart = daemonSource.indexOf("event: 'cycle-inline'");
     expect(inlineBlockStart).toBeGreaterThan(0);
 
     // Look at the 800 chars before the JSON event line — that's where the
     // cycleOk classification happens.
-    const inlineContext = autopilotSource.slice(
+    const inlineContext = daemonSource.slice(
       Math.max(0, inlineBlockStart - 800),
       inlineBlockStart,
     );

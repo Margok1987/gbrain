@@ -224,10 +224,17 @@ describe('protected-names register comment names the real trust mechanism', () =
 // backlog silently completing untouched.
 describe('extract-atoms-drain Minion handler retries on provider_failure (issue #3218)', () => {
   const jobsSrc = surfaceFileSource('jobs', 'src/commands/jobs.ts');
-  const handlerBlock = jobsSrc.slice(
-    jobsSrc.indexOf("registerBuiltinJob(worker, engine, 'extract-atoms-drain'"),
-    jobsSrc.indexOf("registerBuiltinJob(worker, engine, 'extract-atoms-drain'") + 2200,
+  // W4 jobs: the handler body moved into its own module; jobs.ts keeps the registration.
+  const handlerSrc = surfaceFileSource('jobs', 'src/core/minions/handlers/extract-atoms-drain.ts');
+  const handlerBlock = handlerSrc.slice(
+    handlerSrc.indexOf('export function makeExtractAtomsDrainHandler('),
+    handlerSrc.indexOf('export function makeExtractAtomsDrainHandler(') + 2200,
   );
+
+  it('jobs.ts registers the extract-atoms-drain handler module', () => {
+    expect(jobsSrc).toContain("registerBuiltinJob(worker, engine, 'extract-atoms-drain', makeExtractAtomsDrainHandler(engine))");
+    expect(handlerSrc.indexOf('export function makeExtractAtomsDrainHandler(')).toBeGreaterThan(-1);
+  });
 
   it("throws when result.status === 'provider_failure' instead of returning it", () => {
     expect(handlerBlock).toMatch(/result\.status === 'provider_failure'/);
