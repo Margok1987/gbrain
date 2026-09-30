@@ -7,7 +7,6 @@
 # docs/TESTING.md#function-size-ratchet
 path	name	lines	justification
 src/commands/apply-migrations.ts	runApplyMigrations	305	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/autopilot.ts	runAutopilot	1116	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/bootstrap.ts	runHooks	597	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/bootstrap.ts	runHooks>withLock(#1)	449	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/config.ts	runConfig	852	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
@@ -23,8 +22,6 @@ src/commands/extract-conversation-facts.ts	processPage	307	seed: W5 baseline, re
 src/commands/extract-conversation-facts.ts	runExtractConversationFactsCore	371	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/extract.ts	runExtract	398	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/import.ts	runImport	959	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/jobs.ts	registerBuiltinHandlers	1067	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/jobs.ts	runJobs	1554	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/mcp-expose.ts	runPublish	443	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/migrate-embeddings.ts	runMigrateEmbeddings	325	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/migrate-engine.ts	runMigrateEngine	405	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
@@ -68,8 +65,6 @@ src/core/postgres-engine/forward-reference-bootstrap.ts	applyPostgresForwardRefe
 src/core/progressive-batch/orchestrator.ts	runProgressiveBatch	348	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/remediation/run.ts	runRemediation	428	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/schema-pack/unify-types-handler.ts	runUnifyTypes	310	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/core/search/hybrid.ts	hybridSearch	1244	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/core/search/hybrid.ts	hybridSearchCached	437	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/skillopt/orchestrator.ts	runOptimizationLoop	704	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/skillopt/orchestrator.ts	runOptimizationLoop>withBudgetTracker(#1)	405	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/core/sources-ops.ts	addSource	317	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)

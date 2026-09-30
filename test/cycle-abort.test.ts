@@ -95,6 +95,7 @@ describe('autopilot-cycle handler contract (v0.20.5)', () => {
     // Verify the handler code in jobs.ts includes job.signal
     const fs = await import('fs');
     const jobsSource = surfaceFileSource('jobs', 'src/commands/jobs.ts');
+    const handlerSource = surfaceFileSource('jobs', 'src/core/minions/handlers/autopilot-cycle.ts');
 
     // The autopilot-cycle handler MUST pass signal to runCycle.
     // Source-level regression guard.
@@ -105,9 +106,12 @@ describe('autopilot-cycle handler contract (v0.20.5)', () => {
     // that pushes the runCycle({signal:...}) call further down. The intent of
     // the guard is unchanged: "the autopilot-cycle handler passes job.signal
     // to runCycle." The window just needs to span any reasonable handler.
-    const handlerStart = jobsSource.indexOf("registerBuiltinJob(worker, engine, 'autopilot-cycle'");
+    // W4 jobs: registration stays in jobs.ts; the handler body lives in
+    // src/core/minions/handlers/autopilot-cycle.ts.
+    expect(jobsSource).toContain("registerBuiltinJob(worker, engine, 'autopilot-cycle', makeAutopilotCycleHandler(engine))");
+    const handlerStart = handlerSource.indexOf('export function makeAutopilotCycleHandler(');
     expect(handlerStart).toBeGreaterThan(-1);
-    const handlerBlock = jobsSource.slice(handlerStart, handlerStart + 8000);
+    const handlerBlock = handlerSource.slice(handlerStart, handlerStart + 8000);
 
     expect(handlerBlock).toContain('signal: job.signal');
   });
