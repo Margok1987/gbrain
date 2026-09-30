@@ -145,6 +145,9 @@ CHECKS=(
   "check:sync-run-state"
   "check:schema-migrations"
   "check:schema-fresh"
+  # W7 (refactor wave 1): workflow phrases the wave retired stay out of the
+  # docs agents follow (CLAUDE.md, AGENTS.md, CONTRIBUTING.md, docs/, skills/).
+  "check:retired-phrases"
   "check:schema-migration-order"
   "check:structural-manifest"
   # v0.50.5.0 security wave: compiled binaries must not autoload a cwd bunfig.toml.
