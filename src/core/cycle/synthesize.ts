@@ -534,8 +534,7 @@ async function runPhaseSynthesizeInner(
       concurrency: config.triage.concurrency,
       maxMs: config.triage.maxMs,
       signal: opts.signal,
-      rescue: rescueConfigOf(config.triage),
-      decide: await resolveTriageDecide(engine),
+      rescue: rescueConfigOf(config.triage), decide: await resolveTriageDecide(engine),
     }, opts.yieldDuringPhase);
     pass.reports.push(...transcripts.filter(t => retained.has(t.filePath)).map(t => ({ filePath: t.filePath,
       worth: true, score: null, content_type: null, cached: true, reasons: ['retained_completed_output'] })));
@@ -577,8 +576,7 @@ async function runPhaseSynthesizeInner(
       rescue_checked: pass.reports.filter(
         r => r.score !== null && r.score < config.triage.threshold && r.score >= config.triage.rescueFloor,
       ).length,
-      rescue_fired: pass.reports.filter(r => r.rescued === true).length,
-      ...(pass.decide ? { decide: pass.decide } : {}),
+      rescue_fired: pass.reports.filter(r => r.rescued === true).length, ...(pass.decide ? { decide: pass.decide } : {}),
     };
     // 3A: a time-boxed cold pass must never read as mass rejection.
     const deferralSuffix = pass.deferred > 0
@@ -1151,9 +1149,7 @@ async function runPhaseSynthesizeInner(
       finalizedRefs = processed.finalizedRefs;
       quoteVerifyStats = config.quoteVerify ? processed.stats : null;
     } else if (config.quoteVerify && writtenRefs.length > 0) {
-      const transcriptsForVerify = new Map<string, TranscriptForVerify>(
-        worthProcessing.map(t => [t.filePath, { content: t.content }]),
-      );
+      const transcriptsForVerify = new Map<string, TranscriptForVerify>(worthProcessing.map(t => [t.filePath, { content: t.content }]));
       try {
         quoteVerifyStats = await verifyAndRepairDreamPages(engine, writtenRefs, transcriptsForVerify,
           { since: verifySince, sinceByTranscript, checkedAt: summaryDate, signal: opts.signal, grounding });

@@ -5,8 +5,9 @@
  */
 import { whatIfGrounding } from '../../core/cycle/grounding-decide.ts';
 import { whatIfTriage } from '../../core/cycle/triage-decide.ts';
-import '../../core/cycle/decide-datasets.ts';
+import { registerWritePathDatasets } from '../../core/cycle/decide-datasets.ts';
 import { registerWhatIfReducer } from './receipts.ts';
 
+registerWritePathDatasets();
 registerWhatIfReducer('triage', whatIfTriage);
 registerWhatIfReducer('grounding', whatIfGrounding);

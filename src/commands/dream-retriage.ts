@@ -246,6 +246,24 @@ function estimatePerFileUsd(model: string, maxChars: number, maxTokens: number):
   return (inputTokens / 1_000_000) * pricing.input + (maxTokens / 1_000_000) * pricing.output;
 }
 
+/**
+ * System One S7: when the slot acts, decide verdicts (cache identity =
+ * provider + model + policy), the slot threshold and Jev window pricing join
+ * every retriage read; otherwise this is today's triage model and estimate.
+ */
+async function retriageS7(engine: BrainEngine, config: Awaited<ReturnType<typeof loadSynthConfig>>, since: Date | undefined) {
+  const decide = await resolveTriageDecide(engine);
+  const llmUsd = estimatePerFileUsd(config.triage.model, config.triage.maxChars, config.triage.maxTokens);
+  return {
+    decide,
+    gate: decide?.gate,
+    cacheValid: (cached: DreamVerdict): boolean => isTriageCacheValid(cached, config.triage.model, since)
+      || (decide?.acting === true && isTriageCacheValid(cached, decide.identity, since)),
+    model: decide?.acting ? decide.stats.provider : config.triage.model,
+    perFileUsd: decide?.acting ? estimateTriageDecideUsd(decide.stats.provider, config.triage.maxChars) ?? llmUsd : llmUsd,
+  };
+}
+
 async function confirmOnTty(prompt: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false;
   const rl = createInterface({ input: process.stdin, output: process.stderr });
@@ -288,12 +306,7 @@ export async function runDreamRetriage(engine: BrainEngine | null, args: string[
   // fan-out applies. An operator sweep must never cancel queued jobs the
   // rescue admitted (reconcile below), nor audit rescued files as "rejects".
   const rescueCfg = rescueConfigOf(config.triage);
-  // System One S7: when the slot is on, decide verdicts (cache identity =
-  // provider + model + policy) and the slot threshold join every read below.
-  const decide = await resolveTriageDecide(engine);
-  const decideGate = decide?.gate;
-  const cacheValid = (cached: DreamVerdict): boolean => isTriageCacheValid(cached, config.triage.model, parsed.since ?? undefined)
-    || (decide?.acting === true && isTriageCacheValid(cached, decide.identity, parsed.since ?? undefined));
+  const { decide, gate: decideGate, cacheValid, model: triageModel, perFileUsd } = await retriageS7(engine, config, parsed.since ?? undefined);
 
   let transcripts = discoverTranscripts({
     corpusDir: config.corpusDir,
@@ -354,10 +367,6 @@ export async function runDreamRetriage(engine: BrainEngine | null, args: string[
       const valid = cached !== null && cacheValid(cached);
       if (!valid) missCount++;
     }
-    const triageModel = decide?.acting ? decide.stats.provider : config.triage.model;
-    const perFileUsd = decide?.acting
-      ? estimateTriageDecideUsd(decide.stats.provider, config.triage.maxChars) ?? estimatePerFileUsd(config.triage.model, config.triage.maxChars, config.triage.maxTokens)
-      : estimatePerFileUsd(config.triage.model, config.triage.maxChars, config.triage.maxTokens);
     // CX3: --max-usd is estimate-based; an unpriced model would silently
     // disable the budget the operator explicitly asked for — refuse instead.
     if (parsed.maxUsd !== null && perFileUsd === null) {
