@@ -65,6 +65,8 @@ export interface DecideSearchOpts {
   callSite?: string;
   /** Run only S1 (a crag_escalation re-run judges its new candidates with S2-S5 off). */
   rerankOnly?: boolean;
+  /** Run today's pipeline with every slot off (decide probe --query baseline). */
+  off?: boolean;
 }
 
 /** Max candidates the S3 request judges (fixed by design; the unjudged tail is kept). */
@@ -86,6 +88,11 @@ const coPackHandlers: EvidenceCoPackHandler[] = [];
 
 export function registerEvidenceCoPack(handler: EvidenceCoPackHandler): void {
   if (!coPackHandlers.some((h) => h.slot === handler.slot)) coPackHandlers.push(handler);
+}
+
+/** Slots riding the S3 request under `cfg` (part of the evidence pack_shape). */
+export function evidenceCoPackedSlots(cfg: DecideConfig): DecideSlot[] {
+  return coPackHandlers.filter((h) => cfg.slots[h.slot].mode !== 'off').map((h) => h.slot);
 }
 
 // ---------------------------------------------------------------------------
@@ -119,6 +126,7 @@ export async function resolveDecideSearchContext(
   snapshot: Record<string, string> | null | undefined,
   opts: { rerankerModel?: string; rerankerEnabled: boolean; decide?: DecideSearchOpts; sourceId?: string },
 ): Promise<DecideSearchContext | undefined> {
+  if (opts.decide?.off) return undefined;
   const cfg = readDecideConfig(snapshot ?? null);
   if (opts.decide?.rerankOnly) {
     for (const slot of Object.keys(cfg.slots) as DecideSlot[]) if (slot !== 'rerank') cfg.slots[slot] = { ...cfg.slots[slot], mode: 'off' };
@@ -133,7 +141,7 @@ export async function resolveDecideSearchContext(
     policies.rerank = resolveSlotPolicy({ cfg, slot: 'rerank', callSite, packShape: packShape('rerank'), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey, rerankerModel });
   }
   if (cfg.slots.evidence.mode !== 'off') {
-    const coPacked = coPackHandlers.filter((h) => cfg.slots[h.slot].mode !== 'off').map((h) => h.slot);
+    const coPacked = evidenceCoPackedSlots(cfg);
     policies.evidence = resolveSlotPolicy({ cfg, slot: 'evidence', callSite, packShape: packShape('evidence', coPacked), calibrations: state.rows, lastResolved: state.resolved, hasTypesafeKey: hasKey });
     for (const h of coPackHandlers) {
       if (cfg.slots[h.slot].mode === 'off') continue;

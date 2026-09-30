@@ -114,8 +114,7 @@ import {
 } from './defaults.ts';
 import { logRerankFailure, type RerankFailureReason } from '../rerank-audit.ts';
 import { rerankViaDecide } from './decide/rerank-adapter.ts';
-import { runDecide, type DecideContext } from './decide/index.ts';
-import type { DecideRequest, DecideResult } from './decide/types.ts';
+import { runDecide, type DecideContext, type DecideRequest, type DecideResult } from './decide/index.ts';
 const DEFAULT_EXPANSION_MODEL = 'anthropic:claude-haiku-4-5-20251001';
 const DEFAULT_CHAT_MODEL = 'anthropic:claude-sonnet-4-6';
 // v0.35.0.0+: reranker runtime fallback. Used only when search.reranker.enabled
@@ -4156,17 +4155,10 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
     );
   }
   const cfg = requireConfig();
-  if (tp.wire_format === 'typesafe-systemone') {
-    if (recipe.authPresent && !recipe.authPresent(cfg.env)) {
-      noKeyOnce(modelStr, recipe.auth_env?.required[0] ?? 'API key', input.query, input.documents.length);
-      throw new RerankError(`Reranker ${modelStr} needs ${recipe.auth_env?.required[0]} (not set) — rerank skipped, results pass through unreranked.`, 'no_key');
-    }
-    return rerankViaDecide(input, {
-      model: modelStr, modelId: parsed.modelId, maxPayloadBytes: tp.max_payload_bytes, defaultTimeoutMs: DEFAULT_RERANK_TIMEOUT_MS, tracker,
-      url: `${applyOpenAICompatConfig(recipe, cfg).baseURL.replace(/\/$/, '')}${tp.path ?? '/systemone'}`,
-      headers: { ...authToHeaders(applyResolveAuth(recipe, cfg, 'reranker')), 'Content-Type': 'application/json' },
-      transport: _rerankTransport ?? ((u, init) => fetch(u, init)),
-    });
+  if (tp.wire_format === 'typesafe-systemone') { // System One reranker: packed score questions via the decide core (#5178 contract)
+    if (recipe.authPresent && !recipe.authPresent(cfg.env)) { noKeyOnce(modelStr, 'TYPESAFE_API_KEY', input.query, input.documents.length); throw new RerankError(`Reranker ${modelStr} needs TYPESAFE_API_KEY (not set) — rerank skipped, results pass through unreranked.`, 'no_key'); }
+    return rerankViaDecide(input, { model: modelStr, modelId: parsed.modelId, maxPayloadBytes: tp.max_payload_bytes, defaultTimeoutMs: DEFAULT_RERANK_TIMEOUT_MS, tracker, transport: _rerankTransport ?? ((u, init) => fetch(u, init)),
+      url: `${applyOpenAICompatConfig(recipe, cfg).baseURL.replace(/\/$/, '')}${tp.path ?? '/systemone'}`, headers: { ...authToHeaders(applyResolveAuth(recipe, cfg, 'reranker')), 'Content-Type': 'application/json' } });
   }
   // v0.48.2 `no_key` preflight — fail-open, audit-only, once per process per
   // model (see noKeyOnce). A recipe without a custom resolveAuth needs every

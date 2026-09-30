@@ -391,6 +391,23 @@ export async function receiptStats(engine: BrainEngine, opts: { slot?: DecideSlo
   }));
 }
 
+export interface SlotUsage { slot: string; decisions: number; rows: number; input_tokens: number; errors: number; skipped: number; egress: number }
+
+/** Per-slot decision counts, tokens, errors and egress refusals over the window (status, doctor, cost estimates). */
+export async function slotUsage(engine: BrainEngine, sinceHours = 24): Promise<SlotUsage[]> {
+  const rows = await engine.executeRaw<Record<string, unknown>>(
+    `SELECT slot, COUNT(DISTINCT decision_id)::int AS decisions, COUNT(*)::int AS rows,
+            COALESCE(SUM(input_tokens), 0)::int AS input_tokens,
+            SUM(CASE WHEN outcome = 'error' THEN 1 ELSE 0 END)::int AS errors,
+            SUM(CASE WHEN outcome = 'skipped' THEN 1 ELSE 0 END)::int AS skipped,
+            SUM(CASE WHEN error_reason LIKE 'egress%' OR error_reason IN ('denied_source','missing_provenance') THEN 1 ELSE 0 END)::int AS egress
+       FROM decision_receipts WHERE created_at >= now() - ($1::int * interval '1 hour')
+      GROUP BY slot ORDER BY slot`,
+    [sinceHours],
+  );
+  return rows.map((r) => ({ slot: String(r.slot), decisions: Number(r.decisions), rows: Number(r.rows), input_tokens: Number(r.input_tokens), errors: Number(r.errors), skipped: Number(r.skipped), egress: Number(r.egress) }));
+}
+
 export interface ReplayReceipt {
   decision_id: string;
   answer_value: number | null;
@@ -444,4 +461,11 @@ export async function pruneReceipts(engine: BrainEngine, retentionDays: number):
   );
   await engine.executeRaw(`DELETE FROM decide_spend WHERE created_at < now() - ($1::int * interval '1 day')`, [Math.max(retentionDays, 31)]);
   return Number(rows[0]?.n ?? 0);
+}
+
+/** Cycle purge hook: prune receipts past decide.receipts.retention_days (default 7). */
+export async function pruneReceiptsForCycle(engine: BrainEngine): Promise<number> {
+  const raw = await engine.getConfig('decide.receipts.retention_days');
+  const days = raw && /^\d+$/.test(raw) && Number(raw) >= 1 ? Number(raw) : 7;
+  return pruneReceipts(engine, days);
 }

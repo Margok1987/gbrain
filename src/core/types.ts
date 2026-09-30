@@ -962,10 +962,8 @@ export interface SearchResult {
    *  (RRF + boosts). v0.42.3.0 autocut cuts on this — the trustworthy
    *  separatrix — never on RRF/cosine. */
   rerank_score?: number;
-  /** `rubric` when rerank_score is a System One rubric level (autocut and CRAG do not consume it). */
-  rerank_score_kind?: 'rubric';
-  /** S3 evidence gate probability and whether it cleared the threshold (stamped only when the slot acted). */
-  decide_evidence?: { p: number; clears: boolean };
+  /** System One: `rubric` rerank scores (autocut/CRAG ignore them); the S3 evidence probability when the gate acted. */
+  rerank_score_kind?: 'rubric'; decide_evidence?: { p: number; clears: boolean };
   /**
    * v0.42 (T19, plan D6) — multiplier applied by applyAliasResolvedBoost
    * (1.0 = unchanged; default 1.05x). Fires when the result's slug is
@@ -1930,10 +1928,8 @@ export function affectsRecall(d: { stage?: string; reason?: string } | undefined
 export interface HybridSearchMeta {
   /** True iff vector search actually ran. False when OPENAI_API_KEY missing or embed failed. */
   vector_enabled: boolean;
-  /** System One slot diagnostics (present only when a slot ran with visible diagnostics). */
-  decide?: import('./search/decide-stage.ts').DecideSearchMeta;
-  /** System One reranker: the model version that answered. */
-  rerank?: { model_resolved: string };
+  /** System One: slot diagnostics (only when a slot ran visibly) and the reranker model version that answered. */
+  decide?: import('./search/decide-stage.ts').DecideSearchMeta; rerank?: { model_resolved: string };
   /** Post-auto-detect detail level. */
   detail_resolved: 'low' | 'medium' | 'high' | null;
   /** True iff multi-query expansion (Haiku) actually fired and produced variants. */

@@ -14,7 +14,7 @@
  * configured, the model is the one most recently resolved in receipts.
  */
 import { createHash } from 'node:crypto';
-import { providerKind, isTypesafeAlias, type DecideConfig } from './config.ts';
+import { DEFAULT_TYPESAFE_PROVIDER, providerKind, isTypesafeAlias, type DecideConfig } from './config.ts';
 import { llmCapability, llmChatModel } from './providers/llm-structured.ts';
 import { PROTECTION_VERSION } from './protection.ts';
 import { REFERENCE_CALIBRATIONS, type ReferenceCalibration } from './reference-calibrations.ts';
@@ -188,7 +188,14 @@ export function readiness(policy: SlotPolicy, inputs: PolicyInputs): string {
   if (policy.requested === 'shadow') return policy.inactive ? `shadow (inactive: ${policy.inactive})` : 'shadow';
   const spec = SLOT_SPECS[policy.slot];
   if (!spec.wired) return 'off';
-  const probe = resolveSlotPolicy({ ...inputs, cfg: { ...inputs.cfg, slots: { ...inputs.cfg.slots, [policy.slot]: { ...inputs.cfg.slots[policy.slot], mode: 'on' } } } });
+  // Probe what `decide enable <slot>` would produce (it writes the pinned default provider, and the reranker for S1).
+  const sc = inputs.cfg.slots[policy.slot];
+  const provider = sc.provider === 'none' ? DEFAULT_TYPESAFE_PROVIDER : sc.provider;
+  const probe = resolveSlotPolicy({
+    ...inputs,
+    cfg: { ...inputs.cfg, provider: inputs.cfg.provider === 'none' ? provider : inputs.cfg.provider, slots: { ...inputs.cfg.slots, [policy.slot]: { ...sc, mode: 'on', provider } } },
+    ...(policy.slot === 'rerank' ? { rerankerModel: inputs.rerankerModel?.startsWith('typesafe:') ? inputs.rerankerModel : DEFAULT_TYPESAFE_PROVIDER } : {}),
+  });
   if (!probe.inactive) return 'ready for on';
   return ['no_calibration', 'no_qualification', 'pack_shape_mismatch'].includes(probe.inactive) ? 'needs calibration' : 'off';
 }

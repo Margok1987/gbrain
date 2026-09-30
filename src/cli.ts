@@ -1859,6 +1859,7 @@ const THIN_CLIENT_REFUSE_HINTS: Record<string, string> = {
   connectors: 'connectors manage provider session credentials in ~/.gbrain/connectors and sync your chat history on the host. Credentials never cross the wire — run on the host machine.',
   sweep: 'sweep runs the serve-resident maintenance passes against the LOCAL engine. Run it on the host (the serve process also runs it automatically).',
   'compile-context': 'compile-context compiles from the local brain; run it on the host install.',
+  decide: '`gbrain decide` runs on the brain host; run it there.',
   // v0.32 audit additions
   pages: '`pages purge-deleted` is admin+localOnly (hard-deletes from the local DB). Run on the host.',
   files: '`files list` and `files url` MCP ops are localOnly (paths live on the host filesystem). Use `gbrain files` on the host machine.',
@@ -2970,6 +2971,7 @@ TOOLS
                                      See also: autopilot --install (continuous daemon).
   compile-context --target <t>       Compile a deterministic, scanned, budgeted context
         [--budget N] [--check]       file (claude-code | codex | openclaw)
+  decide <status|probe|enable|...>   System One decision support (Jev); every slot off by default
   check-resolvable [--json] [--fix]  Validate skill tree (reachability/MECE/DRY)
   report --type <name> --content ... Save timestamped report to brain/reports/
 
