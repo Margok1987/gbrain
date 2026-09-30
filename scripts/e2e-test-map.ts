@@ -131,7 +131,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/sync-*.ts": ["test/e2e/sync-sigkill-resume-postgres.test.ts", "test/e2e/sync-lock-overlap-postgres.test.ts", "test/e2e/sync-run-workers-postgres.test.ts"],
   // v0.32.8 multi-source bug class regression suite — fires on any cycle
   // phase, extract, integrity, embed, or migrate-engine change.
-  "src/core/cycle/extract-takes.ts": ["test/e2e/multi-source-bug-class.test.ts"],
+  "src/core/cycle/extract-takes.ts": ["test/e2e/multi-source-bug-class.test.ts", "test/e2e/extract-takes-managed.test.ts"],
   // Takes write-op layer (fence-first write + page-lock journey on real PG).
   "src/core/ops/takes.ts": ["test/e2e/takes-write-ops-postgres.test.ts"],
   "src/core/takes-write.ts": ["test/e2e/takes-write-ops-postgres.test.ts"],
@@ -280,6 +280,10 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/ops/links.ts": ["test/e2e/managed-writers-w3.test.ts"],
   "src/core/cycle/extract-atoms-page-state.ts": ["test/e2e/extract-atoms-page-state.test.ts", "test/e2e/reconcile-crash.test.ts", "test/e2e/reconcile-crash-unactivated.test.ts", "test/e2e/reconcile-pgbouncer.test.ts"],
   "src/commands/migrations/v0_13_1.ts": ["test/e2e/grandfather-projection-postgres.test.ts", "test/e2e/persistence-git-coalescing-5530-postgres.test.ts"],
+  "src/commands/migrations/v0_32_2.ts": ["test/e2e/migrations-v0_32_2-managed.test.ts"],
+  "src/core/facts/withdrawal.ts": ["test/e2e/facts-withdrawal-fingerprint-once.test.ts"],
+  "src/core/extract-takes-from-pages.ts": ["test/e2e/persistence-managed-takes-extract.test.ts", "test/e2e/extract-takes-from-pages-resolutions.test.ts"],
+  "src/core/persistence/prepared-maintenance.ts": ["test/e2e/migrations-v0_32_2-managed.test.ts"],
   "src/core/pool-budget.ts": ["test/e2e/persistence-runtime-matrix.test.ts"],
   "src/core/connection-manager.ts": ["test/e2e/persistence-runtime-matrix.test.ts", "test/e2e/pgbouncer-teardown.test.ts"],
   "src/core/postgres-engine.ts": [
@@ -425,11 +429,13 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/migration-preview-safety.test.ts",
     "test/e2e/migrate-chain.test.ts",
     "test/e2e/migration-flow.test.ts",
+    "test/e2e/managed-migration-chain-postgres.test.ts",
   ],
   "src/commands/migrations/**": [
     "test/e2e/migration-preview-safety.test.ts",
     "test/e2e/migrate-chain.test.ts",
     "test/e2e/migration-flow.test.ts",
+    "test/e2e/managed-migration-chain-postgres.test.ts",
   ],
   // Autopilot linux install/uninstall lifecycle (PATH-shimmed crontab +
   // systemctl; the ubuntu CI runner's only behavioral pin on those arms).
