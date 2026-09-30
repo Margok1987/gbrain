@@ -114,6 +114,21 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return rows[0]?.v ?? null;
     },
   },
+  {
+    domain: 'files',
+    async seed(engine) {
+      await engine.upsertFile({ filename: 'rollback.png', storage_path: 'attachments/engine-sql-rollback.png', content_hash: 'seeded' });
+    },
+    async write(tx) {
+      const res = await tx.upsertFile({ filename: 'rollback.png', storage_path: 'attachments/engine-sql-rollback.png', content_hash: 'rolled-back' });
+      expect(res.created).toBe(false);
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ h: string }>(
+        `SELECT content_hash AS h FROM files WHERE storage_path = 'attachments/engine-sql-rollback.png'`);
+      return rows[0]?.h ?? null;
+    },
+  },
 ];
 
 async function rollbackChunk(engine: BrainEngine): Promise<number> {

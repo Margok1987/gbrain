@@ -11,6 +11,7 @@
 migrated	cjk-search
 migrated	code-edges
 migrated	facts
+migrated	files
 migrated	salience
 migrated	sources
 migrated	takes
@@ -44,7 +45,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.getChunksWithEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.getConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.getDreamVerdict
 method	src/core/pglite-engine.ts	PGLiteEngine.getEmbeddingsByChunkIds
-method	src/core/pglite-engine.ts	PGLiteEngine.getFile
 method	src/core/pglite-engine.ts	PGLiteEngine.getHealth
 method	src/core/pglite-engine.ts	PGLiteEngine.getIngestLog
 method	src/core/pglite-engine.ts	PGLiteEngine.getLastSeen
@@ -67,7 +67,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.listConfigKeys
 method	src/core/pglite-engine.ts	PGLiteEngine.listCorpusSample
 method	src/core/pglite-engine.ts	PGLiteEngine.listEvalCandidates
 method	src/core/pglite-engine.ts	PGLiteEngine.listEvalCaptureFailures
-method	src/core/pglite-engine.ts	PGLiteEngine.listFilesForPage
 method	src/core/pglite-engine.ts	PGLiteEngine.listLinkSources
 method	src/core/pglite-engine.ts	PGLiteEngine.listPages
 method	src/core/pglite-engine.ts	PGLiteEngine.listPrefixSampledPages
@@ -108,7 +107,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.unsetConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.updatePageContextualRetrievalState
 method	src/core/pglite-engine.ts	PGLiteEngine.updateSlug
 method	src/core/pglite-engine.ts	PGLiteEngine.upsertEventProjection
-method	src/core/pglite-engine.ts	PGLiteEngine.upsertFile
 method	src/core/pglite-engine.ts	probePgliteScratchStore
 method	src/core/pglite-engine/checkpoint-guard.ts	PgliteCheckpointGuard.beforeOutermostTransaction
 method	src/core/pglite-engine/code-edges.ts	getEdgesByChunk
@@ -142,7 +140,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.getChunksWithEmbeddings
 method	src/core/postgres-engine.ts	PostgresEngine.getConfig
 method	src/core/postgres-engine.ts	PostgresEngine.getDreamVerdict
 method	src/core/postgres-engine.ts	PostgresEngine.getEmbeddingsByChunkIds
-method	src/core/postgres-engine.ts	PostgresEngine.getFile
 method	src/core/postgres-engine.ts	PostgresEngine.getHealth
 method	src/core/postgres-engine.ts	PostgresEngine.getIngestLog
 method	src/core/postgres-engine.ts	PostgresEngine.getLastSeen
@@ -166,7 +163,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.listConfigKeys
 method	src/core/postgres-engine.ts	PostgresEngine.listCorpusSample
 method	src/core/postgres-engine.ts	PostgresEngine.listEvalCandidates
 method	src/core/postgres-engine.ts	PostgresEngine.listEvalCaptureFailures
-method	src/core/postgres-engine.ts	PostgresEngine.listFilesForPage
 method	src/core/postgres-engine.ts	PostgresEngine.listLinkSources
 method	src/core/postgres-engine.ts	PostgresEngine.listPages
 method	src/core/postgres-engine.ts	PostgresEngine.listPrefixSampledPages
@@ -207,7 +203,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.unsetConfig
 method	src/core/postgres-engine.ts	PostgresEngine.updatePageContextualRetrievalState
 method	src/core/postgres-engine.ts	PostgresEngine.updateSlug
 method	src/core/postgres-engine.ts	PostgresEngine.upsertEventProjection
-method	src/core/postgres-engine.ts	PostgresEngine.upsertFile
 method	src/core/postgres-engine.ts	PostgresEngine.withScopedReadTransaction
 method	src/core/postgres-engine/init-schema-lock.ts	acquireInitSchemaAdvisoryLock
 method	src/core/postgres-engine/init-schema-lock.ts	lockHolderPid

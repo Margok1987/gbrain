@@ -1529,7 +1529,12 @@
         "default": [
           {
             "paramCount": 2,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ]
       },
@@ -1537,7 +1542,12 @@
         "default": [
           {
             "paramCount": 1,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ]
       },
@@ -1545,7 +1555,12 @@
         "default": [
           {
             "paramCount": 9,
-            "via": "tagged"
+            "unsafeOptions": {
+              "cancelFence": false,
+              "prepare": true,
+              "simple": false
+            },
+            "via": "unsafe"
           }
         ]
       }
