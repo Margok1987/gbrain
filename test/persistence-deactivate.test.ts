@@ -10,7 +10,7 @@ import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { configDir } from '../src/core/config.ts';
 import { runPersistenceAdministration } from '../src/core/persistence/administration.ts';
@@ -146,6 +146,14 @@ for (const databaseUrl of process.env.DATABASE_URL ? [undefined, process.env.DAT
     expect(existsSync(otherBrain)).toBe(true);
     expect(existsSync(newer)).toBe(true);
     expect(() => assertManagedFilesystemWrite(join(root, 'notes', 'a.md'))).not.toThrow();
+    // A retired reservation beside a checkout that no longer exists is removed too.
+    const gone = join(dirname(root), 'gone-checkout');
+    const { physicalRootReservationPath } = await import('../src/core/persistence/physical-root-record.ts');
+    await engine.executeRaw("UPDATE persistence_topology_changes SET outcome=jsonb_set(outcome,'{source_roots}',to_jsonb(ARRAY[$1::text])) WHERE operation='writer_deactivate'", [gone]);
+    const reservation = physicalRootReservationPath(gone);
+    writeFileSync(reservation, JSON.stringify({ version: 1, token: randomUUID(), brainId: brain.brain_id, worktreeId: binding.worktree_id }), { mode: 0o600 });
+    expect((await cleanupRetiredManagedMarkers(engine)).removed).toContain(reservation);
+    expect(existsSync(reservation)).toBe(false);
     expect((await admin(engine, 'writer_status')).local_markers).toMatchObject({ state: 'pending', pending: [{ path: newer }] });
   }, { databaseUrl }));
 

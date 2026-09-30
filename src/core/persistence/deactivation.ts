@@ -296,11 +296,12 @@ export async function cleanupRetiredManagedMarkers(engine: BrainEngine): Promise
     } catch (error) { report.pending.push({ path, reason: `unreadable: ${(error as Error).message}` }); }
   }
   for (const root of roots) {
+    // A prepared-claim reservation lives beside the checkout and fences it even when the checkout is gone.
+    visit(physicalRootReservationPath(root), root, ours);
     if (!existsSync(root)) continue;
     const gitMarker = gitManagedMarker(root);
     for (const marker of [join(root, '.gbrain-managed'), ...(gitMarker ? [gitMarker] : [])]) visit(marker, root, ours);
     visit(join(root, PHYSICAL_ROOT_MARKER), root, ours);
-    visit(physicalRootReservationPath(root), root, ours);
   }
   await refreshManagedFilesystemRoots(engine);
   if (report.pending.length) {
