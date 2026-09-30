@@ -917,6 +917,43 @@ and the `Migration` type in `schema-migrations/types.ts`. Fixtures:
 `test/fixtures/guards/check-layering.ts/`; forms are driven in
 `test/scripts/layering.test.ts`.
 
+#### Engine-sql ratchet
+
+`scripts/check-engine-sql-ratchet.ts` (`bun run check:engine-sql-ratchet`, in
+`bun run verify`) keeps each storage domain's SQL in one place,
+`src/core/engine-sql/<domain>.ts`, by stopping SQL from growing back into the
+engines. It parses `src/core/pglite-engine.ts`, `src/core/postgres-engine.ts`
+and every file under `src/core/pglite-engine/` and `src/core/postgres-engine/`,
+and names each class member (`PostgresEngine.getPage`), top-level function and
+top-level variable (`insertFact`). A unit is SQL-bearing when the literal text
+of a string, template, tagged template or `+` chain inside it has SQL
+structure: `SELECT ... FROM <x>`, `SELECT <fn>(`, `INSERT INTO <x>`,
+`UPDATE <x> [alias] SET`, `DELETE FROM <x>`, `WITH <x> AS (`,
+`CREATE|ALTER|DROP <object kind>`, `TRUNCATE <x>`, `SET LOCAL <x>`,
+`ON CONFLICT`, `WHERE ... ORDER BY|GROUP BY|LIMIT`, or a `$<n>::type` cast.
+Comments and identifiers never count. Keywords match in upper or lower case
+but never Title Case, and a lowercase match also needs a second SQL signal
+(`where`, `returning`, `$1`, `::`, `;`, `*` and similar), so "Select a file"
+or "could not delete from cache" is not SQL.
+
+`scripts/engine-sql-baseline.tsv` lists `migrated<TAB><domain>` rows (the
+domain's module must exist under `src/core/engine-sql/`) and
+`method<TAB><path><TAB><QualifiedName>` rows for the SQL-bearing members that
+remain. Rows only shrink. The guard fails on:
+
+- a new SQL-bearing member with no row: move the SQL into
+  `src/core/engine-sql/<domain>.ts` and delegate, or mark the declaration (on
+  its line or the line above) with `// engine-sql-ok: <reason>`; an empty
+  reason fails;
+- a stale row, whose member is gone, no longer SQL-bearing or now marked:
+  delete it, or run `bun scripts/check-engine-sql-ratchet.ts --prune`, which
+  drops stale and duplicate rows and never adds one;
+- a duplicate or malformed row, or a `migrated` row with no module.
+
+When a domain moves, delete its members' rows and add its `migrated` row in
+the same commit. Fixtures: `test/fixtures/guards/check-engine-sql-ratchet.ts/`;
+forms are driven in `test/scripts/engine-sql-ratchet.test.ts`.
+
 ### Placeholder assertions
 
 `scripts/check-test-placeholders.mjs` (`bun run check:test-placeholders`, in

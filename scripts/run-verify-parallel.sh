@@ -131,6 +131,9 @@ CHECKS=(
   # EO10 (refactor wave 1): engine-sql/ and schema-migrations/ never import
   # back up into the engine façades or migrate.ts (ESM TDZ cycles).
   "check:layering"
+  # Goal (a) (refactor wave 1): engine SQL only shrinks; baseline
+  # scripts/engine-sql-baseline.tsv.
+  "check:engine-sql-ratchet"
   "check:structural-manifest"
   # v0.50.5.0 security wave: compiled binaries must not autoload a cwd bunfig.toml.
   "check:compile-autoload"
