@@ -238,7 +238,7 @@ acceptance never run for a remote caller.
 | S6 deadline (from turn start, concurrent with reflex) | 250 ms | no (`RECALL_NEEDED_DEADLINE_MS`; also capped by `decide.timeout_ms`) |
 | S6 fire: minimum server budget left / response margin / hits | 150 ms / 40 ms / 3 | no |
 | S6 state caps (prompt head / previous-turn tail) | 6,000 / 2,000 characters | no |
-| S6 suppression boundary | 0.05 | `decide.slots.recall_needed.suppress_below` (bound into the policy fingerprint) |
+| S6 suppression boundary | 0.10 (0.05 before 2026-09-30: with the 0.05 margin floor it could never suppress) | `decide.slots.recall_needed.suppress_below` (bound into the policy fingerprint) |
 | S7 window | whole turns, about 1,500 chars; a turn over 24,000 chars splits at paragraphs (marked); at most 256 windows per transcript (more → today's triage) | no (`TRIAGE_WINDOW_CHARS`, `TRIAGE_TURN_SPLIT_CHARS`, `TRIAGE_MAX_WINDOWS`) |
 | S7 decision deadline / segment map | 60 s per transcript; top 8 windows, 300-char quotes | no |
 | S8 source windows / coverage floor | 3 per claim; 0.25 of the claim's content words | no (`GROUNDING_MAX_WINDOWS`, `GROUNDING_KEYWORD_FLOOR`) |
@@ -248,6 +248,7 @@ acceptance never run for a remote caller.
 | S4 k | min(10, evidence count), shrunk to fit 32k | no (`ANSWERABLE_MAX_K`) |
 | S5 demotion floor | the S3 `min_keep` cut (default 3) | via `decide.slots.evidence.min_keep` |
 | S6 budgets, S8 window count, S7 window size/cap | per slot lane | documented with each slot |
+| Eval pool depth (recall experiment) | per-arm cap 100 (`MAX_SEARCH_LIMIT`) | eval-only: `gbrain eval longmemeval --eval-pool-depth N` (N ≤ 300, `src/core/search/eval-pool-depth.ts`); no config key |
 
 ## Extension points for slot lanes
 
@@ -269,7 +270,10 @@ acceptance never run for a remote caller.
 - `registerDecideSubcommand(name, run, help)` (`src/commands/decide.ts`):
   `proposals`, `sweep`, `judge-agreement`. Lane modules that register
   subcommands, what-if reducers or dataset adapters are imported by
-  `loadDecideLanes()` (write path: `src/commands/decide/writepath.ts`).
+  `loadDecideLanes()` (write path: `src/commands/decide/writepath.ts`; eval
+  harness: `src/commands/decide/eval-lane.ts`, whose `judge-agreement`
+  dispatches without a brain and keeps its kappa math in
+  `src/core/ai/decide/judge-agreement.ts`).
 - `SlotDatasetAdapter.unpacked` / `aggregate: 'max'` (`dataset.ts`): calibrate
   and qualify send one request per question and fold several questions into
   one item value (S7 transcript = max window).
@@ -280,6 +284,14 @@ acceptance never run for a remote caller.
   `resolveSlotPolicy`, `stageDeadlineMs`, `runShadow` and `sampled` for all.
 - `enableDecideEvalOverride()` (`config.ts`): eval commands opt in to
   `GBRAIN_DECIDE_SLOTS`, which never bypasses consent, egress or the cap.
+- `src/eval/decide-eval-flags.ts`: the `--decide*` flags every eval command
+  shares (`prepareDecideEval` merges flags over the inherited env, sets it and
+  opts in; `configureDecideBrain` configures a throwaway benchmark brain;
+  `operatorBrainRefusal` guards a connected brain; `decideRowReceipt` and
+  `summarizeDecideReceipts` build per-row receipts from `DecideSlotMeta` plus
+  the brain's `decide_spend` delta). A new slot's eval receipt comes for free
+  once its call site writes `ctx.meta.<slot>`; slot-specific row fields go in
+  the eval's lane module (LongMemEval: `src/eval/longmemeval/decide-lane.ts`).
 
 ## How to add a slot
 

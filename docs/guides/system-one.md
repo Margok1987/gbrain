@@ -166,7 +166,7 @@ answer `gbrain hook user-prompt`. One question over the prompt and the last
 turn: "does answering this need the user's stored memory?". When on, it fires
 one keyword-only search (limit 3) the reflex rules would have missed, such as
 lowercase names or indirect references, and suppresses reflex injection when
-the probability is under `decide.slots.recall_needed.suppress_below` (0.05)
+the probability is under `decide.slots.recall_needed.suppress_below` (0.10)
 and no exact alias hit exists. It has its own 250 ms deadline inside the
 400 ms turn budget, and the reflex block is never delayed or dropped because
 of it. It sends prompts, so on Jev it needs `decide.egress.private allow`.
@@ -206,11 +206,9 @@ fact, so enabling it never sweeps your whole history silently. Facts
 default to private, so on Jev it needs `decide.egress.private allow`, or
 route it to an `llm:` provider.
 
-<!-- reconcile: `gbrain decide sweep` and `gbrain decide proposals` are not on feat/system-one-v1-docs @ 45a5857 (the CLI prints "not available in this build"). -->
-
 ```bash
-gbrain decide sweep --slot conflict [--since <fact id>]   # run the sweep now
-gbrain decide proposals list                                # both facts' text, locally
+gbrain decide sweep --slot conflict [--since <fact id>] [--source <id>] [--json]   # run the sweep now
+gbrain decide proposals list [--status pending|accepted|rejected|stale|undone|all]  # both facts' text, locally
 gbrain decide proposals accept <id> | reject <id>           # or --all-from <sweep id>
 gbrain decide proposals undo <id>                           # reverse an accepted proposal
 ```
@@ -293,8 +291,12 @@ gbrain decide qualify --slot evidence --dataset evidence.jsonl                  
 gbrain decide enable evidence
 ```
 
-`dataset` sources in this build: `jsonl` and `longmemeval` (evidence gate).
-<!-- reconcile: other lanes add --from brainbench, cat35, facts-fixtures, injection-fixtures, know-to-ask and grounding-labels; none is on feat/system-one-v1-docs @ 45a5857. -->
+`dataset` sources in this build (`gbrain decide dataset --slot <slot> --from
+<source> <path>`): `jsonl` (any slot, pre-labelled lines), `longmemeval`
+(evidence gate, abstention, query routing), `brainbench` (query routing),
+`know-to-ask` (know-to-ask), `cat35` (dream triage), `grounding-labels`
+(claim support), `facts-fixtures` (contradiction) and `injection-fixtures`
+(injection signal).
 `calibrate` re-asks a sample of items three times, and again with shuffled
 neighbours, and stores how much the answers move (`retest_sd`, `repack_sd`).
 Answers inside `max(decide.margin_floor, 2 x max(retest_sd, repack_sd))` (floor 0.05) of the threshold on
@@ -589,12 +591,44 @@ gbrain decide disable <slot>
   and `decide.provider none` stops shadow along with everything else.
 
 Evals can set slot modes for one process with `GBRAIN_DECIDE_SLOTS` (for
-example `triage=on`). Only eval commands (and dream's eval-run mode, once it
-ships) honor it, it never bypasses consent, egress or the daily cap, and
-every receipt records it.
-<!-- reconcile: planned, not on feat/system-one-v1-docs @ 45a5857: dream --eval-run, the eval --decide <slot>=<mode> flag (longmemeval, brainbench, retrieval-quality) and decide judge-agreement --suite <suite>. Restore exact command syntax here when those land. -->
-Planned for the eval lane, not in this build yet: matched eval pairs through
-a `--decide <slot>=<mode>` flag on the LongMemEval, BrainBench and
-retrieval-quality eval commands, and a `decide judge-agreement` subcommand
-that compares Jev with the LLM judge on a labelled set. Protocols and verdicts:
-[`docs/eval/system-one/`](../eval/system-one/).
+example `triage=on`). Only eval commands and `gbrain dream --eval-run` honor
+it, it never bypasses consent, egress or the daily cap, and every receipt
+records it.
+`gbrain dream --eval-run` honors it for dream cycles. The eval commands
+take the same setting as flags, so matched pairs differ only in the slot
+under test:
+
+```bash
+gbrain eval longmemeval <data.jsonl> --no-trajectory --decide <slot>=<off|on|shadow> [--decide ...]
+    [--decide-provider <id>] [--decide-calibration <file|ref:<id>>] [--decide-threshold <slot>=<x>]
+    [--decide-force-on <slot>] [--decide-dataset <jsonl>] [--eval-pool-depth <N>]
+gbrain eval brainbench [--suite know-to-ask] --decide recall_needed=on [same --decide-* flags]
+gbrain eval retrieval-quality <fixture.jsonl> --json --decide <slot>=<mode> [--decide-provider <id>] [--decide-dataset <jsonl>]
+gbrain decide judge-agreement --suite <longmemeval|grounding> --input <file> [--limit N]
+    [--provider <id>] [--threshold 0.5] [--dry-run] [--json] [--out FILE]
+```
+
+- Flags win over an inherited `GBRAIN_DECIDE_SLOTS`; the effective value is
+  set for the run and recorded in its metadata. No slot on or shadow means
+  output identical to a run without the flags.
+- LongMemEval and BrainBench write what the slot needs into their throwaway
+  benchmark brains (provider, consent, `decide.egress.private allow`,
+  thresholds, `force_on`, awaited shadow, calibrations). `retrieval-quality`
+  runs on your brain and never writes its config: it refuses with the
+  catalogued line when the provider, key or consent is missing.
+- `--decide-calibration` takes the JSON `gbrain decide calibrate --slot <slot>
+  --json` prints (or a reference id). With `--decide-dataset`, a calibration
+  whose `split_hash` differs from that dataset, or that is not calibrate-only,
+  is refused with `split_mismatch`, and LongMemEval runs only the eval half.
+- `--decide rerank=on` pins the Jev reranker for the run.
+  `--eval-pool-depth <N>` (N up to 300, LongMemEval only) lifts the per-arm
+  candidate cap for that run and sets `search.reranker.top_n_in` to N;
+  production depth is unchanged.
+- `--decide-force-on` bypasses the action-precision gate so an eval can
+  measure a slot that has not qualified; it prints a warning and is recorded.
+- `judge-agreement` runs Jev beside the existing LLM judge (a `--judge`
+  output, or grounding labels) and reports Cohen's kappa. It needs no brain,
+  and nothing is substituted at runtime.
+
+Row and summary fields: [`docs/eval-bench.md`](../eval-bench.md#system-one-arms---decide).
+Protocols and verdicts: [`docs/eval/system-one/`](../eval/system-one/).
