@@ -25,7 +25,7 @@ src/commands/extract-conversation-facts.ts	processPage	307	seed: W5 baseline, re
 src/commands/extract-conversation-facts.ts	runExtractConversationFactsCore	371	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/extract.ts	runExtract	398	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/import.ts	runImport	959	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/jobs.ts	runJobs	1554	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
+src/commands/jobs/supervisor.ts	runJobsSupervisor	306	TODO: w4c-jobs-supervisor-split (moved verbatim out of runJobs; the next commit splits it)
 src/commands/mcp-expose.ts	runPublish	443	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/migrate-embeddings.ts	runMigrateEmbeddings	325	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/migrate-engine.ts	runMigrateEngine	405	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
