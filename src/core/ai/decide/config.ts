@@ -99,6 +99,8 @@ export interface DecideSlotConfig {
   shadowWait: boolean;
   /** Adopted calibration (`local:<id>` / `ref:<id>`), recorded by enable/adopt. */
   calibration?: string;
+  /** S6 only: suppress reflex injection below this probability (decide.slots.recall_needed.suppress_below). */
+  suppressBelow?: number;
 }
 
 export interface DecideConfig {
@@ -174,6 +176,7 @@ export function readDecideConfig(snapshot: Record<string, string | undefined> | 
       ...(sample !== undefined && SLOT_KEY_VALIDATORS.shadow_sample!(sample) === null ? { shadowSample: Number(sample) } : {}),
       shadowWait: k('shadow_wait') === 'on',
       ...(k('calibration') && calibrationRef(k('calibration')!) === null ? { calibration: k('calibration') } : {}),
+      ...(slot === 'recall_needed' ? { suppressBelow: num(k('suppress_below'), 0.05, GLOBAL_KEYS['decide.slots.recall_needed.suppress_below']!) } : {}),
     };
     return [slot, cfg];
   })) as Record<DecideSlot, DecideSlotConfig>;
