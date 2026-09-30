@@ -171,6 +171,14 @@ describe('datasets', () => {
     expect(items.find((i) => i.id === 'q1:a')!.label).toBe(true);
   });
 
+  test('evidence builder keeps the first occurrence of a repeated haystack session id', async () => {
+    const dup = join(dir, 'lme-dup.json');
+    writeFileSync(dup, JSON.stringify([{ question_id: 'q9', question_type: 'multi-session', question: 'Q?', haystack_session_ids: ['a', 'b', 'a'], haystack_sessions: [[{ role: 'user', content: 'first' }], [{ role: 'user', content: 'other' }], [{ role: 'user', content: 'first again' }]], answer_session_ids: ['a'] }]));
+    const items = await datasetBuilder('longmemeval')!(dup, { slot: 'evidence' });
+    expect(items.map((i) => i.id)).toEqual(['q9:a', 'q9:b']);
+    expect(items[0]!.inputs.candidate).toContain('first');
+  });
+
   test('injection from the #5178 known cases: attack candidates are positive, quoted payloads are not', async () => {
     const items = await datasetBuilder('injection-fixtures')!(join(import.meta.dir, '../fixtures/decide/injection-cases.jsonl'), { slot: 'injection' });
     expect(items.filter((i) => i.label === true).map((i) => i.family).sort()).toEqual(['inj:forged-json', 'inj:injected-command', 'inj:quoted-injection', 'inj:self-rating']);

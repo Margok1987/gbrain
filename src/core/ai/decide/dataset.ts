@@ -176,7 +176,9 @@ registerDatasetBuilder('longmemeval', async (path, opts) => {
     const sessions = (q.haystack_sessions as unknown[]) ?? [];
     const ids = ((q.haystack_session_ids as string[]) ?? sessions.map((_, i) => `s${i}`)).map(String);
     const answers = new Set(((q.answer_session_ids as string[]) ?? []).map(String));
-    const order = ids.map((id, i) => ({ id, i, key: createHash('sha256').update(`${family}:${id}`).digest('hex') }));
+    // A haystack can repeat a session id (same turns, another date): keep its first occurrence so item ids stay unique.
+    const seen = new Set<string>();
+    const order = ids.flatMap((id, i) => (seen.has(id) ? [] : (seen.add(id), [{ id, i, key: createHash('sha256').update(`${family}:${id}`).digest('hex') }])));
     const positives = order.filter((o) => answers.has(o.id));
     const negatives = order.filter((o) => !answers.has(o.id)).sort((a, b) => (a.key < b.key ? -1 : 1));
     const chosen = [...positives, ...negatives].slice(0, Math.max(maxPer, positives.length)).sort((a, b) => a.i - b.i);

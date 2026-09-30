@@ -23,7 +23,8 @@ import { SLOT_SPECS } from '../../core/ai/decide/slots.ts';
 import { getCalibration, insertCalibration, listCalibrations, setCalibrationRetired, storeQualification } from '../../core/ai/decide/store.ts';
 import { DECIDE_SLOTS, DecideError, thresholdValue, type DecideAnswer, type DecideSlot } from '../../core/ai/decide/types.ts';
 import { usageCostUsd } from '../../core/budget/reservation-cost.ts';
-import { resetDecideSearchCache } from '../../core/search/decide-stage.ts';
+import { evidenceCoPackedSlots, resetDecideSearchCache } from '../../core/search/decide-stage.ts';
+import { injectionQuestion } from '../../core/ai/decide/injection.ts';
 import { flagValue, loadDecideState, slotPackShape } from '../decide.ts';
 import '../../core/ai/decide/recall-needed.ts';
 
@@ -38,6 +39,18 @@ function isPositive(item: DatasetItem): boolean {
   return item.label === true || (typeof item.label === 'string' && item.label !== 'false');
 }
 
+/**
+ * The request production sends for a family. S3 carries S5's questions when
+ * injection rides the S3 request, so the shape asked is the shape recorded
+ * (pack_shape evidence+injection); the co-packed answers are not scored.
+ */
+export function productionRequest(slot: DecideSlot, fam: readonly DatasetItem[], cfg: Awaited<ReturnType<typeof loadDecideState>>['cfg']): ReturnType<NonNullable<ReturnType<typeof datasetAdapter>>['request']> {
+  const req = datasetAdapter(slot)!.request(fam);
+  if (slot !== 'evidence' || !evidenceCoPackedSlots(cfg).includes('injection')) return req;
+  const coPacked = req.questions.map((q, i) => injectionQuestion(`injection:${i}`, q.rank ?? i, q.inputs!.candidate!, q.protected === true));
+  return { ...req, questions: [...req.questions, ...coPacked] };
+}
+
 /** Ask every family once (production shape); returns value per item id and the resolved model. */
 async function askFamilies(engine: BrainEngine, slot: DecideSlot, provider: string, fams: DatasetItem[][], cfgOverride: Awaited<ReturnType<typeof loadDecideState>>['cfg']): Promise<{ values: Record<string, number | null>; answers: Record<string, DecideAnswer | undefined>; model: string }> {
   const adapter = datasetAdapter(slot)!;
@@ -45,7 +58,7 @@ async function askFamilies(engine: BrainEngine, slot: DecideSlot, provider: stri
   const answers: Record<string, DecideAnswer | undefined> = {};
   const models = new Set<string>();
   for (const fam of fams) {
-    const req = adapter.request(fam);
+    const req = productionRequest(slot, fam, cfgOverride);
     const base = { slot, callSite: adapter.callSite, state: req.state, questions: req.questions, provider, lane: 'background' as const };
     const r = adapter.unpacked
       ? await runDecideUnpacked(base, { engine, config: cfgOverride }, { deadlineAt: Date.now() + 60_000, concurrency: cfgOverride.backgroundConcurrency })
@@ -99,7 +112,7 @@ async function cmdCalibrate(engine: BrainEngine, args: string[]): Promise<number
   const fams = [...families(calibrate).values()];
   const retestN = Math.min(state.cfg.retestN, fams.length);
   const estimateTokens = fams.reduce((n, fam) => {
-    const req = adapter.request(fam);
+    const req = productionRequest(slot, fam, state.cfg);
     return n + planBatches(estimateContextTokens(Object.fromEntries(Object.entries(req.state).map(([k, v]) => [k, v.text]))), req.questions.map((q) => estimateContextTokens(toWireQuestion(q)))).reduce((m, b) => m + b.estimatedInputTokens, 0);
   }, 0);
   const totalTokens = estimateTokens * (1 + (retestN / Math.max(1, fams.length)) * (REPEATS - 1) * 2);

@@ -24,6 +24,7 @@ import { flushDecideWrites } from '../../../../src/core/ai/decide/store.ts';
 import { loadConfigSnapshot } from '../../../../src/core/config-snapshot.ts';
 import { thresholdValue, type DecideSlot } from '../../../../src/core/ai/decide/types.ts';
 import { loadDecideLanes } from '../../../../src/commands/decide.ts';
+import { productionRequest } from '../../../../src/commands/decide/calibrate.ts';
 import '../../../../src/core/ai/decide/recall-needed.ts';
 
 const args = process.argv.slice(2);
@@ -57,7 +58,7 @@ let next = 0;
 const worker = async () => {
   while (next < jobs.length) {
     const { rep, fam } = jobs[next++]!;
-    const req = adapter.request(fam);
+    const req = productionRequest(slot, fam, cfg);
     const reqBase = { slot, callSite: adapter.callSite, state: req.state, questions: req.questions, provider, lane: 'background' as const };
     const started = performance.now();
     try {
