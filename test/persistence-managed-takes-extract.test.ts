@@ -2,7 +2,6 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import type { BrainEngine } from '../src/core/engine.ts';
 import { configureGateway, resetGateway, __setChatTransportForTests } from '../src/core/ai/gateway.ts';
 import { extractTakesFromPages } from '../src/core/extract-takes-from-pages.ts';
@@ -14,6 +13,12 @@ import { registerLocalWriter } from '../src/core/persistence/identity.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { isolatedSharedSkillsEngine } from './helpers/shared-skills-engine.ts';
+import { requirePostgresTestDatabase } from './helpers/test-backends.ts';
+
+// Postgres runs through test/e2e/persistence-managed-takes-extract.test.ts.
+const backend = process.env.GBRAIN_TEST_BACKEND === 'postgres' ? 'postgres' : 'pglite';
+let closeEngine: () => Promise<void> = async () => {};
 
 const BODY = 'A durable opinion with enough context to be classified as a stable claim. '.repeat(5);
 const home = mkdtempSync(join(tmpdir(), 'gbrain-managed-takes-extract-'));
@@ -23,8 +28,8 @@ let chatSlug: string | undefined;
 let editStaleDuringChat = false;
 
 beforeAll(async () => withEnv({ GBRAIN_HOME: home, GBRAIN_SOURCE: undefined, GBRAIN_BRAIN_ID: 'host' }, async () => {
-  const instance = new PGLiteEngine(); engine = instance;
-  await engine.connect({}); await engine.initSchema();
+  const fixture = await isolatedSharedSkillsEngine(backend === 'postgres' ? requirePostgresTestDatabase() : undefined);
+  engine = fixture.engine; closeEngine = fixture.close;
   mkdirSync(join(repo, 'concepts'), { recursive: true });
   await engine.setConfig('sync.repo_path', repo);
   await engine.executeRaw("UPDATE sources SET local_path=$1 WHERE id='default'", [repo]);
@@ -56,11 +61,11 @@ async function seedPage(slug: string, writeFile = true): Promise<void> {
 
 afterAll(async () => withEnv({ GBRAIN_HOME: home }, async () => {
   __setChatTransportForTests(null); resetGateway();
-  await disposePersistenceConsumer(engine); await engine.disconnect();
+  await disposePersistenceConsumer(engine); await closeEngine();
   rmSync(home, { recursive: true, force: true });
 }));
 
-test('unmanaged from-pages extraction keeps its md-first fence and takes mirror', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+test(`${backend}: unmanaged from-pages extraction keeps its md-first fence and takes mirror`, async () => withEnv({ GBRAIN_HOME: home }, async () => {
   const slug = 'concepts/unmanaged'; await seedPage(slug);
   const result = await extractTakesFromPages(engine, { bootstrapEnabled: true, sourceIdFilter: 'default' });
   expect(result).toMatchObject({ claims_extracted: 1, pages_skipped: 0 });
@@ -69,7 +74,7 @@ test('unmanaged from-pages extraction keeps its md-first fence and takes mirror'
     .toEqual([{ claim: 'managed bootstrap claim' }]);
 }));
 
-test('managed extraction journals one atomic page fence and continues after a revision conflict', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+test(`${backend}: managed extraction journals one atomic page fence and continues after a revision conflict`, async () => withEnv({ GBRAIN_HOME: home }, async () => {
   const staleSlug = 'concepts/stale'; const goodSlug = 'concepts/good';
   const racedSlug = 'concepts/selection-race';
   await engine.putPage(racedSlug, { type: 'concept', title: racedSlug, compiled_truth: 'short', timeline: '', frontmatter: {} });
@@ -81,7 +86,7 @@ test('managed extraction journals one atomic page fence and continues after a re
   await activatePersistence(engine, { confirmQuiesced: true });
   const { operations } = await import('../src/core/operations.ts');
   const putPage = operations.find(operation => operation.name === 'put_page')!;
-  const ctx = { engine, config: { engine: 'pglite' }, logger: { info: () => {}, warn: () => {}, error: () => {} }, dryRun: false, remote: false, sourceId: 'default' } as any;
+  const ctx = { engine, config: { engine: engine.kind }, logger: { info: () => {}, warn: () => {}, error: () => {} }, dryRun: false, remote: false, sourceId: 'default' } as any;
   for (const slug of [staleSlug, goodSlug])
     await putPage.handler(ctx, { slug, content: `---\ntype: concept\ntitle: ${slug}\n---\n\n${BODY}` });
   await engine.executeRaw('UPDATE pages SET updated_at=now()+interval \'1 second\' WHERE source_id=$1 AND slug=$2', ['default', staleSlug]);
@@ -106,7 +111,7 @@ test('managed extraction journals one atomic page fence and continues after a re
   expect(chatSlug).toBe(goodSlug);
 }), 120_000);
 
-test('managed extraction classifies the pinned snapshot after a selection race', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+test(`${backend}: managed extraction classifies the pinned snapshot after a selection race`, async () => withEnv({ GBRAIN_HOME: home }, async () => {
   const slug = 'concepts/selection-race';
   const { operations } = await import('../src/core/operations.ts');
   const putPage = operations.find(operation => operation.name === 'put_page')!;
@@ -144,7 +149,7 @@ test('managed extraction classifies the pinned snapshot after a selection race',
   }
 }));
 
-test('managed extraction composes from the DB snapshot when the canonical file is stale', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+test(`${backend}: managed extraction composes from the DB snapshot when the canonical file is stale`, async () => withEnv({ GBRAIN_HOME: home }, async () => {
   const slug = 'concepts/selection-race';
   const { operations } = await import('../src/core/operations.ts');
   const putPage = operations.find(operation => operation.name === 'put_page')!;
@@ -172,4 +177,19 @@ test('managed extraction composes from the DB snapshot when the canonical file i
   } finally {
     putPage.handler = originalHandler;
   }
+}), 120_000);
+
+test(`${backend}: managed duplicate filtering reads the pinned snapshot takes fence`, async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  const slug = 'concepts/snapshot-duplicate';
+  const compiledTruth = `${BODY}\n\n## Takes\n\n<!--- gbrain:takes:begin -->\n| # | claim | kind | who | weight | since | source |\n|---|-------|------|-----|--------|-------|--------|\n| 1 | managed bootstrap claim | take | system | 0.7 |  | manual |\n<!--- gbrain:takes:end -->`;
+  await engine.transaction(tx => withCoordinatedWrite(tx, ['default'], async () => {
+    await tx.putPage(slug, { type: 'concept', title: slug, compiled_truth: compiledTruth, timeline: '', frontmatter: {} }, { sourceId: 'default' });
+  }));
+  const snapshot = await engine.readPageSnapshot(slug, { sourceId: 'default' });
+  if (!snapshot) throw new Error(`missing fixture ${slug}`);
+  writeFileSync(join(repo, `${slug}.md`), serializePageToMarkdown(snapshot.page, snapshot.tags).replace(/managed bootstrap claim/g, 'stale disk claim'));
+  await engine.executeRaw("UPDATE pages SET updated_at=now()+interval '20 seconds' WHERE source_id=$1 AND slug=$2", ['default', slug]);
+  const result = await extractTakesFromPages(engine, { bootstrapEnabled: true, sourceIdFilter: 'default', maxPages: 1 });
+  expect(result).toMatchObject({ claims_extracted: 0, duplicates_skipped: 1 });
+  expect(parseTakesFence(serializePageToMarkdown(snapshot.page, snapshot.tags)).takes[0]?.claim).toBe('managed bootstrap claim');
 }), 120_000);
