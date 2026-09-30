@@ -207,7 +207,12 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
     if (params.source_id !== undefined) throw invalid('Deactivate is brain-wide: it converts every source of this brain back to classic mode. Omit the <source> argument.');
     keys(params, ['dry_run', 'admin_intent', 'expected_state', 'request_id']);
     const { deactivatePersistence } = await import('./deactivation.ts');
-    if (params.dry_run === true) return { ...await deactivatePersistence(engine, { dryRun: true }), action: operation };
+    if (params.dry_run === true) {
+      const report = await deactivatePersistence(engine, { dryRun: true });
+      // DX-O13: a clean preview prints the state-bound command that applies exactly what it reviewed.
+      return { ...report, action: operation, ...(report.mode === 'managed' && report.blockers.length === 0
+        ? { apply_command: `gbrain sources writer deactivate --admin-intent writer_deactivate --expected-state ${await writerAdminState(engine)}` } : {}) };
+    }
     let expectedState: string | undefined;
     try { expectedState = await requireWriterAdminIntent(engine, operation, params); }
     catch (error) {

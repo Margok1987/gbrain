@@ -159,6 +159,6 @@ export function printSyncResult(result: SyncResult, sink: NodeJS.WriteStream = p
       break;
   }
   const holds = result.connectorHolds;
-  if (holds) write(`  ${holds.held} connector item(s) held after repeated failures${holds.newly_held ? ` (${holds.newly_held} new)` : ''}; they do not block freshness. See them with 'gbrain sources status', re-attempt with '${holds.retry_command}'.`);
+  if (holds) write(`  ${holds.held} connector item(s) held after repeated failures${holds.newly_held ? ` (${holds.newly_held} new)` : ''}; they do not block freshness. See them with '${holds.status_command}', re-attempt with '${holds.retry_command}'.`);
   printManagedSyncNotes(result, write);
 }

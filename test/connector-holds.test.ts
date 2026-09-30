@@ -89,7 +89,7 @@ test('#5740: a GitHub item failing 3 runs is held, the watermark advances past i
       // Run 4 skips the held item, so the sweep completes and the cursor moves past it.
       const fourth = await run();
       expect(fourth.status).not.toBe('partial');
-      expect(fourth.connectorHolds).toEqual({ held: 1, newly_held: 0, retry_command: `gbrain sources retry-held ${f.id}` });
+      expect(fourth.connectorHolds).toEqual({ held: 1, newly_held: 0, retry_command: `gbrain sources retry-held ${f.id}`, status_command: `gbrain sources status ${f.id}` });
       await disposePersistenceConsumer(engine);
       fx.since.length = 0;
       await run();
