@@ -422,6 +422,18 @@ export async function dispatchPerSource(
     }
     sources = [];
   }
+  // DX O1 (fix wave 4): the freshness loop's connector dispatch gate governs the fan-out too.
+  if (sources.length > 0) {
+    const { attemptedConnectorSourceIds } = await import('../core/persistence/connector-state.ts');
+    const { connectorAwaitingFirstSync } = await import('./autopilot-dispatch.ts');
+    const attempted = await attemptedConnectorSourceIds(engine).catch(() => null);
+    const eligible = sources.filter((s) => !connectorAwaitingFirstSync(s, attempted, opts.jsonMode, emit));
+    if (eligible.length === 0) {
+      return { dispatched: [], coalesced: [], skipped_fresh: [], skipped_cap: [], skipped_cooldown: [], skipped_unavailable_path: [],
+        legacy_fallback: false, all_sources_fresh: false, all_sources_handled: false };
+    }
+    sources = eligible;
+  }
 
   if (sources.length === 0) {
     // Legacy path — preserves today's behavior for single-source brains
