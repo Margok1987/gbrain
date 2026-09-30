@@ -26,6 +26,7 @@ import { join, relative, sep } from 'node:path';
 import type { BrainEngine, TakeBatchInput } from '../engine.ts';
 import { parseTakesFence, TAKES_FENCE_BEGIN, type ParsedTake } from '../takes-fence.ts';
 import { walkMarkdownFiles } from '../../commands/extract.ts';
+import { takesPreparation } from '../takes-write.ts';
 import { withCoordinatedWrite } from '../persistence/context.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 
@@ -284,9 +285,9 @@ async function reconcilePageTakes(
 /**
  * Managed brains guard `takes` (#5728): each page publishes as a coordinated
  * write under its page lock, against the text read inside that transaction.
- * Rows carry the `superseded_by` the canonical publication projects (keep in
- * lockstep with src/core/persistence/canonical-projections.ts), so a page it
- * already projected keeps the same values. Resolution columns stay untouched,
+ * Rows carry the `superseded_by` the canonical publication projects (the
+ * shared `takesPreparation.toCanonicalBatchInput`), so a page it already
+ * projected keeps the same values. Resolution columns stay untouched,
  * as on the unmanaged path: some resolutions live only in the database.
  */
 async function reextractCoordinated(
@@ -304,10 +305,7 @@ async function reextractCoordinated(
     if (!page) return;
     const takes = await reconcilePageTakes(tx, page, slug, rebuild, false, result);
     if (takes.length === 0) return;
-    result.takesUpserted += await tx.addTakesBatch(takes.map(t => ({
-      ...parsedTakeToBatchInput(page.id, t),
-      superseded_by: t.active ? null : Number(t.source?.match(/superseded by #(\d+)/)?.[1]) || null,
-    })));
+    result.takesUpserted += await tx.addTakesBatch(takes.map(t => takesPreparation.toCanonicalBatchInput(page.id, t)));
   }));
 }
 

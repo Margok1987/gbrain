@@ -409,6 +409,11 @@ function toBatchInput(pageId: number, t: ParsedTake, supersededBy?: number | nul
   };
 }
 
+/** The row a canonical takes fence projects: an inactive row citing `superseded by #N` points at row N. */
+function toCanonicalBatchInput(pageId: number, t: ParsedTake): TakeBatchInput {
+  return toBatchInput(pageId, t, t.active ? null : Number(t.source?.match(/superseded by #(\d+)/)?.[1]) || null);
+}
+
 async function withTakesLock<T>(
   target: Pick<TakesWriteTarget, 'slug' | 'lockTimeoutMs'>,
   fn: () => Promise<T>,
@@ -780,4 +785,4 @@ export async function resolveTakeOnPage(
 }
 
 /** Pure fence primitives shared by durable semantic preparation and legacy callers. */
-export const takesPreparation = { assertHolderAllowed, assertSafeCellText, assertValidWeight, assertValidSinceDate, findFenceRow, assertFenceRoundTrips, replaceFence, toBatchInput };
+export const takesPreparation = { assertHolderAllowed, assertSafeCellText, assertValidWeight, assertValidSinceDate, findFenceRow, assertFenceRoundTrips, replaceFence, toBatchInput, toCanonicalBatchInput };
