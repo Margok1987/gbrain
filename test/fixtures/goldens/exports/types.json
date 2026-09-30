@@ -4438,7 +4438,7 @@
         "kind": "variable",
         "name": "LINK_EXTRACTOR_VERSION_TS",
         "signature": [
-          "\"2026-09-21T00:00:00Z\""
+          "\"2026-09-30T00:00:00Z\""
         ]
       },
       {
@@ -4482,7 +4482,15 @@
       {
         "kind": "interface",
         "members": [
-          "resolve: (name: string, dirHint?: string | string[]) => Promise<string | null>",
+          "globalBasename?: boolean | undefined",
+          "selfSlug?: string | undefined"
+        ],
+        "name": "ResolveOptions"
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "resolve: (name: string, dirHint?: string | string[], opts?: ResolveOptions) => Promise<string | null>",
           "resolveAttendance?: ((name: string, dirHint?: string | string[]) => Promise<string | null>) | undefined",
           "resolveBasenameMatches?: ((name: string) => Promise<string[]>) | undefined"
         ],
