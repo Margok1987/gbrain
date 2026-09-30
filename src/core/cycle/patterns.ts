@@ -1,4 +1,4 @@
-import { maintenancePreflight, verifyMaintenanceOutputs } from '../persistence/prepared-maintenance.ts';
+import { maintenancePreflight, stampMaintenancePage, verifyMaintenanceOutputs } from '../persistence/prepared-maintenance.ts';
 import { digest } from '../persistence/digest.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 /**
@@ -41,7 +41,7 @@ import type { Page, PageType } from '../types.ts';
 // data-dir, on Postgres because the parent phase itself occupies a worker
 // slot and can deadlock a fully-occupied worker (#2050). synthesize.ts
 // drains its own children the same way.
-import { loadAllowedSlugPrefixes, loadOutputRoot, runSubagentsInline } from './synthesize.ts';
+import { loadAllowedSlugPrefixes, loadOutputRoot, runSubagentsInline, stampDreamProvenance } from './synthesize.ts';
 import { probeChatModel } from '../ai/gateway.ts';
 import { normalizeModelId } from '../model-id.ts';
 import { throwIfAborted } from '../abort-check.ts';
@@ -255,9 +255,9 @@ export async function runPhasePatterns(
     const renewPrivateQueueLease = queue.makeThrottledLeaseRenewer(
       childQueueName, privateQueueOwnerToken, opts.yieldDuringPhase,
     );
+    const cycleDate = opts.cycleDate ?? await resolveCycleDate(engine);
     const data: SubagentHandlerData = {
-      prompt: buildPatternsPrompt(reflections, config.minEvidence, config.sourceSlugPrefix, config.outputSlugPrefix,
-        opts.cycleDate ?? await resolveCycleDate(engine)),
+      prompt: buildPatternsPrompt(reflections, config.minEvidence, config.sourceSlugPrefix, config.outputSlugPrefix, cycleDate),
       model: config.model,
       max_turns: 30,
       // #4217/CDX-12: a patterns child whose every put_page failed must
@@ -359,6 +359,16 @@ export async function runPhasePatterns(
     // the reverse-write below dual-writes files).
     throwIfAborted(opts.signal, '[dream] patterns output');
     const writtenRefs = await collectChildPutPageSlugs(engine, [job.id], cycleSourceId);
+
+    // #5733: pages under the patterns output prefix are dream output and carry
+    // the dream_generated identity stamp every dream_generated consumer reads.
+    const patternRefs = writtenRefs.filter(ref => ref.slug.startsWith(`${config.outputSlugPrefix}/`));
+    if (maintenance) {
+      for (const ref of patternRefs) {
+        throwIfAborted(opts.signal, '[dream] patterns provenance');
+        await stampMaintenancePage(engine, maintenance, ref.slug, cycleDate);
+      }
+    } else await stampDreamProvenance(engine, patternRefs, cycleDate, opts.signal);
 
     // Reverse-write to fs.
     const reverseWriteCount = maintenance ? await verifyMaintenanceOutputs(engine, maintenance, writtenRefs)

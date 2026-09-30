@@ -3006,7 +3006,7 @@ function findLegacyCompletion(
 
 // ── Dream-provenance DB stamp (#2569) ────────────────────────────────
 
-async function stampDreamProvenance(
+export async function stampDreamProvenance(
   engine: BrainEngine,
   refs: Array<{ slug: string; source_id: string; raw_source?: string; first_write_at?: Date }>,
   cycleDate: string,
