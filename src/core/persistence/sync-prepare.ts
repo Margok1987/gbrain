@@ -41,6 +41,8 @@ export interface SyncIntent extends Record<string, unknown> {
   renameFrom?: SyncRename;
   processingOptions?: SyncProcessingOptions;
   syncOptions?: SyncCursorOptions;
+  /** The `--repo` base a relative `--src-subpath` resolved against, for the printed retry. */
+  repoPath?: string;
   /** #5522: another cursor of this source imported entries of this run, so the source may already sit at the target. */
   overtaken?: boolean;
   syncAuthority: SyncAuthority; cursorKey: string; runId: string; index: number;

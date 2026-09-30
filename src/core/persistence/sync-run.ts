@@ -15,7 +15,7 @@ import { assertManagedSyncActive, assertSyncDispatchActive, managedSyncAuthority
 import { prepareManagedSyncMutation, type SyncCursorOptions, type SyncIntent } from './sync-prepare.ts';
 import { inspectUnchanged, screeningRequest, type NoopKernelWaiver } from './noop-kernel.ts';
 import type { GBrainConfig } from '../config.ts';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { currentCompanyBrainSync, getCompanyBrainProfile, readCompanyBrainPlan } from '../company-brain/profile.ts';
 import { readCommittedBlob } from '../company-brain/revision.ts';
 import { refreshProjectionStatistics } from '../search/projection-statistics.ts';
@@ -146,7 +146,8 @@ function writeDiagnostic(cursor: Cursor, pending: Pending, row: WriteRequest): M
   }
   return diagnostic;
 }
-async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, assertActive: () => void): Promise<Pending> {
+async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, assertActive: () => void,
+  run: { syncOptions: SyncCursorOptions; repoPath?: string }): Promise<Pending> {
   assertActive();
   const entry = cursor.entries[cursor.index];
   let slug = '__managed_sync_checkpoint__', pageId: number | null = null, revision: string | null = null;
@@ -197,7 +198,9 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
     expected_revision: revision, sourcePath: entry?.sourcePath ?? null, path: entry?.path ?? null, rawHash, content, lineEndingOnly,
     ...(entry?.renameFrom ? { renameFrom: entry.renameFrom } : {}),
     processingOptions: cursor.processingOptions,
-    ...(!entry && cursor.syncOptions ? { syncOptions: cursor.syncOptions } : {}), ...(!entry && cursor.overtaken ? { overtaken: true } : {}),
+    // A cursor created before its options were recorded has the same key, so this run's options are its options.
+    ...(!entry ? { syncOptions: cursor.syncOptions ?? run.syncOptions, ...(run.repoPath ? { repoPath: run.repoPath } : {}) } : {}),
+    ...(!entry && cursor.overtaken ? { overtaken: true } : {}),
     ownerEpoch: String(cursor.binding.owner_epoch), syncAuthority: cursor.authority, cursorKey: key, runId: cursor.runId,
     slugMode: cursor.slugMode, index: cursor.index, total: cursor.entries.length, from: cursor.from, target: cursor.target, working: entry?.working ?? false,
     ...(cursor.companyPlan ? { companyApproval: { schema: cursor.companyPlan.schema!, planDigest: cursor.companyPlan.plan_digest, extractorVersion: cursor.companyPlan.extractor_version,
@@ -257,6 +260,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
   const processingOptions = syncProcessingOptions(opts);
   const syncOptions: SyncCursorOptions = { full: opts.full ?? false, workingTree: opts.workingTree ?? false, srcSubpath: opts.srcSubpath ?? null,
     exclude: opts.exclude ?? [], includeHidden: opts.includeHidden ?? [], strategy: opts.strategy ?? null };
+  const frozenRun = { syncOptions, ...(opts.repoPath ? { repoPath: resolve(opts.repoPath) } : {}) };
   const key = digest({ source: context.incarnation, principal: authority.writer.principal, authority, ...(company ? { company: { receiptId: company.receiptId, planDigest: company.plan.plan_digest } } : {}),
     options: syncOptions });
   let cursor: Cursor | null = null;
@@ -305,7 +309,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         }
         phase = 'freeze';
         const retry = { ...cursor, processingOptions };
-        cursor = await saveCursor(engine, key, cursor, { ...retry, pending: await freezeEntry(engine, retry, key, assertActive) }, true, assertActive);
+        cursor = await saveCursor(engine, key, cursor, { ...retry, pending: await freezeEntry(engine, retry, key, assertActive, frozenRun) }, true, assertActive);
       }
     }
     if (cursor && opts.retryFailed && !opts.dryRun && !company && !cursor.done) {
@@ -410,7 +414,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         }
         foregroundWaitStart = 0;
         phase = 'freeze';
-        const frozen = await freezeEntry(engine, cursor, key, assertActive);
+        const frozen = await freezeEntry(engine, cursor, key, assertActive, frozenRun);
         cursor = await saveCursor(engine, key, cursor, { ...cursor, ...(frozen.rebound ? { overtaken: true as const } : {}), pending: frozen }, false, assertActive);
       }
       if (!cursor.pending) continue; // another owner-loop advanced the cursor
@@ -459,7 +463,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         first_seen: new Date(done.completed_at ?? done.updated_at).toISOString() });
         // #5762: the hint is built after the failed transaction, from a fresh read of the request indexes.
         const hint = done.error_code === CHECKPOINT_VALIDATION_TIMEOUT && !authority.writer.remote ? await checkpointTimeoutHint(engine,
-          { requestId: pending.requestId, sourceId: cursor.sourceId, processingOptions: pending.intent.processingOptions, syncOptions: pending.intent.syncOptions ?? syncOptions }) : null;
+          { requestId: pending.requestId, sourceId: cursor.sourceId, processingOptions: pending.intent.processingOptions, syncOptions: pending.intent.syncOptions ?? syncOptions, repoPath: pending.intent.repoPath ?? frozenRun.repoPath }) : null;
         return { ...result(cursor, 'blocked_by_failures'), failedFiles: 1,
           failureCodes: [{ code: failure.code, count: 1 }], ...(authority.writer.remote ? {} : { failures: [failure],
             managedWrite: { ...writeDiagnostic(cursor, pending, done), ...hint, ledger_recorded: ledgerRecorded } }) };

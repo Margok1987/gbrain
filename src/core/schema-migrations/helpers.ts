@@ -76,8 +76,8 @@ export type OnlineIndexOutcome = 'present' | 'created' | 'rebuilt' | 'building';
  * `CREATE INDEX IF NOT EXISTS`. Postgres leaves a valid index alone, reports
  * one another session is still building, drops an INVALID leftover of an
  * interrupted concurrent build, then runs `CREATE INDEX CONCURRENTLY IF NOT
- * EXISTS` on a dedicated connection with a bounded lock wait and no statement
- * timeout, then confirms the index is valid. Callers build one index at a time;
+ * EXISTS` on a dedicated connection (with a bounded lock wait and no statement
+ * timeout when that connection is session-stable), then confirms the index is valid. Callers build one index at a time;
  * a lock timeout leaves an INVALID index that the next call drops and rebuilds.
  */
 export async function buildIndexOnline(
@@ -105,14 +105,22 @@ export async function buildIndexOnline(
     'SELECT GREATEST(reltuples, 0)::bigint AS rows FROM pg_class WHERE oid = to_regclass($1)', [index.table]);
   opts.notice?.(`  building ${index.name} on ~${Number(size?.rows ?? 0)} rows; this can take minutes; it is safe to leave running; `
     + 'if interrupted, gbrain doctor names the rebuild command\n');
+  // Session SETs are safe only on a session-stable backend: through a transaction pooler they would leak to
+  // another client. The direct route (split pools) or a URL that is not a known transaction pooler qualifies.
+  const mode = (engine as { connectionManager?: { describeMode(): { mode: string } } | null }).connectionManager?.describeMode().mode;
+  const sessionStable = mode === 'split' || mode === 'single (non-supabase)';
   await engine.withReservedConnection(async conn => {
-    await conn.executeRaw(`SET lock_timeout = '${opts.lockTimeout ?? '60s'}'`);
-    await conn.executeRaw('SET statement_timeout = 0');
+    if (sessionStable) {
+      await conn.executeRaw(`SET lock_timeout = '${opts.lockTimeout ?? '60s'}'`);
+      await conn.executeRaw('SET statement_timeout = 0');
+    }
     try {
       await conn.executeRaw(index.sql.replace('CREATE INDEX', 'CREATE INDEX CONCURRENTLY'));
     } finally {
-      await conn.executeRaw('RESET lock_timeout');
-      await conn.executeRaw('RESET statement_timeout');
+      if (sessionStable) {
+        await conn.executeRaw('RESET lock_timeout');
+        await conn.executeRaw('RESET statement_timeout');
+      }
     }
   });
   // IF NOT EXISTS also skips an INVALID index a concurrent caller's failed build left behind.

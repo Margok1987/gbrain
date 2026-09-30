@@ -82,10 +82,13 @@ export async function readRequestIndexStates(engine: Pick<BrainEngine, 'executeR
 const shellWord = (value: string) => /^[\w./@:=+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 
 /** The exact retry for the failed checkpoint: same source and cursor-selecting options, plus the recorded processing flags. */
-export function checkpointRetryCommand(input: { sourceId: string; processingOptions?: Partial<SyncProcessingOptions> | null; syncOptions?: SyncCursorOptions | null }): string {
+export function checkpointRetryCommand(input: { sourceId: string; processingOptions?: Partial<SyncProcessingOptions> | null; syncOptions?: SyncCursorOptions | null; repoPath?: string | null }): string {
+  const base = `gbrain sync --source ${shellWord(input.sourceId)} --no-pull --retry-failed`;
+  // A compacted receipt no longer carries its intent; never print assumed defaults for work it cannot name.
+  if (!input.processingOptions && !input.syncOptions) return `${base} with the same options as the failed run (this receipt no longer records them)`;
   const options = input.processingOptions ?? {};
   const cursor = input.syncOptions;
-  return [`gbrain sync --source ${shellWord(input.sourceId)} --no-pull --retry-failed`, options.noEmbed ? '--no-embed' : '', options.noExtract ? '--no-extract' : '',
+  return [base, input.repoPath ? `--repo ${shellWord(input.repoPath)}` : '', options.noEmbed ? '--no-embed' : '', options.noExtract ? '--no-extract' : '',
     options.noSchemaPack ? '--no-schema-pack' : '', cursor?.full ? '--full' : '', cursor?.workingTree ? '--working-tree' : '',
     cursor?.srcSubpath ? `--src-subpath ${shellWord(cursor.srcSubpath)}` : '', ...(cursor?.exclude ?? []).map(pattern => `--exclude ${shellWord(pattern)}`),
     ...(cursor?.includeHidden ?? []).map(pattern => `--include-hidden ${shellWord(pattern)}`), cursor?.strategy ? `--strategy ${shellWord(cursor.strategy)}` : '']
@@ -96,7 +99,7 @@ export interface CheckpointTimeoutHint { reason: string; message: string; sugges
 
 /** The one formatter for the refusal: a three-state hint from the index state, plus the filled retry command. */
 export function formatCheckpointTimeoutHint(indexes: RequestIndexState[], input: { requestId: string | null; sourceId: string;
-  processingOptions?: Partial<SyncProcessingOptions> | null; syncOptions?: SyncCursorOptions | null }): CheckpointTimeoutHint {
+  processingOptions?: Partial<SyncProcessingOptions> | null; syncOptions?: SyncCursorOptions | null; repoPath?: string | null }): CheckpointTimeoutHint {
   const retry = checkpointRetryCommand(input);
   const base = { reason: CHECKPOINT_VALIDATION_TIMEOUT, message: CHECKPOINT_VALIDATION_TIMEOUT_MESSAGE, docs: docsAnchor(CHECKPOINT_VALIDATION_TIMEOUT) };
   const building = indexes.filter(index => index.state === 'building');

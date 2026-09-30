@@ -184,6 +184,12 @@ test('#5762 the hint names one of three index states and keeps the saved process
   expect(checkpointRetryCommand({ sourceId: 'notes', processingOptions: null, syncOptions: { full: true, workingTree: false, srcSubpath: 'docs/team a',
     exclude: ['drafts/**', "it's"], includeHidden: ['.notes'], strategy: 'markdown' } })).toBe(
     "gbrain sync --source notes --no-pull --retry-failed --full --src-subpath 'docs/team a' --exclude 'drafts/**' --exclude 'it'\\''s' --include-hidden .notes --strategy markdown");
+  // A relative --src-subpath keeps the --repo base it resolved against.
+  expect(checkpointRetryCommand({ sourceId: 'notes', processingOptions: { noEmbed: true, noExtract: true, noSchemaPack: false },
+    syncOptions: { ...syncOptions, workingTree: false, srcSubpath: 'guides' }, repoPath: '/work/repo/docs' }))
+    .toBe('gbrain sync --source notes --no-pull --retry-failed --repo /work/repo/docs --no-embed --no-extract --src-subpath guides');
+  // A compacted receipt has no intent: no assumed defaults.
+  expect(checkpointRetryCommand({ sourceId: 'notes' })).toBe('gbrain sync --source notes --no-pull --retry-failed with the same options as the failed run (this receipt no longer records them)');
 });
 
 test('#5762 a dropped index reads as missing and the hint then names the rebuild command', async () => each(async engine => {
