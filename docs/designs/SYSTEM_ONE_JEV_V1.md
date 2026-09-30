@@ -50,14 +50,16 @@ Jev (fast, cheap, calibrated) or from the configured chat model (no new vendor),
 
 - (a) With every slot `off` (the default), behavior is byte-identical: existing goldens, BrainBench rows and the
   deterministic hybrid-output golden pass unchanged. No config key flips a default in this PR.
-- (b) Every slot supports `off | shadow | on`. `shadow` makes the call and writes a decision receipt; it changes no
+- (b) Every slot is `off` or `on`; those are the only modes the CLI, docs and `--recommended` present (owner
+  decision 2026-09-30, see "Owner decision: on/off" below). An advanced `shadow` mode exists for diagnostics only.
+  `shadow` `shadow` makes the call and writes a decision receipt; it changes no
   ranking, pruning, gating or write and adds diagnostics only when shadow is awaited (`shadow_wait on`, or `--explain`, which awaits shadow for that one
   query), so operators can
   see real traffic, drift, agreement and latency before trusting a slot. Shadow receipts carry predictions, not
   correctness labels; thresholds come from labelled datasets or the bundled reference calibrations.
 - (c) A slot in `on` mode uses a threshold from a stored calibration for the exact resolved model id, or an explicit
   operator override. If the provider answers with a different model id than the calibration's, the slot demotes
-  itself to `shadow` for that call and `gbrain doctor` warns (drift protection).
+  itself to off behavior (today's path) for that call, writes a receipt, and `gbrain doctor` warns (drift protection).
 - (d) Every slot fails the documented direction: retrieval, context and triage slots fail open to today's path;
   no slot can weaken an existing deterministic floor (verbatim quotes, numbers, visibility, trust).
 - (e) Each slot ships with a matched baseline-vs-feature eval run and a recorded verdict (win / no measurable
@@ -126,6 +128,25 @@ Jev (fast, cheap, calibrated) or from the configured chat model (no new vendor),
 10. **Trust.** `decide` is not an MCP operation. Remote callers can trigger slots only through existing ops
     (`query`, `think`); `calibrate`, receipts review and proposal acceptance are local-CLI only.
 
+### Owner decision: on/off (2026-09-30)
+
+Garry, after reviewing the ELI10: "we should just have on and off as the main things and shadow doesn't have to be
+recommended." This overrides every earlier statement in this document that presents shadow as the default,
+recommended or first step:
+
+- The user-facing model is two states per slot: `off` (today's behavior) and `on` (GBrain acts on the decision).
+  `gbrain decide enable <slot>` turns a slot on; `disable` turns it off. `enable --recommended` turns on the slots
+  with a recorded win and a passing reference calibration.
+- `shadow` stays as an advanced diagnostics mode (`enable --shadow`, `mode shadow`), documented only under an
+  "Advanced diagnostics" heading in the operator guide. No doc, readiness string, doctor hint or quickstart step
+  recommends it, and nothing requires passing through it.
+- Everywhere the plan says a slot "demotes to shadow" (model drift, policy-fingerprint change, missing calibration
+  for an alias), read: the call runs with off behavior (today's path), writes a receipt with the reason, and
+  `decide status` / doctor show `on (inactive: <reason>)` plus the one command that fixes it.
+- Slots that cannot pass the action-precision gate (likely S4, S8) ship as available-but-not-recommended: `enable`
+  refuses with the catalogued reason unless `force_on` is set; they are not "shadow-only".
+- Readiness strings: `off`, `ready for on`, `on`, `on (inactive: <reason>)`, `needs calibration`.
+
 ### Config surface (all default off)
 
 ```
@@ -140,7 +161,7 @@ decide.budget.daily_usd      1.00
 decide.egress.private        deny | allow
 decide.egress.deny_sources   []            (source ids)
 decide.receipts.retention_days 7
-decide.slots.<slot>.mode     off | shadow | on
+decide.slots.<slot>.mode     off | on   (advanced: shadow, diagnostics only, never recommended)
 decide.slots.<slot>.threshold  (optional override; else calibration)
 decide.slots.<slot>.min_keep   (slot-specific, where applicable)
 decide.slots.conflict.proposal_floor  0.50
@@ -262,7 +283,8 @@ New CLI-only command `gbrain decide` (`src/commands/decide.ts`, dispatch in `src
 - `gbrain decide probe [--query <q>]`: works with only a key (pinned default provider); one tiny live request that
   prints resolved model, latency, cost and the next command to run; sends no brain content unless `--query` is given,
   which previews S1 and S3 on one query of your brain after the egress summary and confirmation, changing nothing.
-- `gbrain decide enable <slot> [--on]` (shadow unless `--on`), `gbrain decide enable --recommended`, and
+- `gbrain decide enable <slot>` (turns the slot on; advanced `--shadow` for a diagnostics-only dry run),
+  `gbrain decide enable --recommended`, and
   `gbrain decide disable <slot>|--all`: write every key the slot needs (pinned provider, consent keys, mode) in one
   confirmed step after a plain summary of what data leaves the machine and the estimated cost, then print the
   requested versus effective mode.
@@ -297,14 +319,14 @@ Eval integration: `gbrain eval longmemeval`, `eval brainbench` and `eval retriev
   `(status, created_at)`.
 - No data backfill. No config migration: all keys are new and default off.
 - Agent upgrade note `skills/migrations/v0.60.<patch>.md`: nothing changes until the operator opts in; how to try
-  shadow mode; where the docs live.
+  `gbrain decide enable --recommended`; where the docs live.
 
 ### Docs
 
 - `docs/ai-providers/typesafe.md`: key setup (`TYPESAFE_API_KEY`, `JEV_TYPESAFE_API_KEY` alias), pinned vs alias
   models, reranker setup (carried from #5178), pricing, limits, data handling, what never leaves the machine.
-- `docs/guides/system-one.md`: the operator guide. What each slot does in plain words, the shadow → calibrate (or reference
-  calibration) → on loop with exact commands, `decide enable --recommended`, fail directions, egress rules, reading `decide status` and doctor output, "say to your
+- `docs/guides/system-one.md`: the operator guide. What each slot does in plain words, the off → on switch backed by bundled reference
+  calibrations (own-dataset calibration as the advanced path; shadow documented only under Advanced diagnostics) with exact commands, `decide enable --recommended`, fail directions, egress rules, reading `decide status` and doctor output, "say to your
   agent" prompts, and troubleshooting.
 - `docs/architecture/decide.md`: the capability contract (API, providers, packing, receipts, calibration, drift,
   egress, trust) for contributors adding a slot, with a "how to add a slot" checklist.
@@ -352,8 +374,8 @@ security boundary.
 - Single closed vendor: the `llm:` provider makes every slot work without Jev, but its answers are uncalibrated
   until qualified; v1 qualifies one local `llm:` configuration on S7 for quality and latency. Private brains that
   keep egress denied effectively run S6-S9 as LLM slots.
-- Calibration drift when TypeSafe ships a new version: pinned ids, receipts, drift demotion to shadow.
-- Over-pruning: min-keep floors, identity-evidence protection, calibrated thresholds, shadow first.
+- Calibration drift when TypeSafe ships a new version: pinned ids, receipts, drift falls back to off behavior per call.
+- Over-pruning: min-keep floors, identity-evidence protection, calibrated thresholds, an action-precision gate before `on`.
 - Adversarial flipping: signal-only use; deterministic floors win.
 - Hot-path latency: intent waits at most 150 ms; with S1 on Jev and any of S3-S5 on, the query path
   makes two serial Jev stages (rerank, then the S3/S5 packed request with the S4 request concurrently), each
@@ -2557,3 +2579,6 @@ domain → Eng T1's `executeRaw` store, and DX T5's CHECK constraint → Eng's T
 | 59 | Eng | TS-enforced outcomes (no CHECK); S3/S5 shadow sample 0.1; HMAC subject_ref; salt exclusion; sanitized receipts | Mechanical | P5 | Native, verified | CHECK constraint, plaintext slugs |
 | 60 | Eng | Internal delivery gate: foundation + S1 + S3 before other lanes | Mechanical | P6 | Native hidden complexity; keeps one PR | parallel from start |
 | 61 | Eng | TODOS.md auto-written (7 items) | Mechanical | P3 | Eng phase rule | leave to PR |
+
+- 2026-09-30 owner approval: plan approved with one change, on/off as the only main modes and shadow never
+  recommended (see "Owner decision: on/off" in the Implementation plan). All three User Challenges stand as applied.
