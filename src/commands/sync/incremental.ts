@@ -104,6 +104,7 @@ import {
   trackedSlugIndex,
 } from './rename-reconcile.ts';
 import type { TrackedSlugIndex } from './rename-reconcile.ts';
+import { createSyncRun } from './sync-run.ts';
 
 export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Promise<SyncResult> {
   const company = currentCompanyBrainSync(opts.sourceId);
@@ -1068,7 +1069,8 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   const pageOpts = opts.sourceId ? { sourceId: opts.sourceId } : undefined;
   // #4786: pages this loop retires count as `deleted` in the result (only rows
   // that actually transitioned), so a sweep-only run never reports up_to_date.
-  let swept = 0;
+  const run = createSyncRun();
+  run.swept = 0;
   for (const path of unsyncableModified) {
     // v0.41.13 #1433: never delete on metafile classification.
     // #2404 hardening: same for 'pruned-dir' — a page under a pruned
@@ -1101,7 +1103,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
           // Scope falls back to DEFAULT_SOURCE_ID to preserve deletePage's
           // old 'default' fallback; softDeletePages requires an explicit
           // sourceId. The purge phase owns the eventual hard delete.
-          swept += (await softDeleteSyncPages(engine, [slug], { sourceId: opts.sourceId ?? DEFAULT_SOURCE_ID })).length;
+          run.swept += (await softDeleteSyncPages(engine, [slug], { sourceId: opts.sourceId ?? DEFAULT_SOURCE_ID })).length;
           slog(`  Soft-deleted un-syncable page (recoverable 72h): ${slug}`);
         }
       }
@@ -1127,7 +1129,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
         filesImported: 0,
         pagesAffected: [],
         chunksCreated: 0,
-        added: 0, modified: 0, deleted: swept, renamed: 0,
+        added: 0, modified: 0, deleted: run.swept, renamed: 0,
         reason: 'pull_failed',
       });
     }
@@ -1153,10 +1155,10 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     // sweep orphaned `<rename:…>` sentinels here too.
     await sweepOrphanedRenameSentinels(engine, opts.sourceId ?? DEFAULT_SOURCE_ID);
     return {
-      status: swept > 0 ? 'synced' : 'up_to_date',
+      status: run.swept > 0 ? 'synced' : 'up_to_date',
       fromCommit: lastCommit,
       toCommit: pin,
-      added: 0, modified: 0, deleted: swept, renamed: 0,
+      added: 0, modified: 0, deleted: run.swept, renamed: 0,
       chunksCreated: 0,
       embedded: 0,
       pagesAffected: [],
@@ -1193,18 +1195,18 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   const pendingCheckpointPaths = new Set<string>();
   const checkpointSeconds = resolveSyncCheckpointSeconds();
   const maxFlushFailures = resolveSyncMaxCheckpointFailures();
-  let sinceFlush = 0;
-  let lastFlushAt = Date.now();
-  let consecutiveFlushFailures = 0;
-  let bankedFiles = completedPaths.length;
-  let flushing = false;
-  let checkpointDead = false;
+  run.sinceFlush = 0;
+  run.lastFlushAt = Date.now();
+  run.consecutiveFlushFailures = 0;
+  run.bankedFiles = completedPaths.length;
+  run.flushing = false;
+  run.checkpointDead = false;
   // Assigned at registration (after the pinPersisted gate); called on every
   // normal return so a later operation's SIGTERM doesn't fire this stale flush.
-  let deregisterCheckpointCleanup: () => void = () => {};
+  run.deregisterCheckpointCleanup = () => {};
   const flushCheckpoint = async (): Promise<void> => {
-    if (pendingCheckpointPaths.size === 0 || flushing) return;
-    flushing = true;
+    if (pendingCheckpointPaths.size === 0 || run.flushing) return;
+    run.flushing = true;
     // Synchronous swap (atomic under single-threaded JS): take the current
     // pending set as this flush's batch; workers accumulate into a fresh set.
     const batch = [...pendingCheckpointPaths];
@@ -1212,26 +1214,26 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     try {
       const ok = await appendCompleted(engine, ckpt.paths, batch);
       if (ok) {
-        consecutiveFlushFailures = 0;
-        bankedFiles += batch.length;
-        opts.onProgress?.({ phase: 'import', bankedFiles });
+        run.consecutiveFlushFailures = 0;
+        run.bankedFiles += batch.length;
+        opts.onProgress?.({ phase: 'import', bankedFiles: run.bankedFiles });
       } else {
         // Not durably banked — re-merge so the next flush retries this batch.
         for (const p of batch) pendingCheckpointPaths.add(p);
-        if (++consecutiveFlushFailures >= maxFlushFailures) checkpointDead = true;
+        if (++run.consecutiveFlushFailures >= maxFlushFailures) run.checkpointDead = true;
       }
     } finally {
-      flushing = false;
+      run.flushing = false;
     }
   };
   // v0.42.x (#1794): yield the event loop every N files so the refreshing-lock
   // heartbeat timer can fire mid-import (otherwise the CPU loop starves it and
   // the live lock gets stolen — the thrash this fixes).
   const yieldEvery = resolveSyncYieldEvery();
-  let sinceYield = 0;
+  run.sinceYield = 0;
   const maybeYield = async (): Promise<void> => {
-    if (++sinceYield >= yieldEvery) {
-      sinceYield = 0;
+    if (++run.sinceYield >= yieldEvery) {
+      run.sinceYield = 0;
       // setTimeout(0), NOT setImmediate: the lock-refresh heartbeat is a
       // setInterval (timers phase). In Bun a tight setImmediate loop starves
       // the timers phase, so the heartbeat would never fire. setTimeout(0)
@@ -1242,12 +1244,12 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   const markCompleted = async (path: string): Promise<void> => {
     completed.add(path);
     pendingCheckpointPaths.add(path);
-    const dueByCount = ++sinceFlush >= checkpointEvery;
-    const dueByTime = Date.now() - lastFlushAt >= checkpointSeconds * 1000;
+    const dueByCount = ++run.sinceFlush >= checkpointEvery;
+    const dueByTime = Date.now() - run.lastFlushAt >= checkpointSeconds * 1000;
     const firstFile = completed.size === 1; // bank early on a fresh run
     if (dueByCount || dueByTime || firstFile) {
-      sinceFlush = 0;
-      lastFlushAt = Date.now();
+      run.sinceFlush = 0;
+      run.lastFlushAt = Date.now();
       await flushCheckpoint();
     }
   };
@@ -1264,12 +1266,12 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   // gate clears these so a previously-failing file's `attempts` streak resets
   // on success (consecutive-failure semantics for the auto-skip valve).
   const succeededPaths: string[] = [];
-  let chunksCreated = 0;
+  run.chunksCreated = 0;
   // v0.41.13.0 (T2): tracks add+modify files actually persisted so far.
   // Only bumped from inside importOnePath's success path. partial() reports
   // this as `filesImported` so cron operators can see how much work the
   // aborted run completed before --timeout fired.
-  let filesImported = 0;
+  run.filesImported = 0;
   const start = Date.now();
 
   // v0.41.13.0 (T2 + D-V3-1): closure for the partial-return path.
@@ -1281,11 +1283,11 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   // looking like total loss. toCommit reports the PINNED target; last_commit is
   // never advanced on a partial (the next run resumes from the checkpoint).
   const partial = async (reason: 'timeout' | 'pull_timeout' | 'stall_timeout'): Promise<SyncResult> => {
-    deregisterCheckpointCleanup();
-    if (!checkpointDead) {
+    run.deregisterCheckpointCleanup();
+    if (!run.checkpointDead) {
       try { await flushCheckpoint(); } catch { /* best effort — we're aborting */ }
     }
-    const banked = bankedFiles;
+    const banked = run.bankedFiles;
     serr(
       `[sync] banked ${banked} file(s) this run; next 'gbrain sync' resumes from ` +
       `the checkpoint (last_commit unchanged at ${(lastCommit ?? '').slice(0, 8)}).`,
@@ -1295,22 +1297,22 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     // retry-matcher's connection-class retries (#1794), so `conn_dropped` is
     // asserted structurally, not parsed from an error. The marker lets the
     // bundled skills/db-repair skill pick this up from an agent-run sync.
-    if (checkpointDead && shouldEmitDbAccessMarker()) {
+    if (run.checkpointDead && shouldEmitDbAccessMarker()) {
       serr(`${DB_ACCESS_MARKER_PREFIX} conn_dropped`);
       serr('The sync checkpoint pool died mid-run. Run: gbrain db-repair');
     }
     return buildPartialResult({
       fromCommit: lastCommit,
       toCommit: pin,
-      filesImported,
+      filesImported: run.filesImported,
       pagesAffected: [...pagesAffected],
-      chunksCreated,
+      chunksCreated: run.chunksCreated,
       added: filtered.added.length,
       modified: filtered.modified.length,
-      deleted: filtered.deleted.length + swept,
+      deleted: filtered.deleted.length + run.swept,
       renamed: filtered.renamed.length,
-      reason: checkpointDead ? 'checkpoint_unavailable' : reason,
-      bankedFiles,
+      reason: run.checkpointDead ? 'checkpoint_unavailable' : reason,
+      bankedFiles: run.bankedFiles,
     });
   };
 
@@ -1319,7 +1321,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   // loss; the next run retries the whole range (content_hash short-circuits).
   if (!pinPersisted) {
     serr('[sync] checkpoint target write failed (pool unavailable) — aborting before import; nothing drained, next run retries.');
-    checkpointDead = true;
+    run.checkpointDead = true;
     return await partial('timeout'); // reason → checkpoint_unavailable
   }
 
@@ -1330,7 +1332,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   // is shorter than withRetry's ~12s budget, so a retrying flush would be cut
   // off). Flushes paths ONLY — never clears the checkpoint or advances
   // last_commit, so the D4 invariant holds. Deregistered on every normal return.
-  deregisterCheckpointCleanup = registerCleanup('sync-checkpoint', async () => {
+  run.deregisterCheckpointCleanup = registerCleanup('sync-checkpoint', async () => {
     await appendCompletedOnce(engine, ckpt.paths, [...pendingCheckpointPaths]);
   });
 
@@ -1738,7 +1740,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
             : await importFile(engine, filePath, to, { noEmbed, sourceId: opts.sourceId, activePack: syncActivePack });
           importResult = result;
           noteTypeWarning(result.type_warning);
-          if (result.status === 'imported') chunksCreated += result.chunks;
+          if (result.status === 'imported') run.chunksCreated += result.chunks;
           else if (result.status === 'skipped' && result.skip_reason === 'malformed_path') {
             // Informational skip — a bracket/control-char filename can never
             // import; counting it as a failure would gate the bookmark forever.
@@ -2079,7 +2081,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     // partial result reports `stall_timeout`, not `timeout`.
     const stallSeconds = resolveStallAbortSeconds();
     const progressAt = { last: Date.now() };
-    let stallAborted = false;
+    run.stallAborted = false;
     let stallTimer: ReturnType<typeof setInterval> | undefined;
     if (stallSeconds > 0) {
       const stallMs = stallSeconds * 1000;
@@ -2090,7 +2092,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
             `[sync] no import progress for ${stallSeconds}s — aborting (stall watchdog). ` +
             `The per-source lock will release; the next 'gbrain sync' resumes from the checkpoint.`,
           );
-          stallAborted = true;
+          run.stallAborted = true;
           stallController.abort();
         }
       }, Math.min(5000, stallMs));
@@ -2166,7 +2168,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
             : company ? importCompanyBrainFile(eng, filePath, opts.sourceId!) : importFile(eng, filePath, path, { noEmbed, sourceId: opts.sourceId, activePack: syncActivePack }));
         noteTypeWarning(result.type_warning);
         if (result.status === 'imported') {
-          chunksCreated += result.chunks;
+          run.chunksCreated += result.chunks;
           pagesAffected.push(result.slug);
           deletedSlugs.delete(result.slug); // #1284: deleted-then-re-added in the same run → embeddable again
           // issue #1939: record the file path (not slug) so the gate clears any
@@ -2175,7 +2177,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
           // v0.41.13.0 (T2): bump filesImported on every successful
           // persist. partial() reports this so cron operators see how
           // much actually landed before --timeout fired.
-          filesImported++;
+          run.filesImported++;
           // v0.42.x (#1794): checkpoint this path so a kill banks it.
           await markCompleted(path);
         } else if (result.status === 'skipped' && result.skip_reason === 'malformed_path') {
@@ -2232,7 +2234,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
           // serial fallback inside the parallel branch (database_url unset).
           if (opts.signal?.aborted) {
             progress.finish();
-            return await partial(stallAborted ? 'stall_timeout' : 'timeout');
+            return await partial(run.stallAborted ? 'stall_timeout' : 'timeout');
           }
           await importOnePath(engine, path);
         }
@@ -2268,7 +2270,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
                 // Each worker exits its while loop cleanly when --timeout
                 // fires. In-flight importOnePath() calls complete
                 // naturally (no mid-transaction kill).
-                if (opts.signal?.aborted || checkpointDead) break;
+                if (opts.signal?.aborted || run.checkpointDead) break;
                 const idx = queueIndex++;
                 if (idx >= importsToDo.length) break;
                 await importOnePath(eng, importsToDo[idx]);
@@ -2296,7 +2298,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
         // primary serial site.
         if (opts.signal?.aborted) {
           progress.finish();
-          return await partial(stallAborted ? 'stall_timeout' : 'timeout');
+          return await partial(run.stallAborted ? 'stall_timeout' : 'timeout');
         }
         await importOnePath(engine, path);
       }
@@ -2320,7 +2322,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     // the bookmark write below. By returning partial here, we preserve
     // the D-V3-1 invariant that abort means "never advance last_commit."
     if (opts.signal?.aborted) {
-      return await partial(stallAborted ? 'stall_timeout' : 'timeout');
+      return await partial(run.stallAborted ? 'stall_timeout' : 'timeout');
     }
   }
 
@@ -2329,7 +2331,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   // checkpoint_unavailable partial so the next run re-drains (content_hash
   // short-circuits the re-import). partial() overrides the reason when
   // checkpointDead is set.
-  if (checkpointDead) {
+  if (run.checkpointDead) {
     return await partial('timeout');
   }
 
@@ -2340,7 +2342,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
   // either leave the checkpoint in place (blocked) or clear it (success), so the
   // SIGTERM one-shot flush has nothing left to add. Deregister so a SIGTERM
   // during the success-path git/anchor writes doesn't fire a stale flush.
-  deregisterCheckpointCleanup();
+  run.deregisterCheckpointCleanup();
 
   // v0.42.x (#1794, T3): pin-reachability gate, replacing the pre-v0.42 strict
   // "HEAD == captured" head-drift gate. CODEX-3 originally blocked on ANY HEAD
@@ -2530,7 +2532,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     // v0.42.x (#1794): surface banked progress so a blocked run doesn't read as
     // total loss (last_commit is unchanged by design; the checkpoint is banked).
     serr(
-      `[sync] banked ${bankedFiles} file(s) this run; next 'gbrain sync' resumes ` +
+      `[sync] banked ${run.bankedFiles} file(s) this run; next 'gbrain sync' resumes ` +
       `from the checkpoint (last_commit unchanged at ${(lastCommit ?? '').slice(0, 8)}).`,
     );
     return {
@@ -2539,14 +2541,14 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
       toCommit: pin,
       added: filtered.added.length,
       modified: filtered.modified.length,
-      deleted: filtered.deleted.length + swept,
+      deleted: filtered.deleted.length + run.swept,
       renamed: filtered.renamed.length,
-      chunksCreated,
+      chunksCreated: run.chunksCreated,
       embedded: 0,
       pagesAffected,
       failedFiles: failedFiles.length,
       failureCodes: summarizeFailuresByCode(failedFiles),
-      bankedFiles,
+      bankedFiles: run.bankedFiles,
     };
   }
 
@@ -2572,7 +2574,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     {
       imported: pagesAffected.length,
       errors: gate.acknowledged + gate.autoSkipped.length,
-      chunksCreated,
+      chunksCreated: run.chunksCreated,
     },
     opts.logNoop === true,
   )) {
@@ -2583,7 +2585,7 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
       source_type: 'git_sync',
       source_ref: `${repoPath} @ ${headCommit.slice(0, 8)}`,
       pages_updated: pagesAffected,
-      summary: `Sync: +${filtered.added.length} ~${filtered.modified.length} -${filtered.deleted.length} R${filtered.renamed.length}, ${chunksCreated} chunks, ${elapsed}ms`,
+      summary: `Sync: +${filtered.added.length} ~${filtered.modified.length} -${filtered.deleted.length} R${filtered.renamed.length}, ${run.chunksCreated} chunks, ${elapsed}ms`,
     });
   }
 
@@ -2799,9 +2801,9 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     toCommit: pin,
     added: filtered.added.length,
     modified: filtered.modified.length,
-    deleted: filtered.deleted.length + swept,
+    deleted: filtered.deleted.length + run.swept,
     renamed: filtered.renamed.length,
-    chunksCreated,
+    chunksCreated: run.chunksCreated,
     embedded,
     pagesAffected,
     ...(totalChanges > 100 && embedSlugs.length > 0 ? { embedDeferralReason: 'large_sync' as const } : {}),
