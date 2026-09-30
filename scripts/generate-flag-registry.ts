@@ -138,6 +138,8 @@ function facadeExpansion(p: string): string[] {
     join(ROOT, 'src/commands/mcp-admin-http.ts'),
   ];
   if (rel === 'src/commands/doctor.ts') return collect(join(ROOT, 'src/commands/doctor'));
+  // Refactor wave 1 (W3): the MIGRATIONS array moved to one file per migration.
+  if (rel === 'src/core/migrate.ts') return collect(join(ROOT, 'src/core/schema-migrations'));
   if (rel === 'src/commands/skillpack.ts') return collect(join(ROOT, 'src/commands/skillpack'));
   // connectors is a peeled command dir (index.ts dispatches to auth/sync/status);
   // scan the whole dir at module depth so a safety flag consumed in a subcommand
