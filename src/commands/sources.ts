@@ -460,6 +460,9 @@ async function runAdd(engine: BrainEngine, args: string[]): Promise<void> {
   console.log(
     `  federated: ${fed}${fed ? ' — appears in cross-source default search' : ' — only searched when explicitly named via --source'}`,
   );
+  if (ghKind || gKind) {
+    console.log(`  sync: run \`gbrain sync --source ${id}\` once; after its first sync, autopilot keeps it synced on the autopilot interval.`);
+  }
 
   // v0.42.44 — auto-harden managed clones for git durability the moment a brain
   // repo is added with a PAT. Best-effort: NEVER fail `add` if hardening fails.
@@ -1849,7 +1852,8 @@ export async function runSources(engine: BrainEngine, args: string[]): Promise<v
     return;
   }
 
-  if (['add', 'remove', 'archive', 'restore', 'purge', 'set-path', 'reclone'].includes(sub)) {
+  // #5673: `set-path --clear` is a connector-path clear, not a managed rebind.
+  if (['add', 'remove', 'archive', 'restore', 'purge', 'set-path', 'reclone'].includes(sub) && !(sub === 'set-path' && rest.includes('--clear'))) {
     const { runConnectedSourceLifecycle } = await import('./sources-lifecycle.ts');
     if (await runConnectedSourceLifecycle(engine, args)) return;
   }
@@ -1957,6 +1961,8 @@ Subcommands:
                                     Rejects a missing source or a path that
                                     doesn't exist. See gbrain doctor's
                                     default_source_local_path check.
+  set-path <id> --clear             Clear a connector source's (google, github)
+                                    stale local_path; takes no path.
   webhook <set|show|rotate|clear> <id> [options]
                                     v0.40 — per-source webhook secret management.
                                     Run 'sources webhook --help' for subcommand detail.

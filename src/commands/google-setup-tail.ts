@@ -97,6 +97,7 @@ export async function runGoogleSetupTail(input: SetupTailInput): Promise<void> {
         `First sync: ${result.added + result.modified} pages (${result.status}).` +
           (partial ? ' The rest of the backfill resumes automatically on every future sync.\n' : '\n'),
       );
+      process.stderr.write('Autopilot keeps this source synced on the autopilot interval from now on.\n');
     } finally {
       clearTimeout(timer);
     }

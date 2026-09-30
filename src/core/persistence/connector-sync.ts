@@ -29,7 +29,7 @@ import type { PageSnapshot } from '../page-state/types.ts';
 import { LockStolenError, syncLockId, withRefreshingLock, type DbLockHandle } from '../db-lock.ts';
 import { ownedGoogleReceipts, prepareGoogleReceiptPatch, type GoogleReceipts } from './connector-google-receipts.ts';
 import { connectorCheckpointKey, connectorIdentity, type ConnectorIdentity, type ConnectorKind } from './connector-identity.ts';
-import { readManagedConnectorState, sameConnectorAccount, writeManagedConnectorState, type ConnectorAccount, type ConnectorPendingEntry, type ConnectorRunCounts, type ConnectorState } from './connector-state.ts';
+import { readManagedConnectorState, recordConnectorSyncAttempt, sameConnectorAccount, writeManagedConnectorState, type ConnectorAccount, type ConnectorPendingEntry, type ConnectorRunCounts, type ConnectorState } from './connector-state.ts';
 import { connectorAccountChanged, CONNECTOR_INTENT_OUTDATED_OLD_HOST, CONNECTOR_INTENT_OUTDATED_PRE_UPGRADE } from './connector-errors.ts';
 import { inspectUnchanged, screeningRequest } from './noop-kernel.ts';
 import { conceptPreservationHold, preserveCanonicalFences } from '../cycle/concept-publication.ts';
@@ -193,12 +193,15 @@ export async function withConnectorSync<T>(engine: BrainEngine, sourceId: string
   if (!brain?.enabled) {
     if (opts.resetCheckpoint) throw new OperationError('invalid_params', '--reset-checkpoint applies to managed connector sources.',
       `This brain does not use managed persistence; re-walk this connector with: gbrain sync --source ${sourceId} --full`);
+    await recordConnectorSyncAttempt(engine, sourceId);
     return work(null, opts);
   }
   opts.signal?.throwIfAborted();
   return withRefreshingLock(engine, syncLockId(sourceId), async (signal, handle) => {
     const combined = opts.signal ? AbortSignal.any([opts.signal, signal]) : signal;
     const options = { ...opts, signal: combined };
+    // Stamped before the session loads its state row, so the session's own writes keep it.
+    await recordConnectorSyncAttempt(engine, sourceId);
     const session = await beginConnectorSync(engine, sourceId, connector, config, options, { handle, signal: combined });
     if (!session) throw new OperationError('source_changed', 'The managed connector mode changed before the sweep.');
     let result: T;

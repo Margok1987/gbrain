@@ -6,7 +6,9 @@
  */
 import type { BrainEngine } from '../core/engine.ts';
 import type { MinionQueue } from '../core/minions/queue.ts';
-import { loadAllSources, sourceConfigHasRemoteUrl, sourceLocalPathSkipWarning } from '../core/sources-load.ts';
+import { loadAllSources, parseSourceConfig, sourceConfigHasRemoteUrl, sourceLocalPathSkipWarning, type SourceRow } from '../core/sources-load.ts';
+import { isConnectorSourceKind } from '../core/persistence/connector-identity.ts';
+import { readConnectorDispatchStates, recordConnectorIdleNotice, type ConnectorDispatchState } from '../core/persistence/connector-state.ts';
 import { isSyncDisabledConfig } from '../core/sync-policy.ts';
 import { loadActivationPendingSourceIds, skipActivationPendingSync } from '../core/sync-policy.ts';
 import { resolveAutopilotDispatchTimeoutMs } from './autopilot-timeout.ts';
@@ -221,7 +223,7 @@ export async function dispatchAutopilotTick(
 /**
  * v0.40 D17 freshness: runs first each tick, independent of the score gate.
  */
-async function dispatchFreshnessSyncs(
+export async function dispatchFreshnessSyncs(
   engine: BrainEngine,
   queue: MinionQueue,
   { baseInterval, slot, timeoutMs, jsonMode }: { baseInterval: number; slot: string; timeoutMs: number; jsonMode: boolean },
@@ -236,9 +238,14 @@ async function dispatchFreshnessSyncs(
     if (await isFederatedV2Enabled(engine)) {
       const sources = await loadAllSources(engine);
       const activationPending = await loadActivationPendingSourceIds(engine);
+      const connectors = await readConnectorDispatchStates(engine);
       const intervalMs = baseInterval * 1000;
       const now = Date.now();
       for (const src of sources) {
+        if (isConnectorSourceKind(parseSourceConfig(src.config).kind)) {
+          await dispatchConnectorFreshnessSync(engine, queue, src, connectors.get(src.id), activationPending, { intervalMs, now, slot, timeoutMs, jsonMode });
+          continue;
+        }
         if (!src.local_path) continue;
         // #4399: config.syncEnabled=false excludes a source from AUTOMATIC
         // sync (this loop, the full-cycle fan-out, `sync --all`); an
@@ -294,6 +301,48 @@ async function dispatchFreshnessSyncs(
     }
   } catch (e) {
     logError('dispatch.freshness-gate', e);
+  }
+}
+
+/**
+ * #5673: a connector source (google, github) syncs from its provider, so its
+ * `local_path` is irrelevant and its sync job carries no repoPath. Automatic
+ * capture is opt-in: a connector with no recorded sync attempt stays idle, and
+ * autopilot prints the enable command once.
+ */
+async function dispatchConnectorFreshnessSync(
+  engine: BrainEngine,
+  queue: MinionQueue,
+  src: SourceRow,
+  gate: ConnectorDispatchState | undefined,
+  activationPending: Awaited<ReturnType<typeof loadActivationPendingSourceIds>>,
+  { intervalMs, now, slot, timeoutMs, jsonMode }: { intervalMs: number; now: number; slot: string; timeoutMs: number; jsonMode: boolean },
+): Promise<void> {
+  if (isSyncDisabledConfig(src.config)) return;
+  if (skipActivationPendingSync(activationPending, src.id, 'freshness_sync_skipped', jsonMode, (l) => process.stderr.write(l + '\n'))) return;
+  if (!gate?.attempted) {
+    if (gate?.noticed || !await recordConnectorIdleNotice(engine, src.id)) return;
+    const command = `gbrain sync --source ${src.id}`;
+    process.stderr.write((jsonMode
+      ? JSON.stringify({ event: 'connector_never_synced', source_id: src.id, command })
+      : `[autopilot] Connector source "${src.id}" has never synced, so autopilot leaves it idle. Run it once to keep it synced on the autopilot interval: ${command}`) + '\n');
+    return;
+  }
+  const ageMs = now - (src.last_sync_at ? new Date(src.last_sync_at).getTime() : 0);
+  if (ageMs < intervalMs) return;
+  try {
+    const job = await queue.add(
+      'sync',
+      { sourceId: src.id, pull: sourceConfigHasRemoteUrl(src.config), auto_embed_backfill: true, embed_reason: 'autopilot_freshness' },
+      { queue: 'default', idempotency_key: `autopilot-sync:${src.id}:${slot}`, max_attempts: 2, timeout_ms: timeoutMs, maxWaiting: 1 },
+    );
+    if (jsonMode) {
+      process.stderr.write(JSON.stringify({ event: 'dispatched', job_id: job.id, mode: 'freshness', source_id: src.id, age_ms: ageMs }) + '\n');
+    } else {
+      console.log(`[dispatch] job #${job.id} sync (freshness: ${src.id}; age=${Math.floor(ageMs / 60000)}min)`);
+    }
+  } catch (e) {
+    logError('dispatch.freshness', e);
   }
 }
 
