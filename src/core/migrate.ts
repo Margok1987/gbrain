@@ -7,6 +7,8 @@ import { PAGE_PROJECTION_SCHEMA_SQL, PAGE_PROJECTION_ACTIVATION_SQL } from './pa
 import { LEASE_TOKEN_SCHEMA_SQL } from './lease-schema.ts';
 import { PAGE_STATE_SCHEMA_SQL, PAGE_VERSION_DELETION_SCHEMA_SQL } from './page-state/schema.ts';
 import type { BrainEngine } from './engine.ts';
+import type { Migration } from './schema-migrations/types.ts';
+import { migrationNotice, dropInvalidConcurrentIndex, setQuietMigrationNotices } from './schema-migrations/helpers.ts';
 import { slugifyPath } from './sync.ts';
 import { getFtsLanguage } from './fts-language.ts';
 import { hnswMaxDimsForType, readExistingEmbeddingShape } from './vector-index.ts';
@@ -26,81 +28,7 @@ import { PROJECTION_STATISTICS_SQL, verifyProjectionStatistics } from './search/
 import { SHARED_SKILLS_SCHEMA_SQL } from './shared-skills/schema-all.ts';
 import { migrateConnectorCheckpoints } from './persistence/connector-checkpoint-migration.ts';
 
-/**
- * When true, per-migration explanatory notices (e.g. the v123/v124 "here is
- * what this migration changed" lines that specific handlers write to stderr)
- * are suppressed. Set by runMigrations for a FRESH-install full replay — those
- * notices are useful diagnostics on an UPGRADE but pure noise as a new user's
- * first-run output. Module-level (not threaded through the Migration type)
- * because only a couple of handlers emit them. Guarded via `migrationNotice`.
- * Known limitation: concurrent runMigrations calls in one process (two engines
- * migrating simultaneously) share this flag — worst case is a suppressed or
- * extra stderr NOTICE line; migration execution/stamping is unaffected.
- */
-let quietMigrationNotices = false;
-
-/** Write a per-migration explanatory notice unless fresh-install quiet mode is
- *  on. Handlers should route their "what changed" lines through this. */
-function migrationNotice(line: string): void {
-  if (quietMigrationNotices) return;
-  process.stderr.write(line);
-}
-
-/**
- * Schema migrations — run automatically on initSchema().
- *
- * Each migration is a version number + idempotent SQL. Migrations are embedded
- * as string constants (Bun's --compile strips the filesystem).
- *
- * Each migration runs in a transaction: if the SQL fails, the version stays
- * where it was and the next run retries cleanly.
- *
- * Migrations can also include a handler function for application-level logic
- * (e.g., data transformations that need TypeScript, not just SQL).
- */
-
-interface Migration {
-  version: number;
-  name: string;
-  /** Engine-agnostic SQL. Used when `sqlFor` is absent. Set to '' for handler-only or sqlFor-only migrations. */
-  sql: string;
-  /**
-   * Engine-specific SQL. If present, overrides `sql` for the matching engine.
-   * Needed when Postgres wants CONCURRENTLY but PGLite can't honor it.
-   */
-  sqlFor?: { postgres?: string; pglite?: string };
-  /**
-   * When false, the runner does NOT wrap the SQL in `engine.transaction()`.
-   * Required for `CREATE INDEX CONCURRENTLY` (which Postgres refuses inside a transaction).
-   * Enforced Postgres-only; ignored on PGLite (PGLite has no concurrent writers anyway).
-   * Defaults to true.
-   */
-  transaction?: boolean;
-  handler?: (engine: BrainEngine) => Promise<void>;
-  /**
-   * v0.30.1 (D6): when undefined, treated as `true` for all existing
-   * migrations (every migration in the registry uses CREATE ... IF NOT
-   * EXISTS / ALTER ... IF NOT EXISTS / INSERT ... ON CONFLICT, so re-running
-   * is safe). Explicit `idempotent: false` blocks the verify-hook
-   * self-healing path from re-running a destructive migration; the runner
-   * surfaces `MigrationDriftError` and requires `--skip-verify` to force.
-   *
-   * NEW migrations should declare this explicitly; the CONTRIBUTING
-   * migration template lists it as required for clarity.
-   */
-  idempotent?: boolean;
-  /**
-   * v0.30.1 (D6): post-condition probe. Runs after the migration claims
-   * to have applied. Returns false if the actual schema state doesn't
-   * match what the migration declared (e.g. column/table/index missing
-   * after a partially-committed run on a wedged Supabase pooler).
-   *
-   * Verify-hook coverage is OPT-IN per migration. Per X3 / codex C6 the
-   * v0.30.1 surface ships verify hooks only on a small set of migrations;
-   * older migrations rely on `gbrain upgrade --force-schema` for recovery.
-   */
-  verify?: (engine: BrainEngine) => Promise<boolean>;
-}
+export type { Migration };
 
 /**
  * Resolve idempotent classification with the v0.30.1 default. Used by the
@@ -151,43 +79,6 @@ export class MigrationRetryExhausted extends Error {
     );
     this.name = 'MigrationRetryExhausted';
   }
-}
-
-/**
- * Postgres-only: drops `indexName` iff it currently exists AND is invalid — the
- * leftover of a `CREATE INDEX CONCURRENTLY` that failed partway through. Callers
- * MUST already be inside an `engine.kind === 'postgres'` branch (PGLite has no
- * concurrent-build invalid-index concept and no `pg_index` catalog in the same
- * shape) and MUST run this before their own `CREATE INDEX CONCURRENTLY IF NOT
- * EXISTS`, since a stale invalid entry blocks the create from ever landing.
- *
- * Deliberately does NOT wrap the drop in `DO $$ ... EXECUTE '...' END $$`
- * (#1178): Postgres rejects `CONCURRENTLY` from any function/EXECUTE context —
- * the guard condition works, but the EXECUTE that follows always throws
- * "DROP INDEX CONCURRENTLY cannot be executed from a function". The validity
- * probe runs as a plain application-level SELECT instead, and the DROP (when
- * needed) runs as its own top-level `runMigration` call.
- */
-async function dropInvalidConcurrentIndex(
-  engine: BrainEngine,
-  version: number,
-  indexName: string,
-): Promise<boolean> {
-  // to_regclass() resolves the unqualified name through search_path — the same
-  // resolution the unqualified DROP below relies on — instead of matching
-  // pg_class.relname bare, which could hit a same-named index in a different
-  // schema on a non-default search_path (codex review, #1178).
-  const rows = await engine.executeRaw<{ invalid: boolean }>(
-    `SELECT NOT i.indisvalid AS invalid
-       FROM pg_index i
-      WHERE i.indexrelid = to_regclass($1)`,
-    [indexName],
-  );
-  const isInvalid = rows.some((r) => r.invalid);
-  if (isInvalid) {
-    await engine.runMigration(version, `DROP INDEX CONCURRENTLY IF EXISTS ${indexName};`);
-  }
-  return isInvalid;
 }
 
 // Migrations are embedded here, not loaded from files.
@@ -7237,7 +7128,7 @@ export async function runMigrations(engine: BrainEngine): Promise<{ applied: num
   // Suppress per-migration explanatory notices during a fresh-install replay
   // (they are upgrade diagnostics, noise on a new user's first run). Restored
   // in the finally so an in-process upgrade after a fresh init still narrates.
-  quietMigrationNotices = quietReplay;
+  setQuietMigrationNotices(quietReplay);
 
   // Progress messages route to stderr so callers parsing stdout (e.g.
   // `gbrain jobs submit --json | jq`) aren't polluted by migration noise.
@@ -7272,7 +7163,7 @@ export async function runMigrations(engine: BrainEngine): Promise<{ applied: num
   } finally {
     // Never leak the fresh-install quiet flag into a later in-process run —
     // covers every exit path from here on (incl. the pre-flight probe).
-    quietMigrationNotices = false;
+    setQuietMigrationNotices(false);
   }
 
   return { applied, current: LATEST_VERSION };

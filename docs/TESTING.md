@@ -839,6 +839,21 @@ commit: `GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <file>` (the switch carries the
 overrides). Performance baselines are a bench, not a test:
 `docs/designs/refactor-wave-1/perf-baseline.md`.
 
+### Move-only verifier
+
+`scripts/verify-move-only.ts` proves a commit tagged `Move-Only: yes` moves code
+without editing it: every top-level statement of every touched TS file on the
+base side reappears token for token on the head side (tokens from
+`scripts/lib/normalize-tokens.ts`, so whitespace and comments are ignored and
+string/SQL text is exact). Imports, `export ... from` lines and toggling the
+`export` modifier on a moved statement are allowed and counted. Run
+`bun scripts/verify-move-only.ts <commit>` (default `HEAD~1..HEAD`);
+`--wrapper migration` inlines `export const vNNN: Migration = {...}` files into
+the generated registry array so the W3 split must reproduce the original
+`MIGRATIONS` array, and `--rename-map <json>` applies identifier rewrites for
+`Mechanical-Rename: yes` commits. Failures print `FAIL: <file:line>` with the
+first differing token. Pinned by `test/scripts/verify-move-only.test.ts`.
+
 ### Guard registry and self-test
 
 The privacy and test-isolation guards use `scripts/lib/guard-candidates.sh` to
