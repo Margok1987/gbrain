@@ -5,7 +5,7 @@ Current behavior and load-bearing invariants; history belongs in Git and CHANGEL
 
 - `patches/postgres@3.4.9.patch` — auditable delta for the driver ownership and cancellation repair already applied to the shipped `vendor/postgres` ESM/CommonJS/workerd source (not an install hook; `bash vendor/update-postgres.sh --check` verifies it), consumed by `PostgresEngine.runUnsafe` through `#postgres`. Abortable reservations settle atomically; shared transaction queues isolate cancellable SQL from tagged/savepoint siblings while preserving unfenced pipelining. See [PostgreSQL cancellation ownership](../postgres-cancellation.md) for settlement, deadline, transport and clean-install invariants. Pinned by `test/e2e/persistence-chaos.test.ts`.
 
-- `src/core/engine-sql/` — one SQL implementation per migrated storage domain (refactor wave 1 W1; today `facts`, `takes`, `salience`, `code-edges`, `cjk-search`), run by both engines through one executor contract:
+- `src/core/engine-sql/` — one SQL implementation per migrated storage domain (the domains are the `migrated` rows of `scripts/engine-sql-baseline.tsv`), run by both engines through one executor contract:
 
   ```
   PGLiteEngine / PostgresEngine   one-line delegations; RLS scoping per method as on master
