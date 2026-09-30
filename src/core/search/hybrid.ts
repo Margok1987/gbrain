@@ -851,6 +851,8 @@ async function applyAliasResolvedBoost(
 
 export interface HybridSearchOpts extends SearchOpts {
   expansion?: boolean;
+  /** System One: remote spend accounting, call site, S1-only re-runs (see search/decide-stage.ts). */
+  decide?: import('./decide-stage.ts').DecideSearchOpts;
   /**
    * #5428 — opt-in single-token alias hop (see applyAliasTokenHop). Per-call
    * wins; otherwise brain config `search.alias_token_hop=true`. Default off.

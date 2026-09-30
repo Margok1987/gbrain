@@ -21,6 +21,7 @@ import { recordSearchTelemetry } from '../telemetry.ts';
 import { resolveBoostMap, resolveHardExcludes } from '../source-boost.ts';
 import { resolveEmbeddingColumn } from '../embedding-column.ts';
 import { resolveSearchDateBounds } from '../date-bounds.ts';
+import { type DecideSearchContext, decideMetaFor, resolveDecideSearchContext } from '../decide-stage.ts';
 
 /**
  * Everything the stages read, resolved once at hybridSearch entry, plus the
@@ -56,6 +57,10 @@ export interface HybridRequest {
   lastResultsCount: number;
   /** T7 — rank-1 base_score for the telemetry drift signal; undefined when there are no results. */
   lastRank1Score: number | undefined;
+  /** System One slots for this request; undefined when every slot is off (no decide work at all). */
+  decide?: DecideSearchContext;
+  /** Set by the rerank stage when the System One reranker answered. */
+  rerankMeta?: { model_resolved: string };
 }
 
 const DEBUG = process.env.GBRAIN_SEARCH_DEBUG === '1';
@@ -258,6 +263,13 @@ export async function resolveHybridRequest(
     lastResultsCount: 0,
     lastRank1Score: undefined,
   };
+  if (modeInput.decide) {
+    req.decide = await resolveDecideSearchContext(engine, modeInput.decide, {
+      rerankerModel: opts?.reranker?.model ?? resolvedMode.reranker_model,
+      rerankerEnabled: opts?.reranker?.enabled ?? resolvedMode.reranker_enabled,
+      decide: opts?.decide, sourceId: opts?.sourceId,
+    }).catch(() => undefined);
+  }
   return req;
 }
 
@@ -290,8 +302,12 @@ export async function applyIdentityBoosts(req: HybridRequest, list: SearchResult
   // search_telemetry rollup. Telemetry write is sync (bumps a bucket map),
   // flush is fire-and-forget on 60s / 100-call thresholds. The hot path
   // never waits.
-export function emitHybridMeta(req: HybridRequest, meta: HybridSearchMeta): void {
+export function emitHybridMeta(req: HybridRequest, rawMeta: HybridSearchMeta): void {
   const { engine, opts } = req;
+  const decide = decideMetaFor(req.decide);
+  const meta: HybridSearchMeta = decide || req.rerankMeta
+    ? { ...rawMeta, ...(decide ? { decide } : {}), ...(req.rerankMeta ? { rerank: req.rerankMeta } : {}) }
+    : rawMeta;
   try {
     opts?.onMeta?.(meta);
   } catch {

@@ -14,6 +14,7 @@ import { dedupResults } from '../dedup.ts';
 import { enforceTokenBudget } from '../token-budget.ts';
 import { pushDegraded, stampBudgetStage } from './degraded.ts';
 import { stampEvidence } from '../evidence.ts';
+import { applyEvidenceGate } from '../decide-stage.ts';
 import { warnOncePerProcess } from '../../utils.ts';
 
 /** No embedding provider (and no multimodal route): keyword + title + relational only. */
@@ -52,14 +53,16 @@ export async function searchWithoutEmbeddings(
   // #1663 — structural exact-lookup tier (slug / exact-title identity).
   const noEmbedHopped = await applyExactLookupTier(engine, noEmbedPreExact, query, exactLookupOpts);
   stampEvidence(noEmbedHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
+  // System One S3 evidence gate (no-op when the slot is off), at the fused path's position.
+  const noEmbedGated = await applyEvidenceGate(req.decide, query, noEmbedHopped);
   // #3995 — guaranteed page-1 relational evidence: a fired arm's answer is
   // often lexically unrecoverable, so its single-arm fused row can land
   // beyond the limit slice on keyword-heavy corpora. Promote/inject before
   // slicing (first page only; pure no-op when the arm didn't fire).
-  let noEmbedPool = noEmbedHopped;
+  let noEmbedPool = noEmbedGated;
   let noEmbedRelSlot: RelationalEvidenceSlotDecision | undefined;
   if (relationalList.length > 0) {
-    const r = ensureRelationalEvidenceSlot(noEmbedHopped, relationalList, limit, offset, {
+    const r = ensureRelationalEvidenceSlot(noEmbedGated, relationalList, limit, offset, {
       cosineFloor: resolvedMode.evidence_cosine_floor,
     });
     noEmbedPool = r.pool;

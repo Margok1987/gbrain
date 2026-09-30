@@ -415,6 +415,7 @@ const search: Operation = {
       // #4415: agent-explicit recency + salience (same posture as `query`).
       salience: p.salience as 'off' | 'on' | 'strong' | undefined,
       recency: p.recency as 'off' | 'on' | 'strong' | undefined,
+      decide: { remote: ctx.remote !== false },
       onMeta: (m) => { capturedMeta = m; },
     })).map(r => ({ ...r }));
     stampDeepResearchIds(results);
@@ -671,6 +672,7 @@ const query: Operation = {
       offset: (p.offset as number) || 0,
       excludePrivate,
       requireSafeChunks: ctx.remote !== false,
+      decide: { remote: ctx.remote !== false },
       takesHoldersAllowList: readHolders(ctx),
       expansion: expand,
       expandFn: expand ? expandQuery : undefined,
@@ -762,6 +764,8 @@ const query: Operation = {
             expandFn: expandQuery,
             relationalRetrieval: true,
             autocut: false,
+            // System One: the re-run gets its own rerank; S2-S5 run off on its new candidates.
+            decide: { remote: ctx.remote !== false, rerankOnly: true },
             detail,
             // Preserve the caller's #3985 type filter on the re-run (raw
             // pass-through; the base call already rejected malformed input).
