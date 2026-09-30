@@ -145,6 +145,19 @@ export const ROLLBACK_CASES: RollbackCase[] = [
         .filter((l) => l.to_slug === LINK_TARGET).map((l) => `${l.link_type}:${l.context}`).sort();
     },
   },
+  {
+    domain: 'timeline',
+    async seed(engine) {
+      await seedPage(engine);
+      await engine.addTimelineEntry(SLUG, { date: '2026-01-02', source: 'test:rollback', summary: 'seeded entry' });
+    },
+    async write(tx) {
+      expect(await tx.addTimelineEntry(SLUG, { date: '2026-01-03', source: 'test:rollback', summary: 'rolled-back entry' })).toBe(true);
+    },
+    async observe(engine) {
+      return (await engine.getTimeline(SLUG, { sourceId: 'default' })).map((e) => e.summary).sort();
+    },
+  },
 ];
 
 async function rollbackChunk(engine: BrainEngine): Promise<number> {

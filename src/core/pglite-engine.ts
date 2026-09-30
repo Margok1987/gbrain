@@ -143,6 +143,7 @@ import * as salienceImpl from './engine-sql/salience.ts';
 import * as pagesImpl from './engine-sql/pages.ts';
 import * as tagsImpl from './engine-sql/tags.ts';
 import * as linksImpl from './engine-sql/links.ts';
+import * as timelineImpl from './engine-sql/timeline.ts';
 import { searchKeywordCJK } from './engine-sql/cjk-search.ts';
 import { applyForwardReferenceBootstrap, pgliteBootstrapTarget } from './engine-sql/bootstrap.ts';
 
@@ -2825,257 +2826,36 @@ export class PGLiteEngine implements BrainEngine {
     entry: TimelineInput,
     opts?: { skipExistenceCheck?: boolean; sourceId?: string },
   ): Promise<boolean> {
-    const sourceId = opts?.sourceId ?? 'default';
-    // #4109: mirrors PostgresEngine — page resolution and insertion share one
-    // statement snapshot so the miss is typed (PageMissingError) rather than
-    // inferred from a zero-row insert. ON CONFLICT DO NOTHING via the
-    // (page_id, date, md5(summary), source) unique index (#3737: md5-keyed so
-    // long summaries fit the btree row cap).
-    // #3827: the `inserted` flag makes the outcome observable (true =
-    // inserted, false = deduplicated, or page missing under
-    // skipExistenceCheck), mirroring the Postgres engine. Source-qualify the
-    // page-id lookup so multi-source brains don't fan timeline rows out
-    // across every source containing the slug.
-    // Free-text body fields are NUL + lone-surrogate sanitized (#2011), matching
-    // the batch path and the Postgres engine; identity fields (slug, date) raw.
-    const result = await this.db.query<{ page_exists: boolean; inserted: boolean }>(
-      `WITH page_state AS (
-         SELECT id FROM pages WHERE slug = $1 AND source_id = $6
-       ), inserted AS (
-         INSERT INTO timeline_entries (page_id, date, source, summary, detail)
-         SELECT id, $2::date, $3, $4, $5
-         FROM page_state
-         ON CONFLICT (page_id, date, md5(summary), source) DO NOTHING
-         RETURNING 1
-       )
-       SELECT
-         EXISTS(SELECT 1 FROM page_state) AS page_exists,
-         EXISTS(SELECT 1 FROM inserted) AS inserted`,
-      [slug, entry.date, sanitizeForJsonb(entry.source || ''), sanitizeForJsonb(entry.summary), sanitizeForJsonb(entry.detail || ''), sourceId]
-    );
-    if (!result.rows[0]?.page_exists && !opts?.skipExistenceCheck) {
-      throw new PageMissingError('addTimelineEntry', 'page', slug, sourceId);
-    }
-    return result.rows[0]?.inserted === true;
+    return timelineImpl.addTimelineEntry(this.engineSql, slug, entry, opts);
   }
 
   async addTimelineEntriesBatch(entries: TimelineBatchInput[], opts?: BatchOpts): Promise<number> {
     if (entries.length === 0) return 0;
-    return this.batchRetry(opts?.auditSite ?? 'addTimelineEntriesBatch', opts?.signal, () => this._addTimelineEntriesBatchOnce(entries), entries.length);
-  }
-
-  private async _addTimelineEntriesBatchOnce(entries: TimelineBatchInput[]): Promise<number> {
-    if (entries.length === 0) return 0;
-    // #1861: JSONB jsonb_to_recordset instead of unnest(${arr}::text[]); free-text
-    // summary/detail/source carry the same array-literal crash hazard. Mirrors
-    // PostgresEngine. `date` stays text in the recordset and is cast v.date::date.
-    const rows = buildTimelineRows(entries);
-    const result = await executeRawJsonb(
-      this,
-      `INSERT INTO timeline_entries (page_id, date, source, summary, detail)
-       SELECT p.id, v.date::date, v.source, v.summary, v.detail
-       FROM jsonb_to_recordset(($1::jsonb)->'rows')
-         AS v(slug text, date text, source text, summary text, detail text, source_id text)
-       JOIN pages p ON p.slug = v.slug AND p.source_id = v.source_id AND p.deleted_at IS NULL
-       ON CONFLICT (page_id, date, md5(summary), source) DO NOTHING
-       RETURNING 1`,
-      [],
-      [{ rows }],
-    );
-    return result.length;
+    return this.batchRetry(opts?.auditSite ?? 'addTimelineEntriesBatch', opts?.signal, () => timelineImpl.addTimelineEntriesBatch(this.engineSql, entries), entries.length);
   }
 
   async getTimeline(slug: string, opts?: TimelineOpts): Promise<TimelineEntry[]> {
-    // v0.31.8 (D16) + #2200: build WHERE clause dynamically so the source scope
-    // composes cleanly with the after/before filters. Precedence: federated
-    // sourceIds[] > scalar sourceId > unscoped (cross-source, pre-v0.31.8).
-    // (Postgres builds the equivalent via sql`` fragment composition — different
-    // idiom, same result; the engines stay lockstep on behavior, not on builder.)
-    const limit = opts?.limit || 100;
-    const where: string[] = ['p.slug = $1'];
-    if (opts?.excludePrivate) {
-      where.push(privatePagesFilterFragment('p'));
-      where.push(privateTimelineEventFilterFragment('te'));
-    }
-    const params: unknown[] = [slug];
-    if (opts?.after) {
-      params.push(opts.after);
-      where.push(`te.date >= $${params.length}::date`);
-    }
-    if (opts?.before) {
-      params.push(opts.before);
-      where.push(`te.date <= $${params.length}::date`);
-    }
-    // #2200: federated grant (sourceIds[]) wins over scalar sourceId. The join
-    // unions timeline entries across every same-slug page in the grant.
-    if (opts?.sourceIds && opts.sourceIds.length > 0) {
-      params.push(opts.sourceIds);
-      where.push(`p.source_id = ANY($${params.length}::text[])`);
-    } else if (opts?.sourceId) {
-      params.push(opts.sourceId);
-      where.push(`p.source_id = $${params.length}`);
-    }
-    params.push(limit);
-    const result = await this.db.query(
-      `SELECT te.* FROM timeline_entries te
-       JOIN pages p ON p.id = te.page_id
-       WHERE ${where.join(' AND ')}
-       ORDER BY te.date DESC LIMIT $${params.length}`,
-      params
-    );
-    return result.rows as unknown as TimelineEntry[];
-  }
-
-  // ── v0.42.x Life Chronicle (#2390) timeline reads ───────────────────────
-  // Same result contract as the Postgres engine (parity is on results, not the
-  // builder idiom): JOIN depth page (deleted_at IS NULL), LEFT JOIN event page,
-  // hide soft-deleted event projections, order by COALESCE(event effective_date,
-  // date). Source scope: federated sourceIds[] > scalar sourceId > unscoped.
-  // Returns the ep-side fragment (same param slot): the event-page LEFT JOIN carries
-  // the caller's scope so out-of-scope event fields null out (#2200 origin-join shape).
-  private pushChronicleSource(where: string[], params: unknown[], opts?: PageReadScope): string {
-    if (opts?.excludePrivate) {
-      where.push(privatePagesFilterFragment('p'), privateTimelineEventFilterFragment('te'));
-    }
-    if (opts?.sourceIds && opts.sourceIds.length > 0) {
-      params.push(opts.sourceIds);
-      where.push(`p.source_id = ANY($${params.length}::text[])`);
-      return ` AND ep.source_id = ANY($${params.length}::text[])`;
-    } else if (opts?.sourceId) {
-      params.push(opts.sourceId);
-      where.push(`p.source_id = $${params.length}`);
-      return ` AND ep.source_id = $${params.length}`;
-    }
-    return '';
-  }
-
-  private static chronicleSelect(epScope: string): string {
-    return `
-    SELECT te.date::text AS date, te.summary, te.detail, te.source,
-           te.page_id, p.slug AS page_slug,
-           te.event_page_id, ep.slug AS event_slug,
-           ep.effective_date::text AS effective_date,
-           ep.frontmatter->'event'->>'kind' AS kind
-    FROM timeline_entries te
-    JOIN pages p ON p.id = te.page_id AND p.deleted_at IS NULL
-    LEFT JOIN pages ep ON ep.id = te.event_page_id${epScope}`;
+    return timelineImpl.getTimeline(unscopedExecutor(this.engineSql, 'timeline: unscoped on master (EO4 inventory)'), slug, opts);
   }
 
   async getTimelineForDate(date: string, opts?: ChronicleTimelineOpts): Promise<ChronicleTimelineRow[]> {
-    const limit = opts?.limit ?? 200;
-    const params: unknown[] = [date];
-    const lower = opts?.week ? `date_trunc('week', $1::date)::date` : `$1::date`;
-    const upper = opts?.week ? `(date_trunc('week', $1::date) + interval '6 days')::date` : `$1::date`;
-    const where: string[] = [
-      `te.date >= ${lower}`,
-      `te.date <= ${upper}`,
-      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
-    ];
-    const epScope = this.pushChronicleSource(where, params, opts);
-    params.push(limit);
-    const result = await this.db.query(
-      `${PGLiteEngine.chronicleSelect(epScope)}
-       WHERE ${where.join(' AND ')}
-       ORDER BY COALESCE(ep.effective_date, te.date::timestamptz) ASC, te.id ASC
-       LIMIT $${params.length}`,
-      params,
-    );
-    return result.rows as unknown as ChronicleTimelineRow[];
+    return timelineImpl.getTimelineForDate(unscopedExecutor(this.engineSql, 'timeline: unscoped on master (EO4 inventory)'), date, opts);
   }
 
   async getSince(date: string, opts?: ChronicleTimelineOpts): Promise<ChronicleTimelineRow[]> {
-    const limit = opts?.limit ?? 200;
-    const params: unknown[] = [date];
-    const where: string[] = [
-      `te.date >= $1::date`,
-      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
-    ];
-    if (opts?.kind) {
-      params.push(opts.kind);
-      where.push(`ep.frontmatter->'event'->>'kind' = $${params.length}`);
-    }
-    const epScope = this.pushChronicleSource(where, params, opts);
-    params.push(limit);
-    const result = await this.db.query(
-      `${PGLiteEngine.chronicleSelect(epScope)}
-       WHERE ${where.join(' AND ')}
-       ORDER BY COALESCE(ep.effective_date, te.date::timestamptz) ASC, te.id ASC
-       LIMIT $${params.length}`,
-      params,
-    );
-    return result.rows as unknown as ChronicleTimelineRow[];
+    return timelineImpl.getSince(unscopedExecutor(this.engineSql, 'timeline: unscoped on master (EO4 inventory)'), date, opts);
   }
 
   async getOnThisDay(opts?: PageReadScope & { date?: string; limit?: number }): Promise<ChronicleTimelineRow[]> {
-    const limit = opts?.limit ?? 50;
-    const params: unknown[] = [];
-    let target: string;
-    if (opts?.date) { params.push(opts.date); target = `$${params.length}::date`; }
-    else { target = `current_date`; }
-    const where: string[] = [
-      `EXTRACT(MONTH FROM te.date) = EXTRACT(MONTH FROM ${target})`,
-      `EXTRACT(DAY FROM te.date) = EXTRACT(DAY FROM ${target})`,
-      `te.date < ${target}`,
-      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
-    ];
-    const epScope = this.pushChronicleSource(where, params, opts);
-    params.push(limit);
-    const result = await this.db.query(
-      `${PGLiteEngine.chronicleSelect(epScope)}
-       WHERE ${where.join(' AND ')}
-       ORDER BY te.date DESC, te.id ASC
-       LIMIT $${params.length}`,
-      params,
-    );
-    return result.rows as unknown as ChronicleTimelineRow[];
+    return timelineImpl.getOnThisDay(unscopedExecutor(this.engineSql, 'timeline: unscoped on master (EO4 inventory)'), opts);
   }
 
   async getLastSeen(entitySlug: string, opts?: PageReadScope & { asof?: string }): Promise<LastSeenResult> {
-    const params: unknown[] = [entitySlug, `%${entitySlug}%`];
-    const where: string[] = [
-      `(te.event_page_id IS NULL OR ep.deleted_at IS NULL)`,
-      `(p.slug = $1 OR (ep.id IS NOT NULL AND EXISTS (
-          SELECT 1 FROM jsonb_array_elements_text(
-            CASE WHEN jsonb_typeof(ep.frontmatter->'event'->'who') = 'array'
-                 THEN ep.frontmatter->'event'->'who' ELSE '[]'::jsonb END
-          ) AS w(name) WHERE w.name = $1 OR w.name LIKE $2)))`,
-    ];
-    // "Last seen" is a PAST relation: chronicle stores future events
-    // (calendar-event is eligible), which must not read as "last seen".
-    // Bound to <= asof/today, mirroring getOnThisDay's `te.date < target`.
-    let seenThrough: string;
-    if (opts?.asof) { params.push(opts.asof); seenThrough = `$${params.length}::date`; }
-    else { seenThrough = `current_date`; }
-    where.push(`te.date <= ${seenThrough}`);
-    const epScope = this.pushChronicleSource(where, params, opts);
-    const result = await this.db.query(
-      `SELECT te.date::text AS last_date, ep.slug AS last_event_slug
-       FROM timeline_entries te
-       JOIN pages p ON p.id = te.page_id AND p.deleted_at IS NULL
-       LEFT JOIN pages ep ON ep.id = te.event_page_id${epScope}
-       WHERE ${where.join(' AND ')}
-       ORDER BY COALESCE(ep.effective_date, te.date::timestamptz) DESC, te.id DESC
-       LIMIT 1`,
-      params,
-    );
-    const row = result.rows[0] as { last_date?: string; last_event_slug?: string } | undefined;
-    return finalizeLastSeen(entitySlug, row?.last_date ?? null, row?.last_event_slug ?? null, opts?.asof);
+    return timelineImpl.getLastSeen(unscopedExecutor(this.engineSql, 'timeline: unscoped on master (EO4 inventory)'), entitySlug, opts);
   }
 
   async upsertEventProjection(opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string }): Promise<{ projected: boolean }> {
-    const sourceId = opts.sourceId ?? 'default';
-    const r = await this.db.query(
-      `INSERT INTO timeline_entries (page_id, date, source, summary, detail, event_page_id)
-       SELECT dp.id, $1::date, $2, $3, $4, ep.id
-       FROM pages dp, pages ep
-       WHERE dp.slug = $5 AND dp.source_id = $6 AND ep.slug = $7 AND ep.source_id = $6
-       ON CONFLICT (event_page_id, date) WHERE event_page_id IS NOT NULL
-       DO UPDATE SET summary = EXCLUDED.summary, detail = EXCLUDED.detail,
-                     page_id = EXCLUDED.page_id, source = EXCLUDED.source
-       RETURNING id`,
-      [opts.date, 'life-chronicle:event:' + opts.eventSlug, opts.summary, opts.detail ?? '', opts.depthSlug, sourceId, opts.eventSlug],
-    );
-    return { projected: r.rows.length > 0 };
+    return timelineImpl.upsertEventProjection(this.engineSql, opts);
   }
 
   async mergeOntologyFact(obs: OntologyObservationInput): Promise<OntologyMergeResult> {

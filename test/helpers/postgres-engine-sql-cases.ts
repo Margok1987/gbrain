@@ -74,9 +74,7 @@ export const DOMAIN_OF: Record<string, string> = {
   'activeEmbeddingColId': OOS.helper,
   'buildStaleChunkWhere': OOS.helper,
   'buildChunklessPagesWhere': OOS.helper,
-  'chronicleSourceCond': OOS.helper,
   '_upsertChunksOnce': OOS.helper,
-  '_addTimelineEntriesBatchOnce': OOS.helper,
   '_searchKeywordCJK': OOS.helper,
 
   // pages

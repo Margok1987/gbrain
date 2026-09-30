@@ -16,12 +16,10 @@ migrated	pages
 migrated	salience
 migrated	tags
 migrated	takes
-method	src/core/pglite-engine.ts	PGLiteEngine._addTimelineEntriesBatchOnce
+migrated	timeline
 method	src/core/pglite-engine.ts	PGLiteEngine._connectInternal
 method	src/core/pglite-engine.ts	PGLiteEngine._upsertChunksOnce
-method	src/core/pglite-engine.ts	PGLiteEngine.addTimelineEntry
 method	src/core/pglite-engine.ts	PGLiteEngine.buildChunklessPagesWhere
-method	src/core/pglite-engine.ts	PGLiteEngine.chronicleSelect
 method	src/core/pglite-engine.ts	PGLiteEngine.countChunklessPagesWithContent
 method	src/core/pglite-engine.ts	PGLiteEngine.countStaleChunks
 method	src/core/pglite-engine.ts	PGLiteEngine.deleteChunks
@@ -37,14 +35,9 @@ method	src/core/pglite-engine.ts	PGLiteEngine.getEmbeddingsByChunkIds
 method	src/core/pglite-engine.ts	PGLiteEngine.getFile
 method	src/core/pglite-engine.ts	PGLiteEngine.getHealth
 method	src/core/pglite-engine.ts	PGLiteEngine.getIngestLog
-method	src/core/pglite-engine.ts	PGLiteEngine.getLastSeen
-method	src/core/pglite-engine.ts	PGLiteEngine.getOnThisDay
 method	src/core/pglite-engine.ts	PGLiteEngine.getOntology
 method	src/core/pglite-engine.ts	PGLiteEngine.getRawData
-method	src/core/pglite-engine.ts	PGLiteEngine.getSince
 method	src/core/pglite-engine.ts	PGLiteEngine.getStats
-method	src/core/pglite-engine.ts	PGLiteEngine.getTimeline
-method	src/core/pglite-engine.ts	PGLiteEngine.getTimelineForDate
 method	src/core/pglite-engine.ts	PGLiteEngine.invalidateContentDriftEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.invalidateStaleSignatureEmbeddings
 method	src/core/pglite-engine.ts	PGLiteEngine.listAllSources
@@ -59,7 +52,6 @@ method	src/core/pglite-engine.ts	PGLiteEngine.logEvalCaptureFailure
 method	src/core/pglite-engine.ts	PGLiteEngine.logIngest
 method	src/core/pglite-engine.ts	PGLiteEngine.mergeOntologyFact
 method	src/core/pglite-engine.ts	PGLiteEngine.migrateFactsToCanonical
-method	src/core/pglite-engine.ts	PGLiteEngine.pushChronicleSource
 method	src/core/pglite-engine.ts	PGLiteEngine.putDreamVerdict
 method	src/core/pglite-engine.ts	PGLiteEngine.putRawData
 method	src/core/pglite-engine.ts	PGLiteEngine.searchKeyword
@@ -72,15 +64,12 @@ method	src/core/pglite-engine.ts	PGLiteEngine.sumStaleChunkChars
 method	src/core/pglite-engine.ts	PGLiteEngine.sweepDreamVerdicts
 method	src/core/pglite-engine.ts	PGLiteEngine.unsetConfig
 method	src/core/pglite-engine.ts	PGLiteEngine.updateSourceConfig
-method	src/core/pglite-engine.ts	PGLiteEngine.upsertEventProjection
 method	src/core/pglite-engine.ts	PGLiteEngine.upsertFile
 method	src/core/pglite-engine.ts	probePgliteScratchStore
 method	src/core/pglite-engine/checkpoint-guard.ts	PgliteCheckpointGuard.beforeOutermostTransaction
 method	src/core/pglite-engine/code-edges.ts	getEdgesByChunk
-method	src/core/postgres-engine.ts	PostgresEngine._addTimelineEntriesBatchOnce
 method	src/core/postgres-engine.ts	PostgresEngine._searchKeywordCJK
 method	src/core/postgres-engine.ts	PostgresEngine._upsertChunksOnce
-method	src/core/postgres-engine.ts	PostgresEngine.addTimelineEntry
 method	src/core/postgres-engine.ts	PostgresEngine.buildChunklessPagesWhere
 method	src/core/postgres-engine.ts	PostgresEngine.connect
 method	src/core/postgres-engine.ts	PostgresEngine.countChunklessPagesWithContent
@@ -98,14 +87,9 @@ method	src/core/postgres-engine.ts	PostgresEngine.getEmbeddingsByChunkIds
 method	src/core/postgres-engine.ts	PostgresEngine.getFile
 method	src/core/postgres-engine.ts	PostgresEngine.getHealth
 method	src/core/postgres-engine.ts	PostgresEngine.getIngestLog
-method	src/core/postgres-engine.ts	PostgresEngine.getLastSeen
-method	src/core/postgres-engine.ts	PostgresEngine.getOnThisDay
 method	src/core/postgres-engine.ts	PostgresEngine.getOntology
 method	src/core/postgres-engine.ts	PostgresEngine.getRawData
-method	src/core/postgres-engine.ts	PostgresEngine.getSince
 method	src/core/postgres-engine.ts	PostgresEngine.getStats
-method	src/core/postgres-engine.ts	PostgresEngine.getTimeline
-method	src/core/postgres-engine.ts	PostgresEngine.getTimelineForDate
 method	src/core/postgres-engine.ts	PostgresEngine.initSchema
 method	src/core/postgres-engine.ts	PostgresEngine.invalidateContentDriftEmbeddings
 method	src/core/postgres-engine.ts	PostgresEngine.invalidateStaleSignatureEmbeddings
@@ -134,7 +118,6 @@ method	src/core/postgres-engine.ts	PostgresEngine.sumStaleChunkChars
 method	src/core/postgres-engine.ts	PostgresEngine.sweepDreamVerdicts
 method	src/core/postgres-engine.ts	PostgresEngine.unsetConfig
 method	src/core/postgres-engine.ts	PostgresEngine.updateSourceConfig
-method	src/core/postgres-engine.ts	PostgresEngine.upsertEventProjection
 method	src/core/postgres-engine.ts	PostgresEngine.upsertFile
 method	src/core/postgres-engine.ts	PostgresEngine.withScopedReadTransaction
 method	src/core/postgres-engine/init-schema-lock.ts	acquireInitSchemaAdvisoryLock
