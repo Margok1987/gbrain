@@ -12,7 +12,7 @@ identifiers and attribution are available in the pre-removal Git revision
 
 ## [0.60.13.0] - 2026-09-30
 
-**Your agent can now ask search for the whole conversation, section or page around each hit, in the same call, instead of a 300-word chunk. It is off by default until a matched study shows it helps.**
+**Two things: your agent can now ask search for the whole conversation, section or page around each hit in the same call (off by default until a matched study shows it helps), and seven correctness fixes land, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**
 
 When an agent searches your brain it gets ranked chunks. For questions that span several conversations, or ask when something changed, the answer often sits in the text around the chunk. In a fixed 100-question LongMemEval-S study (reranker off), the same reader answered 89 correctly from the full retrieved sessions and 65 from the top five chunks. Until now the agent had to call `get_page` once per hit to close that gap.
 
@@ -29,9 +29,30 @@ The default stays `chunk`: nothing changes unless you or your agent ask. An earl
 
 Things to watch: expansion never shows more than `get_page` would show the same caller. It removes takes, private fact rows and withdrawn facts from the whole page before cutting evidence, even on your own machine (use `get_page` for those), and it never includes page frontmatter. A page that became private, was deleted, or left your grant between the search and the expansion is dropped, not served from the old hit.
 
+### Seven correctness fixes
+
+Before this release, an agent connected over MCP could ask for the `entity` card (or `context_pack`) of a public page and see inbound links from private pages, including the private page's slug and the sentence it wrote. That is fixed, along with six smaller bugs in name resolution, federated recall, as-of facts, "last seen" and search date filters. Each one was found by the new gbrain-evals N3 (temporal and as-of), N4 (entity resolution) and N6 (visibility leak fuzz) categories, which score synthetic worlds with known answers, and each is now pinned by a test.
+
+| Benchmark (synthetic worlds, $0, no keys) | Before | After |
+| --- | --- | --- |
+| Visibility leak fuzz: probes that leaked private content to a remote caller | 8 of 3,158 | 0 of 3,158 |
+| Temporal as-of: `ontology_get` as-of accuracy | 99/104 | 104/104 |
+| Temporal as-of: `chronicle_last_seen` probes right | 76/83 (mean error 16.3 days) | 83/83 (0 days) |
+| Temporal as-of: bad date bounds rejected | 4/5 | 5/5 |
+| Entity resolution: wrong merges (resolver / recall) | 1/136 / 3/144 | 0/136 / 0/144 |
+| Entity resolution: exact-name floor (resolver / recall) | 47/48 / 49/50 | 48/48 / 50/50 |
+| Entity resolution: recall correct refusals | 90.5% of 21 | 100% of 21 |
+
+- **The entity card keeps private pages private.** For remote callers, `entity`, `context_pack` and `delta` now leave out inbound links from pages marked `visibility: private`, from derived pages (atoms and synthesized concepts, private by default) and from edges authored by a private page, and `backlink_count` stops counting them, matching `get_backlinks`. Links from soft-deleted pages are left out for every caller. Your own local CLI still sees private links.
+- **A person's own name beats someone else's former name.** When one page is titled "Jordan Lee-Example" and another page lists "Jordan Lee-Example" as an alias, the name now resolves to the first page. `remember`, `recall` and save-time fact attribution follow.
+- **Federated recall stops mixing up namesakes.** With a grant over several sources, `recall({ entity })` used to merge two different people who share a slug in two sources. It now returns no facts and an `ambiguous_entity` list naming each `(source_id, entity_slug)`, so the agent can pick one with `source_id`. Pages linked with `entity_identity_link` still merge. Every recalled fact now carries `source_id`.
+- **A stint learned late stays in as-of answers.** If you record that someone works at a company, then later learn they also worked there years earlier, `ontology_get --asof` now returns the earlier stint instead of nothing.
+- **"Last seen" is exact.** `chronicle_last_seen` no longer credits `people/kim-example` with sightings of `people/kim-example-2` (it matches the exact slug or a wikilink to it), and a late-evening event no longer outranks a row dated the next day, so it stops reporting the day before.
+- **Bad search dates fail loudly.** `query --since "May 5"` used to return an empty list. Search date bounds now accept only `YYYY-MM-DD`, an ISO timestamp or a duration like `7d`, and anything else is rejected with a clear message.
+
 ### To take advantage of v0.60.13.0
 
-`gbrain upgrade`. There is no migration. Try it on one question:
+`gbrain upgrade`. There is no migration. Agents that read `recall` results over several sources should handle the new `ambiguous_entity` field. To try evidence delivery on one question:
 
 ```bash
 gbrain query "when did the launch move?" --return-unit page --token-budget 6000
@@ -56,7 +77,16 @@ The contract, the fallback codes and the benchmark are in `docs/evidence-deliver
 #### Safety
 - Every delivered page is re-authorized under the caller's current scope (source grant, private pages, deleted, quarantined, archived sources, current text revision); stale or cached hits are dropped, never served from hit text. Leak canaries (private facts, takes, withdrawn facts, malformed protected tails, timeline facts, private pages, derived atoms, same-slug pages in another source, grant revocation, a page turning private, an edit mid-flight) pass on PGLite and Postgres through local ops, MCP stdio and MCP HTTP, with public presence controls.
 
+#### Correctness fixes (found by gbrain-evals N3 / N4 / N6)
+- `src/core/verbs/entity-card.ts`: the card's inbound-edge query and `backlink_count` apply `privatePagesFilterFragment` and `privateLinkOriginFilterFragment` for untrusted callers and skip soft-deleted referrers; outgoing links and recent timeline rows use the same private-page gate.
+- `src/core/entities/resolve.ts`: an exact slug-basename match on a live page resolves before the alias arm in both `resolveEntitySlug` and `resolveEntitySlugWithSource`.
+- `src/core/ops/facts.ts`: `recall`'s entity arms (with and without `since`) refuse namesakes in several sources unless an entity-identity group links them; fact rows add `source_id`. New `identityIdsForPages` in `src/core/entity-identity.ts`.
+- `mergeOntologyFact` (both engines): a same-value observation dated before the current open value's start is stored as a live row, not an expired corroboration (`isBackdatedObservation` in `src/core/chronicle/ontology.ts`).
+- `src/core/engine-sql/timeline.ts` `getLastSeen`: exact and wikilink matching with LIKE metacharacters escaped; newest projected day first, event instant only within a day.
+- `src/core/search/date-bounds.ts`: strict ISO-8601 grammar; `src/core/search/hybrid/arms.ts` surfaces a datetime cast error (SQLSTATE 22007/22008) instead of treating it as a degraded arm.
+
 #### Tests and tooling
+- Fix tests: `test/entity-card-private-backlinks.test.ts`, `test/entity-resolve-exact-name-floor.test.ts`, `test/recall-federated-namesakes.test.ts`, `test/ontology-backdated-same-value.test.ts`, `test/chronicle-last-seen-matching.test.ts`, `test/search-date-bound-non-iso.test.ts`, plus Postgres arms in `test/e2e/chronicle-last-seen-postgres.test.ts` and `test/e2e/ontology-merge-parity.test.ts`.
 - `test/evidence-delivery.test.ts` (stitching round trip, allocation and boundary properties, units, errors, snippet precedence, recall and think wiring), `test/evidence-delivery-golden.test.ts` (default output byte-identical to v0.60.12.0), `test/e2e/evidence-delivery-leak.test.ts`, `test/e2e/evidence-delivery-parity.test.ts` (engine parity and query/assemble parity).
 - `scripts/bench-evidence-delivery.ts` measures the stage's added latency per unit (cold, warm, large pages, CJK, 8-way concurrency) on PGLite and Postgres.
 

@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 198471,
-    "stdoutSha256": "945d9901249d0ef2737c3e6b4bf7f1fe5c16246594e2faed64a7552ca0f710ac",
+    "stdoutBytes": 198725,
+    "stdoutSha256": "3559128ade73b7bee9f7ee38013049ac8757cc66f8c2cf6ea639f9f526a11115",
     "toolNames": [
       "remember",
       "entity",
@@ -4252,7 +4252,7 @@
               "type": "number"
             },
             "entity": {
-              "description": "Entity slug (canonical). Returns facts about this entity newest first.",
+              "description": "Entity slug (canonical). Returns facts about this entity newest first, each labelled with its source_id. Across several granted sources, same-slug entities that no entity-identity group links are different entities: facts comes back empty and ambiguous_entity names each (source_id, entity_slug); pass source_id to read one.",
               "type": "string"
             },
             "grep": {
