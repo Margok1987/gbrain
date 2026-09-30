@@ -474,6 +474,8 @@ export function isDurabilityHardened(repoPath: string): boolean {
   }
 }
 
+const BOUNDED_EXEC_TERM_GRACE_MS = 2_000;
+
 export interface BoundedExecOptions {
   timeout: number;
   env?: NodeJS.ProcessEnv;
@@ -488,6 +490,11 @@ export interface BoundedExecOptions {
  * (bun:test `expect().resolves/.rejects`, oven-sh/bun#30301): execFile's
  * callback and its own `timeout` then never fire and the child stays a zombie,
  * so the deadline and abort are enforced with our own timer.
+ *
+ * Stopping sends SIGTERM first so git can remove its lockfiles (a SIGKILLed
+ * `git add`/`commit` leaves `.git/index.lock` behind and every later git call
+ * in that worktree fails), then SIGKILLs after a short grace period and
+ * settles from the timer even if the exit event never arrives.
  */
 export function execFileBounded(file: string, args: string[], options: BoundedExecOptions): Promise<{ error: ExecFileException | null; stdout: string }> {
   const { timeout, signal, ...rest } = options;
@@ -500,10 +507,20 @@ export function execFileBounded(file: string, args: string[], options: BoundedEx
       signal?.removeEventListener('abort', onAbort);
       resolve({ error, stdout });
     };
-    const child = execFile(file, args, { ...rest, encoding: 'utf8' }, (error, stdout) => finish(error, stdout));
+    let stopped: ExecFileException | null = null;
+    let escalation: ReturnType<typeof setTimeout> | undefined;
+    const child = execFile(file, args, { ...rest, encoding: 'utf8' }, (error, stdout) => {
+      clearTimeout(escalation);
+      finish(stopped ?? error, stopped ? '' : stdout);
+    });
     const stop = (message: string, code: string) => {
-      child.kill('SIGKILL');
-      finish(Object.assign(new Error(message), { code, killed: true, signal: 'SIGKILL' as const }), '');
+      if (stopped) return;
+      stopped = Object.assign(new Error(message), { code, killed: true, signal: 'SIGTERM' as const });
+      child.kill('SIGTERM');
+      escalation = setTimeout(() => {
+        child.kill('SIGKILL');
+        finish(stopped, '');
+      }, BOUNDED_EXEC_TERM_GRACE_MS);
     };
     const timer = setTimeout(() => stop(`${file} did not finish within ${timeout}ms`, 'ETIMEDOUT'), timeout);
     const onAbort = () => stop(`${file} was aborted`, 'ABORT_ERR');
