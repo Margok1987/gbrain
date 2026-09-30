@@ -1,6 +1,6 @@
 {
   "golden": {
-    "count": 173,
+    "count": 174,
     "gaps": [
       17,
       18,
@@ -22,7 +22,7 @@
       "slugifyPath": "401dbca23580865d8b168dd8d84db4a6c708c6610d7cb61abafc7d0ee9809063",
       "verifyProjectionStatistics": "59d9ccfea1c53384d8607874a51209a9c2dfd51b2b85a2cb6269fa4120faf1f3"
     },
-    "latest": 178,
+    "latest": 179,
     "records": [
       {
         "handler": {
@@ -2628,6 +2628,19 @@
         "transaction": "absent",
         "verify": "absent",
         "version": 178
+      },
+      {
+        "handler": "absent",
+        "idempotent": true,
+        "name": "pages_links_attendance_blocked",
+        "sql": {
+          "length": 178,
+          "sha256": "bc97634375148dbcba33e7cdb868a34f93b15ae61f7aea17325a60d81ea5b4de"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 179
       }
     ],
     "versions": [
@@ -2803,7 +2816,8 @@
       175,
       176,
       177,
-      178
+      178,
+      179
     ]
   },
   "normalizer": "migrations-record-v1"
