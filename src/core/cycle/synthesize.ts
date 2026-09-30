@@ -91,6 +91,7 @@ import { withChatPhase, estimateChatCostUsd } from '../ai/chat-usage.ts';
 import { verifyAndRepairDreamPages, normForGrounding, readVerifyEpoch, loadChildWriteEpochs, isDreamOwnedPage, type QuoteVerifyStats, type TranscriptForVerify } from './synthesize-verify.ts';
 import { dreamBreakerRefusal, loadDreamBreaker } from './dream-breaker.ts';
 import { resolveTriageDecide, type TriageDecide, type TriageDecideStats } from './triage-decide.ts';
+import { resolveGroundingDecide } from './grounding-decide.ts';
 import { passesTriageGate, rescueConfigOf, DEFAULT_RESCUE_FLOOR, DEFAULT_RESCUE_MIN_SEGMENTS, DEFAULT_RESCUE_CONTENT_TYPES, DEFAULT_RESCUE_CONFIG, type RescueConfig, type RescueVerdictLike } from './triage-rescue.ts';
 
 // Slug grammar from validatePageSlug — shared via PAGE_SLUG_SEG (#738).
@@ -1142,9 +1143,10 @@ async function runPhaseSynthesizeInner(
     // switch: dream.synthesize.quote_verify=false.
     let quoteVerifyStats: QuoteVerifyStats | null = null;
     const sinceByTranscript = await loadChildWriteEpochs(engine, childIds, jobRawSource, verifySince);
+    const grounding = config.quoteVerify ? await resolveGroundingDecide(engine) : undefined;
     if (maintenance) {
       const processed = await postprocessManagedSynthesis(engine, maintenance, writtenRefs, childIds, jobRawSource,
-        worthProcessing, { cycleDate: summaryDate, quoteVerify: config.quoteVerify, sinceByTranscript, signal: opts.signal });
+        worthProcessing, { cycleDate: summaryDate, quoteVerify: config.quoteVerify, sinceByTranscript, signal: opts.signal, grounding });
       writtenRefs = processed.writtenRefs;
       finalizedRefs = processed.finalizedRefs;
       quoteVerifyStats = config.quoteVerify ? processed.stats : null;
@@ -1154,7 +1156,7 @@ async function runPhaseSynthesizeInner(
       );
       try {
         quoteVerifyStats = await verifyAndRepairDreamPages(engine, writtenRefs, transcriptsForVerify,
-          { since: verifySince, sinceByTranscript, checkedAt: summaryDate, signal: opts.signal });
+          { since: verifySince, sinceByTranscript, checkedAt: summaryDate, signal: opts.signal, grounding });
       } catch (e) {
         throwIfAborted(opts.signal, '[dream] quote verify');
         process.stderr.write(`[dream] quote verify pass failed open: ${e instanceof Error ? e.message : String(e)}\n`);
@@ -1403,6 +1405,7 @@ async function runPhaseSynthesizeInner(
         // F1b/F4b telemetry (null when the kill switch is off or nothing
         // was written).
         quote_verify: quoteVerifyStats,
+        ...(grounding ? { grounding: grounding.stats } : {}),
         // F6: phase spend, from the two authoritative sources (minion_jobs
         // child counters + triage pass usage). cost_usd null when unpriced.
         spend: spendBlock,

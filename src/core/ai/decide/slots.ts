@@ -69,7 +69,7 @@ export const SLOT_SPECS: Readonly<Record<DecideSlot, SlotSpec>> = {
   grounding: {
     slot: 'grounding', lane: 'background', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['dream'],
     egressClasses: ['conversation'], shadowSample: 1, whatIfReproducible: true, questionVersion: 1,
-    failDirection: 'keep the mechanical verification result', wired: false,
+    failDirection: 'keep the mechanical verification result', wired: true,
   },
   conflict: {
     slot: 'conflict', lane: 'background', questionKind: 'choice', harmful: false, thresholded: true, callSites: ['sweep'],
