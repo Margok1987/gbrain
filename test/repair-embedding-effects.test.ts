@@ -262,5 +262,16 @@ for (const kind of testBackends()) {
       const [scan] = await listEmbeddingCandidates(engine, [f.sourceId]);
       expect(scan.chars).toBeGreaterThan(0);
     });
+
+    check('a --limit run resumes after the last settled effect instead of reprocessing the first', async () => {
+      const a = await fixture('stale');
+      const b = await fixture('stale');
+      const runner = await repairRunner(engine, { apply: true });
+      const scope = { brain_id: 'host', source_ids: [a.sourceId, b.sourceId] };
+      const first = await runner.run('embedding-effects', scope, { limit: 1 });
+      const next = await runner.run('embedding-effects', scope, { limit: 1 });
+      expect(next.resumed_from).not.toBeNull();
+      expect([first.outcome_items![0].item, next.outcome_items![0].item].sort()).toEqual([`${a.sourceId}:page`, `${b.sourceId}:page`].sort());
+    });
   });
 }

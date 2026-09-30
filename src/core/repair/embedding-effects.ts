@@ -24,14 +24,15 @@ function localHost(): string {
 export const embeddingEffectsRepair: RepairHandler = {
   kind: 'embedding-effects',
   publication: 'projection',
-  // Settlement is idempotent and rechecked per item, so every run plans what remains.
-  async plan(engine, scope) {
+  // Effect ids order the scan, so a --limit or interrupted run resumes after the last settled effect.
+  async plan(engine, scope, after) {
     const candidates = await listEmbeddingCandidates(engine, scope.source_ids);
     const hostId = existingLocalHostId();
     const config = await loadConfigWithEngine(engine);
     const items: RepairItem[] = [];
     const residuals: Record<string, number> = {};
-    for (const [index, candidate] of candidates.entries()) {
+    for (const candidate of candidates) {
+      if (after && Number(candidate.effect_id) <= after.id) continue;
       const predicted = hostId ? await settleEmbeddingEffect(engine, candidate, { dryRun: true, config, hostId })
         : { outcome: 'blocked' as const, reason: 'owner_unavailable' };
       if (predicted.outcome === 'blocked' || predicted.outcome === 'changed_since_preview') {
@@ -39,7 +40,7 @@ export const embeddingEffectsRepair: RepairHandler = {
         residuals[key] = (residuals[key] ?? 0) + 1;
         continue;
       }
-      items.push({ cursor: { phase: 0, id: index + 1 }, source_id: candidate.source_id, slug: candidate.slug,
+      items.push({ cursor: { phase: 0, id: Number(candidate.effect_id) }, source_id: candidate.source_id, slug: candidate.slug,
         chars: predicted.paid ? candidate.chars * EMBEDDING_RETRY_BUDGET_ATTEMPTS : 0,
         action: `${predicted.outcome}${predicted.reason ? `:${predicted.reason}` : ''}${predicted.paid ? ' (paid)' : ''}`,
         change: { from: JSON.stringify({ effect_id: candidate.effect_id, state: candidate.state, attempts: candidate.attempts } satisfies Pick<EmbeddingCandidate, 'effect_id' | 'state' | 'attempts'>), to: predicted.outcome } });
