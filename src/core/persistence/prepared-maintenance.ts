@@ -5,6 +5,7 @@ import { loadConfig, type GBrainConfig } from '../config.ts';
 import { OperationError, type OperationContext } from '../ops/contract.ts';
 import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
 import { serializePageToMarkdown } from '../markdown.ts';
+import { parseFactsFence } from '../facts-fence.ts';
 import { submissionAuthority, authorizeStoredRequest, authorizeWrite } from './authority.ts';
 import { currentVerifiedLocalWriter, localHostId, registerLocalWriter } from './identity.ts';
 import { getWorktreeBinding, managedPersistenceEnabled, type WorktreeBinding } from './ownership.ts';
@@ -177,6 +178,61 @@ export async function submitMaintenanceConsolidation(engine: BrainEngine, author
   return submitMaintenance(engine, authority, slug, intent, requestId);
 }
 
+/** One legacy fact the v0.32.2 backfill adopts at a fence position; `hash` pins its whole row at admission. */
+export interface FactFenceAssignment { id: number; row_num: number; hash: string }
+
+/**
+ * v0.32.2 on a managed brain: publish the page with its rendered facts fence
+ * and adopt the legacy rows in place, so the canonical projection matches
+ * them by (source, page, row_num) instead of inserting duplicates.
+ */
+export async function submitFactFenceAdoption(engine: BrainEngine, authority: MaintenanceAuthority, slug: string,
+  options: { content: string; expectedRevision: string; assignments: Array<{ id: number; row_num: number }>; file: boolean }): Promise<Record<string, unknown>> {
+  const current = await readFacts(engine, authority.writer.sourceId, options.assignments.map(a => a.id));
+  const facts: FactFenceAssignment[] = options.assignments.map(a => ({ ...a, hash: digest(current.find(f => f.id === a.id)?.value ?? null) }));
+  const intent = { kind: 'managed_maintenance_adopt_fact_fence', expected_revision: options.expectedRevision,
+    source_incarnation: authority.writer.sourceIncarnation, content: options.content, facts };
+  return submitMaintenance(engine, authority, slug, intent, maintenanceRequestId({ authority: authority.writer, slug, intent }), options.file);
+}
+
+async function prepareFactFenceAdoption(engine: BrainEngine, row: WriteRequest, config: GBrainConfig): Promise<PreparedMutation> {
+  const p = row.intent!;
+  const facts = p.facts as FactFenceAssignment[];
+  if (p.source_incarnation !== row.source_incarnation) throw new OperationError('source_changed', 'The fact adoption source changed.');
+  if (new Set(facts.map(f => f.id)).size !== facts.length || new Set(facts.map(f => f.row_num)).size !== facts.length) {
+    throw new OperationError('invalid_params', 'A fact adoption assigns one fact or fence position twice.');
+  }
+  const fence = new Map(parseFactsFence(p.content as string).facts.map(f => [f.rowNum, f]));
+  const check = async (db: BrainEngine, lock: boolean) => {
+    const current = await readFacts(db, row.source_id, facts.map(f => f.id), lock);
+    for (const assignment of facts) {
+      const fact = current.find(f => f.id === assignment.id);
+      if (!fact || digest(fact.value) !== assignment.hash || fact.value.entity_slug !== row.slug) {
+        throw new OperationError('revision_conflict', 'A legacy fact changed or moved to another owner before adoption.');
+      }
+      const cell = fence.get(assignment.row_num);
+      if (!cell?.active || cell.claim !== fact.value.fact || cell.visibility !== fact.value.visibility) {
+        throw new OperationError('invalid_params', 'The adopted fence row does not render its legacy fact.');
+      }
+    }
+    const occupied = await db.executeRaw(`SELECT id FROM facts WHERE source_id=$1 AND source_markdown_slug=$2
+      AND row_num=ANY($3::integer[])${lock ? ' FOR UPDATE' : ''}`, [row.source_id, row.slug, facts.map(f => f.row_num)]);
+    if (occupied.length) throw new OperationError('revision_conflict', 'An adopted fence position is already owned by another fact.');
+  };
+  await check(engine, false);
+  const prepared = await preparePageMutation(engine, { ...row, intent: { kind: 'managed_maintenance_page', content: p.content,
+    expected_revision: p.expected_revision } }, config);
+  return { ...prepared, validate: async tx => { await prepared.validate?.(tx); await check(tx, true); }, apply: async tx => {
+    // Runs ahead of the page import and its canonical projection, so the
+    // projection's expiry pass and insertFacts see the adopted positions.
+    await tx.executeRaw(`UPDATE facts f SET row_num=a.row_num,source_markdown_slug=$2
+      FROM jsonb_to_recordset($3::text::jsonb) AS a(id integer,row_num integer)
+      WHERE f.source_id=$1 AND f.id=a.id AND f.row_num IS NULL`,
+    [row.source_id, row.slug, JSON.stringify(facts.map(({ id, row_num }) => ({ id, row_num })))]);
+    return { ...await prepared.apply(tx), facts_adopted: facts.length };
+  } };
+}
+
 export async function prepareMaintenanceMutation(engine: BrainEngine, row: WriteRequest, config: GBrainConfig): Promise<PreparedMutation> {
   if (row.authority.remote) throw new OperationError('permission_denied', 'Remote maintenance publication is not supported.');
   if (row.intent?.kind === 'managed_maintenance_page') {
@@ -195,6 +251,7 @@ export async function prepareMaintenanceMutation(engine: BrainEngine, row: Write
       return { ...outcome, event_projected: projected };
     } };
   }
+  if (row.intent?.kind === 'managed_maintenance_adopt_fact_fence') return prepareFactFenceAdoption(engine, row, config);
   if (row.intent?.kind === 'managed_maintenance_phantom_merge') return (await import('../cycle/phantom-redirect-managed.ts')).preparePhantomMerge(engine, row, config);
   if (row.intent?.kind === 'managed_maintenance_phantom_delete') return (await import('../cycle/phantom-redirect-managed.ts')).preparePhantomDelete(engine, row, config);
   if (row.intent?.kind !== 'managed_maintenance_consolidate') throw new OperationError('invalid_params', 'Unsupported maintenance request.');
