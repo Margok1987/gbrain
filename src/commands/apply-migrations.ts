@@ -13,6 +13,7 @@
  */
 
 import { VERSION } from '../version.ts';
+import type { BrainEngine } from '../core/engine.ts';
 import { loadConfig } from '../core/config.ts';
 import { PgliteBusyError } from '../core/pglite-lock.ts';
 import {
@@ -380,7 +381,7 @@ export async function runApplyMigrations(args: string[]): Promise<void> {
   let exitCode: number | undefined;
   try {
     await holdLock();
-    exitCode = await runLockedMigrations(cli, installed, holdLock);
+    exitCode = await runLockedMigrations(cli, installed, holdLock, () => held.lock !== null);
   } catch (error) {
     if (!(error instanceof MigrationsRunningError)) throw error;
     console.error(`apply-migrations refused: ${error.message}`);
@@ -400,7 +401,16 @@ async function runLockedMigrations(
   cli: ReturnType<typeof parseArgs>,
   installed: string,
   holdLock: () => Promise<void>,
+  hasLock: () => boolean,
 ): Promise<number | undefined> {
+  // Without the orchestration lease (a schema too old for it), schema work goes
+  // through initSchema(), which serializes on the schema lock.
+  const migrateSchema = async (eng: BrainEngine, from: number): Promise<{ applied: number; current: number }> => {
+    if (hasLock()) { const { runMigrations } = await import('../core/migrate.ts'); return runMigrations(eng); }
+    await eng.initSchema();
+    const current = parseInt(await eng.getConfig('version') || String(from), 10);
+    return { applied: Math.max(0, current - from), current };
+  };
   // Bug 3 — --force-retry: write an explicit reset marker for a wedged
   // migration, then return. User re-runs `gbrain apply-migrations --yes`
   // to actually re-attempt.
@@ -444,7 +454,6 @@ async function runLockedMigrations(
   // recovery path.
   if (cli.forceSchema || cli.forceAll) {
     try {
-      const { runMigrations } = await import('../core/migrate.ts');
       const { loadConfig: lc, toEngineConfig } = await import('../core/config.ts');
       const { createEngine } = await import('../core/engine-factory.ts');
       const cfg = lc();
@@ -455,7 +464,7 @@ async function runLockedMigrations(
       const eng = await createEngine(toEngineConfig(cfg));
       await eng.connect(toEngineConfig(cfg));
       console.log('Running schema migrations from current config.version...');
-      const result = await runMigrations(eng);
+      const result = await migrateSchema(eng, parseInt(await eng.getConfig('version') || '1', 10));
       console.log(`Applied ${result.applied} schema migration(s); now at v${result.current}.`);
       await eng.disconnect();
     } catch (err) {
@@ -496,14 +505,13 @@ async function runLockedMigrations(
         const verStr = await eng.getConfig('version');
         const schemaVer = parseInt(verStr || '1', 10);
         dbProbe = { status: 'connected', schemaVer, latest: LATEST_VERSION };
-        const { runMigrations } = await import('../core/migrate.ts');
         schemaBehind = await resolveSchemaBehind({
           schemaVer,
           latest: LATEST_VERSION,
           // --list and --dry-run are read-only surfaces: never mutate schema
           // even when combined with --yes/--non-interactive.
           autoApply: (cli.yes || cli.nonInteractive) && !cli.dryRun && !cli.list,
-          run: () => runMigrations(eng),
+          run: () => migrateSchema(eng, schemaVer),
         });
         await eng.disconnect();
       }
