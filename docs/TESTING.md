@@ -937,8 +937,8 @@ string/SQL text is exact). Imports, `export ... from` lines and toggling the
 `export` modifier on a moved statement are allowed and counted. Run
 `bun scripts/verify-move-only.ts <commit>` (default `HEAD~1..HEAD`);
 `--wrapper migration` inlines `export const vNNN: Migration = {...}` files into
-the generated registry array so the W3 split must reproduce the original
-`MIGRATIONS` array; `--wrapper doctor-entry` inlines each
+the generated registry array so the W3 split must reproduce the base side's
+single `MIGRATIONS` literal entry for entry; `--wrapper doctor-entry` inlines each
 `run<Topic>(ctx: DoctorContext): Promise<Check[]>` body (minus its ctx
 destructure / `connectedEngine` / `const checks` prologue and `return checks;`)
 at its `checks.push(...(await runX(ctx)));` call in `buildChecks`, drops the
@@ -991,7 +991,7 @@ per-file rules. They do not cache passing results. Candidate scanner failures
 fail the guard, and matching files retain the same allowlists and diagnostics.
 
 `scripts/guards-manifest.tsv` is THE single registry of `scripts/check-*`
-guards (currently 61), each classified `scanner` (greps/parses repo sources —
+guards (currently 66), each classified `scanner` (greps/parses repo sources —
 must eventually carry fixtures), `buildfresh`, or `repostate` (build/freshness
 guards are exempt-with-reason, not fixture-tested).
 `scripts/guard-self-test.sh` (`bun run check:guard-self-test`, wired into
@@ -1137,6 +1137,29 @@ read is scoped. The guard fails on:
 The allowlists live in the script. Fixtures:
 `test/fixtures/guards/check-engine-sql-brands.ts/`; forms are driven in
 `test/scripts/engine-sql-brands.test.ts`.
+
+#### Retired-phrase guard
+
+`scripts/check-retired-phrases.sh` (`bun run check:retired-phrases`, in
+`bun run verify`, under a second) keeps the instructions agents follow
+literally in step with refactor wave 1. It greps `CLAUDE.md`, `AGENTS.md`,
+`CONTRIBUTING.md`, `docs/` and `skills/` for the contributor-workflow phrases
+the wave retired: the old migrations-array wording and appending to it, the
+rule that every engine method is written twice, the CLI switch-case step, the
+migrate.ts region policy, and schema text listed as a hand-synced pair of
+`schema.sql` and the PGLite schema module. The patterns and the current
+instruction for each live in the script's `RETIRED` table. Historical records
+may quote them and are exempt: `docs/designs/`, `docs/test-audit/`,
+`docs/incidents/`, `docs/plans/`, `docs/proposals/`, `docs/research/`,
+`docs/issues/`, `docs/superpowers/`, `docs/migrations/`, `skills/migrations/`
+and the wave 1 porting kit (`docs/architecture/wave-1-*`); `CHANGELOG.md` is
+not scanned. Each hit prints `FAIL: <file:line> retired phrase "<match>"`,
+then `Why:`, `Fix:` with the current instruction, and `See:`. The fix is to
+rewrite the sentence to the current workflow, never to exempt the file. To
+retire another phrase, add a row to `RETIRED`. Fixtures:
+`test/fixtures/guards/check-retired-phrases.sh/` (one `bad-<location>` tree per
+scanned location); every pattern and the exemptions are driven in
+`test/scripts/check-retired-phrases.test.ts`.
 
 ### Placeholder assertions
 
@@ -1803,7 +1826,7 @@ Unit tests and what they cover:
 - `test/bootstrap.test.ts` — bootstrap contract: no-op on fresh install, idempotent across two `initSchema()` calls, no-op on modern brain that already has every probed column, full bootstrap path on a simulated legacy brain, fresh-install regression guard, legacy `links` shape coverage.
 - `test/schema-bootstrap-coverage.test.ts` — CI guard covering BOTH embedded schema blobs: neither may forward-reference state its engine's bootstrap can't create, and a reference covered on one blob is NOT automatically covered on the other (`dream_verdicts` exists only in the Postgres blob). PGLite half: `REQUIRED_BOOTSTRAP_COVERAGE` lists every forward reference in `PGLITE_SCHEMA_SQL`; the test fails loudly if `applyForwardReferenceBootstrap` skips one (extend both arrays when adding a column-with-index to the embedded schema blob). Also parses `src/core/migrate.ts` source text for every `ALTER TABLE ... ADD COLUMN` (top-level `sql:`, `sqlFor.{postgres,pglite}` overrides, AND handler-body `engine.runMigration(N, \`ALTER TABLE ...\`)`) and asserts each (table, column) pair is covered by the bootstrap OR by the schema blob's CREATE TABLE bodies — catching the column-only forward-reference class (e.g. `sources.archived`, `oauth_clients.source_id`) that a CREATE INDEX parser alone can't see. Postgres half (the class-closure gate): parses every CREATE INDEX column reference in `SCHEMA_SQL` and requires each to be in the blob's CREATE TABLE body AND not migration-added, or probed + ALTERed by `src/core/engine-sql/bootstrap.ts` (the single bootstrap both engines run; the PGLite half reads it minus its `dialect-only:postgres` regions) — a column that is both in the blob's CREATE TABLE and migration-added is still a forward reference for pre-existing brains, where `CREATE TABLE IF NOT EXISTS` no-ops and the blob's CREATE INDEX wedges `initSchema` before migrations can help. This gate is parser-driven (no registry to extend); intentional non-probes go in `POSTGRES_INDEX_REF_EXEMPTIONS` with a rationale. Honest scope: CREATE INDEX column references only — constraints, views, and trigger bodies are a filed TODOS.md follow-up. `parseBaseTableColumns` strips SQL line + block comments before identifying column names so commented-out lines don't hide adjacent columns.
 - `test/dream-verdict-cache-ttl.test.ts` — `dream_verdicts` TTL contract on PGLite: put assigns the default TTL, expired rows miss on read and only they are swept, re-judging via upsert refreshes a nearly-expired row, the migration backfill derives expiry from `judged_at` idempotently, and a NULL-expiry row (the pre-backfill upgrade window) reads as a hit and survives the sweep — the locally-runnable pin for the NULL-tolerant read predicate both engines share.
-- `test/helpers/schema-diff.ts` + `test/helpers/schema-diff.test.ts` + `test/e2e/schema-drift.test.ts` — cross-engine schema parity gate. Helper exports pure `snapshotSchema(query)` / `diffSnapshots(pg, pglite, opts)` / `formatDiffForFailure(diff)` / `isCleanDiff(diff)` over a four-tuple per column (`data_type`, `udt_name`, `is_nullable`, `column_default`). E2E test spins up fresh PGLite + Postgres, runs `engine.initSchema()` on each, snapshots `information_schema.columns`, then diffs. 2-table allowlist (`files`, `file_migration_ledger`) — every other Postgres table must reach PGLite via `PGLITE_SCHEMA_SQL` or a migration's `sqlFor.pglite` branch. Sentinels for `oauth_clients`, `mcp_request_log`, `access_tokens`, `eval_candidates` give tighter blame messages. Skips without `DATABASE_URL`. Wired into `scripts/e2e-test-map.ts` so changes to `src/schema.sql`, `src/core/pglite-schema.ts`, or `src/core/migrate.ts` trigger it. The failure message names every drift with a paste-ready hint pointing at `src/core/pglite-schema.ts`.
+- `test/helpers/schema-diff.ts` + `test/helpers/schema-diff.test.ts` + `test/e2e/schema-drift.test.ts` — cross-engine schema parity gate. Helper exports pure `snapshotSchema(query)` / `diffSnapshots(pg, pglite, opts)` / `formatDiffForFailure(diff)` / `isCleanDiff(diff)` over a four-tuple per column (`data_type`, `udt_name`, `is_nullable`, `column_default`). E2E test spins up fresh PGLite + Postgres, runs `engine.initSchema()` on each, snapshots `information_schema.columns`, then diffs. 2-table allowlist (`files`, `file_migration_ledger`) — every other Postgres table must reach PGLite via `PGLITE_SCHEMA_SQL` or a migration's `sqlFor.pglite` branch. Sentinels for `oauth_clients`, `mcp_request_log`, `access_tokens`, `eval_candidates` give tighter blame messages. Skips without `DATABASE_URL`. Wired into `scripts/e2e-test-map.ts` so changes to `src/schema.sql`, the PGLite schema façade or its generated template, or the migration runner trigger it. The failure message names every drift with a paste-ready hint pointing at `src/schema.sql` (or its TS fragment) plus `bun run build:schema`, a PGLite rule in `scripts/build-schema.ts`, or a migration's `sqlFor.pglite` branch.
 - `test/schema-catalog-golden.test.ts` + `test/e2e/schema-catalog-golden.test.ts` — refactor wave 1 E4 catalog goldens (`test/fixtures/goldens/catalog/`). `snapshotCatalog(query)` in `test/helpers/schema-diff.ts` pins columns with ordinal position, defaults, full index definitions, constraints incl. CHECK text, triggers, function signature + body sha256, views, policies, grants (connecting role placeholdered), RLS flags, sequences and extension names; extension-owned objects are excluded. Captured at three configs (`CATALOG_CONFIGS` in `test/helpers/schema-catalog.ts`: default OpenAI/1536, 4096 dims which skips the chunk and halfvec HNSW indexes, `GBRAIN_FTS_LANGUAGE=portuguese`) on PGLite engine init, the PGLite schema blob without migrations, Postgres engine init (fresh throwaway database per capture) and Postgres `db.initSchema()`, plus an optional PgBouncer arm. Every capture runs twice through the `schema-catalog-lines-v1` normalizer. PGLite master-vs-branch compares ordinals (the goldens pin them); PG ↔ PGLite parity stays name-based. Regenerate deliberately with `GBRAIN_TEST_UPDATE_GOLDENS=1`.
 - `test/pglite-upgrade-replay.test.ts` — refactor wave 1 EO3: opens the pinned master-built PGLite brain (`test/fixtures/goldens/pglite-upgrade-replay/brain.tar.gz` + `MANIFEST.json`, rebuilt only on master with `bun scripts/build-pglite-upgrade-fixture.ts`) with current code and asserts the catalog before boot equals the E4 golden, the post-boot catalog is pinned, corpus rows and fingerprint survive, and a restart + repeat `initSchema()` is a no-op (no migrations, identical catalog, unchanged relation/constraint/function OIDs; the triggers the blob recreates on every boot are pinned).
 - `test/setup-branching.test.ts` — setup flow.
