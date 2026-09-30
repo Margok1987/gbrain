@@ -201,6 +201,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/db-lock.ts": ["test/e2e/db-lock-acquisition-token.test.ts", "test/e2e/sync-lock-overlap-postgres.test.ts", "test/e2e/managed-connector-fencing.test.ts", "test/e2e/managed-connector-recovery.test.ts"],
   "src/core/lease-schema.ts": ["test/e2e/db-lock-acquisition-token.test.ts"],
   "src/core/persistence/**": [
+    "test/e2e/fix-wave-3-integration.test.ts",
     "test/e2e/persistence-http-liveness.test.ts",
     "test/e2e/persistence-phase-liveness.test.ts",
     "test/e2e/persistence-idle-pool.test.ts",
@@ -250,7 +251,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/w5-persistence-postgres.test.ts",
   ],
   "src/core/brain-score-recommendations.ts": ["test/e2e/w5-persistence-postgres.test.ts"],
-  "src/core/repair/**": ["test/e2e/repair-command.test.ts", "test/e2e/derived-visibility-repair.test.ts", "test/e2e/safe-chunk-reseal.test.ts", "test/e2e/recovery-layer.test.ts", "test/e2e/repair-contextual-mode-5621-postgres.test.ts"],
+  "src/core/repair/**": ["test/e2e/repair-command.test.ts", "test/e2e/derived-visibility-repair.test.ts", "test/e2e/safe-chunk-reseal.test.ts", "test/e2e/recovery-layer.test.ts", "test/e2e/repair-contextual-mode-5621-postgres.test.ts", "test/e2e/fix-wave-3-integration.test.ts"],
   "src/core/remediation/**": ["test/e2e/recovery-layer.test.ts"],
   "src/core/remediation-checkpoint.ts": ["test/e2e/recovery-layer.test.ts"],
   "src/commands/repair.ts": ["test/e2e/repair-command.test.ts", "test/e2e/repair-contextual-mode-5621-postgres.test.ts"],
@@ -407,7 +408,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/autopilot.ts": ["test/e2e/autopilot-linux-lifecycle.serial.test.ts", "test/e2e/worker-readiness-cli.test.ts"],
   "src/commands/doctor.ts": ["test/e2e/doctor-progress.test.ts"],
   // Doctor check modules peeled from doctor.ts feed the same e2e surface.
-  "src/commands/doctor/**": ["test/e2e/doctor-progress.test.ts", "test/e2e/recovery-layer.test.ts"],
+  "src/commands/doctor/**": ["test/e2e/doctor-progress.test.ts", "test/e2e/recovery-layer.test.ts", "test/e2e/fix-wave-3-integration.test.ts"],
   // Knowledge graph layer feeds graph-quality.
   "src/core/link-extraction.ts": ["test/e2e/graph-quality.test.ts", "test/e2e/attendance-retrieval-postgres.test.ts"],
   "src/core/attendance-repair.ts": ["test/e2e/attendance-repair-postgres.test.ts"],

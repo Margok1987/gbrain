@@ -1,6 +1,8 @@
 # TODOS
 
-## Fix wave 3 recovery-layer follow-ups (filed 2026-09-29, follow-up from v0.60.11.0)
+## Fix wave 3 follow-ups (filed 2026-09-29, follow-up from v0.60.11.0)
+
+### Recovery layer
 
 - [ ] **P1 — Bounded replay window for lifetime request IDs (wave-2 CEO-E7).**
   **What:** every admitted write keeps a permanent request ID for replay protection, so the principal and brain lifetime-ID limits only move later (`persistence_capacity` warns at 80% and names a `gbrain config set` value). **Fix:** a bounded replay window with a documented horizon and an eviction rule that never replays a committed write twice; size it from the default of 600 admissions a day (about 417 days of headroom at the default limit). **Effort:** L. **Priority:** P1.
@@ -20,7 +22,8 @@
 - [ ] **P3 — #3783 with #5691: query-side embedding prefixes behind a setting.** **Priority:** P3.
 - [ ] **P3 — #5392 inert single-writer mode.** Recommended no: resolve through the #5198/#5254 family instead. Recorded so the decision is visible. **Priority:** P3.
 - [ ] **P3 — Retire `safeChunkUpgradeAdvisory`.** Post-upgrade now reports `safe_index_pending` through the recovery banner; the function remains only for `test/safe-chunk-reseal.test.ts`. Move that assertion onto the doctor check and delete the function. **Effort:** S. **Priority:** P3.
-## Fix wave 3 lane A follow-ups (connectors, filed 2026-09-29, follow-up from v0.60.11.0)
+
+### Connectors
 
 - [ ] **P1 — Move the cycle stamps out of `sources.config`.**
   **What:** `runCycle` writes `last_source_cycle_at` / `last_full_cycle_at` into `sources.config` after every source cycle; that rotating blob was the root cause behind #5686. v0.60.11.0 keys connector identity on parsed settings instead, but nine files still read the stamps from the blob. **Fix:** dedicated columns or a cycle-state row, with a migration; community PR #5695 sketched one.
@@ -30,7 +33,12 @@
   **What:** the managed connector waits at most 30 s in total for accepted writes per run (`CONNECTOR_WAIT_BUDGET_MS`). **Fix:** a config key, clamped so it never exceeds the caller's job timeout.
 - [ ] **P2 — Multi-source connector fan-out deadline (`stopped_on_wait_budget` across sources).**
   **What:** each connector run bounds its own waits and records `stopped_on_wait_budget`, but no in-process fan-out dispatches many connector sources against one shared deadline, so the plan's 50-source fan-out stop was not built. **Fix:** when such a fan-out exists (for example `sync --all` over connector sources), stop dispatching new sources at the deadline and report the rest.
-## Fix wave 3 lane B follow-ups (filed 2026-09-29, follow-up from v0.60.11.0)
+- [ ] **P3 — Connector ingest waits on its whole pending set while the owner is delayed.**
+  **What:** under a delayed consumer each run first waits on its recorded pending set and stops on the wait budget, so new upstream items are not admitted until the backlog drains (measured by `test/fix-wave-3-chaos.test.ts`). Nothing is lost; the items wait upstream. **Fix:** if time-to-searchable under sustained arrivals matters, admit new items up to the outstanding limit while the pending set resolves.
+- [ ] **P3 — User timeline bullets on pages other preserving writers regenerate.**
+  **What:** `add_timeline_entry` on a connector page now writes a materialized-marked bullet so the connector re-render keeps it (#5567). Other preserving writers that regenerate an ordinary page still treat an unmarked bullet their new body drops as removed. **Fix:** audit those writers and mark user-added bullets on the pages they own, with a regression per writer.
+
+### Maintenance writers
 
 - [ ] **P2 — Managed `writeSingleFact` keeps unresolved entity attribution.**
   **What:** on a managed brain a single fact for an entity with no page is stored database-only with `entity_slug` NULL (the response now reports that honestly), so the same claim for a second absent entity dedups against the first. The shared `managed_facts_entity` preparer accepts only the row's slug or NULL. **Fix:** an opt-in intent flag used only by `writeSingleFact`: `publishManagedFacts` keeps the resolver's fallback slug on `memory/unattributed` rows, and `prepareManagedFactsMutation` allows that slug on rows without a row number and passes it to `insertFact`, so dedup is per entity; add a test pinning the facts backstop's unchanged replay and dedup contract.

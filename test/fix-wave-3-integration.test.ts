@@ -121,7 +121,7 @@ test('check 1 (S1): a cycle stamp mid-sweep while connector pages are pending; t
       expect(done.state).toBe('committed');
       // Lane D stamps both sides of a Lane A connector publication; the publication time is the database clock.
       expect(done).toMatchObject({ admitter_version: version, consumer_version: version });
-      expect(done.published_at).not.toBeNull();
+      expect((done as WriteRequest & { published_at: unknown }).published_at).not.toBeNull();
     }
     expect(readFileSync(join(f.dir, 'people/first-example.md'), 'utf8')).toContain('First Example');
     await disposePersistenceConsumer(engine);

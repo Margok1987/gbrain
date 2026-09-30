@@ -10,43 +10,48 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.11.0] - 2026-09-29
+## [0.60.11.0] - 2026-09-30
 
-**After an upgrade, doctor now finds the leftover damage, shows you the exact fix for each piece, and applies the fixes you agree to under a spending cap.**
+**Managed brains stop re-writing the same pages every hour, every maintenance job finishes again, and after an upgrade doctor shows you each leftover problem with the exact fix.**
 
-Earlier releases shipped repairs for history that only the database had, for derived pages with no visibility, and for pages hidden from remote search. They only ran when someone read the doctor output and typed the command. `gbrain doctor --remediate` never offered them, and on a brain without API keys it quit before getting that far. Remote agents saw none of it.
+If you connect Gmail, Calendar, Contacts or GitHub to a managed brain, each connector used to forget where it stopped after every maintenance cycle. So every hour it walked its whole window again and spent a new permanent write ID and receipt on every unchanged page. Now it resumes where it stopped, skips pages that did not change, and keeps going when the owner is slow instead of giving up after one write.
 
-Now `gbrain doctor --remediation-plan` lists every repair that has work to do, with the command that applies it, whatever your brain score. Each one is marked as needing your agreement. `gbrain doctor --remediate --yes --include-repairs --max-usd 2` runs them. Free repairs always run. A paid step that would go over the cap waits, and the resume command keeps the same cap. When it finishes, doctor sorts every leftover finding into: fixed, still pending, needs your agreement, needs an operator, or cannot be fixed yet. `gbrain post-upgrade` prints a preview-only banner that tells your agent to ask you first. Remote doctor shows one "host operator action required" line per problem, without paths or page contents.
+On the same brains, a dozen maintenance steps still used a writer that managed brains refuse. Concept synthesis paid for the model call and then died, taking the rest of the nightly job with it. Every maintenance writer now goes through the coordinator, and one failing step no longer stops the steps after it.
 
-| After upgrading a brain with leftover damage | Before | After |
+After an upgrade, `gbrain post-upgrade` prints a preview banner, and `gbrain doctor --remediation-plan` lists every repair with its command. `gbrain doctor --remediate --yes --include-repairs --max-usd 2` applies the ones you agree to, under a spending cap.
+
+| Managed brain, test fixtures on both engines | Before | After |
 | --- | --- | --- |
-| Repairs listed in `doctor --remediation-plan` | none | every kind with pending items, each with its command |
-| `doctor --remediate` on a brain without keys | exits 2, runs nothing | runs the repairs you agreed to |
-| Remote doctor lines for these problems | none | one sanitized line per check |
-| Commands from post-upgrade to a clean plan (test fixture) | not possible | 3 |
+| Page admissions on a quiet connector's second run | every window item | 0 |
+| Connector runs that resume their cursor after a maintenance cycle | none | all |
+| Global maintenance after `synthesize_concepts` is refused | job dies | later phases run, job reports the failure |
+| Repairs listed by `doctor --remediation-plan` | none | every kind with work, each with its command |
+| Commands from `gbrain post-upgrade` to a clean repair plan | not possible | 3 |
+| Grandfathering 250 pages on a pushed repository, seconds per page (PGLite / Postgres) | 0.456 / 0.821 | 0.060 / 0.070 |
+
+Things to watch: the first connector run after the upgrade may re-admit its window once (see below). A page you saved to an unbound Postgres source still refuses by default; the error now names both fixes.
 
 ### To take advantage of v0.60.11.0
 
 `gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
 
-1. **Run the orchestrator manually:**
+1. **Upgrade hosts in this order, with autopilot paused on connector hosts.** Mixed versions refuse with typed errors instead of losing data, and this order keeps them away:
    ```bash
-   gbrain apply-migrations --yes --no-autopilot-install
-   ```
-2. **Your agent reads `skills/migrations/v0.60.11.0.md` the next time you interact with it.** It previews the recovery plan and asks you before applying anything.
-3. **Upgrade hosts in order.** Pause autopilot first, then upgrade every host in this order:
-   ```bash
-   gbrain autopilot pause --reason "upgrading to v0.60.11.0"   # on each connector host
-   gbrain upgrade                                              # every consumer and worktree-owner host first
-   gbrain upgrade                                              # then the connector hosts
-   gbrain doctor --remediation-plan                            # preview; ask before applying
+   gbrain autopilot pause --reason "upgrading to v0.60.11.0"   # on each host that runs connector jobs
+   gbrain upgrade                                              # first: every consumer and worktree-owner host
+   gbrain upgrade                                              # then: the connector hosts
+   gbrain doctor --remediation-plan                            # preview; ask the user before applying
    gbrain autopilot resume                                     # on each host you paused
    gbrain sources status                                       # verify
    ```
+   If schema work did not complete, run `gbrain apply-migrations --yes --no-autopilot-install` on the brain host.
+2. **Expect one connector re-walk, once.** Migration 176 moves each connector's cursor to its new key. A source whose newest cursor receipt was compacted re-walks its window once on its next run, and connector writes still queued from before the upgrade fail once with `connector_intent_outdated` (detail `pre_upgrade`, nothing to do) and are fetched again. The post-upgrade banner and `gbrain sources status` count those sources. This first spike is expected and is not the hourly churn this release fixes.
+3. **Your agent reads `skills/migrations/v0.60.11.0.md` the next time you interact with it.** It previews the recovery plan and asks you before applying anything.
 4. **Verify the outcome:**
    ```bash
-   gbrain doctor --remediation-plan     # no repair steps left once you have applied the agreed ones
-   gbrain sources writer status --json  # writer versions per host
+   gbrain sources status --json          # after the second run a quiet connector shows page_admissions: 0
+   gbrain doctor --remediation-plan      # no repair steps left once you applied the agreed ones
+   gbrain sources writer status --json   # writer versions per host
    ```
 5. **If any step fails or the numbers look wrong,** please file an issue:
    https://github.com/garrytan/gbrain/issues with:
@@ -58,118 +63,54 @@ Now `gbrain doctor --remediation-plan` lists every repair that has work to do, w
 
 ### Itemized changes
 
-- **Repairs are part of the remediation plan.** `gbrain doctor --remediation-plan` lists each `gbrain repair` kind that has pending items as a protected step, independent of `--target-score`. Each step is marked "requires user agreement" and prints its apply command (`gbrain repair <kind> --apply`). Job steps print their `gbrain jobs submit` command, and the plan ends with one combined `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. `--json` adds `repair_steps`, `combined_command` and a `command` per step.
-- **`--remediate --include-repairs`.** Repair steps run only with this flag, even when the score target is unreachable. Without it they are listed as "N repair steps skipped (user agreement required)". They run in-process on the brain host, and a remote caller cannot include them. Repairs that rewrite pages are re-embedded by their publication, so their estimate counts against the cap before they start.
-- **A cumulative, resumable cap.** `--max-usd` covers the whole run and every `--resume`. A paid step whose estimate is above what is left does not start. The free steps still run, then the run stops with a resume command that repeats the cap and `--include-repairs`. The local checkpoint records the brain, cap, agreement, spend and original steps. `--resume` without `--max-usd` reuses the recorded cap. A checkpoint from another brain is refused, and repairs found later need a fresh agreement.
-- **Finding classes and exit status.** `gbrain doctor --remediate --json` classifies every finding as `cleared`, `pending`, `consent_required`, `operator_required` or `unsupported`, and reports `repairs_completed` separately from `healthy`. It exits 0 when no automatically repairable finding is left and no step failed. Operator-required and unsupported findings are listed but do not fail the run.
-- **Preview-only post-upgrade banner.** `gbrain post-upgrade` runs the recovery checks once, the full checks rather than `--fast`. It then prints one `[AGENT] Relay this to your operator` block with the brain, a count for each finding, the preview command and "ask the user before applying". It never prints `--yes` or `--apply`. A clean brain prints nothing.
-- **Remote doctor host-action lines.** A remote or thin-client caller sees one line per recovery check. Each line has a stable id, a short impact summary without counts, and "host operator action required: on the brain host run `gbrain doctor --remediation-plan`". It never includes paths, row contents, SQL, account emails or installation ids. A check that could not run says `Unknown:` and never reports ok.
-- **New doctor checks.** `safe_index_pending` counts pages that remote search still withholds and names `gbrain repair safe-chunks`. `self_capture` (#5413) counts corpus files captured from gbrain's own model sessions, split into identified and undecidable, and prints copy-paste quarantine commands. It never moves or deletes anything. `stale_embedding_effects` (#5629) names a committed write whose queued embedding effect no command can clear yet, and reports it as unsupported.
-- **`gbrain repair` refuses unknown options.** A mistyped flag, or `--max-usd` (which repair never had), used to be ignored while the repair ran anyway. Now it refuses with `invalid_params` naming the flag, and `--max-usd` points to the capped doctor route. The `--all` preview marks the kinds that may queue paid embeddings.
-- **`gbrain autopilot pause` / `resume`.** `pause [--reason <text>]` holds this host's daemon and job workers until `resume`. `gbrain upgrade` and `autopilot --install` keep the pause, `autopilot status` shows it, and `resume` never clears a migration or restore hold.
-- **Writer admin lock (#5285).** `gbrain sources writer lock` / `unlock` set an opt-in, brain-level lock. While it is set, writer claim, activate and transfer refuse for every caller with `writer_admin_locked`, whose hint tells an agent to stop and ask the operator. Ordinary writes continue, including the first write on a PGLite brain. There is no `--force`: the local unlock is the way out. `gbrain config set` and `unset` refuse the reserved key, and `sources writer status` shows the lock. It guards against routine agent administration and is not a security boundary.
-- **Writer versions (migration v178).** Write requests now record the version and host id of the binary that admitted them and of the consumer that published them, plus the publication time. `gbrain sources writer status` shows the latest versions per host and principal. Doctor's `writer_version` check warns when a request published in the last 7 days came from a binary older than this release (unstamped) or older than v0.60.5.0. It names the host UUID and `gbrain upgrade`. This is an observation, not an enforced floor.
-- **`writer_not_quiesced` names what blocks it (#5629).** The refusal and `sources writer status` name the blocking effect id, kind, source, page and request id, plus the inspect command.
-- **Unbound collisions reconcile.** After a source is bound, a database-only page whose canonical file appears at the same path now previews in `gbrain sources reconcile <source> <slug> --preview` with both sides. `--apply` writes the resolution you chose and records the file as the page's origin.
-- **Docs.** [Recover after upgrading](docs/guides/repair.md#recover-after-upgrading-to-this-release), the #5413 quarantine commands, a claim and activate runbook with a quiescence checklist and the admin lock sequence in `docs/architecture/topologies.md`, and new rows in `docs/guides/write-refusals.md`.
-**Managed Google and GitHub connectors stop re-admitting the same pages every hour.**
-
-A managed connector saved its cursor under a key that hashed the whole `sources.config` record, and every maintenance cycle rewrote that record with its "last cycle" timestamp. So every run found no cursor, walked its whole window again and took a new permanent write ID and receipt for each unchanged page. On a slow owner it also stopped after the first write that had not published within five seconds, so the cursor was never saved and the next run started over. Reports put this at about 90% of one brain's writes and 1.3 GB of receipts in 2.5 days; the link between the rotating key and that report is inferred from the code, not reproduced on the reporter's brain.
-
-| Two identical runs of a managed connector (test fixture, both engines) | Before | After |
-| --- | --- | --- |
-| Page admissions on the second run, stable cursor | every window item | 0 |
-| Checkpoint admissions on the second run, stable cursor | 1 | 0 |
-| Checkpoint admissions per quiet run, cursor that changes every run (Calendar, Gmail) | 1 | 1 |
-| Runs that resume their saved cursor after a cycle stamp | none | all |
-
-Most real providers hand out a new cursor on every run, so a quiet source normally costs one checkpoint admission per run and nothing else.
-
-### To take advantage of v0.60.11.0
-
-Run `gbrain upgrade` on every host that runs the persistence consumer or owns a worktree first, then on hosts that run connector jobs. Migration 176 moves each connector's checkpoint to its new key; follow [the upgrade steps](skills/migrations/v0.60.11.0.md). The first run after the upgrade may re-admit a connector's window once; that spike is expected. Check the result with `gbrain sources status --json`: after the second run a quiet connector shows `page_admissions: 0`.
-
-### Itemized changes
+#### Connectors (#5686, #5470, #5600, #5601)
 
 - **Stable connector identity.** The checkpoint key, the admission and publication change checks and the attachment-repair preview use the parsed connector settings minus credential-delivery fields. Cycle stamps and other bookkeeping in `sources.config` no longer restart a connector or fail its pending writes with `source_changed`.
-- **Account pinning.** Each connector source pins the account its credential belongs to. Google checks it through every enabled service (Gmail, Calendar or Contacts) before importing; GitHub records the App installation, or the login under `scope: auto`. A different account refuses with `connector_account_changed` and two exact ways out.
-- **Unchanged items take no admission.** Connector sync, managed `gbrain import`, `gbrain sync --working-tree` and company-profile sync run each item through its own publication preparation first and skip it when publishing would change nothing. Pages below the safe-chunk fence, pages whose search projection lags, deleted pages and changed pages are still published. An unchanged connector cursor is not saved again; freshness for `gbrain waiting` is stamped directly.
-- **Accepted writes count as progress.** A connector keeps going when the owner is slow, waits at most 30 seconds in total per run, and records writes still pending; the next run resolves them first and retries failed ones by itself. `extract_atoms` reports a batch the owner accepted but has not published as pending, not failed, and dream no longer halts on it. Managed `gbrain import` reports such a file as pending instead of failed.
-- **`gbrain sync --source <id> --reset-checkpoint`** re-walks one connector's window from scratch. Unchanged pages are not admitted again and the account pin is kept.
+- **Account pinning.** Each connector source pins the account its credential belongs to. Google checks it through every enabled service before importing; GitHub records the App installation, or the login under `scope: auto`. A different account refuses with `connector_account_changed` and two exact ways out.
+- **Unchanged items take no admission.** Connector sync, managed `gbrain import`, `gbrain sync --working-tree` and company-profile sync run each item through its own publication preparation first and skip it when publishing would change nothing. Pages below the safe-chunk fence, pages whose search projection lags, deleted pages and changed pages are still published. An unchanged cursor is not saved again; freshness for `gbrain waiting` is stamped directly.
+- **Accepted writes count as progress.** A connector keeps going when the owner is slow, waits at most 30 seconds in total per run, and records writes still pending; the next run resolves them first and retries failed ones by itself. `extract_atoms` reports a batch the owner accepted but has not published as pending, not failed, and dream no longer halts on it.
+- **`gbrain sync --source <id> --reset-checkpoint`** re-walks one connector's window. Unchanged pages are not admitted again and the account pin is kept.
 - **`gbrain sources status`** shows each connector's upgrade recovery state and its last run's admissions, skipped pages, pending writes and checkpoint admissions.
-- **Orphan checkpoint cleanup.** `gbrain doctor` counts connector checkpoint rows no source can load (`connector_checkpoints`), and `gbrain repair connector-checkpoints` removes them after you agree.
-- **Mixed-version safety.** Connector writes use a new intent format. An older consumer refuses it with `unsupported_mutation_protocol` and the connector says which hosts to upgrade; an older connector's writes fail `connector_intent_outdated` and are fetched again after the upgrade.
+- **Mixed-version safety.** Connector writes use a new intent format. An older consumer refuses it with `unsupported_mutation_protocol` and the connector names the hosts to upgrade; an older connector's writes fail `connector_intent_outdated` and are fetched again after the upgrade.
+- **Your notes on connector pages survive a re-walk.** A timeline entry you add to a connector page (`add_timeline_entry`) is kept when the connector renders the page again from the provider, and adding one to a database-only connector source stays database-only instead of claiming the source or refusing.
 
-Contributed ideas: the no-op screen before admission builds on the approach in #5581 by @tarush1989, and the diagnosis and test cases for the cycle-stamp key rotation build on #5695 by @thebergerking91.
-**Managed brains run their whole maintenance cycle again: every maintenance writer publishes through the coordinator, and one refused phase no longer kills the job.**
+#### Maintenance writers on managed brains (#5484, #5280, #5523, #5405)
 
-On a brain with managed persistence turned on, a dozen maintenance writers still used the old direct writer, which a managed brain refuses. `synthesize_concepts` was the worst: it paid for synthesis and then threw, so the scheduled global maintenance job died on every run and no later phase ran. Chronicle extraction, the purge of deleted pages, enrichment, `add_link` / `remove_link`, `gbrain bootstrap verify`, the facts writers and several smaller phases had the same problem. They all publish through the persistence coordinator now, with the same authority checks, revisions and crash recovery as `put_page`, and each checks writer authority before it spends anything on a model.
+- **`synthesize_concepts`** publishes through the maintenance coordinator in the same order as before: private first, then the provenance edges, then promotion to world. The authority check runs before any model call.
+- **A failing phase no longer kills maintenance.** A phase that throws is reported as a failed phase and later phases still run; the job still reports the failure and `gbrain dream` exits non-zero. Cancellation, a lost cycle lease and budget exhaustion still stop the job. A phase that fails after paid model calls is counted in doctor's `dream_paid_loop` check.
+- **More writers go through the coordinator:** Life Chronicle events with their timeline row, the purge of deleted pages, `gbrain enrich` and `enrich_thin` (keeping facts and takes fences), the drift report and `grade_takes` auto-resolutions, the managed `extract` walk, `add_link` / `remove_link` as coordinated database-only writes (a manual link survives re-derivation), `gbrain bootstrap verify` cleanup, and the facts, phantom-redirect, open-loop and conversation-facts writers.
+- **Every phase and mutating operation is classified** for managed brains, and a matrix test runs every phase once on a managed PGLite and Postgres brain.
+- **Unbound Postgres sources (#5254).** Saving a page to a source with a checkout folder but no owner still refuses by default, but the error (`owner_unavailable`, detail `unbound_source`) names both fixes: bind with the printed `gbrain sources writer claim` command, or run `gbrain config set persistence.unbound_write database_only`. Migration 177 records those pages as database-only, so they stay that way after binding, and a publication racing a bind fails instead of committing. Doctor's `unbound_source` check is ok while the source is unbound and warns once it is bound; when a canonical file appears at such a page's path, `gbrain sources reconcile <source> <slug> --preview` shows both sides and `--apply` resolves it.
 
-Embedding migrations also stop stranding a brain without vectors when the cost cap sits near the estimate, and saving a page to an unbound Postgres source now tells you exactly how to fix it.
+#### Embeddings and migrations (#5680, #4616, #5621, #5530, #5289)
 
-### To take advantage of v0.60.11.0
+- **Embedding migration budget (#5680).** Each provider request is charged at its maximum and settled to reported usage, once per attempt, summed across retries and splits. When `--max-cost-usd` is below the printed worst case, the migration stops before touching any vector and prints the command that covers it (`embedding_budget_below_worst_case`).
+- **Degenerate vectors are refused per chunk (#4616).** A zero-norm, NaN or infinite vector fails only its own chunk with `embedding_zero_norm`; the page's other vectors are kept, on managed brains too, and the failure names `gbrain embed <slug>`. Empty inputs never reach the provider. `gbrain reindex --vectors` rebuilds vector indexes after a PGLite crash repair, and the repair notice names it.
+- **Contextual retrieval mode (#5621).** `--no-embed` imports record their mode. Contributed by @woprrr (#5630). `gbrain repair contextual-mode` stamps existing pages exactly as a fresh import would and re-embeds only pages whose input changes.
+- **Grandfathering groups its Git work (#5530).** The effect runner commits up to 100 ready single-file Git effects of a worktree together and pushes each root once per pass; a failed push leaves the group queued for the next pass.
+- **`embed --stale --dry-run` matches the live run (#5289).** Chunks that only need a restamp are reported as `would_restamp`.
 
-Run `gbrain upgrade` on the brain host. Migration v177 adds one nullable column (`pages.database_only_reason`) and starts no service. Then run `gbrain doctor` once: the new `unbound_source` check counts pages saved database-only to a source with no canonical owner.
+#### Recovery after an upgrade
 
-### Itemized changes
+- **Repairs are part of the remediation plan.** `gbrain doctor --remediation-plan` lists each `gbrain repair` kind with pending items (timeline, visibility, safe-chunks, contextual-mode, connector-checkpoints) as a protected step with its apply command, independent of `--target-score`. `--remediate --include-repairs` runs them in-process on the brain host under a cumulative, resumable `--max-usd` cap; free steps always run.
+- **Finding classes and exit status.** `gbrain doctor --remediate --json` classifies every finding as `cleared`, `pending`, `consent_required`, `operator_required` or `unsupported`, and exits 0 when no automatically repairable finding is left.
+- **Preview-only post-upgrade banner.** `gbrain post-upgrade` runs the recovery checks once and prints one `[AGENT] Relay this to your operator` block with each finding's count, the connector re-walk count and the preview command. It never prints `--yes` or `--apply`.
+- **Remote doctor host-action lines.** Remote callers see one sanitized line per recovery check, never paths, row contents, SQL, account emails or installation ids; a check that cannot run says `Unknown:`.
+- **New doctor checks.** `connector_checkpoints` (orphan connector cursor rows, cleared by `gbrain repair connector-checkpoints`), `unbound_source`, `safe_index_pending`, `self_capture` (#5413, with copy-paste quarantine commands) and `stale_embedding_effects` (#5629).
+- **`gbrain repair` refuses unknown options,** and `--max-usd` points to the capped doctor route.
+- **`gbrain autopilot pause` / `resume`.** A pause survives `gbrain upgrade` and `autopilot --install`; `resume` never clears a migration hold.
+- **Writer admin lock (#5285).** `gbrain sources writer lock` / `unlock` set an opt-in lock under which writer claim, activate and transfer refuse with `writer_admin_locked`. Ordinary writes continue. It is not a security boundary.
+- **Writer versions (migration 178).** Each write request records the version and host of the binary that admitted it and of the consumer that published it. Doctor's `writer_version` check warns about writers older than this release or v0.60.5.0 seen in the last 7 days. It observes; it does not enforce.
+- **`writer_not_quiesced` names what blocks it (#5629).**
+- **Managed-worktree fixes.** A `gbrain sources push` refused by the managed-worktree guard records the refusal (#5614), `writer claim` before activation returns `activation_required` naming what it fences (#5617), and autopilot skips sync for claimed sources awaiting activation (#5613). Contributed by Roma Cherepanov (@cheRoma).
 
-- **`synthesize_concepts` on managed brains (#5484).** Concepts publish through the maintenance coordinator in the same order as before: private first, then the provenance edges, then promotion to world. Republishing a concept keeps its facts and takes fences, timeline and tags, or holds the concept untouched when those fences are ambiguous. The authority check runs before any model call.
-- **A failing phase no longer kills maintenance.** A phase that throws is now reported as a failed phase with its error, and the phases after it still run. The job still reports the failure: the cycle is partial, global freshness is not stamped, and `gbrain dream` exits non-zero. Cancellation, a lost cycle lease and budget exhaustion still stop the job. A phase that fails after paying for model calls is counted in doctor's `dream_paid_loop` check under a `dream:phase:<phase>:<source>` key.
-- **More writers go through the coordinator (#5280, #5523, #5405).**
-  - Life Chronicle events publish with their timeline row on the source page in one write, and a deleted event is never brought back.
-  - The purge phase, `gbrain pages purge-deleted`, the purge job and `purge_deleted_pages` purge each expired tombstone through a coordinated `delete_page --purge`. A tombstone that can't be purged is reported, not forced.
-  - `gbrain enrich` and the `enrich_thin` phase keep a page's facts and takes fences when the model rewrites its prose. `gbrain enrich`, the `enrich_thin` phase, the drift report and `grade_takes` auto-resolutions publish through the coordinator; `propose_takes` skips its legacy receipt page on managed brains, and the lint phase reports issues without rewriting managed files.
-  - The `extract` phase's file walk on a managed brain now goes through the coordinated stale-link extraction instead of silently losing timeline rows to the refused raw batch.
-  - `add_link` and `remove_link` are coordinated database-only writes. A manual link survives re-derivation and its page's next sync.
-  - `gbrain bootstrap verify` cleans up its probe pages through the coordinator.
-  - Fact-fence reconciliation in `extract_facts`, the phantom-page redirect, direct fact-fence writes, Google open-loop extraction, bulk `gbrain extract-conversation-facts` and the `conversation_facts_backfill` phase commit through the coordinator.
-  - Deliberate administrative refusals (`sources add/remove/reclone/archive/restore/purge`, engine migration, shared-secret sync delegation) are unchanged.
-- **Every phase and mutating operation is classified.** `src/core/cycle/phase-table.ts` classifies each cycle phase for managed brains, a matrix test runs every phase once on a managed PGLite and Postgres brain and checks its committed result, and `docs/architecture/managed-mutating-writers.tsv` classifies every mutating operation and the CLI writers above. The canonical-writer census now also counts direct `importFromContent` calls and fails on an unclassified operation.
-- **Unbound Postgres sources (#5254).** Saving a page to a source that has a checkout folder but no designated owner still refuses by default, but the error (`owner_unavailable`, detail `unbound_source`) now names both fixes: bind the source with the printed `gbrain sources writer claim` command, or run `gbrain config set persistence.unbound_write database_only` to allow database-only saves. With the opt-in, new and already database-only pages save to the database and the result says why no file was written; pages that came from a markdown file keep refusing. Such pages stay database-only after binding (a publication racing a bind fails instead of committing), and sync never overwrites them. The `unbound_source` doctor check is ok while the source is unbound and warns once it is bound.
-- **Embedding migration budget (#5680).** Each provider request is charged at its maximum size and then settled to what the provider reported, once per attempt, summed across retries and splits; usage above the reservation stops further requests. A request's maximum is now sized to its own texts instead of the provider's whole batch limit. The plan prints a worst-case authorization next to the estimate. When `--max-cost-usd` is below it, the migration stops before touching any vector and prints your cap, the worst case and the exact command that covers it (error `embedding_budget_below_worst_case`).
-
-Thanks to @akinduroifedayo, whose PR #5631 supplied the concept and chronicle publication approach adopted here.
-**Embedding providers can no longer hide pages from vector search, pages imported without embeddings get the same contextual wrapping as everything else, and upgrading a large managed brain stops making one Git commit per page.**
-
-Some embedding providers return an all-zero or broken vector for odd input, like a chunk that is only whitespace or symbols. gbrain used to store it. The vector index silently skips such a row, so the page showed up in keyword search and `gbrain get` but never in semantic search, and doctor said everything was fine. gbrain now refuses those vectors one chunk at a time: the rest of the page still gets its vectors, and the failure names the page and the command to fix it. After a PGLite crash repair, the notice now says indexes were not rebuilt and gives you the one command that rebuilds them.
-
-Pages imported with `--no-embed` (big syncs, connector sources) never recorded their contextual retrieval mode, so every later embedding pass embedded them raw. New imports record it, and `gbrain repair contextual-mode` stamps the pages you already have, re-embedding only the ones whose embedding input actually changes.
-
-Upgrading a managed brain with a pushed canonical repository used to commit and push once per page during the grandfather step. It now groups the Git work:
-
-| 250 pages, hardened repo with a local remote | Before | After |
-| --- | --- | --- |
-| PGLite, seconds per page | 0.456 | 0.060 |
-| Postgres, seconds per page | 0.821 | 0.070 |
-| Git commits | about 248 | 16 to 20 |
-
-### To take advantage of v0.60.11.0
-
-`gbrain upgrade` does the rest. There is no schema migration. On the brain host, preview and then apply the new repair when doctor's `contextual_retrieval_coverage` check reports pages never evaluated against the contextual retrieval ladder:
-
-```bash
-gbrain repair contextual-mode              # preview
-gbrain repair contextual-mode --apply      # stamp; re-embeds only pages whose input changed
-```
-
-If your PGLite brain was auto-repaired after a crash, run `gbrain reindex --vectors`.
-
-### Itemized changes
-
-- **Degenerate vectors are refused per chunk.** The embedding gateway refuses a zero-norm, NaN or infinite vector with `embedding_zero_norm` and never sends an empty or whitespace-only input to the provider. Only the affected chunk fails: `gbrain embed --stale`, imports and code imports keep every other vector of the batch, leave the refused chunk for a later pass, and do not stamp the page's embedding signature. The error is never retried as a rate limit or network failure, and it names `gbrain embed <slug>` and its row in `docs/guides/write-refusals.md`.
-- **`gbrain reindex --vectors`** rebuilds every HNSW vector index from the stored vectors, with no re-embedding and no cost (concurrently on Postgres). The PGLite WAL-repair notice and `gbrain pglite-repair` now say indexes are not rebuilt and name it.
-- **`--no-embed` imports record their contextual retrieval mode.** Every markdown import stamps the mode and corpus generation it resolves, so later embed passes wrap the page. A failed source-policy read now fails the import instead of stamping the global mode. Contributed by @woprrr (#5630).
-- **`gbrain repair contextual-mode`** stamps existing pages that have no mode, exactly as a fresh import would. It writes projections only (no page write and no request ID), keeps every vector whose embedding input is unchanged, and re-embeds a changed page once, or leaves it for `gbrain embed --stale` under `--no-embed`. `gbrain repair --all` runs it after `safe-chunks`, and doctor's `contextual_retrieval_coverage` check names it.
-- **Grandfathering groups its Git work.** The effect runner commits up to 100 ready single-file Git effects of a worktree together and pushes each root once per pass. A failed path fails only its own effect; a failed push leaves the group queued and the next pass pushes once. The v0.13.1 step admits pages in windows of 50, and short groups yield briefly to queued publications so their Git work lands together.
-- **`embed --stale --dry-run` matches the live run.** Chunks whose vectors are already in the current embedding space and only need a restamp are reported as `would_restamp`, not as work to embed.
-- **Managed-worktree refusals show up in push status.** A `gbrain sources push` refused by the managed-worktree guard records the refusal instead of leaving the last success on record. Contributed by @cheRoma (#5614).
-- **`writer claim` says what it fences.** Before persistence is activated, the claim and its dry run return `activation_required`, naming the sync and file writers that now refuse. Contributed by @cheRoma (#5617).
-- **Autopilot skips sync for claimed sources awaiting activation.** The freshness loop and the per-source fan-out drop the sync phase (and its pull) for those sources and report the reason once, instead of queueing a sync that fails on every tick. Contributed by @cheRoma (#5613).
+Contributions: the no-op screen builds on #5581 by @tarush1989; the cycle-stamp diagnosis and test cases build on #5695 by @thebergerking91; the concept and chronicle publication approach comes from #5631 by @akinduroifedayo; `--no-embed` mode stamping is #5630 by Alexandre Mallet (@woprrr); the managed-worktree fixes are #5614, #5617 and #5613 by Roma Cherepanov (@cheRoma).
 
 ### For contributors
 
-- `.github/workflows/macos-validation.yml` runs nightly, on dispatch and on pull requests labelled `macos-validation`, on a pinned `macos-26` runner with no secrets. It covers the APFS device-identity re-stamp, the PGLite checkpoint harness on a store of at least 2 GiB, and the signed release binary. The security matrix, the darwin release build and the darwin native-lock cells pin `macos-26` and `macos-26-intel`.
-- The checkpoint harness gains `--min-store-gb` and samples worker CPU with `ps` off Linux. `scripts/bench-grandfather-5530.ts` reproduces the grandfather numbers above (`--no-harden` and `--no-push` isolate the Git share).
+- `test/fix-wave-3-integration.test.ts` (with its Postgres arm in `test/e2e/fix-wave-3-integration.test.ts`) runs the twelve cross-lane checks, plus a chaos scenario with a delayed consumer and a provider outage, a timed recovery run (at most 3 operator commands, 5-minute ceiling) and the managed zero-norm check.
+- `.github/workflows/macos-validation.yml` runs nightly, on dispatch and on pull requests labelled `macos-validation`, on a pinned `macos-26` runner with no secrets: APFS device-identity re-stamp, the PGLite checkpoint harness on a store of at least 2 GiB, and the signed release binary.
+- The canonical-writer census counts direct `importFromContent` calls; `scripts/bench-grandfather-5530.ts` reproduces the grandfather numbers.
 
 ## [0.60.10.0] - 2026-09-29
 
