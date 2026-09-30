@@ -17,9 +17,9 @@ import {
   whoknowsHealthCheck,
 } from './core-health.ts';
 import type { Check } from '../../doctor.ts';
-import { connectedEngine, type DoctorContext } from '../context.ts';
+import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 
-export async function runIntegrity(ctx: DoctorContext): Promise<Check[]> {
+async function runIntegrity(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -80,7 +80,9 @@ export async function runIntegrity(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runJsonbIntegrity(ctx: DoctorContext): Promise<Check[]> {
+export const integrityEntry: DoctorEntry = { name: 'integrity', emits: ['integrity'], run: runIntegrity };
+
+async function runJsonbIntegrity(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -132,7 +134,19 @@ export async function runJsonbIntegrity(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runWhoknows(ctx: DoctorContext): Promise<Check[]> {
+export const jsonbIntegrityEntry: DoctorEntry = {
+  name: 'jsonb_integrity',
+  emits: [
+    'jsonb_integrity',
+    'takes_weight_grid',
+    'child_table_orphans',
+    'raw_provenance',
+    'source_config_shape',
+  ],
+  run: runJsonbIntegrity,
+};
+
+async function runWhoknows(ctx: DoctorContext): Promise<Check[]> {
   const { progress, scope } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -148,7 +162,13 @@ export async function runWhoknows(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runCrossModal(ctx: DoctorContext): Promise<Check[]> {
+export const whoknowsEntry: DoctorEntry = {
+  name: 'whoknows_health',
+  emits: ['whoknows_health'],
+  run: runWhoknows,
+};
+
+async function runCrossModal(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -273,7 +293,13 @@ export async function runCrossModal(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runMarkdownBody(ctx: DoctorContext): Promise<Check[]> {
+export const crossModalEntry: DoctorEntry = {
+  name: 'cross_modal_modality_backfill',
+  emits: ['cross_modal_modality_backfill', 'unified_multimodal_coverage'],
+  run: runCrossModal,
+};
+
+async function runMarkdownBody(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -322,3 +348,9 @@ export async function runMarkdownBody(ctx: DoctorContext): Promise<Check[]> {
   }
   return checks;
 }
+
+export const markdownBodyEntry: DoctorEntry = {
+  name: 'markdown_body_completeness',
+  emits: ['markdown_body_completeness'],
+  run: runMarkdownBody,
+};

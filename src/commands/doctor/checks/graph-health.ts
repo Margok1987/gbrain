@@ -10,9 +10,9 @@
 import { startHeartbeat } from '../../../core/progress.ts';
 import { quarantineFilterFragment } from '../../../core/quarantine.ts';
 import type { Check } from '../../doctor.ts';
-import { connectedEngine, type DoctorContext } from '../context.ts';
+import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 
-export async function runGraphCoverage(ctx: DoctorContext): Promise<Check[]> {
+async function runGraphCoverage(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -120,7 +120,13 @@ export async function runGraphCoverage(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runOrphanRatio(ctx: DoctorContext): Promise<Check[]> {
+export const graphCoverageEntry: DoctorEntry = {
+  name: 'graph_coverage',
+  emits: ['graph_coverage', 'brain_score'],
+  run: runGraphCoverage,
+};
+
+async function runOrphanRatio(ctx: DoctorContext): Promise<Check[]> {
   const { orphanRatioSourceId, progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -197,7 +203,13 @@ export async function runOrphanRatio(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runStaleMentions(ctx: DoctorContext): Promise<Check[]> {
+export const orphanRatioEntry: DoctorEntry = {
+  name: 'orphan_ratio',
+  emits: ['orphan_ratio'],
+  run: runOrphanRatio,
+};
+
+async function runStaleMentions(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -222,7 +234,13 @@ export async function runStaleMentions(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runTimelineHistory(ctx: DoctorContext): Promise<Check[]> {
+export const staleMentionsEntry: DoctorEntry = {
+  name: 'stale_mentions',
+  emits: ['stale_mentions', 'timeline_orphans', 'slug_collisions'],
+  run: runStaleMentions,
+};
+
+async function runTimelineHistory(ctx: DoctorContext): Promise<Check[]> {
   const { orphanRatioSourceId, progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -240,3 +258,18 @@ export async function runTimelineHistory(ctx: DoctorContext): Promise<Check[]> {
   }
   return checks;
 }
+
+export const timelineHistoryEntry: DoctorEntry = {
+  name: 'timeline_history',
+  emits: [
+    'timeline_history',
+    'derived_visibility',
+    'safe_index_pending',
+    'connector_checkpoints',
+    'unbound_source',
+    'writer_version',
+    'self_capture',
+    'stale_embedding_effects',
+  ],
+  run: runTimelineHistory,
+};

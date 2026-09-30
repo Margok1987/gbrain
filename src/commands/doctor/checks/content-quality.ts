@@ -11,9 +11,9 @@ import { EMBED_SKIP_FILTER_FRAGMENT } from '../../../core/embed-skip.ts';
 import { startHeartbeat } from '../../../core/progress.ts';
 import { checkUnverifiedExtractions } from './extraction-sync.ts';
 import type { Check } from '../../doctor.ts';
-import { connectedEngine, type DoctorContext } from '../context.ts';
+import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 
-export async function runContentSanity(ctx: DoctorContext): Promise<Check[]> {
+async function runContentSanity(ctx: DoctorContext): Promise<Check[]> {
   const { args, progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -220,7 +220,13 @@ export async function runContentSanity(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runQuarantine(ctx: DoctorContext): Promise<Check[]> {
+export const contentSanityEntry: DoctorEntry = {
+  name: 'oversized_pages',
+  emits: ['oversized_pages', 'scraper_junk_pages', 'content_sanity_audit_recent'],
+  run: runContentSanity,
+};
+
+async function runQuarantine(ctx: DoctorContext): Promise<Check[]> {
   const { orphanRatioSourceId, progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -275,7 +281,13 @@ export async function runQuarantine(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runFrontmatter(ctx: DoctorContext): Promise<Check[]> {
+export const quarantineEntry: DoctorEntry = {
+  name: 'quarantined_pages',
+  emits: ['quarantined_pages', 'flagged_pages', 'unverified_extractions'],
+  run: runQuarantine,
+};
+
+async function runFrontmatter(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -407,3 +419,9 @@ export async function runFrontmatter(ctx: DoctorContext): Promise<Check[]> {
   }
   return checks;
 }
+
+export const frontmatterEntry: DoctorEntry = {
+  name: 'frontmatter_integrity',
+  emits: ['frontmatter_integrity'],
+  run: runFrontmatter,
+};

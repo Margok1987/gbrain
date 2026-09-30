@@ -14,9 +14,9 @@ import { buildMemorableRelayCheck } from './integrations-memorable.ts';
 import { buildMemoryWritebackCheck } from './memory-writeback.ts';
 import { checkSelfUpgradeHealth, checkUpgradeErrors } from './upgrade-health.ts';
 import type { Check } from '../../doctor.ts';
-import type { DoctorContext } from '../context.ts';
+import type { DoctorContext, DoctorEntry } from '../context.ts';
 
-export async function runBootstrapChecks(ctx: DoctorContext): Promise<Check[]> {
+async function runBootstrapChecks(ctx: DoctorContext): Promise<Check[]> {
   const { engine } = ctx;
   const checks: Check[] = [];
 
@@ -28,7 +28,23 @@ export async function runBootstrapChecks(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runMemorableRelay(ctx: DoctorContext): Promise<Check[]> {
+export const bootstrapChecksEntry: DoctorEntry = {
+  name: 'plugin_lane_collision',
+  emits: [
+    'plugin_lane_collision',
+    'bootstrap_harness_health',
+    'bootstrap_hooks_heartbeat',
+    'bootstrap_push_health',
+    'bootstrap_durability_job',
+    'bootstrap_serve_lock',
+    'bootstrap_hook_schema_pairing',
+    'bootstrap_runbook_skew',
+    'bootstrap_last_verify',
+  ],
+  run: runBootstrapChecks,
+};
+
+async function runMemorableRelay(ctx: DoctorContext): Promise<Check[]> {
   const { engine, progress } = ctx;
   const checks: Check[] = [];
 
@@ -47,7 +63,13 @@ export async function runMemorableRelay(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runConnectors(ctx: DoctorContext): Promise<Check[]> {
+export const memorableRelayEntry: DoctorEntry = {
+  name: 'memorable_relay_health',
+  emits: ['memorable_relay_health', 'memory_writeback'],
+  run: runMemorableRelay,
+};
+
+async function runConnectors(ctx: DoctorContext): Promise<Check[]> {
   const { engine } = ctx;
   const checks: Check[] = [];
 
@@ -75,7 +97,13 @@ export async function runConnectors(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runMinionsMigration(ctx: DoctorContext): Promise<Check[]> {
+export const connectorsEntry: DoctorEntry = {
+  name: 'connectors',
+  emits: ['connectors', 'dream_paid_loop'],
+  run: runConnectors,
+};
+
+async function runMinionsMigration(ctx: DoctorContext): Promise<Check[]> {
   const { engine } = ctx;
   const checks: Check[] = [];
 
@@ -173,3 +201,9 @@ export async function runMinionsMigration(ctx: DoctorContext): Promise<Check[]> 
   checks.push(checkSelfUpgradeHealth());
   return checks;
 }
+
+export const minionsMigrationEntry: DoctorEntry = {
+  name: 'minions_migration',
+  emits: ['minions_migration', 'upgrade_errors', 'self_upgrade_health'],
+  run: runMinionsMigration,
+};

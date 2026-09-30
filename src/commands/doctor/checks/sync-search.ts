@@ -44,9 +44,9 @@ import {
 } from './routing-federation.ts';
 import { checkChatFallbackChainInert, checkSearchMode, checkEvalDrift } from './search-eval.ts';
 import type { Check } from '../../doctor.ts';
-import { connectedEngine, type DoctorContext } from '../context.ts';
+import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 
-export async function runSyncFreshness(ctx: DoctorContext): Promise<Check[]> {
+async function runSyncFreshness(ctx: DoctorContext): Promise<Check[]> {
   const { orphanRatioSourceId, progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -98,7 +98,24 @@ export async function runSyncFreshness(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runSearchMode(ctx: DoctorContext): Promise<Check[]> {
+export const syncFreshnessEntry: DoctorEntry = {
+  name: 'sync_freshness',
+  emits: [
+    'sync_freshness',
+    'canonical_content_writes',
+    'backup_coverage',
+    'sync_consolidation',
+    'links_extraction_lag',
+    'cycle_freshness',
+    'content_hash_duplicates',
+    'code_chunk_metadata',
+    'undeclared_db_only_pages',
+    'db_only_collector_collision',
+  ],
+  run: runSyncFreshness,
+};
+
+async function runSearchMode(ctx: DoctorContext): Promise<Check[]> {
   const { doFix, dryRun, progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -198,3 +215,39 @@ export async function runSearchMode(ctx: DoctorContext): Promise<Check[]> {
   }
   return checks;
 }
+
+export const searchModeEntry: DoctorEntry = {
+  name: 'chat_fallback_chain_inert',
+  emits: [
+    'chat_fallback_chain_inert',
+    'search_mode',
+    'hidden_by_search_policy',
+    'eval_drift',
+    'reranker_health',
+    'batch_retry_health',
+    'wedged_queue',
+    'orphaned_private_queue',
+    'autopilot_fanout_concurrency',
+    'google_oauth',
+    'graph_signals_coverage',
+    'junk_entity_hubs',
+    'brainstorm_health',
+    'link_resolution_opportunity',
+    'embedding_width_consistency',
+    'facts_embedding_width_consistency',
+    'source_routing_health',
+    'oauth_confidential_client_health',
+    'oauth_client_scope_health',
+    'autopilot_lock_scope',
+    'stale_locks',
+    'cycle_phase_scope',
+    'embed_staleness',
+    'entity_link_coverage',
+    'timeline_coverage',
+    'takes_count',
+    'pack_upgrade_available',
+    'type_proliferation',
+    'dangling_aliases',
+  ],
+  run: runSearchMode,
+};

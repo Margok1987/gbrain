@@ -11,9 +11,9 @@ import { parseFrontmatter } from '../../../core/backfill-effective-date.ts';
 import { computeEffectiveDate } from '../../../core/effective-date.ts';
 import { zeroTotalContradictionsCheck } from '../../../core/eval-contradictions/run-health.ts';
 import type { Check } from '../../doctor.ts';
-import { connectedEngine, type DoctorContext } from '../context.ts';
+import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 
-export async function runEvalCapture(ctx: DoctorContext): Promise<Check[]> {
+async function runEvalCapture(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -72,7 +72,13 @@ export async function runEvalCapture(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runContradictions(ctx: DoctorContext): Promise<Check[]> {
+export const evalCaptureEntry: DoctorEntry = {
+  name: 'eval_capture',
+  emits: ['eval_capture'],
+  run: runEvalCapture,
+};
+
+async function runContradictions(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -157,7 +163,13 @@ export async function runContradictions(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runFactsExtraction(ctx: DoctorContext): Promise<Check[]> {
+export const contradictionsEntry: DoctorEntry = {
+  name: 'contradictions',
+  emits: ['contradictions'],
+  run: runContradictions,
+};
+
+async function runFactsExtraction(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -292,7 +304,13 @@ export async function runFactsExtraction(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runEffectiveDate(ctx: DoctorContext): Promise<Check[]> {
+export const factsExtractionEntry: DoctorEntry = {
+  name: 'facts_extraction_health',
+  emits: ['facts_extraction_health'],
+  run: runFactsExtraction,
+};
+
+async function runEffectiveDate(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -416,7 +434,13 @@ export async function runEffectiveDate(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runSalience(ctx: DoctorContext): Promise<Check[]> {
+export const effectiveDateEntry: DoctorEntry = {
+  name: 'effective_date_health',
+  emits: ['effective_date_health'],
+  run: runEffectiveDate,
+};
+
+async function runSalience(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -468,3 +492,9 @@ export async function runSalience(ctx: DoctorContext): Promise<Check[]> {
   }
   return checks;
 }
+
+export const salienceEntry: DoctorEntry = {
+  name: 'salience_health',
+  emits: ['salience_health'],
+  run: runSalience,
+};

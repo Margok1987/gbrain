@@ -1,15 +1,12 @@
 import type { BrainEngine } from '../core/engine.ts';
 import { setCliExitVerdict } from '../core/cli-force-exit.ts';
 import { getIdleBlockers } from '../core/migrate.ts';
-import { checkResolvable } from '../core/check-resolvable.ts';
-import { autoFixDryViolations, type AutoFixReport } from '../core/dry-fix.ts';
 import { parseFlags as parseSkillsDirFlags, resolveSkillsDir } from './check-resolvable.ts';
 import { createProgress } from '../core/progress.ts';
 import { categorizeCheck, type CheckCategory } from '../core/doctor-categories.ts';
 import { rankIssues, type RankedIssue } from '../core/doctor-cause-rank.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import type { DbUrlSource } from '../core/config.ts';
-import { loadConfig } from '../core/config.ts';
 import { resolveEnvNumber, resolveHoursEnv } from '../core/env-number.ts';
 export { checkPostgresCancellationDriver } from './doctor/checks/postgres-cancellation.ts';
 export { checkProjectionReadiness } from './doctor/checks/projection-readiness.ts';
@@ -129,8 +126,6 @@ export {
   checkPoolBudget,
   checkCycleFreshness,
 } from './doctor/checks/consolidation-cycle.ts';
-import { dbRepairRecurrenceCheck } from './doctor/checks/engine-fit.ts';
-import { classifyPgAccessError } from '../core/pg-access-classify.ts';
 export { dbRepairRecurrenceCheck, pgliteScaleCheck } from './doctor/checks/engine-fit.ts';
 export {
   computePgliteDataDirCheck,
@@ -141,58 +136,8 @@ export {
   buildMemoryVerbsCheck,
   buildRetrievalReflexCheck,
 } from './doctor/checks/verbs-reflex.ts';
-import { runRetrievalReflex, runSkillConformance } from './doctor/checks/skill-group.ts';
-import {
-  runBootstrapChecks,
-  runMemorableRelay,
-  runConnectors,
-  runMinionsMigration,
-} from './doctor/checks/local-runtime.ts';
-import { runSupervisor } from './doctor/checks/supervisor-health.ts';
-import {
-  runStubGuard,
-  runExtractionBacklogs,
-  runHomeDirInWorktree,
-  runDefaultSourcePath,
-} from './doctor/checks/local-audits.ts';
-import { runPgliteDataDir } from './doctor/checks/db-connection.ts';
-import {
-  runPgvector,
-  runRls,
-  runSchemaVersion,
-  runRlsEventTrigger,
-  runEmbeddings,
-} from './doctor/checks/schema-health.ts';
-import {
-  runEmbeddingProvider,
-  runAlternativeProviders,
-  runEmbeddingColumnRegistry,
-  runEmbeddingEnvOverride,
-} from './doctor/checks/embedding-health.ts';
-import {
-  runGraphCoverage,
-  runOrphanRatio,
-  runStaleMentions,
-  runTimelineHistory,
-} from './doctor/checks/graph-health.ts';
-import {
-  runIntegrity,
-  runJsonbIntegrity,
-  runWhoknows,
-  runCrossModal,
-  runMarkdownBody,
-} from './doctor/checks/data-integrity.ts';
-import { runContentSanity, runQuarantine, runFrontmatter } from './doctor/checks/content-quality.ts';
-import {
-  runEvalCapture,
-  runContradictions,
-  runFactsExtraction,
-  runEffectiveDate,
-  runSalience,
-} from './doctor/checks/knowledge-health.ts';
-import { runQueueHealth, runIndexAudit, runImageAssets } from './doctor/checks/queue-assets.ts';
-import { runSyncFreshness, runSearchMode } from './doctor/checks/sync-search.ts';
 import type { DoctorContext } from './doctor/context.ts';
+import { runDoctorRegistry } from './doctor/registry.ts';
 export interface Check {
   name: string;
   status: 'ok' | 'warn' | 'fail';
@@ -381,59 +326,7 @@ export { resolveEnvNumber as _resolveEnvNumber };
 const _resolveEnvNumber = resolveEnvNumber;
 const _resolveSyncFreshnessHours = resolveHoursEnv;
 
-/**
- * PgBouncer / prepared-statement compatibility. URL-only inspection — no DB
- * round-trip — extracted so it runs BOTH before the connection check and in
- * the dead-DB filesystem lane (a URL problem is diagnosable with the DB down).
- */
-async function pgbouncerPrepareCheck(): Promise<Check | null> {
-  try {
-    const { resolvePrepare } = await import('../core/db.ts');
-    const config = loadConfig();
-    const url = config?.database_url || '';
-    if (!url) return null;
-    const prepare = resolvePrepare(url);
-    if (prepare === false) {
-      return { name: 'pgbouncer_prepare', status: 'ok', message: 'Prepared statements disabled (PgBouncer-safe)' };
-    }
-    try {
-      const parsed = new URL(url.replace(/^postgres(ql)?:\/\//, 'http://'));
-      if (parsed.port === '6543') {
-        return {
-          name: 'pgbouncer_prepare',
-          status: 'warn',
-          message:
-            'Port 6543 (PgBouncer transaction mode) detected but prepared statements are enabled. ' +
-            'This causes "prepared statement does not exist" errors under concurrent load. ' +
-            'Fix: unset GBRAIN_PREPARE (or set =false), or add ?prepare=false to the connection URL.',
-        };
-      }
-    } catch {
-      // URL parse failure — skip, nothing actionable
-    }
-    return null;
-  } catch {
-    return null; // best-effort; never fail doctor on this check
-  }
-}
 
-/**
- * db-availability loop (2c/2c-bis): the ONE classified-connection-fail shape,
- * shared by the live connection check and the dead-DB synthesized entry.
- * `connection` is in ROOT_CAUSE_CHECKS, so top_issues[0].fix carries the
- * classified remediation instead of a raw pg error. Deliberately NOT
- * makeRemediationStep: that lane feeds `--remediate`, whose Minion jobs need
- * the very DB that's down (db-repair is the engine-free applier here).
- */
-function classifiedConnectionCheck(e: unknown): Check {
-  const d = classifyPgAccessError(e, { url: loadConfig()?.database_url ?? null });
-  return {
-    name: 'connection',
-    status: 'fail',
-    message: d.message,
-    details: { reason: d.reason, transient: d.transient, fix_hint: `${d.remediation} Run: gbrain db-repair` },
-  };
-}
 
 /**
  * Build the full check list for `gbrain doctor` against an engine + arg vector.
@@ -459,7 +352,13 @@ function classifiedConnectionCheck(e: unknown): Check {
  * `test/doctor-cli-smoke.test.ts` covers the render + exit paths that
  * a unit test can't reach in-process.
  *
- * Side effects retained inside buildChecks (kept for "no behavior change"):
+ * Refactor wave 1 (W4 doctor): the checks themselves are the ordered
+ * entries of `DOCTOR_CHECK_REGISTRY` (src/commands/doctor/registry.ts, one
+ * `{ name, emits, run }` per topic block under src/commands/doctor/checks/).
+ * buildChecks parses the flags into a `DoctorContext` and runs the registry;
+ * the two early exits are registry entries returning `STOP_DOCTOR`.
+ *
+ * Side effects retained inside the entries (kept for "no behavior change"):
  *   - `printAutoFixReport` on `--fix` non-JSON path
  *   - `progress` reporter writes to stderr (heartbeats per check)
  *   - `engine.executeRaw` / handler-leaf calls (the actual probe work)
@@ -497,9 +396,6 @@ export async function buildChecks(
       orphanRatioSourceId = args[++i] || undefined;
     }
   }
-
-  const checks: Check[] = [];
-  let autoFixReport: AutoFixReport | null = null;
 
   // Progress reporter. `--json` is doctor's machine-readable output, so plain
   // progress must not leak to stderr unless the caller explicitly asks for
@@ -546,180 +442,12 @@ export async function buildChecks(
     progress,
     skillsDirResolution: detected,
     skillsDir,
+    autoFixReport: null,
+    schemaVersion: 0,
+    connectionFailed: false,
   };
-  if (scope === 'all' && skillsDir) {
 
-    // --fix: run auto-repair BEFORE checkResolvable so the post-fix scan
-    // reflects the new state. Auto-fix only targets DRY violations today;
-    // other resolver issues are left to human repair.
-    //
-    // SAFETY GATE (v0.31.7 follow-up to D5): refuse --fix when the skills
-    // dir came from the install-path fallback. autoFixDryViolations writes
-    // to SKILL.md files; a user running `cd ~ && gbrain doctor --fix`
-    // without an explicit signal would have install_path resolve to the
-    // bundled gbrain repo and silently rewrite the install-tree skills.
-    // Codex caught this leak in the v0.31.7 ship review (D6 lock).
-    if (doFix) {
-      if (detected.source === 'install_path') {
-        process.stderr.write(
-          'gbrain doctor --fix refused: skills dir resolved via install-path fallback (read-only).\n' +
-          'The --fix flag writes to SKILL.md files; running it against the bundled install\n' +
-          'tree would silently mutate gbrain itself. Set $GBRAIN_SKILLS_DIR, $OPENCLAW_WORKSPACE,\n' +
-          'or pass --skills-dir <path> to point at the workspace you actually want to fix.\n',
-        );
-      } else {
-        autoFixReport = autoFixDryViolations(skillsDir, { dryRun });
-        printAutoFixReport(autoFixReport, dryRun, jsonOutput);
-      }
-    }
-
-    const report = checkResolvable(skillsDir, { skillsDirSource: detected.source === 'explicit' ? null : detected.source });
-    if (report.errors.length === 0 && report.warnings.length === 0) {
-      checks.push({
-        name: 'resolver_health',
-        status: 'ok',
-        message: `${report.summary.total_skills} skills, all reachable`,
-      });
-    } else {
-      const status = report.errors.length > 0 ? 'fail' as const : 'warn' as const;
-      const total = report.errors.length + report.warnings.length;
-      const check: Check = {
-        name: 'resolver_health',
-        status,
-        message: `${total} issue(s): ${report.errors.length} error(s), ${report.warnings.length} warning(s)`,
-        issues: [...report.errors, ...report.warnings].map(i => ({
-          type: i.type,
-          skill: i.skill,
-          action: i.action,
-          fix: i.fix,
-        })),
-      };
-      checks.push(check);
-    }
-  } else if (scope === 'all') {
-    checks.push({ name: 'resolver_health', status: 'warn', message: 'Could not find skills directory' });
-  }
-
-  checks.push(...(await runRetrievalReflex(ctx)));
-  checks.push(...(await runSkillConformance(ctx)));
-  checks.push(...(await runBootstrapChecks(ctx)));
-  checks.push(...(await runMemorableRelay(ctx)));
-  checks.push(...(await runConnectors(ctx)));
-  checks.push(...(await runMinionsMigration(ctx)));
-  checks.push(...(await runSupervisor(ctx)));
-  checks.push(...(await runStubGuard(ctx)));
-  checks.push(...(await runExtractionBacklogs(ctx)));
-  checks.push(...(await runHomeDirInWorktree(ctx)));
-  checks.push(...(await runDefaultSourcePath(ctx)));
-  checks.push(...(await runPgliteDataDir(ctx)));
-
-  // --- DB checks (skip if --fast or no engine) ---
-
-  if (fastMode || !engine) {
-    if (!engine) {
-      // Pick the precise message. When dbSource is provided, we know
-      // whether a URL exists (env or config-file) — the caller simply
-      // skipped the connection. When null, there really is no config
-      // anywhere.
-      if (!fastMode && dbSource && connectError !== undefined) {
-        // 2c-bis: a REAL connect failure — synthesize the classified check so
-        // `checks[name=="connection"]` exists in every failure shape.
-        checks.push(classifiedConnectionCheck(connectError));
-      } else {
-        let msg: string;
-        if (fastMode && dbSource) {
-          msg = `Skipping DB checks (--fast mode, URL present from ${dbSource})`;
-        } else if (!fastMode && dbSource) {
-          msg = `Could not connect to configured DB (URL from ${dbSource}); filesystem checks only`;
-        } else {
-          msg = 'No database configured (filesystem checks only). Set GBRAIN_DATABASE_URL or run `gbrain init`.';
-        }
-        checks.push({ name: 'connection', status: 'warn', message: msg });
-      }
-      // URL-only + engine-free checks still run on a dead DB — that is the
-      // point of them.
-      const pgbouncer = await pgbouncerPrepareCheck();
-      if (pgbouncer) checks.push(pgbouncer);
-      const recurrence = dbRepairRecurrenceCheck();
-      if (recurrence) checks.push(recurrence);
-    }
-    // Early return: caller renders the partial check list + decides exit code.
-    // Pre-v0.39 this site called outputResults + process.exit directly; the
-    // narrow-seam extract moved both to the runDoctor CLI wrapper.
-    return checks;
-  }
-
-  // DB checks phase — start a single reporter phase so agents see which
-  // check is running (several take seconds on 50K-page brains; without a
-  // heartbeat the binary looks hung when stdout is piped).
-  progress.start('doctor.db_checks');
-
-  // 3a. PgBouncer / prepared-statement compatibility — HOISTED above the
-  // connection check because it is URL-only (no round-trip) and must still
-  // run when the connection below fails.
-  progress.heartbeat('pgbouncer_prepare');
-  {
-    const pgbouncer = await pgbouncerPrepareCheck();
-    if (pgbouncer) checks.push(pgbouncer);
-  }
-
-  // 3b. db-repair recurrence — engine-free receipts read; runs regardless of
-  // connection state (repeat repairs are most interesting when the DB is sick).
-  {
-    const recurrence = dbRepairRecurrenceCheck();
-    if (recurrence) checks.push(recurrence);
-  }
-
-  // 3. Connection
-  progress.heartbeat('connection');
-  try {
-    const stats = await engine.getStats();
-    checks.push({ name: 'connection', status: 'ok', message: `Connected, ${stats.page_count} pages` });
-  } catch (e: unknown) {
-    // db-availability loop (2c): classified + redacted, with the fix hint.
-    checks.push(classifiedConnectionCheck(e));
-    progress.finish();
-    // Early return: caller renders the partial check list + decides exit code.
-    // Pre-v0.39 this site called outputResults + process.exit directly; the
-    // narrow-seam extract moved both to the runDoctor CLI wrapper.
-    return checks;
-  }
-
-  checks.push(...(await runPgvector(ctx)));
-  checks.push(...(await runRls(ctx)));
-  checks.push(...(await runSchemaVersion(ctx)));
-  checks.push(...(await runRlsEventTrigger(ctx)));
-  checks.push(...(await runEmbeddings(ctx)));
-  checks.push(...(await runEmbeddingProvider(ctx)));
-  checks.push(...(await runAlternativeProviders(ctx)));
-  checks.push(...(await runEmbeddingColumnRegistry(ctx)));
-  checks.push(...(await runEmbeddingEnvOverride(ctx)));
-  checks.push(...(await runGraphCoverage(ctx)));
-  checks.push(...(await runOrphanRatio(ctx)));
-  checks.push(...(await runStaleMentions(ctx)));
-  checks.push(...(await runTimelineHistory(ctx)));
-  checks.push(...(await runIntegrity(ctx)));
-  checks.push(...(await runJsonbIntegrity(ctx)));
-  checks.push(...(await runWhoknows(ctx)));
-  checks.push(...(await runCrossModal(ctx)));
-  checks.push(...(await runMarkdownBody(ctx)));
-  checks.push(...(await runContentSanity(ctx)));
-  checks.push(...(await runQuarantine(ctx)));
-  checks.push(...(await runFrontmatter(ctx)));
-  checks.push(...(await runEvalCapture(ctx)));
-  checks.push(...(await runContradictions(ctx)));
-  checks.push(...(await runFactsExtraction(ctx)));
-  checks.push(...(await runEffectiveDate(ctx)));
-  checks.push(...(await runSalience(ctx)));
-  checks.push(...(await runQueueHealth(ctx)));
-  checks.push(...(await runIndexAudit(ctx)));
-  checks.push(...(await runImageAssets(ctx)));
-  checks.push(...(await runSyncFreshness(ctx)));
-  checks.push(...(await runSearchMode(ctx)));
-
-  progress.finish();
-
-  return checks;
+  return runDoctorRegistry(ctx);
 }
 
 /**
@@ -786,36 +514,6 @@ export function doctorProgressOptions(jsonOutput: boolean) {
     return { mode: 'quiet' as const };
   }
   return cliOptsToProgressOptions(cliOpts);
-}
-
-/** Print the auto-fix report in human-readable form. JSON output goes through
- *  outputResults alongside the check list; this is the pretty-print path. */
-function printAutoFixReport(report: AutoFixReport, dryRun: boolean, jsonOutput: boolean): void {
-  if (jsonOutput) return; // JSON consumers read autoFixReport via the check issues / caller
-  const verb = dryRun ? 'PROPOSED' : 'APPLIED';
-  for (const outcome of report.fixed) {
-    console.log(`[${verb}] ${outcome.skillPath} (${outcome.patternLabel})`);
-    if (outcome.before) {
-      console.log('--- before');
-      console.log(outcome.before);
-      console.log('--- after');
-      console.log(outcome.after ?? '');
-      console.log('');
-    }
-  }
-  const n = report.fixed.length;
-  const s = report.skipped.length;
-  if (n === 0 && s === 0) {
-    console.log('Doctor --fix: no DRY violations to repair.');
-    return;
-  }
-  const label = dryRun ? 'fixes proposed' : 'fixes applied';
-  console.log(`${n} ${label}${s > 0 ? `, ${s} skipped:` : '.'}`);
-  for (const sk of report.skipped) {
-    const hint = sk.reason === 'working_tree_dirty' ? ' (run `git stash` first)' : '';
-    console.log(`  - ${sk.skillPath}: ${sk.reason}${hint}`);
-  }
-  if (dryRun && n > 0) console.log('\nRun without --dry-run to apply.');
 }
 
 function outputResults(

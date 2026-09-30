@@ -9,9 +9,9 @@
 
 import { computeWorkerOomLoopCheck, computePoolReapHealthCheck } from './pglite-worker.ts';
 import type { Check } from '../../doctor.ts';
-import type { DoctorContext } from '../context.ts';
+import type { DoctorContext, DoctorEntry } from '../context.ts';
 
-export async function runSupervisor(ctx: DoctorContext): Promise<Check[]> {
+async function runSupervisor(ctx: DoctorContext): Promise<Check[]> {
   const { engine, fastMode } = ctx;
   const checks: Check[] = [];
 
@@ -278,3 +278,9 @@ export async function runSupervisor(ctx: DoctorContext): Promise<Check[]> {
   }
   return checks;
 }
+
+export const supervisorEntry: DoctorEntry = {
+  name: 'supervisor',
+  emits: ['supervisor', 'supervisor_singleton', 'supervisor_niceness', 'worker_oom_loop', 'pool_reap_health'],
+  run: runSupervisor,
+};

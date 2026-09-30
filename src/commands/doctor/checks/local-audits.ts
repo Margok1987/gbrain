@@ -23,9 +23,9 @@ import {
   computeConversationParserProbeHealthCheck,
 } from './search-eval.ts';
 import type { Check } from '../../doctor.ts';
-import type { DoctorContext } from '../context.ts';
+import type { DoctorContext, DoctorEntry } from '../context.ts';
 
-export async function runStubGuard(ctx: DoctorContext): Promise<Check[]> {
+async function runStubGuard(ctx: DoctorContext): Promise<Check[]> {
   const { engine, orphanRatioSourceId } = ctx;
   const checks: Check[] = [];
 
@@ -108,7 +108,13 @@ export async function runStubGuard(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runExtractionBacklogs(ctx: DoctorContext): Promise<Check[]> {
+export const stubGuardEntry: DoctorEntry = {
+  name: 'stub_guard_24h',
+  emits: ['stub_guard_24h', 'sync_failures', 'slug_fallback_audit'],
+  run: runStubGuard,
+};
+
+async function runExtractionBacklogs(ctx: DoctorContext): Promise<Check[]> {
   const { engine } = ctx;
   const checks: Check[] = [];
 
@@ -328,7 +334,23 @@ export async function runExtractionBacklogs(ctx: DoctorContext): Promise<Check[]
   return checks;
 }
 
-export async function runHomeDirInWorktree(ctx: DoctorContext): Promise<Check[]> {
+export const extractionBacklogsEntry: DoctorEntry = {
+  name: 'malformed_path_pages',
+  emits: [
+    'malformed_path_pages',
+    'nightly_quality_probe_health',
+    'extract_health',
+    'conversation_facts_backlog',
+    'extract_atoms_backlog',
+    'atom_provenance_drift',
+    'conversation_format_coverage',
+    'progressive_batch_audit_health',
+    'conversation_parser_probe_health',
+  ],
+  run: runExtractionBacklogs,
+};
+
+async function runHomeDirInWorktree(ctx: DoctorContext): Promise<Check[]> {
   const checks: Check[] = [];
 
   // 3e. home_dir_in_worktree (v0.35.8.0; peeled to doctor/checks/home-worktree.ts).
@@ -421,7 +443,13 @@ export async function runHomeDirInWorktree(ctx: DoctorContext): Promise<Check[]>
   return checks;
 }
 
-export async function runDefaultSourcePath(ctx: DoctorContext): Promise<Check[]> {
+export const homeDirInWorktreeEntry: DoctorEntry = {
+  name: 'home_dir_in_worktree',
+  emits: ['home_dir_in_worktree', 'npm_squat', 'pglite_leftovers'],
+  run: runHomeDirInWorktree,
+};
+
+async function runDefaultSourcePath(ctx: DoctorContext): Promise<Check[]> {
   const { engine } = ctx;
   const checks: Check[] = [];
 
@@ -562,3 +590,9 @@ export async function runDefaultSourcePath(ctx: DoctorContext): Promise<Check[]>
   }
   return checks;
 }
+
+export const defaultSourcePathEntry: DoctorEntry = {
+  name: 'default_source_local_path',
+  emits: ['default_source_local_path', 'fts_reindex_incomplete', 'multi_source_drift', 'orphan_clones'],
+  run: runDefaultSourcePath,
+};

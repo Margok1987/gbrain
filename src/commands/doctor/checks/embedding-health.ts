@@ -10,9 +10,9 @@
 import { hnswIndexExpected, hnswMaxDimsForType } from '../../../core/vector-index.ts';
 import { checkEmbeddingEnvOverride, checkEmbeddingMigrationState } from './search-eval.ts';
 import type { Check } from '../../doctor.ts';
-import { connectedEngine, type DoctorContext } from '../context.ts';
+import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 
-export async function runEmbeddingProvider(ctx: DoctorContext): Promise<Check[]> {
+async function runEmbeddingProvider(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -150,7 +150,13 @@ export async function runEmbeddingProvider(ctx: DoctorContext): Promise<Check[]>
   return checks;
 }
 
-export async function runAlternativeProviders(ctx: DoctorContext): Promise<Check[]> {
+export const embeddingProviderEntry: DoctorEntry = {
+  name: 'embedding_provider',
+  emits: ['embedding_provider'],
+  run: runEmbeddingProvider,
+};
+
+async function runAlternativeProviders(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const checks: Check[] = [];
 
@@ -189,7 +195,13 @@ export async function runAlternativeProviders(ctx: DoctorContext): Promise<Check
   return checks;
 }
 
-export async function runEmbeddingColumnRegistry(ctx: DoctorContext): Promise<Check[]> {
+export const alternativeProvidersEntry: DoctorEntry = {
+  name: 'alternative_providers',
+  emits: ['alternative_providers'],
+  run: runAlternativeProviders,
+};
+
+async function runEmbeddingColumnRegistry(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -362,7 +374,13 @@ export async function runEmbeddingColumnRegistry(ctx: DoctorContext): Promise<Ch
   return checks;
 }
 
-export async function runEmbeddingEnvOverride(ctx: DoctorContext): Promise<Check[]> {
+export const embeddingColumnRegistryEntry: DoctorEntry = {
+  name: 'embedding_column_registry',
+  emits: ['embedding_column_registry'],
+  run: runEmbeddingColumnRegistry,
+};
+
+async function runEmbeddingEnvOverride(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -375,3 +393,9 @@ export async function runEmbeddingEnvOverride(ctx: DoctorContext): Promise<Check
   checks.push(await checkEmbeddingMigrationState(engine));
   return checks;
 }
+
+export const embeddingEnvOverrideEntry: DoctorEntry = {
+  name: 'embedding_env_override',
+  emits: ['embedding_env_override', 'embedding_migration_state'],
+  run: runEmbeddingEnvOverride,
+};

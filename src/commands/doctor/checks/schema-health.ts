@@ -17,9 +17,9 @@ import { checkPersistenceCapacity } from './persistence-capacity.ts';
 import { checkPostgresCancellationDriver } from './postgres-cancellation.ts';
 import { checkProjectionReadiness } from './projection-readiness.ts';
 import type { Check } from '../../doctor.ts';
-import { connectedEngine, type DoctorContext } from '../context.ts';
+import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
 
-export async function runPgvector(ctx: DoctorContext): Promise<Check[]> {
+async function runPgvector(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -56,7 +56,22 @@ export async function runPgvector(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runRls(ctx: DoctorContext): Promise<Check[]> {
+export const pgvectorEntry: DoctorEntry = {
+  name: 'pgvector',
+  emits: [
+    'pgvector',
+    'postgres_cancellation_driver',
+    'pages_upsert_arbiter',
+    'text_projection_readiness',
+    'persistence_capacity',
+    'parked_effects',
+    'links_link_source_check',
+    'pglite_scale',
+  ],
+  run: runPgvector,
+};
+
+async function runRls(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -156,7 +171,9 @@ export async function runRls(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runSchemaVersion(ctx: DoctorContext): Promise<Check[]> {
+export const rlsEntry: DoctorEntry = { name: 'rls', emits: ['rls'], run: runRls };
+
+async function runSchemaVersion(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -214,10 +231,17 @@ export async function runSchemaVersion(ctx: DoctorContext): Promise<Check[]> {
   } catch {
     checks.push({ name: 'schema_version', status: 'warn', message: 'Could not check schema version' });
   }
+  ctx.schemaVersion = schemaVersion;
   return checks;
 }
 
-export async function runRlsEventTrigger(ctx: DoctorContext): Promise<Check[]> {
+export const schemaVersionEntry: DoctorEntry = {
+  name: 'schema_version',
+  emits: ['schema_version', 'schema_columns'],
+  run: runSchemaVersion,
+};
+
+async function runRlsEventTrigger(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -288,7 +312,13 @@ export async function runRlsEventTrigger(ctx: DoctorContext): Promise<Check[]> {
   return checks;
 }
 
-export async function runEmbeddings(ctx: DoctorContext): Promise<Check[]> {
+export const rlsEventTriggerEntry: DoctorEntry = {
+  name: 'rls_event_trigger',
+  emits: ['rls_event_trigger'],
+  run: runRlsEventTrigger,
+};
+
+async function runEmbeddings(ctx: DoctorContext): Promise<Check[]> {
   const { progress } = ctx;
   const engine = connectedEngine(ctx);
   const checks: Check[] = [];
@@ -324,3 +354,5 @@ export async function runEmbeddings(ctx: DoctorContext): Promise<Check[]> {
   }
   return checks;
 }
+
+export const embeddingsEntry: DoctorEntry = { name: 'embeddings', emits: ['embeddings'], run: runEmbeddings };
