@@ -1,6 +1,6 @@
 # TODOS
 
-## Fix wave 4 follow-ups (filed 2026-09-30, follow-up from v0.60.18.0)
+## Fix wave 4 follow-ups (filed 2026-09-30, follow-up from v0.60.20.0)
 
 - [ ] **P2 — #5731 residual: restore extractor facts the pre-fix projection expired (wave 5).**
   **What:** the #5731 fix stops the canonical projection from expiring conversation-extractor facts, but rows it expired before the fix stay expired. **Fix:** the explicit-only `gbrain repair extractor-facts` kind from the wave 4 plan: a preview that lists every candidate with its class and evidence and a preview hash, `--apply` that restores only defect-evidenced rows through a named maintenance intent, `--include-ambiguous <hash>` for rows a fence takeover could explain, and a stale-hash refusal. **Why deferred:** below the wave 4 cut line. **Effort:** M. **Priority:** P2.
@@ -62,7 +62,7 @@
 - [ ] **P3 — Connector ingest waits on its whole pending set while the owner is delayed.**
   **What:** under a delayed consumer each run first waits on its recorded pending set and stops on the wait budget, so new upstream items are not admitted until the backlog drains (measured by `test/fix-wave-3-chaos.test.ts`). Nothing is lost; the items wait upstream. **Fix:** if time-to-searchable under sustained arrivals matters, admit new items up to the outstanding limit while the pending set resolves.
 - [ ] **P3 — Hold tuning keys if field reports show the fixed thresholds misfire.**
-  **What:** fix wave 4 (v0.60.18.0) holds a connector item after 3 consecutive failed syncs, with a fixed circuit breaker (5 attempted items; half transient, or 5 and half with one code), a fixed transient backoff (1 h, 6 h, 24 h, then daily for 7 days) and a cap of 100 holds per source. **Fix:** only if field reports show these misfire, add validated `connectors.hold.threshold_runs`, `connectors.hold.breaker_items`, `connectors.hold.backoff` and `connectors.hold.window_days` config keys with today's values as defaults, with tests and the connector guides updated.
+  **What:** fix wave 4 (v0.60.20.0) holds a connector item after 3 consecutive failed syncs, with a fixed circuit breaker (5 attempted items; half transient, or 5 and half with one code), a fixed transient backoff (1 h, 6 h, 24 h, then daily for 7 days) and a cap of 100 holds per source. **Fix:** only if field reports show these misfire, add validated `connectors.hold.threshold_runs`, `connectors.hold.breaker_items`, `connectors.hold.backoff` and `connectors.hold.window_days` config keys with today's values as defaults, with tests and the connector guides updated.
 - [ ] **P3 — Row-level ownership for fences in connector renders.**
   **What:** when the provider's own render carries a facts fence (for example a GitHub issue body), the provider owns the whole fence: upstream corrections win, and rows added on the brain to that fence are not carried. When the provider later drops its fence entirely, the stored fence is carried as brain-added. **Fix:** record which fence rows came from the provider so each side's rows follow its owner.
 - [ ] **P3 — Resume a partially refused embedding without re-embedding its siblings.**
