@@ -964,9 +964,31 @@ After a move-only commit changes a function's key, run
 `bun scripts/check-function-size.ts --transfer`. It rewrites a missing row to
 the one unbaselined over-limit function whose whitespace-normalized text is
 identical to the old function at `HEAD` (`--from <ref>` for another base),
-keeping lines and justification, and leaves everything else for review.
+apart from an added leading `export` and module specifiers re-relativized to
+the new directory (each resolved against its own file, so a retargeted
+specifier still refuses), keeping lines and justification, and leaves
+everything else for review.
 Fixtures: `test/fixtures/guards/check-function-size.ts/{bad,good}`; every rule
 is driven in `test/scripts/check-function-size.test.ts`.
+
+### SyncRun state guard
+
+`scripts/check-sync-run-state.ts` (`bun run check:sync-run-state`, in
+`bun run verify`, well under a second) protects the refactor wave 1 `SyncRun`
+rule (A17). `SyncRun` (`src/commands/sync/sync-run.ts`) holds the state one
+incremental sync shares between closures that interleave across awaits: the
+checkpoint flush and its cadence, the import workers, the stall watchdog and
+the partial exit. Its mutable fields are the members of `interface SyncRun`
+not marked `readonly`. Over `src/commands/sync/**/*.ts` the guard fails when a
+mutable field is destructured from a SyncRun value (`const { bankedFiles } =
+run`, or a `{ checkpointDead }: SyncRun` parameter) or copied into a local
+(`const banked = run.bankedFiles`), because such a copy goes stale at the next
+await. A SyncRun value is a binding named `run`, annotated `SyncRun`, or
+initialized from `createSyncRun()`. Readonly fields (collection references,
+fixed configuration) may be destructured. Each failure prints
+`FAIL: <file:line>` plus `Why:` / `Fix:` / `See:`; the fix is to use
+`run.<field>` at each read and write. Fixtures:
+`test/fixtures/guards/check-sync-run-state.ts/{good,bad,bad-alias,bad-param}`.
 
 ### Source reads in tests
 

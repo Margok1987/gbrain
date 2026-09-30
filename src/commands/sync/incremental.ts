@@ -1287,9 +1287,8 @@ export async function performSyncInner(engine: BrainEngine, opts: SyncOpts): Pro
     if (!run.checkpointDead) {
       try { await flushCheckpoint(); } catch { /* best effort — we're aborting */ }
     }
-    const banked = run.bankedFiles;
     serr(
-      `[sync] banked ${banked} file(s) this run; next 'gbrain sync' resumes from ` +
+      `[sync] banked ${run.bankedFiles} file(s) this run; next 'gbrain sync' resumes from ` +
       `the checkpoint (last_commit unchanged at ${(lastCommit ?? '').slice(0, 8)}).`,
     );
     // db-availability loop (4b): a dead checkpoint IS a DB-access failure by
