@@ -246,6 +246,7 @@ test/scripts/ci-runner-routing.test.ts	CI runner routing	6	readFileSync
 test/scripts/classify-tests.test.ts	classify-tests detectors	23	bun-file,doctor-source-helper,exec-scan,readFileSync,source-surface-helper
 test/scripts/coverage-diff-gate.test.ts	exemptions	3	readFileSync
 test/scripts/data-safety-native-workflow.test.ts	data-safety native CI coverage	12	readFileSync
+test/scripts/e2e-backend-matrix.test.ts	scripts/e2e-backend-matrix.txt	3	readFileSync
 test/scripts/e2e-runner.test.ts	second	5	readFileSync
 test/scripts/e2e-runner.test.ts	sequential E2E runner (GITHUB_ACTIONS=${githubActions})	7	readFileSync
 test/scripts/e2e-wiring.test.ts	e2e file claim ratchet	5	readFileSync
