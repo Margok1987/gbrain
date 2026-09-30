@@ -352,8 +352,8 @@ Worked examples:
 3. **When the forward-reference bootstrap changes.** Existing brains replay the blob before
    migrations run. If the blob gains an index, FK, trigger or view that references a column an
    older brain may lack, add that column's probe and `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
-   to both engines' forward-reference bootstrap (`PGLiteEngine#applyForwardReferenceBootstrap`,
-   `src/core/postgres-engine/forward-reference-bootstrap.ts`). A column only defined in a
+   to the forward-reference bootstrap both engines run (`src/core/engine-sql/bootstrap.ts`:
+   probe, gap, DDL). A column only defined in a
    `CREATE TABLE` needs no bootstrap entry. `test/schema-bootstrap-coverage.test.ts` names any gap.
 
 ## Engine detection and access repair

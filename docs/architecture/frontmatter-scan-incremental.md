@@ -58,8 +58,8 @@ Why these columns:
 - Partial index on `WHERE codes != '[]'::jsonb`: doctor's aggregate query
   only walks rows with issues, which is a small fraction of pages.
 
-This follows the canonical `applyForwardReferenceBootstrap` pattern in
-`src/core/pglite-engine.ts` (and `postgres-engine.ts`) — the new column /
+This follows the canonical forward-reference bootstrap pattern in
+`src/core/engine-sql/bootstrap.ts` (run by both engines) — the new column /
 table additions go into the bootstrap probe set per CLAUDE.md so old brains
 walking forward through the schema chain don't wedge on the table not
 existing.
