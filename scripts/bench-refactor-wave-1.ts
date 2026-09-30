@@ -339,7 +339,10 @@ type Op = (i: number, span: Span) => Promise<unknown>;
 
 interface OpResult {
   latency_ms: Summary;
-  sql_round_trips?: { first_call: number; per_call_min: number; per_call_max: number; first_call_parses: number; parses_per_call_min: number; parses_per_call_max: number };
+  sql_round_trips?: {
+    first_call: number; per_call_min: number; per_call_max: number; per_call: number[]; total: number;
+    first_call_parses: number; parses_per_call_min: number; parses_per_call_max: number; parses_total: number;
+  };
   provider_calls_per_call?: Record<keyof ProviderSnapshot, number>;
 }
 
@@ -392,7 +395,9 @@ async function measureCounts(op: Op, counter: RoundTripCounter, calls: number): 
   return {
     sql_round_trips: {
       first_call: first.counts!.roundTrips, per_call_min: Math.min(...trips), per_call_max: Math.max(...trips),
+      per_call: trips, total: trips.reduce((sum, v) => sum + v, 0),
       first_call_parses: first.counts!.parses, parses_per_call_min: Math.min(...parses), parses_per_call_max: Math.max(...parses),
+      parses_total: parses.reduce((sum, v) => sum + v, 0),
     },
     provider_calls_per_call: perCall,
   };
