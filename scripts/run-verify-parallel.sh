@@ -140,6 +140,9 @@ CHECKS=(
   # EO4 (refactor wave 1): RLS read brands stay unforgeable; brand factories
   # importable only from their allowlists (never src/core/ops/**).
   "check:engine-sql-brands"
+  "check:schema-migrations"
+  "check:schema-fresh"
+  "check:schema-migration-order"
   "check:structural-manifest"
   # v0.50.5.0 security wave: compiled binaries must not autoload a cwd bunfig.toml.
   "check:compile-autoload"
