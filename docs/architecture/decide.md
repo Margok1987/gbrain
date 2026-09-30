@@ -176,7 +176,11 @@ acceptance never run for a remote caller.
 | Per-decision timeout (hot) | 1500 ms | `decide.timeout_ms` |
 | Shadow in-flight queue | 8 | no |
 | Retest sample | 50 families, 3 repeats | `decide.calibrate.retest_n` |
-| S4 k, S6 budgets, S8 window count, S7 window size/cap | per slot lane | documented with each slot |
+| S6 deadline (from turn start, concurrent with reflex) | 250 ms | no (`RECALL_NEEDED_DEADLINE_MS`; also capped by `decide.timeout_ms`) |
+| S6 fire: minimum server budget left / response margin / hits | 150 ms / 40 ms / 3 | no |
+| S6 state caps (prompt head / previous-turn tail) | 6,000 / 2,000 characters | no |
+| S6 suppression boundary | 0.05 | `decide.slots.recall_needed.suppress_below` (bound into the policy fingerprint) |
+| S4 k, S8 window count, S7 window size/cap | per slot lane | documented with each slot |
 
 ## Extension points for slot lanes
 

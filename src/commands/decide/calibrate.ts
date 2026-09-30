@@ -24,6 +24,7 @@ import { DECIDE_SLOTS, DecideError, thresholdValue, type DecideSlot } from '../.
 import { usageCostUsd } from '../../core/budget/reservation-cost.ts';
 import { resetDecideSearchCache } from '../../core/search/decide-stage.ts';
 import { flagValue, loadDecideState, slotPackShape } from '../decide.ts';
+import '../../core/ai/decide/recall-needed.ts';
 
 const REPEATS = 3;
 
@@ -158,7 +159,8 @@ async function cmdQualify(engine: BrainEngine, args: string[]): Promise<number> 
   const evalItems = all.filter((i) => i.split === 'eval');
   const cfg = { ...state.cfg, consent: { query: true, candidates: true, facts: true, conversation: true }, egressPrivate: 'allow' as const };
   const minKeep = state.cfg.slots[slot].minKeep ?? cal.min_keep ?? SLOT_SPECS[slot].defaultMinKeep ?? 0;
-  const policy = { threshold: state.cfg.slots[slot].threshold ?? cal.threshold, margin: marginFor(state.cfg.marginFloor, { retest_sd: cal.retest_sd ?? 0, repack_sd: cal.repack_sd ?? 0 }), minKeep };
+  const suppressBelow = state.cfg.slots[slot].suppressBelow;
+  const policy = { threshold: state.cfg.slots[slot].threshold ?? cal.threshold, margin: marginFor(state.cfg.marginFloor, { retest_sd: cal.retest_sd ?? 0, repack_sd: cal.repack_sd ?? 0 }), minKeep, ...(suppressBelow !== undefined ? { suppressBelow } : {}) };
   try {
     const fams = [...families(evalItems).values()];
     const answered = await askFamilies(engine, slot, provider, fams, cfg);
@@ -166,7 +168,7 @@ async function cmdQualify(engine: BrainEngine, args: string[]): Promise<number> 
     const actions: HarmfulAction[] = fams.flatMap((fam) => adapter.harmfulActions!(fam, answered.values, policy).map((a) => ({ family: a.item.family, correct: a.correct, slice: a.item.slice })));
     const minPrecision = state.cfg.slots[slot].minActionPrecision;
     const q = qualifyActions(actions, minPrecision);
-    const fingerprint = policyFingerprint({ slot, callSite, threshold: policy.threshold, marginFloor: state.cfg.marginFloor, minKeep, packShape: cal.pack_shape });
+    const fingerprint = policyFingerprint({ slot, callSite, threshold: policy.threshold, marginFloor: state.cfg.marginFloor, minKeep, packShape: cal.pack_shape, suppressBelow });
     await storeQualification(engine, cal.id, { action_precision_lb: q.action_precision_lb, qualification: JSON.stringify({ ...q, min_action_precision: minPrecision }), policy_fingerprint: fingerprint });
     resetDecideSearchCache();
     const out = { calibration: `local:${cal.id}`, ...q, min_action_precision: minPrecision, policy_fingerprint: fingerprint, next: q.status === 'qualified' ? `gbrain decide enable ${slot}` : null };

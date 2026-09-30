@@ -77,23 +77,26 @@ export async function searchWithoutEmbeddings(
   // WP2/T3 — no silent bypass: the keyword-only-config branch names why
   // vector didn't run, and whether the keyword arm itself came up empty
   // (skipped-by-modality is not a keyword miss, hence the image gate).
-  pushDegraded(degraded, 'embed_unavailable', 'no_provider');
-  // #3808: meta names the degradation for programmatic callers, but a CLI
-  // human never saw it — mirror the embed-failure warn (once per process,
-  // stderr) with the diagnose reason so a silently keyword-only brain is
-  // visible the first time it ships results.
-  try {
-    const { diagnoseEmbedding } = await import('../../ai/gateway.ts');
-    const diag = diagnoseEmbedding(providerProbe);
-    const reason = diag.ok ? 'provider_unreachable' : (diag.reason ?? 'provider_unreachable');
-    warnOncePerProcess(
-      'search-vector-leg-unavailable',
-      `[gbrain] vector search unavailable (${reason}) — results are keyword-only. Run \`gbrain doctor\` to diagnose.`,
-    );
-  } catch {
-    // Fail-open like every sibling stage: the warning is best-effort and a
-    // gateway import/diagnose throw must never fail the already-computed
-    // keyword-only degraded results it exists to explain.
+  // System One S6 fire retrieval asks for keyword-only on purpose: vector is not degraded.
+  if (!opts?.decide?.keywordOnly) {
+    pushDegraded(degraded, 'embed_unavailable', 'no_provider');
+    // #3808: meta names the degradation for programmatic callers, but a CLI
+    // human never saw it — mirror the embed-failure warn (once per process,
+    // stderr) with the diagnose reason so a silently keyword-only brain is
+    // visible the first time it ships results.
+    try {
+      const { diagnoseEmbedding } = await import('../../ai/gateway.ts');
+      const diag = diagnoseEmbedding(providerProbe);
+      const reason = diag.ok ? 'provider_unreachable' : (diag.reason ?? 'provider_unreachable');
+      warnOncePerProcess(
+        'search-vector-leg-unavailable',
+        `[gbrain] vector search unavailable (${reason}) — results are keyword-only. Run \`gbrain doctor\` to diagnose.`,
+      );
+    } catch {
+      // Fail-open like every sibling stage: the warning is best-effort and a
+      // gateway import/diagnose throw must never fail the already-computed
+      // keyword-only degraded results it exists to explain.
+    }
   }
   if (keywordResults.length === 0 && earlyModality !== 'image') {
     pushDegraded(degraded, 'keyword_zero');

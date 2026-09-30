@@ -57,6 +57,8 @@ export interface SlotPolicy {
   shadowSample: number;
   shadowWait: boolean;
   packShape: string;
+  /** S6: the suppression boundary (part of the fingerprint). */
+  suppressBelow?: number;
 }
 
 export interface PolicyInputs {
@@ -80,11 +82,12 @@ export function marginFor(marginFloor: number, calibration?: Pick<PolicyCalibrat
 }
 
 /** Immutable fingerprint of the action policy a qualification is bound to. */
-export function policyFingerprint(p: { slot: DecideSlot; callSite: string; threshold?: number; marginFloor: number; minKeep: number; packShape: string }): string {
+export function policyFingerprint(p: { slot: DecideSlot; callSite: string; threshold?: number; marginFloor: number; minKeep: number; packShape: string; suppressBelow?: number }): string {
   const body = JSON.stringify({
     slot: p.slot, callSite: p.callSite, threshold: p.threshold === undefined ? null : Number(p.threshold.toFixed(4)),
     margin: 'max(floor,2*max(retest_sd,repack_sd))', marginFloor: p.marginFloor, minKeep: p.minKeep,
     protections: PROTECTION_VERSION, question: SLOT_SPECS[p.slot].questionVersion, packShape: p.packShape,
+    suppressBelow: p.suppressBelow,
   });
   return createHash('sha256').update(body).digest('hex').slice(0, 16);
 }
@@ -150,11 +153,11 @@ export function resolveSlotPolicy(inputs: PolicyInputs): SlotPolicy {
     : calibration ? (calibration.ref.startsWith('ref:') ? 'reference' : 'calibration') : 'none';
   const minKeep = sc.minKeep ?? calibration?.min_keep ?? spec.defaultMinKeep ?? 0;
   const margin = marginFor(cfg.marginFloor, sc.threshold !== undefined && !calibration ? undefined : calibration);
-  const fingerprint = policyFingerprint({ slot, callSite, threshold, marginFloor: cfg.marginFloor, minKeep, packShape: inputs.packShape });
+  const fingerprint = policyFingerprint({ slot, callSite, threshold, marginFloor: cfg.marginFloor, minKeep, packShape: inputs.packShape, suppressBelow: sc.suppressBelow });
   const base: SlotPolicy = {
     slot, callSite, requested: sc.mode, effective: sc.mode, provider, model, threshold, thresholdSource, calibration,
     minKeep, margin, fingerprint, forceOn: sc.forceOn, shadowSample: sc.shadowSample ?? spec.shadowSample,
-    shadowWait: sc.shadowWait, packShape: inputs.packShape,
+    shadowWait: sc.shadowWait, packShape: inputs.packShape, ...(sc.suppressBelow !== undefined ? { suppressBelow: sc.suppressBelow } : {}),
   };
   const inactive = (reason: string): SlotPolicy => ({ ...base, effective: 'off', inactive: reason });
   if (sc.mode === 'off') return base;
