@@ -151,6 +151,7 @@ const TYPICAL_CANDIDATE = 'x'.repeat(1200);
 const COST_UNITS: Partial<Record<DecideSlot, { unit: string; questions: number }>> = {
   rerank: { unit: 'queries', questions: 30 },
   evidence: { unit: 'queries', questions: 20 },
+  recall_needed: { unit: 'turns', questions: 1 },
 };
 
 /** Estimated USD per 1,000 units: from the last 24 h of receipts, else the planner estimate for a typical input. */

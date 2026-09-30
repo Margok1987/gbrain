@@ -59,7 +59,7 @@ export const SLOT_SPECS: Readonly<Record<DecideSlot, SlotSpec>> = {
   recall_needed: {
     slot: 'recall_needed', lane: 'hot', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['turn_context'],
     egressClasses: ['conversation'], shadowSample: 1, whatIfReproducible: false, questionVersion: 1,
-    failDirection: 'fail open: the reflex result stands', wired: false,
+    failDirection: 'fail open: the reflex result stands', wired: true,
   },
   triage: {
     slot: 'triage', lane: 'background', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['dream'],

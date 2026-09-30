@@ -184,7 +184,7 @@
         "calibration": null,
         "cost_per_1k": {
           "basis": "n/a",
-          "unit": "units",
+          "unit": "turns",
           "usd": null
         },
         "decisions_24h": 0,
@@ -207,7 +207,7 @@
         "status": "pending",
         "threshold": null,
         "threshold_source": "none",
-        "wired": false
+        "wired": true
       },
       {
         "calibration": null,
