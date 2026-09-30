@@ -45,6 +45,8 @@ export interface DecideSlotMeta {
   agreement?: { top1: boolean; kendall_tau: number };
   /** One-line answer summary (S2 label, S4 probability and verdict). */
   answer?: string;
+  /** S1 on: input tokens the Jev reranker reported (its spend is BudgetKind rerank, not decide_spend). */
+  input_tokens?: number;
 }
 
 /** S4 on the query op: `meta.answerability` (diagnostic only; shadow shows it only when awaited). */
@@ -415,7 +417,7 @@ export function recordRerankReceipts(
   void writeReceipts(ctx.engine, { ...base, result, outcomes: Object.fromEntries(questions.map((q) => [q.id, 'kept'])) });
   ctx.meta.rerank = {
     mode: policy.requested, effective: 'on', provider: policy.provider, model_resolved: meta!.model_resolved,
-    judged: head.length, outcomes: { kept: head.length }, latency_ms: meta!.latency_ms,
+    judged: head.length, outcomes: { kept: head.length }, latency_ms: meta!.latency_ms, input_tokens: meta!.input_tokens,
   };
 }
 
