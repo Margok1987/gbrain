@@ -14,31 +14,18 @@
  * Postgres counterpart: test/e2e/schema-migrations-replay.test.ts.
  */
 import { describe, expect, test } from 'bun:test';
-import { PGLiteEngine } from '../src/core/pglite-engine.ts';
-import { LATEST_VERSION, MIGRATIONS, runMigrations } from '../src/core/migrate.ts';
-import { CATALOG_CONFIGS, expectCatalogGolden, pgliteCatalogQuery, withCatalogConfig } from './helpers/schema-catalog.ts';
-import { snapshotCatalog } from './helpers/schema-diff.ts';
-import { withColdPglite } from './helpers/with-snapshot.ts';
+import { LATEST_VERSION, MIGRATIONS } from '../src/core/migrate.ts';
+import { CATALOG_CONFIGS, capturePgliteReplayCatalog, expectCatalogGolden, withCatalogConfig } from './helpers/schema-catalog.ts';
 
 const REPLAY_CHECKPOINTS = [2, 20, 95, LATEST_VERSION - 1] as const;
 
 describe('schema migrations replay from checkpoints (PGLite)', () => {
   for (const checkpoint of REPLAY_CHECKPOINTS) {
     test(`replay from v${checkpoint} reaches the fresh-install catalog`, async () => {
-      await withCatalogConfig(CATALOG_CONFIGS[0], () => withColdPglite(async () => {
-        const engine = new PGLiteEngine();
-        try {
-          await engine.connect({});
-          await engine.initSchema();
-          await engine.setConfig('version', String(checkpoint));
-          const result = await runMigrations(engine);
-          expect(result.applied).toBe(MIGRATIONS.filter((m) => m.version > checkpoint).length);
-          expect(result.current).toBe(LATEST_VERSION);
-          expectCatalogGolden('catalog/pglite-engine-init-default', await snapshotCatalog(pgliteCatalogQuery(engine)));
-        } finally {
-          await engine.disconnect();
-        }
-      }));
+      const { catalog, applied, current } = await withCatalogConfig(CATALOG_CONFIGS[0], () => capturePgliteReplayCatalog(checkpoint));
+      expect(applied).toBe(MIGRATIONS.filter((m) => m.version > checkpoint).length);
+      expect(current).toBe(LATEST_VERSION);
+      expectCatalogGolden('catalog/pglite-engine-init-default', catalog);
     }, 180_000);
   }
 });
