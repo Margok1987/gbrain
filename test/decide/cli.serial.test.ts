@@ -54,7 +54,7 @@ describe('gbrain decide CLI', () => {
     const noKey = await cli(['decide', 'enable', 'rerank', '--yes']);
     expect(noKey.exitCode).toBe(1);
     expect(noKey.stderr).toContain('no_key');
-    const unavailable = await cli(['decide', 'enable', 'triage', '--yes']);
+    const unavailable = await cli(['decide', 'enable', 'intent', '--yes']);
     expect(unavailable.exitCode).toBe(1);
     expect(unavailable.stderr).toContain('slot_unavailable');
     const status = JSON.parse((await cli(['decide', 'status', '--json'])).stdout);

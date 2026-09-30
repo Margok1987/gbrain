@@ -153,9 +153,11 @@ export async function printEffectiveModeLines(engine: BrainEngine, slot?: string
 }
 
 const TYPICAL_CANDIDATE = 'x'.repeat(1200);
-const COST_UNITS: Partial<Record<DecideSlot, { unit: string; questions: number }>> = {
+const COST_UNITS: Partial<Record<DecideSlot, { unit: string; questions: number; unpacked?: boolean }>> = {
   rerank: { unit: 'queries', questions: 30 },
   evidence: { unit: 'queries', questions: 20 },
+  triage: { unit: 'transcripts', questions: 20, unpacked: true },
+  grounding: { unit: 'dream pages', questions: 10, unpacked: true },
 };
 
 /** Estimated USD per 1,000 units: from the last 24 h of receipts, else the planner estimate for a typical input. */
@@ -165,8 +167,10 @@ function costPer1k(slot: DecideSlot, provider: string, usage?: { decisions: numb
   const typical = COST_UNITS[slot];
   if (!typical) return { usd: null, basis: 'n/a' };
   const q: DecideQuestion = { id: 'q', kind: 'noul', instructions: 'Typical question about `candidate`.', inputs: { candidate: { text: TYPICAL_CANDIDATE, class: 'candidates' } } };
-  const tokens = planBatches(estimateContextTokens({ query: 'a typical question' }), Array.from({ length: typical.questions }, () => estimateContextTokens(toWireQuestion(q))))
-    .reduce((n, b) => n + b.estimatedInputTokens, 0);
+  const tokens = typical.unpacked
+    ? typical.questions * planBatches(estimateContextTokens({}), [estimateContextTokens(toWireQuestion(q))])[0]!.estimatedInputTokens
+    : planBatches(estimateContextTokens({ query: 'a typical question' }), Array.from({ length: typical.questions }, () => estimateContextTokens(toWireQuestion(q))))
+      .reduce((n, b) => n + b.estimatedInputTokens, 0);
   return { usd: (usageCostUsd(provider, tokens, 0, 'decide') ?? 0) * 1000, basis: 'estimate' };
 }
 
