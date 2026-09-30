@@ -187,7 +187,17 @@ describe('PGLite upgrade replay (EO3)', () => {
   test('before boot, the pinned brain matches the E4 fresh-install golden', () => {
     expect(existsSync(join(GOLDENS_DIR, `${FRESH_GOLDEN}.json`))).toBe(true);
     expect(requirePhase('beforeBoot').version).toBe(manifest.schema_version);
-    expect(describeCatalogGoldenDrift(FRESH_GOLDEN, requirePhase('beforeBoot').catalog)).toBe('');
+    const drift = describeCatalogGoldenDrift(FRESH_GOLDEN, requirePhase('beforeBoot').catalog);
+    if (manifest.schema_version === LATEST_VERSION) {
+      expect(drift).toBe('');
+      return;
+    }
+    // A branch whose migrations postdate the master-built fixture: the old
+    // brain must be a strict prefix of a fresh install — only objects the
+    // newer migrations create may be missing; nothing extra or changed.
+    const lines = drift.split('\n').slice(1).map((l) => l.trim()).filter(Boolean);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.filter((l) => !l.startsWith('- MISSING '))).toEqual([]);
   });
 
   test('upgrade boot succeeds; its catalog is pinned and differs from a fresh install only by function whitespace', async () => {
