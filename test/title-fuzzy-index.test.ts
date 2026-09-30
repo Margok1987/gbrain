@@ -33,7 +33,7 @@ describe('findByTitleFuzzy indexed threshold', () => {
   });
 
   test('Postgres and PGLite implementations retain the indexed prefilter', () => {
-    // Both engines delegate to the one engine-sql implementation (refactor wave 1 W1-extended).
+    // test-reads-source-ok[structural]: the trigram prefilter is a planner property with no observable result difference; both engines run engine-sql/pages.ts (W1-extended).
     for (const source of [surfaceFileSource('postgres-engine', 'src/core/engine-sql/pages.ts')]) {
       const start = source.indexOf('export async function findByTitleFuzzy(');
       const end = source.indexOf('\nexport async function getPageTimestamps(', start);
