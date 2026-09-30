@@ -9,7 +9,7 @@
  *   calibrate / qualify / calibrations / dataset   (src/commands/decide/calibrate.ts)
  *   receipts [--slot <slot>] [--since <h>] [--what-if-threshold <t>]  (decide/receipts.ts)
  *
- * Slot lanes add subcommands (proposals, sweep, judge-agreement) through
+ * Slot lanes add subcommands (proposals, sweep; judge-agreement from decide/eval-lane.ts) through
  * `registerDecideSubcommand`.
  */
 import type { BrainEngine } from '../core/engine.ts';
@@ -72,6 +72,7 @@ export function registerDecideSubcommand(name: string, run: DecideSubcommand, he
 /** Slot lanes register subcommands, what-if reducers and dataset adapters when their module loads. */
 export async function loadDecideLanes(): Promise<void> {
   await import('./decide/writepath.ts');
+  await import('./decide/eval-lane.ts');
 }
 
 export function decideHelpText(): string {
@@ -476,7 +477,7 @@ export async function runDecideCommand(engine: BrainEngine, args: string[]): Pro
       default: {
         const extra = sub ? extraSubcommands.get(sub) : undefined;
         if (extra) return await extra.run(engine, args.slice(1));
-        if (sub === 'proposals' || sub === 'sweep' || sub === 'judge-agreement') {
+        if (sub === 'proposals' || sub === 'sweep') {
           console.error(`gbrain decide ${sub} is not available in this build (its slot is not wired yet). See gbrain decide status.`);
           return 1;
         }

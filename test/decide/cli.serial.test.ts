@@ -38,6 +38,7 @@ describe('gbrain decide CLI', () => {
       expect(r.stdout).toContain('enable <slot>');
       expect(r.stdout).toContain('sweep --slot conflict');
       expect(r.stdout).toContain('proposals list');
+      expect(r.stdout).toContain('judge-agreement --suite <longmemeval|grounding>');
     } finally { rmSync(empty, { recursive: true, force: true }); }
   });
 

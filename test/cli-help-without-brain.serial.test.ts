@@ -105,6 +105,21 @@ describe('--help without a configured brain', () => {
     expect(stdout + stderr).toContain('--preset daily-driver|coding-agent');
   }, 30_000);
 
+  // System One: the eval-only judge harness is discoverable (and runnable) brainless.
+  test('decide judge-agreement --help answers with its usage', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'gbrain-nobrain-'));
+    const env: Record<string, string | undefined> = { ...process.env, GBRAIN_HOME: home };
+    delete env.GBRAIN_DATABASE_URL;
+    delete env.DATABASE_URL;
+    for (const args of [['decide', 'judge-agreement', '--help'], ['decide', 'judge-agreement']]) {
+      const proc = Bun.spawn(['bun', '--no-env-file', 'run', 'src/cli.ts', ...args], { cwd: REPO, env, stdout: 'pipe', stderr: 'pipe' });
+      const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+      await proc.exited;
+      expect(stdout + stderr).not.toContain('No brain configured');
+      expect(stdout + stderr).toContain('judge-agreement --suite <longmemeval|grounding> --input <file>');
+    }
+  }, 30_000);
+
   for (const command of HELP_WITHOUT_BRAIN) {
     test(`${command} --help answers`, async () => {
       const { code, out } = await runHelp(command);
