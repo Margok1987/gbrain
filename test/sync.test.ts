@@ -823,7 +823,7 @@ describe('performSync dry-run never writes', () => {
 
 describe('sync regression — #132 nested transaction deadlock', () => {
   test('src/commands/sync.ts does not wrap the add/modify loop in engine.transaction()', async () => {
-    const source = surfaceFileSource('sync', 'src/commands/sync.ts');
+    const source = surfaceFileSource('sync', 'src/commands/sync/incremental.ts');
     // Accept either of the historical loop shapes: the original inline
     // `for (const path of [...filtered.added, ...filtered.modified])` or
     // the v0.15.2 progress-wrapped variant where the list is hoisted into
