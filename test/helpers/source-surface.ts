@@ -85,7 +85,16 @@ export const SOURCE_SURFACES = {
     dirs: ['src/commands/jobs'],
   },
   hybrid: { files: ['src/core/search/hybrid.ts'], dirs: ['src/core/search/hybrid'] },
-  autopilot: { files: ['src/commands/autopilot.ts'], dirs: ['src/commands/autopilot'] },
+  autopilot: {
+    files: [
+      'src/commands/autopilot.ts',
+      // W4 autopilot: daemon modules peeled out of runAutopilot into the flat autopilot-*.ts set.
+      'src/commands/autopilot-daemon.ts',
+      'src/commands/autopilot-dispatch.ts',
+      'src/commands/autopilot-probes.ts',
+    ],
+    dirs: ['src/commands/autopilot'],
+  },
   migrate: { files: ['src/core/migrate.ts'], dirs: ['src/core/schema-migrations'] },
   'pglite-engine': { files: ['src/core/pglite-engine.ts'], dirs: ['src/core/engine-sql'] },
   'postgres-engine': { files: ['src/core/postgres-engine.ts'], dirs: ['src/core/engine-sql'] },

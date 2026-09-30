@@ -9,7 +9,7 @@ path	name	lines	justification
 src/cli.ts	handleCliOnly	1520	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/cli.ts	main	415	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/apply-migrations.ts	runApplyMigrations	305	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
-src/commands/autopilot.ts	runAutopilot	1116	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
+src/commands/autopilot-daemon.ts	runAutopilotDaemon	1087	TODO: w4c-autopilot-daemon-split (moved verbatim out of runAutopilot; the following commits decompose it)
 src/commands/bootstrap.ts	runHooks	597	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/bootstrap.ts	runHooks>withLock(#1)	449	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)
 src/commands/config.ts	runConfig	852	seed: W5 baseline, refactor wave 1 (decomposition deferred to wave 2, plan D1)

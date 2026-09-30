@@ -178,7 +178,17 @@ function facadeExpansion(p: string): string[] {
       ...collect(join(ROOT, 'src/commands/jobs')),
     ];
   }
-  if (rel === 'src/commands/autopilot.ts') return collect(join(ROOT, 'src/commands/autopilot'));
+  if (rel === 'src/commands/autopilot.ts') {
+    // W4 autopilot split runAutopilot's daemon into flat autopilot-*.ts
+    // siblings (the existing autopilot-fanout/-pause convention). Only the
+    // modules peeled out of autopilot.ts: pre-existing siblings were always
+    // ordinary deps, so a glob would widen the surface.
+    const peeled = ['autopilot-daemon.ts', 'autopilot-dispatch.ts', 'autopilot-probes.ts'];
+    return [
+      ...peeled.map(f => join(ROOT, 'src/commands', f)).filter(p => existsSync(p)),
+      ...collect(join(ROOT, 'src/commands/autopilot')),
+    ];
+  }
   return [];
 }
 

@@ -8,9 +8,11 @@
  * drains again.
  */
 import { describe, test, expect } from 'bun:test';
-import { surfaceFileSource } from './helpers/source-surface.ts';
+import { surfaceFileSource, surfaceSource } from './helpers/source-surface.ts';
 
-const SRC = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
+// W4 autopilot: containment reads the autopilot surface; positional spans name the module that holds the daemon code.
+const SRC = surfaceSource('autopilot');
+const DAEMON_SRC = surfaceFileSource('autopilot', 'src/commands/autopilot-daemon.ts');
 
 describe('autopilot auto-drain wiring', () => {
   test('CODEX #2: idempotency key includes a UTC-day time slot (not static)', () => {
@@ -20,7 +22,7 @@ describe('autopilot auto-drain wiring', () => {
   });
 
   test('CODEX #1: submits with allowProtectedSubmit', () => {
-    expect(SRC).toMatch(/extract-atoms-drain[\s\S]{0,800}allowProtectedSubmit: true/);
+    expect(DAEMON_SRC).toMatch(/extract-atoms-drain[\s\S]{0,800}allowProtectedSubmit: true/);
   });
 
   test('CODEX #3: enumerates sources and counts backlog per source', () => {
@@ -39,7 +41,7 @@ describe('autopilot auto-drain wiring', () => {
   });
 
   test('is Postgres-gated (PGLite has no worker surface)', () => {
-    expect(SRC).toMatch(/engine\.kind === 'postgres'[\s\S]{0,400}auto_drain/);
+    expect(DAEMON_SRC).toMatch(/engine\.kind === 'postgres'[\s\S]{0,400}auto_drain/);
   });
 
   // issue #3218 (codex P1): with the handler now throwing on an
@@ -49,8 +51,8 @@ describe('autopilot auto-drain wiring', () => {
   test('issue #3218: submits with max_attempts 3 (not 1) so a retry can backoff before dead-lettering', () => {
     // lastIndexOf: the queue.add(...) call site itself (the earlier occurrence
     // is the unrelated created_at count query above it in the same function).
-    const callSite = SRC.lastIndexOf("'extract-atoms-drain'");
-    const drainBlock = SRC.slice(callSite, callSite + 900);
+    const callSite = DAEMON_SRC.lastIndexOf("'extract-atoms-drain'");
+    const drainBlock = DAEMON_SRC.slice(callSite, callSite + 900);
     expect(drainBlock).toContain('max_attempts: 3');
     expect(drainBlock).not.toContain('max_attempts: 1');
   });
@@ -59,7 +61,7 @@ describe('autopilot auto-drain wiring', () => {
     // maxWaiting would return source A's waiting job for source B's submit,
     // never queuing B and over-counting the cap. The per-source idempotency key
     // is the dedup; a pre-check on it avoids counting idempotency-hit re-submits.
-    const drainBlock = SRC.slice(SRC.indexOf("'extract-atoms-drain'"));
+    const drainBlock = DAEMON_SRC.slice(DAEMON_SRC.indexOf("'extract-atoms-drain'"));
     expect(drainBlock.slice(0, 900)).not.toContain('maxWaiting');
     expect(SRC).toContain('WHERE idempotency_key = $1 LIMIT 1');
   });
