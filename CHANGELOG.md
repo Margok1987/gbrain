@@ -10,6 +10,52 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.14.0] - 2026-09-30
+
+**Managed brains finish their upgrade migrations again: the takes and facts backfills publish through the coordinator instead of wedging the chain, and a test now walks every migration on a managed brain so the next one that writes around the coordinator fails in CI.**
+
+On a managed brain the v0.28.0 takes backfill wrote `takes` directly, the writer guard refused it, and after three tries v0.28.0 was recorded as wedged. Every later migration (v0.29.1, v0.31.0, v0.32.2, v0.43.0, v0.46.3) stayed pending behind it. v0.32.2 had the same bug and a worse one: it rewrote the page file in your canonical worktree before its database update was refused, so the file and the database disagreed.
+
+| Managed brain, legacy content, `gbrain apply-migrations --yes` | Before | After |
+| --- | --- | --- |
+| v0.28.0 takes backfill | `partial`, then `wedged` (`writer_coordinator_required`) | complete, rows match the canonical projection |
+| v0.32.2 facts backfill | fails; page file rewritten, facts left unfenced | complete; legacy fact ids, vectors and positions kept |
+| Database-only pages in v0.32.2 | skipped | fenced and verified from the database |
+| Request IDs exhausted | each page fails with a bare `queue_capacity` | refused before any change, with the exact `gbrain config set persistence.limits.*` command |
+| Whole chain, v0.11.0 to shared-content, on PGLite and Postgres | not tested | tested, including an idempotent rerun |
+
+### To take advantage of v0.60.14.0
+
+`gbrain upgrade` runs the migrations. If v0.28.0 was already recorded as wedged on a managed brain, clear the marker once and run the chain:
+
+```bash
+gbrain apply-migrations --list
+gbrain apply-migrations --force-retry 0.28.0
+gbrain apply-migrations --yes
+```
+
+If a migration refuses with `queue_capacity`, run the `gbrain config set persistence.limits.…` command it prints, then `gbrain apply-migrations --yes` again. Your agent reads `skills/migrations/v0.60.14.0.md` the next time you talk to it.
+
+**Say to your agent:** *"Finish any gbrain migrations that are stuck after my upgrade."*
+
+### Itemized changes
+
+#### Managed migrations
+- **v0.28.0 takes backfill on managed brains (#5728).** Each fenced page publishes its takes in a coordinated write under the page lock. The `superseded_by` value comes from the same helper the canonical projection uses (`takesPreparation.toCanonicalBatchInput`), so rows the projection already wrote stay unchanged. Adopted from PR #5763, thanks @andreineacsu.
+- **v0.32.2 facts backfill on managed brains.** Each entity page publishes its rendered facts fence as one `managed_maintenance_adopt_fact_fence` maintenance request. The request carries the page revision, the source incarnation and, for each legacy fact, its id, assigned `row_num` and a hash of the whole row. Inside the publication it re-locks those facts and their fence positions. It refuses a changed fact, a taken position or a duplicate assignment. It adopts the rows in place before the canonical projection runs. Conversation-extractor rows keep their positions. Typed-claim columns ride into the rendered fence.
+- **Capacity refusal up front.** The managed v0.13.1 grandfather and v0.32.2 adoption check the brain and principal lifetime-ID caps against the admissions they need. When the caps are too small, they refuse before touching any page, with the same filled capacity command an admission prints.
+- **Migration-chain test.** A reusable fixture (`test/helpers/managed-migration-chain.ts`) builds a managed brain with a real Git checkout, a real claim and activation, and legacy content for the data phases. It runs the real `gbrain apply-migrations` over every registered orchestrator migration, on PGLite in the slow tier and on Postgres in E2E. It asserts complete ledger entries, non-empty phase counts, the adopted data and an idempotent rerun. A companion test starts with exhausted request IDs.
+
+#### Atoms, facts and dream output
+- **Legacy database-only atoms can be repaired on managed brains (#5721).** A derive-phase page (`atoms/`, `concepts/`, `extracts/`, `life/events/`) that never recorded a canonical file now publishes database-only, so `gbrain repair visibility` can stamp legacy atoms that remote readers could not see. A recorded file that went missing still refuses. Adopted from PR #5722, thanks @howardpark.
+- **Atom retry after a revision-only change (#5699).** An explicit atom retry now compares the same input the drain keys on (source incarnation, kind, locator, page id and content hash). It no longer refuses when only the page's revision or visibility changed. It runs against the current origin and still refuses a content change.
+- **`remember` no longer times out on fact-heavy pages (#5725).** The withdrawal overlay fingerprints each claim once instead of once per withdrawal. On a 28-row fence against 400 withdrawals the overlay goes from about 133 ms to about 4.5 ms on PGLite. Adopted from PR #5726, thanks @VXNCXNX. A new test pins the matching rules on both engines.
+- **Structured output for atom extraction (#5627).** The extractor sends an object-root `atoms` response schema through the gateway's capability gate; the tolerant parser still accepts legacy bare arrays. Adopted from PR #5711, thanks @baumar73.
+- **Chat transcripts are data, not a conversation to continue (#5705).** The atom prompt wraps the transcript in `<transcript>` tags and says it is data. A closing tag inside the transcript is escaped. Quote grounding still runs against the text the model saw. On six synthetic fixtures with `claude-haiku-4-5`, extraction results matched before and after (no parse failures either way).
+- **Patterns pages carry `dream_generated` (#5733).** Pages the patterns phase writes under its output prefix get the dream-output stamp and cycle dates in the database and the file, through the managed maintenance write on managed brains.
+- **`unify-types` refuses apply up front on managed brains (#5634).** It refuses with `writer_coordinator_required` before its lock or any write. The dry run says apply is unsupported there, and the job dead-letters on its first attempt instead of retrying. The coordinated per-page retype stays deferred.
+- **`takes extract --from-pages` on managed brains.** Each page publishes one revision-checked `put_page` with its complete takes fence. A revision conflict skips that page. The suite now runs on Postgres too. Adopted from PR #5716, thanks @Masashi-Ono0611.
+
 ## [0.60.13.0] - 2026-09-30
 
 **Two things: your agent can now ask search for the whole conversation, section or page around each hit in the same call (off by default until a matched study shows it helps), and seven correctness fixes land, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**
