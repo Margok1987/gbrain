@@ -3236,7 +3236,6 @@
       "scoping": {
         "_addLinksBatchOnce": "none",
         "_addTimelineEntriesBatchOnce": "none",
-        "_putPage": "none",
         "_searchKeywordCJK": "direct",
         "_upsertChunksOnce": "via:readPageSnapshot",
         "activeEmbeddingColId": "none",
@@ -3253,7 +3252,6 @@
         "batchRetry": "none",
         "buildChunklessPagesWhere": "none",
         "buildStaleChunkWhere": "none",
-        "buildStalePagesWhere": "none",
         "chronicleSourceCond": "none",
         "connRetry": "none",
         "connect": "none",
@@ -3274,6 +3272,7 @@
         "disconnectInternal": "none",
         "discoverOntologyDimensions": "none",
         "engineSql": "none",
+        "engineSqlOn": "none",
         "executeRaw": "none",
         "executeRawDirect": "none",
         "expireFact": "none",

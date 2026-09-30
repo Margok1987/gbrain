@@ -100,6 +100,22 @@ export const ROLLBACK_CASES: RollbackCase[] = [
       return Number(rows[0]?.n ?? 0);
     },
   },
+  {
+    domain: 'pages',
+    async seed(engine) {
+      await seedPage(engine);
+    },
+    async write(tx) {
+      const page = await tx.putPage(SLUG, { type: 'note', title: 'Rollback probe', compiled_truth: 'rolled-back body' });
+      expect(page.compiled_truth).toBe('rolled-back body');
+      expect(await tx.softDeletePage(SLUG, { sourceId: 'default' })).toEqual({ slug: SLUG });
+    },
+    async observe(engine) {
+      const rows = await engine.executeRaw<{ body: string; deleted: boolean }>(
+        `SELECT compiled_truth AS body, deleted_at IS NOT NULL AS deleted FROM pages WHERE slug = $1 AND source_id = 'default'`, [SLUG]);
+      return rows[0] ? { body: rows[0].body, deleted: rows[0].deleted } : null;
+    },
+  },
 ];
 
 async function rollbackChunk(engine: BrainEngine): Promise<number> {
