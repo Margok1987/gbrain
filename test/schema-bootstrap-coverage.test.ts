@@ -990,6 +990,17 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   // reference to trip on, and every reader treats NULL as an unclaimed legacy
   // row (never import-deleted).
   'tags.tag_source',
+  // Migration 191 — writer-version stamps. persistence_requests and
+  // persistence_brain are migration-created on PGLite (absent from
+  // PGLITE_SCHEMA_SQL), so no PGLite-blob forward reference can exist; no
+  // index in either blob references these columns; every reader treats NULL
+  // as an unstamped (older) writer or an unrecorded cutoff.
+  'persistence_requests.admitter_version',
+  'persistence_requests.admitter_host_id',
+  'persistence_requests.consumer_version',
+  'persistence_requests.consumer_host_id',
+  'persistence_requests.published_at',
+  'persistence_brain.writer_version_cutoff',
 ]);
 
 test('every ALTER TABLE ADD COLUMN in MIGRATIONS is covered by applyForwardReferenceBootstrap (column-only class)', async () => {

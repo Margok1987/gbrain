@@ -207,6 +207,8 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/persistence-chaos.test.ts",
     "test/e2e/persistence-runtime-matrix.test.ts",
     "test/e2e/persistence-admin-intent.test.ts",
+    "test/e2e/persistence-writer-admin-lock.test.ts",
+    "test/e2e/persistence-writer-stamps.test.ts",
     "test/e2e/persistence-recovery.test.ts",
     "test/e2e/managed-sync-failures.test.ts",
     "test/e2e/managed-connector-routing.test.ts",
@@ -229,6 +231,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/reconcile-crash.test.ts",
     "test/e2e/reconcile-crash-unactivated.test.ts",
     "test/e2e/reconcile-pgbouncer.test.ts",
+    "test/e2e/reconcile-unbound-collision.test.ts",
     "test/e2e/persistence-skill-bundles-postgres.test.ts",
     "test/e2e/shared-skills-transports.test.ts",
     "test/e2e/canonical-projection-history.test.ts",
@@ -239,7 +242,9 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
     "test/e2e/w5-persistence-postgres.test.ts",
   ],
   "src/core/brain-score-recommendations.ts": ["test/e2e/w5-persistence-postgres.test.ts"],
-  "src/core/repair/**": ["test/e2e/repair-command.test.ts", "test/e2e/derived-visibility-repair.test.ts", "test/e2e/safe-chunk-reseal.test.ts"],
+  "src/core/repair/**": ["test/e2e/repair-command.test.ts", "test/e2e/derived-visibility-repair.test.ts", "test/e2e/safe-chunk-reseal.test.ts", "test/e2e/recovery-layer.test.ts"],
+  "src/core/remediation/**": ["test/e2e/recovery-layer.test.ts"],
+  "src/core/remediation-checkpoint.ts": ["test/e2e/recovery-layer.test.ts"],
   "src/commands/repair.ts": ["test/e2e/repair-command.test.ts"],
   "src/core/timeline-marker.ts": ["test/e2e/timeline-materialize.test.ts"],
   "src/commands/source-reconcile.ts": ["test/e2e/reconcile-crash.test.ts", "test/e2e/reconcile-crash-unactivated.test.ts", "test/e2e/reconcile-pgbouncer.test.ts"],
@@ -383,7 +388,7 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/autopilot.ts": ["test/e2e/autopilot-linux-lifecycle.serial.test.ts", "test/e2e/worker-readiness-cli.test.ts"],
   "src/commands/doctor.ts": ["test/e2e/doctor-progress.test.ts"],
   // Doctor check modules peeled from doctor.ts feed the same e2e surface.
-  "src/commands/doctor/**": ["test/e2e/doctor-progress.test.ts"],
+  "src/commands/doctor/**": ["test/e2e/doctor-progress.test.ts", "test/e2e/recovery-layer.test.ts"],
   // Knowledge graph layer feeds graph-quality.
   "src/core/link-extraction.ts": ["test/e2e/graph-quality.test.ts", "test/e2e/attendance-retrieval-postgres.test.ts"],
   "src/core/attendance-repair.ts": ["test/e2e/attendance-repair-postgres.test.ts"],
@@ -439,4 +444,5 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/backup.ts": ["test/e2e/backup-coverage-parity.test.ts"],
   "src/commands/doctor/checks/backup-coverage.ts": ["test/e2e/backup-coverage-parity.test.ts"],
   "src/commands/doctor/checks/sync-failures.ts": ["test/e2e/managed-sync-failures.test.ts"],
+  "src/commands/doctor/checks/writer-version.ts": ["test/e2e/persistence-writer-stamps.test.ts"],
 };

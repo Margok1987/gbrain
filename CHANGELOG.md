@@ -10,6 +10,69 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.11.0] - 2026-09-29
+
+**After an upgrade, doctor now finds the leftover damage, shows you the exact fix for each piece, and applies the fixes you agree to under a spending cap.**
+
+Earlier releases shipped repairs for history that only the database had, for derived pages with no visibility, and for pages hidden from remote search. They only ran when someone read the doctor output and typed the command. `gbrain doctor --remediate` never offered them, and on a brain without API keys it quit before getting that far. Remote agents saw none of it.
+
+Now `gbrain doctor --remediation-plan` lists every repair that has work to do, with the command that applies it, whatever your brain score. Each one is marked as needing your agreement. `gbrain doctor --remediate --yes --include-repairs --max-usd 2` runs them. Free repairs always run. A paid step that would go over the cap waits, and the resume command keeps the same cap. When it finishes, doctor sorts every leftover finding into: fixed, still pending, needs your agreement, needs an operator, or cannot be fixed yet. `gbrain post-upgrade` prints a preview-only banner that tells your agent to ask you first. Remote doctor shows one "host operator action required" line per problem, without paths or page contents.
+
+| After upgrading a brain with leftover damage | Before | After |
+| --- | --- | --- |
+| Repairs listed in `doctor --remediation-plan` | none | every kind with pending items, each with its command |
+| `doctor --remediate` on a brain without keys | exits 2, runs nothing | runs the repairs you agreed to |
+| Remote doctor lines for these problems | none | one sanitized line per check |
+| Commands from post-upgrade to a clean plan (test fixture) | not possible | 3 |
+
+### To take advantage of v0.60.11.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes --no-autopilot-install
+   ```
+2. **Your agent reads `skills/migrations/v0.60.11.0.md` the next time you interact with it.** It previews the recovery plan and asks you before applying anything.
+3. **Upgrade hosts in order.** Pause autopilot first, then upgrade every host in this order:
+   ```bash
+   gbrain autopilot pause --reason "upgrading to v0.60.11.0"   # on each connector host
+   gbrain upgrade                                              # every consumer and worktree-owner host first
+   gbrain upgrade                                              # then the connector hosts
+   gbrain doctor --remediation-plan                            # preview; ask before applying
+   gbrain autopilot resume                                     # on each host you paused
+   gbrain sources status                                       # verify
+   ```
+4. **Verify the outcome:**
+   ```bash
+   gbrain doctor --remediation-plan     # no repair steps left once you have applied the agreed ones
+   gbrain sources writer status --json  # writer versions per host
+   ```
+5. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+- **Repairs are part of the remediation plan.** `gbrain doctor --remediation-plan` lists each `gbrain repair` kind that has pending items as a protected step, independent of `--target-score`. Each step is marked "requires user agreement" and prints its apply command (`gbrain repair <kind> --apply`). Job steps print their `gbrain jobs submit` command, and the plan ends with one combined `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. `--json` adds `repair_steps`, `combined_command` and a `command` per step.
+- **`--remediate --include-repairs`.** Repair steps run only with this flag, even when the score target is unreachable. Without it they are listed as "N repair steps skipped (user agreement required)". They run in-process on the brain host, and a remote caller cannot include them. Repairs that rewrite pages are re-embedded by their publication, so their estimate counts against the cap before they start.
+- **A cumulative, resumable cap.** `--max-usd` covers the whole run and every `--resume`. A paid step whose estimate is above what is left does not start. The free steps still run, then the run stops with a resume command that repeats the cap and `--include-repairs`. The local checkpoint records the brain, cap, agreement, spend and original steps. `--resume` without `--max-usd` reuses the recorded cap. A checkpoint from another brain is refused, and repairs found later need a fresh agreement.
+- **Finding classes and exit status.** `gbrain doctor --remediate --json` classifies every finding as `cleared`, `pending`, `consent_required`, `operator_required` or `unsupported`, and reports `repairs_completed` separately from `healthy`. It exits 0 when no automatically repairable finding is left and no step failed. Operator-required and unsupported findings are listed but do not fail the run.
+- **Preview-only post-upgrade banner.** `gbrain post-upgrade` runs the recovery checks once, the full checks rather than `--fast`. It then prints one `[AGENT] Relay this to your operator` block with the brain, a count for each finding, the preview command and "ask the user before applying". It never prints `--yes` or `--apply`. A clean brain prints nothing.
+- **Remote doctor host-action lines.** A remote or thin-client caller sees one line per recovery check. Each line has a stable id, a short impact summary without counts, and "host operator action required: on the brain host run `gbrain doctor --remediation-plan`". It never includes paths, row contents, SQL, account emails or installation ids. A check that could not run says `Unknown:` and never reports ok.
+- **New doctor checks.** `safe_index_pending` counts pages that remote search still withholds and names `gbrain repair safe-chunks`. `self_capture` (#5413) counts corpus files captured from gbrain's own model sessions, split into identified and undecidable, and prints copy-paste quarantine commands. It never moves or deletes anything. `stale_embedding_effects` (#5629) names a committed write whose queued embedding effect no command can clear yet, and reports it as unsupported.
+- **`gbrain repair` refuses unknown options.** A mistyped flag, or `--max-usd` (which repair never had), used to be ignored while the repair ran anyway. Now it refuses with `invalid_params` naming the flag, and `--max-usd` points to the capped doctor route. The `--all` preview marks the kinds that may queue paid embeddings.
+- **`gbrain autopilot pause` / `resume`.** `pause [--reason <text>]` holds this host's daemon and job workers until `resume`. `gbrain upgrade` and `autopilot --install` keep the pause, `autopilot status` shows it, and `resume` never clears a migration or restore hold.
+- **Writer admin lock (#5285).** `gbrain sources writer lock` / `unlock` set an opt-in, brain-level lock. While it is set, writer claim, activate and transfer refuse for every caller with `writer_admin_locked`, whose hint tells an agent to stop and ask the operator. Ordinary writes continue, including the first write on a PGLite brain. There is no `--force`: the local unlock is the way out. `gbrain config set` and `unset` refuse the reserved key, and `sources writer status` shows the lock. It guards against routine agent administration and is not a security boundary.
+- **Writer versions (migration v191).** Write requests now record the version and host id of the binary that admitted them and of the consumer that published them, plus the publication time. `gbrain sources writer status` shows the latest versions per host and principal. Doctor's `writer_version` check warns when a request published in the last 7 days came from a binary older than this release (unstamped) or older than v0.60.5.0. It names the host UUID and `gbrain upgrade`. This is an observation, not an enforced floor.
+- **`writer_not_quiesced` names what blocks it (#5629).** The refusal and `sources writer status` name the blocking effect id, kind, source, page and request id, plus the inspect command.
+- **Unbound collisions reconcile.** After a source is bound, a database-only page whose canonical file appears at the same path now previews in `gbrain sources reconcile <source> <slug> --preview` with both sides. `--apply` writes the resolution you chose and records the file as the page's origin.
+- **Docs.** [Recover after upgrading](docs/guides/repair.md#recover-after-upgrading-to-this-release), the #5413 quarantine commands, a claim and activate runbook with a quiescence checklist and the admin lock sequence in `docs/architecture/topologies.md`, and new rows in `docs/guides/write-refusals.md`.
+
 ## [0.60.10.0] - 2026-09-29
 
 **Local PGLite brains now commit writes about 3.7× faster, with the same durability.**

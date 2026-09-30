@@ -14,6 +14,9 @@ import type { PersistenceAdminOperation } from './admin-contract.ts';
 import { operationScopesAllowed } from '../scope.ts';
 import { assertWriterAdminState, requireWriterAdminIntent, writerAdminState, WRITER_INSPECTION_HINT } from './admin-intent.ts';
 import { writerOnboardingPreflight } from './onboarding.ts';
+import { assertWriterAdminUnlocked, readWriterAdminLock, setWriterAdminLock } from './admin-lock.ts';
+import { listBlockingEffects } from './blocking-effects.ts';
+import { listWriterVersions } from './writer-versions.ts';
 
 const invalid = (message: string) => new OperationError('invalid_params', message);
 function source(value: unknown): string {
@@ -82,6 +85,12 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
     return { ...await runtime.connectCompanyBrain(engine, input) };
   }
   if (currentVerifiedLocalWriter()?.remote) throw new OperationError('permission_denied', 'Writer administration requires a trusted local CLI caller.');
+  if (operation === 'writer_lock' || operation === 'writer_unlock') {
+    keys(params, []);
+    return { ...await setWriterAdminLock(engine, operation === 'writer_lock') };
+  }
+  // Early refusal before any native lock or preview; the checks inside each transaction stay authoritative.
+  if (['writer_claim', 'writer_activate', 'writer_transfer_prepare', 'writer_transfer_accept'].includes(operation)) await assertWriterAdminUnlocked(engine);
   if (operation === 'writer_sync') return (await import('./sync-administration.ts')).runAuthenticatedSyncSlice(engine, params);
   if (operation === 'writer_extract_stale') {
     keys(params, ['source_id', 'dry_run']);
@@ -149,8 +158,13 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
     const onboarding = await writerOnboardingPreflight(engine, params.source_id as string | undefined);
     const [sharedSkills] = await engine.executeRaw<{ writer_protocol_floor: number; skill_bundles_enabled: boolean }>(
       'SELECT writer_protocol_floor,skill_bundles_enabled FROM persistence_brain WHERE singleton=1');
+    const adminLock = await readWriterAdminLock(engine);
+    const blockingEffects = await listBlockingEffects(engine, { sourceId: params.source_id as string | undefined, limit: 20 });
+    const writerVersions = await listWriterVersions(engine);
     await assertWriterAdminState(engine, adminState, false);
-    return { ...diagnostics, host_id: existingLocalHostId(), bindings, admin_state: adminState, onboarding, shared_skills: sharedSkills, ...(native ? { native_lock: native } : {}) };
+    return { ...diagnostics, host_id: existingLocalHostId(), local_host_id: existingLocalHostId(), bindings, admin_state: adminState,
+      admin_lock: { locked: adminLock.locked, set_at: adminLock.set_at, host_id: adminLock.host_id }, blocking_effects: blockingEffects,
+      writer_versions: writerVersions, onboarding, shared_skills: sharedSkills, ...(native ? { native_lock: native } : {}) };
   }
   if (operation === 'writer_claim') {
     keys(params, ['source_id', 'path', 'dry_run', 'admin_intent', 'expected_state']);
