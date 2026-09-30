@@ -12,7 +12,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { BrainEngine } from '../../core/engine.ts';
 import { meanItemSd, qualifyActions, reliability, requiredN, searchThreshold, type CalibrationTarget, type HarmfulAction, type LabelledValue } from '../../core/ai/decide/calibrate.ts';
-import { datasetAdapter, datasetBuilder, datasetHash, datasetSources, families, idsHash, parseDatasetJsonl, splitHash, toJsonl, type DatasetItem } from '../../core/ai/decide/dataset.ts';
+import { datasetAdapter, datasetBuilder, datasetHash, datasetSources, families, idsHash, itemForCallSite, parseDatasetJsonl, splitHash, toJsonl, type DatasetItem } from '../../core/ai/decide/dataset.ts';
 import { runDecide } from '../../core/ai/decide/index.ts';
 import { estimateContextTokens, planBatches } from '../../core/ai/decide/pack.ts';
 import { lookupModel, marginFor, policyFingerprint } from '../../core/ai/decide/policy.ts';
@@ -20,7 +20,7 @@ import { refusalLine } from '../../core/ai/decide/outcomes.ts';
 import { toWireQuestion } from '../../core/ai/decide/providers/typesafe.ts';
 import { SLOT_SPECS } from '../../core/ai/decide/slots.ts';
 import { getCalibration, insertCalibration, listCalibrations, setCalibrationRetired, storeQualification } from '../../core/ai/decide/store.ts';
-import { DECIDE_SLOTS, DecideError, thresholdValue, type DecideSlot } from '../../core/ai/decide/types.ts';
+import { DECIDE_SLOTS, DecideError, thresholdValue, type DecideAnswer, type DecideSlot } from '../../core/ai/decide/types.ts';
 import { usageCostUsd } from '../../core/budget/reservation-cost.ts';
 import { resetDecideSearchCache } from '../../core/search/decide-stage.ts';
 import { flagValue, loadDecideState, slotPackShape } from '../decide.ts';
@@ -37,21 +37,25 @@ function isPositive(item: DatasetItem): boolean {
 }
 
 /** Ask every family once (production shape); returns value per item id and the resolved model. */
-async function askFamilies(engine: BrainEngine, slot: DecideSlot, provider: string, fams: DatasetItem[][], cfgOverride: Awaited<ReturnType<typeof loadDecideState>>['cfg']): Promise<{ values: Record<string, number | null>; model: string }> {
+async function askFamilies(engine: BrainEngine, slot: DecideSlot, provider: string, fams: DatasetItem[][], cfgOverride: Awaited<ReturnType<typeof loadDecideState>>['cfg']): Promise<{ values: Record<string, number | null>; answers: Record<string, DecideAnswer | undefined>; model: string }> {
   const adapter = datasetAdapter(slot)!;
   const values: Record<string, number | null> = {};
+  const answers: Record<string, DecideAnswer | undefined> = {};
   const models = new Set<string>();
   for (const fam of fams) {
     const req = adapter.request(fam);
     const r = await runDecide({ slot, callSite: adapter.callSite, state: req.state, questions: req.questions, provider, lane: 'background', deadlineMs: 60_000 }, { engine, config: cfgOverride });
     models.add(r.model_resolved);
     for (const q of req.questions) {
+      const item = req.itemFor[q.id];
+      if (!item) continue;
       const a = r.answers[q.id];
-      values[req.itemFor[q.id]!.id] = a ? thresholdValue(a) : null;
+      values[item.id] = a ? thresholdValue(a) : null;
+      answers[item.id] = a;
     }
   }
   if (models.size > 1) throw new DecideError('mixed_model', `calibration answered by ${models.size} different models`);
-  return { values, model: [...models][0] ?? '' };
+  return { values, answers, model: [...models][0] ?? '' };
 }
 
 function sample<T>(items: readonly T[], n: number, seed: string): T[] {
@@ -74,13 +78,13 @@ async function cmdCalibrate(engine: BrainEngine, args: string[]): Promise<number
   const adapter = datasetAdapter(slot);
   if (!adapter || !SLOT_SPECS[slot].thresholded) { console.error(refusalLine('slot_unavailable', slot)); return 1; }
   const text = readFileSync(path, 'utf8');
-  const all = parseDatasetJsonl(text).filter((i) => i.slot === slot);
+  const callSite = flagValue(args, '--call-site') ?? adapter.callSite;
+  const all = parseDatasetJsonl(text).filter((i) => i.slot === slot && itemForCallSite(i, callSite));
   const calibrate = all.filter((i) => i.split === 'calibrate');
   if (calibrate.length === 0) { console.error('dataset has no calibrate-half items for this slot (build it with gbrain decide dataset)'); return 1; }
   const state = await loadDecideState(engine);
   const provider = state.cfg.slots[slot].provider;
   if (provider === 'none') { console.error(refusalLine('no_provider', slot)); return 1; }
-  const callSite = flagValue(args, '--call-site') ?? adapter.callSite;
   const fams = [...families(calibrate).values()];
   const retestN = Math.min(state.cfg.retestN, fams.length);
   const estimateTokens = fams.reduce((n, fam) => {
@@ -98,7 +102,7 @@ async function cmdCalibrate(engine: BrainEngine, args: string[]): Promise<number
   const cfg = { ...state.cfg, consent: { query: true, candidates: true, facts: true, conversation: true }, egressPrivate: 'allow' as const };
   try {
     const first = await askFamilies(engine, slot, provider, fams, cfg);
-    const labelled: LabelledValue[] = calibrate.filter((i) => first.values[i.id] !== null && first.values[i.id] !== undefined).map((i) => ({ value: first.values[i.id]!, label: isPositive(i) }));
+    const labelled: LabelledValue[] = calibrate.filter((i) => first.values[i.id] !== null && first.values[i.id] !== undefined).map((i) => ({ value: first.values[i.id]!, label: adapter.positive ? adapter.positive(i, first.answers[i.id]) : isPositive(i) }));
     const target = (flagValue(args, '--target') ?? 'f1') as CalibrationTarget;
     const minRaw = flagValue(args, '--min');
     const choice = searchThreshold(labelled, target, minRaw === undefined ? undefined : Number(minRaw));
@@ -146,10 +150,10 @@ async function cmdQualify(engine: BrainEngine, args: string[]): Promise<number> 
   const adapter = datasetAdapter(slot);
   if (!adapter?.harmfulActions) { console.error(refusalLine('slot_unavailable', slot)); return 1; }
   const text = readFileSync(path, 'utf8');
-  const all = parseDatasetJsonl(text).filter((i) => i.slot === slot);
+  const callSite = flagValue(args, '--call-site') ?? adapter.callSite;
+  const all = parseDatasetJsonl(text).filter((i) => i.slot === slot && itemForCallSite(i, callSite));
   const state = await loadDecideState(engine);
   const provider = state.cfg.slots[slot].provider;
-  const callSite = flagValue(args, '--call-site') ?? adapter.callSite;
   const model = lookupModel(provider, state.lastResolved);
   const rows = (await listCalibrations(engine, { slot })).filter((c) => c.call_site === callSite && c.provider === provider && (!model || c.model_resolved === model));
   const cal = rows[0];

@@ -116,6 +116,7 @@ export async function loadDecideState(engine: BrainEngine): Promise<DecideState>
 }
 
 export function slotPackShape(slot: DecideSlot, cfg: DecideConfig): string {
+  if (slot === 'injection') return packShape('evidence', [...evidenceCoPackedSlots(cfg), 'injection']);
   return slot === 'evidence' ? packShape('evidence', evidenceCoPackedSlots(cfg)) : packShape(slot, [], { unpacked: ['answerable', 'triage', 'grounding'].includes(slot) });
 }
 

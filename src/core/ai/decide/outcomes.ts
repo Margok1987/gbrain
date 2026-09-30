@@ -36,7 +36,7 @@ export const SKIP_REASONS = [
   'rate_limited', 'provider_error', 'malformed_response', 'mixed_model', 'model_drift', 'policy_changed',
   'no_calibration', 'pack_shape_mismatch', 'action_precision_low', 'no_qualification', 'pinned_model_unavailable',
   'payload_too_large', 'llm_capability', 'egress_private_denied', 'egress_class_denied', 'missing_provenance',
-  'denied_source', 'shadow_queue_full', 'reranker_not_jev', 'cache_hit', 'no_candidates',
+  'denied_source', 'shadow_queue_full', 'reranker_not_jev', 'cache_hit', 'no_candidates', 'egress_denied',
 ] as const;
 export type SkipReason = typeof SKIP_REASONS[number];
 

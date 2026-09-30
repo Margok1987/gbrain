@@ -116,6 +116,8 @@ export interface DecideConfig {
   consent: Record<EvidenceClass, boolean>;
   retentionDays: number;
   retestN: number;
+  /** S2: how long hybridSearch waits for the intent answer (decide.slots.intent.wait_ms). */
+  intentWaitMs: number;
   slots: Record<DecideSlot, DecideSlotConfig>;
   /** GBRAIN_DECIDE_SLOTS eval override, honored only when the caller opts in. */
   evalOverride?: string;
@@ -198,6 +200,7 @@ export function readDecideConfig(snapshot: Record<string, string | undefined> | 
     consent: Object.fromEntries(EVIDENCE_CLASSES.map((c) => [c, get(`decide.egress.typesafe.${c}`) === 'allow'])) as Record<EvidenceClass, boolean>,
     retentionDays: num(get('decide.receipts.retention_days'), 7, GLOBAL_KEYS['decide.receipts.retention_days']!),
     retestN: num(get('decide.calibrate.retest_n'), 50, GLOBAL_KEYS['decide.calibrate.retest_n']!),
+    intentWaitMs: num(get('decide.slots.intent.wait_ms'), 150, GLOBAL_KEYS['decide.slots.intent.wait_ms']!),
     slots,
     ...(evalSlots ? { evalOverride: evalSlots } : {}),
   };

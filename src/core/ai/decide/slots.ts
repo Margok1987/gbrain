@@ -39,7 +39,7 @@ export const SLOT_SPECS: Readonly<Record<DecideSlot, SlotSpec>> = {
   intent: {
     slot: 'intent', lane: 'hot', questionKind: 'choice', harmful: false, thresholded: true, callSites: ['search', 'think'],
     egressClasses: ['query'], shadowSample: 1, whatIfReproducible: false, questionVersion: 1,
-    failDirection: 'fall back to the regex classifier', wired: false,
+    failDirection: 'fall back to the regex classifier', wired: true,
   },
   evidence: {
     slot: 'evidence', lane: 'hot', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['search', 'think'],
@@ -47,14 +47,14 @@ export const SLOT_SPECS: Readonly<Record<DecideSlot, SlotSpec>> = {
     failDirection: 'fail open: keep every candidate', wired: true,
   },
   answerable: {
-    slot: 'answerable', lane: 'hot', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['query', 'think'],
+    slot: 'answerable', lane: 'hot', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['think', 'query'],
     egressClasses: ['query', 'candidates'], shadowSample: 1, whatIfReproducible: false, questionVersion: 1,
-    failDirection: 'fail open: answer normally', wired: false,
+    failDirection: 'fail open: answer normally', wired: true,
   },
   injection: {
-    slot: 'injection', lane: 'hot', questionKind: 'noul', harmful: false, thresholded: true, callSites: ['search'],
+    slot: 'injection', lane: 'hot', questionKind: 'noul', harmful: false, thresholded: true, callSites: ['search', 'think'],
     egressClasses: ['query', 'candidates'], shadowSample: 0.1, whatIfReproducible: false, questionVersion: 1,
-    failDirection: 'fail open: no demotion', wired: false,
+    failDirection: 'fail open: no demotion', wired: true,
   },
   recall_needed: {
     slot: 'recall_needed', lane: 'hot', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['turn_context'],

@@ -14,7 +14,7 @@
  */
 import { createHash } from 'node:crypto';
 import { evidenceQuestion, reduceEvidence } from './evidence.ts';
-import type { DecideQuestion, DecideSlot, EvidenceItem } from './types.ts';
+import type { DecideAnswer, DecideQuestion, DecideSlot, EvidenceItem } from './types.ts';
 
 export interface DatasetItem {
   id: string;
@@ -93,6 +93,13 @@ export interface SlotDatasetAdapter {
   request(family: readonly DatasetItem[]): { state: Record<string, EvidenceItem>; questions: DecideQuestion[]; itemFor: Record<string, DatasetItem> };
   /** Harmful action the production reducer took on an item, and whether it was right (null: no harmful action). */
   harmfulActions?(family: readonly DatasetItem[], values: Record<string, number | null>, policy: { threshold: number; margin: number; minKeep: number }): Array<{ item: DatasetItem; correct: boolean }>;
+  /** Choice slots: whether the answer is correct for the item (calibration label); default: the item label is true. */
+  positive?(item: DatasetItem, answer: DecideAnswer | undefined): boolean;
+}
+
+/** Items that carry `state.call_site` (one dataset, several call sites) belong to that call site only. */
+export function itemForCallSite(item: Pick<DatasetItem, 'state'>, callSite: string): boolean {
+  return item.state.call_site === undefined || item.state.call_site === callSite;
 }
 
 const adapters = new Map<DecideSlot, SlotDatasetAdapter>();

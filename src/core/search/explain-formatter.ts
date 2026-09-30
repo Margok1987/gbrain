@@ -150,6 +150,7 @@ export function formatDecideSummary(decide: HybridSearchMeta['decide'] | undefin
     const mode = m!.effective === m!.mode ? m!.mode : `${m!.mode} (inactive: ${m!.skipped ?? 'unknown'})`;
     const who = m!.provider ? ` — ${m!.provider}${m!.model_resolved ? ` (resolved ${m!.model_resolved})` : ''}` : '';
     const parts: string[] = [];
+    if (m!.answer) parts.push(m!.answer);
     if (m!.judged !== undefined) parts.push(`judged ${m!.judged}`);
     if (m!.threshold !== undefined) parts.push(`threshold ${fmt(m!.threshold)}`);
     if (m!.outcomes) parts.push(Object.entries(m!.outcomes).map(([o, n]) => `${o} ${n}`).join(', '));

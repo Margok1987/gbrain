@@ -21,7 +21,8 @@ import { recordSearchTelemetry } from '../telemetry.ts';
 import { resolveBoostMap, resolveHardExcludes } from '../source-boost.ts';
 import { resolveEmbeddingColumn } from '../embedding-column.ts';
 import { resolveSearchDateBounds } from '../date-bounds.ts';
-import { type DecideSearchContext, decideMetaFor, resolveDecideSearchContext } from '../decide-stage.ts';
+import { type DecideSearchContext, decideMetaFor, resolveAndLaunchDecide } from '../decide-stage.ts';
+import { applySearchIntent } from '../decide-retrieval.ts';
 
 /**
  * Everything the stages read, resolved once at hybridSearch entry, plus the
@@ -128,6 +129,14 @@ export async function resolveHybridRequest(
     },
   });
 
+  // System One: resolve the decide context and launch S2 now, alongside the
+  // regex classifier (undefined when every slot is off: no decide work).
+  const decidePending = modeInput.decide ? resolveAndLaunchDecide(engine, modeInput.decide, query, {
+    rerankerModel: opts?.reranker?.model ?? resolvedMode.reranker_model,
+    rerankerEnabled: opts?.reranker?.enabled ?? resolvedMode.reranker_enabled,
+    decide: opts?.decide, sourceId: opts?.sourceId,
+  }).catch(() => undefined) : undefined;
+
   // v0.36 (D7+D11): resolve embedding column once at entry. Single
   // round-trip to read DB-plane config (mirrors loadSearchModeConfig).
   // Resolver throws on unknown name with a paste-ready hint; let it
@@ -153,7 +162,11 @@ export async function resolveHybridRequest(
   // weight-adjustment path. Intent weighting is on by default (off via
   // `opts.intentWeighting = false`; mode bundle supplies the default).
   // #4415: merges the brain's `search.intent_patterns` config over the banks.
-  const suggestions = await classifyQueryWithBrainPatterns(engine, query);
+  const regexSuggestions = await classifyQueryWithBrainPatterns(engine, query);
+  // System One S2: an above-threshold intent replaces the regex one before
+  // weights, detail and search options are derived (regex is the fallback).
+  const decide = decidePending ? await decidePending : undefined;
+  const suggestions = decide ? await applySearchIntent(decide, query, regexSuggestions).catch(() => regexSuggestions) : regexSuggestions;
   const intentWeightingOn = resolvedMode.intentWeighting;
   const intentWeights = intentWeightingOn
     ? weightsForIntent(suggestions.intent)
@@ -263,13 +276,7 @@ export async function resolveHybridRequest(
     lastResultsCount: 0,
     lastRank1Score: undefined,
   };
-  if (modeInput.decide) {
-    req.decide = await resolveDecideSearchContext(engine, modeInput.decide, {
-      rerankerModel: opts?.reranker?.model ?? resolvedMode.reranker_model,
-      rerankerEnabled: opts?.reranker?.enabled ?? resolvedMode.reranker_enabled,
-      decide: opts?.decide, sourceId: opts?.sourceId,
-    }).catch(() => undefined);
-  }
+  if (decide) req.decide = decide;
   return req;
 }
 
@@ -305,8 +312,9 @@ export async function applyIdentityBoosts(req: HybridRequest, list: SearchResult
 export function emitHybridMeta(req: HybridRequest, rawMeta: HybridSearchMeta): void {
   const { engine, opts } = req;
   const decide = decideMetaFor(req.decide);
-  const meta: HybridSearchMeta = decide || req.rerankMeta
-    ? { ...rawMeta, ...(decide ? { decide } : {}), ...(req.rerankMeta ? { rerank: req.rerankMeta } : {}) }
+  const answerability = req.decide?.answerability;
+  const meta: HybridSearchMeta = decide || req.rerankMeta || answerability
+    ? { ...rawMeta, ...(decide ? { decide } : {}), ...(req.rerankMeta ? { rerank: req.rerankMeta } : {}), ...(answerability ? { answerability } : {}) }
     : rawMeta;
   try {
     opts?.onMeta?.(meta);
