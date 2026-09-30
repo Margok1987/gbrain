@@ -1787,6 +1787,14 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   [`docs/guides/open-loops.md`](./docs/guides/open-loops.md) (how detection
   works); the harness protocol lives in
   [`skills/google-loops/SKILL.md`](./skills/google-loops/SKILL.md).
+- **Turn on System One decisions (TypeSafe Jev):** every slot is off by
+  default and nothing is sent until the user opts in. With `TYPESAFE_API_KEY`
+  set, `gbrain decide probe` (sends nothing from the brain), then
+  `gbrain decide probe --query "<q>"` to preview on the user's own brain, then
+  `gbrain decide enable --recommended` after showing the user what leaves the
+  machine. `gbrain decide disable --all` is the kill switch. Guide:
+  [`docs/guides/system-one.md`](./docs/guides/system-one.md); key setup:
+  [`docs/ai-providers/typesafe.md`](./docs/ai-providers/typesafe.md).
 - **Contribute code:** [`CONTRIBUTING.md`, "Where does my change go?"](./CONTRIBUTING.md#where-does-my-change-go)
   names the files, registry, regenerate command and smallest test for a storage method,
   schema migration, doctor check, CLI-only command, HTTP route or sync phase. A branch written
@@ -3041,6 +3049,7 @@ off until the user opts in, and paid enrichment is a separate choice.
 | Share a brain page as a link | `skills/publish/SKILL.md` |
 | "validate frontmatter", "check frontmatter", "fix frontmatter", "frontmatter audit", "brain lint" | `skills/frontmatter-guard/SKILL.md` |
 | "what search mode", "is my cache hot", "tune my retrieval", "compare search modes", "clear search overrides" | `gbrain search modes/stats/tune` directly. See `skills/conventions/search-modes.md` |
+| "turn on System One", "enable Jev", "TypeSafe decide", "why is the evidence gate inactive", "turn System One off" | `gbrain decide probe/status/enable/disable` directly (brain host only). See `docs/guides/system-one.md` |
 | "eval results", "search benchmark", "haters-immune methodology", "regression check on retrieval" | `gbrain eval run-all` / `gbrain eval compare`. See `docs/eval/SEARCH_MODE_METHODOLOGY.md` |
 | "bulk delete", "wipe the", "rm -rf", "purge the", "bulk forget" | `skills/data-loss-gate/SKILL.md` |
 | "fact check", "fact-check", "verify the facts", "check the claims" | `skills/fact-check/SKILL.md` |
@@ -3565,7 +3574,7 @@ Data flowing into the brain. Each integration is a recipe — markdown + setup h
 - **Gmail + Calendar + Contacts (native)**: the google source kind syncs threads, events, and contacts through your own OAuth client and runs the open-loop engine on top (`gbrain waiting`). Setup: [`docs/guides/google-connect.md`](docs/guides/google-connect.md); recipes: [`recipes/email-to-brain.md`](recipes/email-to-brain.md), [`recipes/calendar-to-brain.md`](recipes/calendar-to-brain.md).
 - **Email + calendar (webhooks)**: webhook handlers that route to brain signals. [`docs/integrations/meeting-webhooks.md`](docs/integrations/meeting-webhooks.md).
 - **Embedding providers**: Voyage (new-install default: `voyage-4` @ 1024d), OpenAI, OpenRouter, Google Gemini, Azure OpenAI, MiniMax, Alibaba DashScope, Zhipu, Ollama (local), llama.cpp llama-server (local), LM Studio, Together, and LiteLLM proxy. Pricing matrix + decision tree in [`docs/integrations/embedding-providers.md`](docs/integrations/embedding-providers.md). Existing vectors are never converted by changing the default; use the explicitly approved [embedding migration](docs/guides/embedding-migration.md).
-- **Rerankers**: Voyage `rerank-2.5` hosted (the default; reranking is on in `balanced` and `tokenmax` modes, same `VOYAGE_API_KEY` as embeddings; the preview `rerank-3` / `rerank-3-lite` are selectable with `gbrain config set search.reranker.model voyage:rerank-3`), plus the `llama-server-reranker` recipe for fully-local cross-encoder rerank via llama.cpp running Qwen3-Reranker against the same `gateway.rerank()` seam. Setup walkthrough in [`docs/ai-providers/llama-server-reranker.md`](docs/ai-providers/llama-server-reranker.md).
+- **Rerankers**: Voyage `rerank-2.5` hosted (the default; reranking is on in `balanced` and `tokenmax` modes, same `VOYAGE_API_KEY` as embeddings; the preview `rerank-3` / `rerank-3-lite` are selectable with `gbrain config set search.reranker.model voyage:rerank-3`), plus the `llama-server-reranker` recipe for fully-local cross-encoder rerank via llama.cpp running Qwen3-Reranker against the same `gateway.rerank()` seam. Setup walkthrough in [`docs/ai-providers/llama-server-reranker.md`](docs/ai-providers/llama-server-reranker.md). TypeSafe Jev is an opt-in reranker too (`typesafe:jev-1.13.0`, `TYPESAFE_API_KEY`); see [`docs/ai-providers/typesafe.md`](docs/ai-providers/typesafe.md).
 - **Credential vault + gateway**: `gbrain creds` manages OAuth and API credentials in a local vault ([`recipes/credential-gateway.md`](recipes/credential-gateway.md)); agent-side vault-aware secret distribution: [`docs/integrations/credential-gateway.md`](docs/integrations/credential-gateway.md).
 - **MCP clients**: every major MCP client is supported. [`docs/mcp/`](docs/mcp/) per-client setup.
 - **Memorable (procedural memory)**: optional, off by default. Your brain remembers *what* happened; Memorable makes your agent remember *how* — finished sessions become replayable procedures stored on your machine (in a standalone local store, or inside your brain database if you opt in), recalled when a similar task comes back. See the section below, and [`docs/memorable-agents.md`](docs/memorable-agents.md) for the agent-facing detail.
