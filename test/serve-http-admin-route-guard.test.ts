@@ -267,6 +267,26 @@ describe('serve-http admin route guard (structural)', () => {
     }
   });
 
+  // Refactor wave 1 split the routes into serve-http-<area>.ts modules that
+  // take requireAdmin from the shared context (`const { requireAdmin } = ctx`).
+  // Dropping it from one route in an in-memory copy of a moved module must
+  // surface as a violation that names that module file:line.
+  for (const { file, route, method, path } of [
+    { file: 'src/commands/serve-http-metrics.ts', route: "app.get('/metrics', requireAdmin, ", method: 'get', path: '/metrics' },
+    { file: 'src/commands/serve-http-admin-api.ts', route: "app.get('/admin/api/stats', requireAdmin, ", method: 'get', path: '/admin/api/stats' },
+  ]) {
+    test(`mutation: dropping requireAdmin from ${path} in ${file} is a violation at that file:line`, () => {
+      const original = moduleSources.find(s => s.file === file);
+      expect(original, `${file} must be scanned`).toBeDefined();
+      expect(original!.text.split(route).length - 1, `${file} registers ${route}exactly once`).toBe(1);
+      const mutatedText = original!.text.replace(route, route.replace('requireAdmin, ', ''));
+      const mutated = moduleSources.map(s => (s.file === file ? { file, text: mutatedText } : s));
+      const line = mutatedText.slice(0, mutatedText.indexOf(route.replace('requireAdmin, ', ''))).split('\n').length;
+      expect(violationsOf(scanModules(moduleSources).unguarded)).toEqual([]);
+      expect(violationsOf(scanModules(mutated).unguarded).map(describeRoute)).toEqual([`app.${method}('${path}') at ${file}:${line}`]);
+    });
+  }
+
   test('self-test: extractor + guard logic CAN fail on a known-bad route (anti-vacuity)', () => {
     // Embedded fixture exercising every shape the real file uses: an
     // allowlisted credential route, a guarded route, a commented-out route

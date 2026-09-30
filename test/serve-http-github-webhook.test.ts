@@ -104,7 +104,7 @@ describe('selectGitHubItemSources', () => {
 
 describe('handler wiring (source pin)', () => {
   test('legacy-only match ACKs 202 ignored before any job submission', () => {
-    const src = surfaceFileSource('serve-http', 'src/commands/serve-http.ts');
+    const src = surfaceFileSource('serve-http', 'src/commands/serve-http-webhooks.ts');
     const guard = src.indexOf('verified.length === 0 && legacyMatched');
     const enqueue = src.indexOf('github_item:', guard);
     expect(guard).toBeGreaterThan(0);

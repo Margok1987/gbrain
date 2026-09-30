@@ -448,7 +448,18 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/commands/serve-http-registration.ts": ["test/e2e/serve-http-consent.test.ts"],
   "src/commands/serve-http-admin-limits.ts": ["test/e2e/serve-http-consent.test.ts"],
   "src/core/harness/client-setup.ts": ["test/e2e/serve-http-consent.test.ts"],
-  "src/commands/serve-http-oauth.ts": ["test/e2e/serve-http-consent.test.ts"],
+  "src/commands/serve-http-oauth.ts": ["test/e2e/serve-http-consent.test.ts", "test/e2e/serve-http-oauth.test.ts"],
+  // Refactor wave 1 split runServeHttp into these modules; each keeps the
+  // façade's e2e claims for the code it took.
+  "src/commands/serve-http-admin-api.ts": ["test/e2e/serve-http-consent.test.ts", "test/e2e/serve-http-oauth.test.ts"],
+  "src/commands/serve-http-metrics.ts": ["test/e2e/serve-http-oauth.test.ts"],
+  "src/commands/serve-http-spa.ts": ["test/e2e/serve-http-consent.test.ts"],
+  "src/commands/serve-http-webhooks.ts": ["test/e2e/serve-http-ingest-webhook.test.ts"],
+  "src/commands/serve-http-mcp.ts": [
+    "test/e2e/serve-http-oauth.test.ts",
+    "test/e2e/harness-access.test.ts",
+    "test/e2e/serve-http-source-grant.test.ts",
+  ],
   "src/commands/serve-http.ts": [
     "test/e2e/serve-http-consent.test.ts",
     "test/e2e/serve-http-ingest-webhook.test.ts",
