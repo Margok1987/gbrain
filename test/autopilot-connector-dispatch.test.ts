@@ -116,6 +116,15 @@ describe('#5673 connector dispatch gate', () => {
     expect(byId.notes.phases).toContain('sync');
   });
 
+  test('connectors whose paths were all cleared still get their own cycles instead of the legacy one', async () => {
+    await addSource('gmail-cleared', { kind: 'google' });
+    await recordConnectorSyncAttempt(engine, 'gmail-cleared');
+    const result = await dispatchPerSource(engine, new MinionQueue(engine), { repoPath: dir, slot: 's', timeoutMs: 60_000, fanoutMax: 10, jsonMode: true, emit: () => {}, log: () => {} });
+    expect(result.legacy_fallback).toBe(false);
+    const cycles = (await jobs()).filter(job => job.name === 'autopilot-cycle');
+    expect(cycles.map(job => [job.data.source_id, job.data.repoPath])).toEqual([['gmail-cleared', null]]);
+  });
+
   test('the upgrade migration records an attempt for every connector the pre-upgrade loop dispatched', async () => {
     await addSource('gmail-dispatched', { kind: 'google' }, dir);
     await addSource('gmail-disabled', { kind: 'google', syncEnabled: false }, dir);

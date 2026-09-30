@@ -421,13 +421,13 @@ export async function dispatchPerSource(
   let connectorIds = new Set<string>();
   try {
     sources = await engine.listAllSources({ localPathOnly: true });
-    if (sources.length > 0) {
-      const connectors = await readConnectorDispatchStates(engine).catch(() => new Map<string, { attempted: boolean }>());
-      connectorIds = new Set([...connectors].filter(([, state]) => state.attempted).map(([id]) => id));
-      const checkouts = new Set(sources.filter(s => !isConnectorSourceKind(s.config?.kind)).map(s => s.id));
-      const all = connectorIds.size ? await engine.listAllSources() : sources;
-      sources = all.filter(s => connectorIds.has(s.id) || checkouts.has(s.id));
-    }
+    // Connector gates are read whether or not any checkout source exists, so a
+    // connector whose path was cleared is never folded into the legacy cycle.
+    const connectors = await readConnectorDispatchStates(engine).catch(() => new Map<string, { attempted: boolean }>());
+    connectorIds = new Set([...connectors].filter(([, state]) => state.attempted).map(([id]) => id));
+    const checkouts = new Set(sources.filter(s => !isConnectorSourceKind(s.config?.kind)).map(s => s.id));
+    const all = connectorIds.size ? await engine.listAllSources() : sources;
+    sources = all.filter(s => connectorIds.has(s.id) || checkouts.has(s.id));
   } catch (e) {
     // Brand-new brain without sources table (pre-v0.18) — fall through
     // to the legacy single-job path. The error path here also covers
