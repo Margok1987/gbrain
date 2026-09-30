@@ -8565,7 +8565,7 @@ gbrain repair --all --apply                    # every kind in order
 any other option the table below does not list, including `--max-usd`: a
 refused run changes nothing. To cap paid embedding work, run the repairs
 through `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. `--all`
-runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `orphan-bindings`, then `embedding-effects`, and stops at the
 first kind that stops.
 
 Each item is re-checked against the page's current state just before it is
@@ -8594,6 +8594,8 @@ should also check `results[].complete`.
 | `timeline` | `timeline_history` | Re-saves each page with its current body through a revision-bound `put_page`. The save writes each database-only timeline entry back into the page as a bullet preceded by `<!-- gbrain:materialized v1 <hash> -->`. | `kept_unrenderable_rows`: entries that would change if written as a bullet (for example an empty source). They stay in the database. |
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
 | `connector-checkpoints` | `connector_checkpoints` | Deletes managed connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days. They accumulate after a content setting such as `g_history_days` changes, or when a connector host older than v0.60.11.0 runs during an upgrade. Cleanup only: it never copies or re-keys a checkpoint, takes no journal admission and runs brain-wide (`--source` does not narrow it). | Rows a queued or running connector write, or a connector's recorded pending set, still references. |
+| `orphan-bindings` | `orphan_persistence_bindings` | Deletes persistence source bindings whose source was removed, or that belong to an earlier incarnation of a source re-added under the same id. Releases before this one left the binding behind on `gbrain sources remove` and `gbrain sources purge`, so the re-added source read as claimed and every `gbrain sync --source <id>` failed with `writer_coordinator_required`. Bookkeeping only: no journal admission, no page or file changes, and it runs brain-wide (`--source` does not narrow it). See [orphan bindings](#orphan-bindings). | A binding that a queued, running or recovering write request of the same source incarnation still references. |
+| `embedding-effects` | `stale_embedding_effects` | Settles stale queued and failed embedding effects of committed writes, which block receipt compaction and activation: `reconciled` when current vectors pass the effect verifier, `superseded` when the page was deleted or a newer revision owns its own effect, `retry_queued` for the owner (paid; a used-up retry allowance gets one new bounded cycle per explicit apply). See [stale queued embedding effects](#stale-queued-embedding-effects). | `blocked` effects, counted by reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). |
 | `safe-chunks` | `safe_index_pending` (also `contextual_retrieval_coverage`, `details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 | `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync or a connector source before this release), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. `embed_skip`: pages marked to skip embedding keep their stored vectors and are not stamped. |
 
@@ -8658,6 +8660,27 @@ pending writes, and re-walks the configured window once. Existing pages stay,
 unchanged ones take no admission, and the account pin is kept. It refuses on a
 Git-backed source and while the account differs
 ([`connector_account_changed`](write-refusals.md#connector-account-changed)).
+
+<a id="orphan-bindings"></a>
+### Orphan persistence bindings
+
+**Say to your agent:** *"I removed a source and added it back, and now sync
+says it needs a coordinator. Fix it."*
+
+Removing a source now also removes that source's persistence binding, and the
+claim check only counts a binding of the source's current incarnation. A
+binding left behind by an older release is reported by doctor's
+`orphan_persistence_bindings` check. Preview, then apply after you agree:
+
+```bash
+gbrain repair orphan-bindings            # lists each binding and why it is orphaned
+gbrain repair orphan-bindings --apply    # deletes them
+gbrain doctor                            # orphan_persistence_bindings is ok
+```
+
+Do not delete binding rows by hand: the repair rechecks, in the same
+statement, that the binding is still orphaned and that no pending write
+request uses it.
 
 ## Resume
 
@@ -8825,6 +8848,25 @@ as one line each, for example
 A line that says `Unknown:` means the check could not run; it is not a clean
 result. Ask the brain host's operator to run the steps above.
 
+### Symptoms from the lifecycle fixes in this release
+
+| Symptom or error text | Issue | Preview | Apply | Verify |
+| --- | --- | --- | --- | --- |
+| `gbrain upgrade` said the upgrade failed, or migrations ran twice | #5693 | `gbrain apply-migrations --list` | `gbrain apply-migrations --yes` | `gbrain doctor` (`minions_migration` ok) |
+| `another apply-migrations is running (host …, pid …)` | #5693 | `gbrain doctor` | wait, then `gbrain apply-migrations --yes` | `gbrain apply-migrations --list` |
+| doctor `orphan_persistence_bindings`; a re-added source fails with `writer_coordinator_required` | #5732 | `gbrain repair orphan-bindings` | `gbrain repair orphan-bindings --apply` | `gbrain doctor` |
+| doctor `stale_embedding_effects`; `writer_not_quiesced` names an embedding effect | #5629, #5734 | `gbrain repair embedding-effects --source <id>` | `gbrain repair embedding-effects --source <id> --apply` | `gbrain doctor` (pending until the owner run commits a `retry_queued` effect) |
+| autopilot never syncs a connector, or prints `has never synced` | #5673 | `gbrain sources status <id>` | `gbrain sync --source <id>` once | `gbrain sources status <id>` |
+| a connector source keeps a stale `local_path` | #5673 | `gbrain sources list` | `gbrain sources set-path <id> --clear` | `gbrain sources list` |
+| classic writes refused after leaving managed mode, or `local_markers: pending` | #5628 | `gbrain sources writer deactivate --dry-run` | see the [deactivate runbook](../architecture/topologies.md#deactivate-runbook) | `gbrain sources writer status` on every host |
+
+`orphan-bindings` and `embedding-effects` also run under `gbrain repair --all`
+and `gbrain doctor --remediate --include-repairs`; `embedding-effects` is paid
+work when it queues a retry. Retry commands: `gbrain sources writer retry-effects <source> --request-id <id>`
+(one failed or parked effect), `gbrain sync --source <id> --no-pull --retry-failed`
+(a failed sync write) and `gbrain repair embedding-effects --source <id> --apply`
+(stuck embedding effects, including a used-up retry allowance).
+
 ## Quarantine self-captured corpus files
 
 `gbrain doctor` reports `self_capture` when the dream session corpus
@@ -8854,14 +8896,36 @@ are sure you do not need it.
 
 ## Stale queued embedding effects
 
+**Say to your agent:** *"Doctor says an embedding effect is stuck and it blocks
+activation. Settle it."*
+
 `gbrain doctor` reports `stale_embedding_effects` when a committed write still
-has a queued embedding effect an hour later that no consumer has claimed
-(#5629). It blocks shared-skill activation with `writer_not_quiesced`, and the
-refusal names the effect. Inspect it with
-`gbrain sources writer status <source> --json`. Inspection cannot clear it:
-`gbrain sources writer retry-effects` only handles failed effects, and the
-path that reconciles or re-queues a stale queued effect (never silently
-dropping it) is not built yet. Doctor remediation reports it as `unsupported`.
+has an embedding effect that is queued an hour later with no consumer claiming
+it (#5629), or that failed (#5734, for example after a provider outage). Either
+one keeps the write receipt from compacting and blocks activation with
+`writer_not_quiesced`. Preview, then apply after you agree, on the brain host:
+
+```bash
+gbrain repair embedding-effects --source <source>          # predicts each effect's outcome
+gbrain repair embedding-effects --source <source> --apply  # settles them
+gbrain doctor                                              # verify: stale_embedding_effects is ok
+```
+
+Each effect ends in exactly one outcome; no obligation is dropped without one:
+
+| Outcome | When | Spends |
+| --- | --- | --- |
+| `reconciled` | The page's current chunks already pass the effect's verifier (same revision, selected column, model and hashes). The effect commits. | Nothing |
+| `superseded` | The page was deleted, or a newer revision of the same page owns its own embedding effect. The effect commits as superseded. | Nothing |
+| `retry_queued` | The owner embeds it: a stale queued effect is re-queued; a failed one gets the `retry-effects` allowance; when that allowance is used up (`embedding_retry_exhausted`), one new bounded retry cycle, once per explicit apply. | Provider calls, up to the bounded retry budget |
+| `blocked` | Nothing changed. `owner_unavailable` (run it on the owner host), `embedding_disabled` or `embedding_unconfigured` (configure embeddings first), `projection_pending` (sync the page first) or `no_replacement_obligation` (the page changed without a newer embedding obligation; run `gbrain embed <slug> --source <source>`). | Nothing |
+
+`retry_queued` is not success: doctor keeps the effect pending until the
+owner's run commits it. The preview marks retries as paid work; through
+`gbrain doctor --remediate --yes --include-repairs --max-usd <n>`, the estimate
+covers the whole retry budget each grant authorizes. A resumed run replays the
+grant it already made instead of granting another cycle. A signature-mismatched
+vector is never reconciled; it is re-embedded.
 
 ## Related
 
@@ -8928,7 +8992,9 @@ of making a duplicate.
 | <a id="embedding_zero_norm"></a>`zero_norm`, `non_finite` or `empty_input` | `embedding_zero_norm` | The embedding provider returned a vector with no direction (all zeros, NaN or infinity) for a chunk, or the chunk text was empty. A vector index silently skips such a row, so gbrain refuses to store it. Only that chunk is refused: the page text and every other chunk's vector are saved, and the page is left for `gbrain embed --stale`. It is never retried as a rate limit or network error. | Inspect the named page's chunk text (empty, whitespace- or symbol-only chunks are the usual cause) or the embedding provider, fix it, then run `gbrain embed <slug>` (add `--source <source>` for a non-default source). If normal text also returns zero vectors, the provider or model is broken; check it with `gbrain doctor`. |
 | `targets_parked` (doctor: `parked_effects`) | effect `error_code` | A Git backup or withdrawal target failed five times in a row and was set aside so the other pages keep committing. The page write itself committed; its Git backup or withdrawal is incomplete. Contention, dependency waits, shutdown and transient database errors never count toward the five. | `gbrain sources writer status <source>`, fix the cause it names, preview with `gbrain sources writer retry-effects <source> --request-id <id> --dry-run`, then run it without `--dry-run`. Each run grants one more attempt per parked target; a target that fails again parks again. |
 | <a id="writer_admin_locked"></a>`writer_admin_locked` | `writer_admin_locked` | The operator set the brain's writer admin lock (`gbrain sources writer lock`), so writer claim, activate, transfer prepare and transfer accept refuse for every caller. Ordinary writes are not affected. | Agents: stop and ask the operator; do not unlock it yourself. The operator runs, on the brain host, `gbrain sources writer unlock`, re-reads `gbrain sources writer status <source> --json`, administers, then `gbrain sources writer lock` again. See the [writer admin lock](../architecture/topologies.md#writer-admin-lock). |
-| <a id="writer_not_quiesced"></a>`writer_not_quiesced` | `writer_not_quiesced` | Activation found an older writer, a legacy lock, or queued, running or recovering work. When work blocks it, the message names the blocking effect id, kind, source, page and request id. | Stop the writers named in the [claim and activate runbook](../architecture/topologies.md#claim-and-activate-runbook), inspect the named work with `gbrain sources writer status <source> --json`, let it finish, then retry. A committed write whose queued embedding effect is never claimed cannot be cleared by a command yet; see [stale queued embedding effects](repair.md#stale-queued-embedding-effects). |
+| <a id="writer_not_quiesced"></a>`writer_not_quiesced` | `writer_not_quiesced` | Activation found an older writer, a legacy lock, or queued, running or recovering work. When work blocks it, the message names the blocking effect id, kind, source, page and request id. | Stop the writers named in the [claim and activate runbook](../architecture/topologies.md#claim-and-activate-runbook), inspect the named work with `gbrain sources writer status <source> --json`, let it finish, then retry. A committed write whose embedding effect is stuck queued or failed is settled by `gbrain repair embedding-effects --source <source>` (preview), then the same command with `--apply`; see [stale queued embedding effects](repair.md#stale-queued-embedding-effects). |
+| <a id="migrations_running"></a>`migrations_running` | `migrations_running` (exit 75) | `gbrain apply-migrations` (or the post-upgrade step of `gbrain upgrade`) found another runner holding the brain's orchestration lock and stopped before touching the migration ledger, so migrations never run twice in parallel. The message names the holder's host and pid. A holder that died is taken over automatically on the next run. `gbrain upgrade` reports this as `Migrations: running`, not as a failed upgrade. | Wait for the other run to finish; `gbrain doctor` shows migration progress. Then `gbrain apply-migrations --yes` confirms everything is applied. |
+| <a id="writer_deactivate"></a>`writer_deactivate` blockers | `writer_not_quiesced`, `writer_admin_locked`, `writer_admin_state_changed`, `writer_lock_unavailable` | `gbrain sources writer deactivate` found pending work (a queued, running or recovering write, a topology change or effect that is not settled, or a live connector or maintenance lease), the writer admin lock, a changed admin state, or a local process holding a worktree lock. Nothing changed. The suggestion names each blocker and its exit. | Run `gbrain sources writer deactivate --dry-run` for the full list, run each named exit (`gbrain cancel-write-request <request_id>`, `gbrain sync --source <id> --no-pull --retry-failed`, `gbrain repair embedding-effects --source <id>`, `gbrain sources writer retry-effects <source> --request-id <id> --dry-run`, `gbrain sources writer unlock`), then deactivate again with a fresh `--expected-state` from `gbrain sources writer status --json`. See the [deactivate runbook](../architecture/topologies.md#deactivate-runbook). |
 | unknown option (repair) | `invalid_params` | `gbrain repair` refuses any option it does not list, so a mistyped flag or `--max-usd` never runs a repair silently without it. | Fix the option (`gbrain repair --help`). To cap paid repair work, run `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. |
 
 `gbrain doctor` reports parked targets as the `parked_effects` check with the
@@ -8944,7 +9010,7 @@ A source with a checkout path (`local_path`, or `sync.repo_path` for the
 that checkout, through the source's canonical owner. PGLite claims that owner
 automatically on the first write. Postgres does not, because several hosts can
 share one Postgres brain and only one of them may own the files. Until someone
-binds the source, `put_page`, `capture` and `delete_page` to it refuse with
+binds the source, page writes to it refuse with
 `owner_unavailable` and `detail: unbound_source`. The suggestion names both
 ways out with the real source filled in:
 
@@ -8957,17 +9023,23 @@ ways out with the real source filled in:
 2. **Allow database-only writes** with
    `gbrain config set persistence.unbound_write database_only` (the default is
    `refuse`; no other value is accepted, and the key can only be set on the
-   brain host). A `put_page` to a new page, or to a page that is already
-   database-only, then writes to the database only. Its result says
+   brain host). Every page write to a page with no recorded canonical file
+   (a new page, or one with no stored source path) then writes to the
+   database only: `put_page`, `capture`, `delete_page`, `restore_page`,
+   `revert_version`, `add_tag`, `remove_tag`, `add_timeline_entry` and the
+   `takes_*` writes. Its result says
    `write_through: { written: false, skipped: "unbound_source" }` with a
    warning. Pages written this way stay database-only: binding the source
    later does not materialize them into canonical files, later writes keep
-   them database-only, and sync never deletes or overwrites them.
+   them database-only, and sync never deletes or overwrites them. To restore
+   the refusal, run `gbrain config unset persistence.unbound_write`.
 
 The opt-in never applies to a page that came from a canonical file (it has a
 stored source path). An edit there could be lost on the owner's next sync, so
-it keeps refusing with only the bind option. `capture` and `delete_page` also
-keep refusing.
+it keeps refusing with only the bind option. `revert_version` is also judged on
+the version it writes: reverting to a version recorded while the page had a
+canonical file refuses the same way (versions taken before this release did not
+record it and count as file-less).
 
 If the source is bound after a database-only write was accepted but before it
 was published, the write fails with the same reason and nothing is written;
