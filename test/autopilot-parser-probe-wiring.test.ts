@@ -14,9 +14,9 @@
 import { describe, test, expect } from 'bun:test';
 import { surfaceFileSource, surfaceSource } from './helpers/source-surface.ts';
 
-// W4 autopilot: containment reads the autopilot surface; positional spans name the module that holds the daemon code.
+// W4 autopilot: containment reads the autopilot surface; positional spans name the module that holds the probe steps.
 const SOURCE = surfaceSource('autopilot');
-const DAEMON_SOURCE = surfaceFileSource('autopilot', 'src/commands/autopilot-daemon.ts');
+const PROBES_SOURCE = surfaceFileSource('autopilot', 'src/commands/autopilot-probes.ts');
 
 describe('autopilot wiring: conversation-parser probe', () => {
   test('invokes the phase module and the audit trail', () => {
@@ -62,7 +62,7 @@ describe('autopilot wiring: conversation-parser probe', () => {
   });
 
   test('probe call wrapped in try/catch that does NOT bump consecutiveErrors', () => {
-    expect(DAEMON_SOURCE).toMatch(/catch[\s\S]*?autopilot\.parser_probe[\s\S]*?do NOT bump consecutiveErrors/);
+    expect(PROBES_SOURCE).toMatch(/catch[\s\S]*?autopilot\.parser_probe[\s\S]*?do NOT bump consecutiveErrors/);
   });
 
   test('DI shape: the exact 7 fields of the parser probe NightlyProbeDeps', () => {

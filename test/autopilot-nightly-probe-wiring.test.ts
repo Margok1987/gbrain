@@ -15,9 +15,9 @@
 import { describe, test, expect } from 'bun:test';
 import { surfaceFileSource, surfaceSource } from './helpers/source-surface.ts';
 
-// W4 autopilot: containment reads the autopilot surface; positional spans name the module that holds the daemon code.
+// W4 autopilot: containment reads the autopilot surface; positional spans name the module that holds the probe steps.
 const SOURCE = surfaceSource('autopilot');
-const DAEMON_SOURCE = surfaceFileSource('autopilot', 'src/commands/autopilot-daemon.ts');
+const PROBES_SOURCE = surfaceFileSource('autopilot', 'src/commands/autopilot-probes.ts');
 
 describe('autopilot wiring: nightly quality probe', () => {
   test('imports runNightlyQualityProbe from the phase module', () => {
@@ -54,8 +54,8 @@ describe('autopilot wiring: nightly quality probe', () => {
     // The try/catch around the probe must log the error but never crash the loop.
     // We verify the structural pattern: the probe call is inside a try block,
     // the catch block calls logError, and consecutiveErrors is not bumped inside the catch.
-    expect(DAEMON_SOURCE).toMatch(/try\s*\{\s*[^}]*nightly_quality_probe/);
-    expect(DAEMON_SOURCE).toMatch(/catch[\s\S]*?autopilot\.nightly_probe[\s\S]*?do NOT bump consecutiveErrors/);
+    expect(PROBES_SOURCE).toMatch(/try\s*\{\s*[^}]*nightly_quality_probe/);
+    expect(PROBES_SOURCE).toMatch(/catch[\s\S]*?autopilot\.nightly_probe[\s\S]*?do NOT bump consecutiveErrors/);
   });
 
   test('DI shape: isEnabled / hasEmbeddingProvider / resolveMaxUsd / resolveRepoRoot / runLongMemEval / runCrossModalBatch / now', () => {
