@@ -716,12 +716,17 @@ Measured effect: ~3.5x per PGLite-booting file (a cold boot replays every
 migration, ~3.1s each on a CI shard). Properties:
 
 - **Idempotent.** A hash short-circuit exits in ~40ms when the snapshot is
-  fresh, and REBUILDS a stale one. The hash covers the raw file bytes of
-  `migrate.ts`, `pglite-schema.ts`, and their schema/migration helpers,
-  including grant constraints and withdrawal triggers. Imported SQL and
-  handler changes invalidate the fixture; coverage instrumentation does not
-  change the hash. Keep the dependency list in `computeSnapshotSchemaHash`
-  and the CI cache keys aligned when adding another schema helper.
+  fresh, and REBUILDS a stale one. The hash covers the raw file bytes of the
+  static import closure of `pglite-schema.ts`, the schema-migration registry
+  and `migrate.ts`, plus the bootstrap file (`src/core/snapshot-schema-inputs.ts`
+  computes the list; no hand list). Imported SQL and handler changes
+  invalidate the fixture; coverage instrumentation does not change the hash.
+  `test/snapshot-inputs-closure.test.ts` checks that list against an
+  independent TS-AST closure, requires every literal dynamic import in the
+  closure to be classified, and discovers all 13 `pglite-snapshot-*` CI cache
+  keys: identical `hashFiles` inputs covering every hash input, each profile
+  restoring its own tar. A failure names the missing file and both workflow
+  files to edit.
 - **Concurrency-safe.** Each profile has its own lock with a PID/token owner
   and host/process-namespace identity. Only a confirmed dead local owner using
   the current retirement protocol can be reclaimed. Both normal release and
