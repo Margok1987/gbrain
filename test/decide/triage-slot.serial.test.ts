@@ -17,7 +17,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
-import { configureGateway, resetGateway, __setDecideTransportForTests } from '../../src/core/ai/gateway.ts';
+import { configureGateway, resetGateway, __setDecideTransportForTests, __setChatTransportForTests } from '../../src/core/ai/gateway.ts';
 import { flushDecideWrites, __resetDecideStoreForTests, insertCalibration, storeQualification } from '../../src/core/ai/decide/store.ts';
 import { policyFingerprint } from '../../src/core/ai/decide/policy.ts';
 import { runTriagePass, buildTriageMapBlock, TRIAGE_VERSION, type JudgeClient, type TriagePassCfg } from '../../src/core/cycle/synthesize.ts';
@@ -363,6 +363,37 @@ describe('S7 on through runTriagePass', () => {
     const noJudge = await pass([t2], { judge: null });
     expect(noJudge.reports[0]!.worth).toBe(true);
     expect(noJudge.reports[0]!.reasons[0]).toContain('incomplete');
+  });
+});
+
+describe('S7 on a local llm: provider (vendor independence)', () => {
+  test('llm:ollama runs the same windows through structured chat; the verdict is cached under the llm identity', async () => {
+    await setConfig({ 'decide.slots.triage.provider': 'llm:ollama:qwen3:8b', 'decide.slots.triage.mode': 'on', 'decide.slots.triage.threshold': '0.5', 'decide.slots.triage.force_on': 'true' });
+    const prompts: any[] = [];
+    __setChatTransportForTests(async (opts) => {
+      const req = JSON.parse(String(opts.messages?.[0]?.content ?? '{}'));
+      prompts.push({ req, schema: Boolean((opts as { responseSchema?: unknown }).responseSchema), purpose: (opts as { purpose?: string }).purpose });
+      const answers = Object.fromEntries(req.questions.map((q: any) => [q.id, q.type === 'choice'
+        ? { type: 'choice', choice: 'strategy', confidence: 0.7, probabilities: { strategy: 0.7 } }
+        : { type: 'noul', noul: String(q.inputs?.window ?? '').includes(SIGNAL) ? 0.8 : 0.1 }]));
+      const text = JSON.stringify({ answers });
+      return { text, blocks: [{ type: 'text', text }], stopReason: 'end', usage: { input_tokens: 10, output_tokens: 10, cache_read_tokens: 0, cache_creation_tokens: 0 },
+        model: 'ollama:qwen3:8b', providerId: 'ollama', responseModel: 'qwen3:8b-q4' } as never;
+    });
+    try {
+      const b = buried();
+      const out = await pass([b]);
+      expect(judgeCalls).toBe(0);
+      expect(out.reports[0]!.worth).toBe(true);
+      const windowPrompts = prompts.filter((p) => p.req.questions[0].type === 'noul');
+      expect(windowPrompts.every((p) => p.req.questions.length === 1 && p.schema && p.purpose === 'decide:triage')).toBe(true);
+      const v = await engine.getDreamVerdict(b.filePath, b.contentHash);
+      expect(v!.model!.startsWith('decide:llm:ollama:qwen3:8b@qwen3:8b-q4#')).toBe(true);
+      const rows = await receipts();
+      expect(rows.every((x) => x.provider === 'llm:ollama:qwen3:8b' && x.model_resolved === 'qwen3:8b-q4')).toBe(true);
+    } finally {
+      __setChatTransportForTests(null);
+    }
   });
 });
 
