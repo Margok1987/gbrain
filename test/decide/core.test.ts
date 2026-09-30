@@ -20,6 +20,7 @@ import { isProtectedResult } from '../../src/core/ai/decide/protection.ts';
 import { stableSplit, splitHash, parseDatasetJsonl } from '../../src/core/ai/decide/dataset.ts';
 import type { CalibrationRow } from '../../src/core/ai/decide/store.ts';
 import { DecideError, thresholdValue, type DecideQuestion } from '../../src/core/ai/decide/types.ts';
+import { SLOT_SPECS } from '../../src/core/ai/decide/slots.ts';
 
 const noul = (id: string, rank?: number, text = 'x'): DecideQuestion => ({ id, kind: 'noul', rank, instructions: 'Is `c` evidence?', inputs: { c: { text, class: 'candidates' } } });
 
@@ -250,8 +251,14 @@ describe('slot policy', () => {
   });
 
   test('unwired slots are unavailable', () => {
-    const p = resolveSlotPolicy({ ...inputs({ ...ON, 'decide.slots.intent.mode': 'on' }, []), slot: 'intent', packShape: packShape('intent') });
-    expect(p).toMatchObject({ inactive: 'slot_unavailable', effective: 'off' });
+    const spec = SLOT_SPECS.intent as { wired: boolean };
+    spec.wired = false;
+    try {
+      const p = resolveSlotPolicy({ ...inputs({ ...ON, 'decide.slots.intent.mode': 'on' }, []), slot: 'intent', packShape: packShape('intent') });
+      expect(p).toMatchObject({ inactive: 'slot_unavailable', effective: 'off' });
+    } finally {
+      spec.wired = true;
+    }
   });
 });
 
