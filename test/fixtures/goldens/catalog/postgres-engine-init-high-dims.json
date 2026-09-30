@@ -186,7 +186,7 @@
       "persistence_topology_changes.persistence_topology_changes_state_check": "c CHECK ((state = ANY (ARRAY['recovering'::text, 'committed'::text, 'failed'::text])))",
       "persistence_topology_changes.persistence_topology_changes_terminal_bytes_check": "c CHECK ((terminal_bytes >= 0))",
       "persistence_worktrees.persistence_worktrees_pkey": "p PRIMARY KEY (id)",
-      "persistence_worktrees.persistence_worktrees_state_check": "c CHECK ((state = ANY (ARRAY['active'::text, 'draining'::text, 'recovering'::text])))",
+      "persistence_worktrees.persistence_worktrees_state_check": "c CHECK ((state = ANY (ARRAY['active'::text, 'draining'::text, 'recovering'::text, 'retired'::text])))",
       "persistence_writer_protocols.persistence_writer_protocols_pkey": "p PRIMARY KEY (worktree_id, host_id)",
       "persistence_writer_protocols.persistence_writer_protocols_protocol_version_check": "c CHECK ((protocol_version = 2))",
       "persistence_writer_protocols.persistence_writer_protocols_worktree_id_fkey": "f FOREIGN KEY (worktree_id) REFERENCES persistence_worktrees(id)",
@@ -1765,12 +1765,13 @@
           "3 compiled_truth text/text NOT NULL",
           "4 frontmatter jsonb/jsonb NOT NULL DEFAULT '{}'::jsonb",
           "5 snapshot_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
-          "6 knowledge_revision uuid/uuid NULL",
-          "7 timeline text/text NULL",
-          "8 title text/text NULL",
-          "9 type text/text NULL",
-          "10 tags jsonb/jsonb NULL",
-          "11 is_deleted boolean/bool NULL"
+          "6 source_path text/text NULL",
+          "7 knowledge_revision uuid/uuid NULL",
+          "8 timeline text/text NULL",
+          "9 title text/text NULL",
+          "10 type text/text NULL",
+          "11 tags jsonb/jsonb NULL",
+          "12 is_deleted boolean/bool NULL"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },
@@ -1829,7 +1830,8 @@
           "4 activated_at timestamp with time zone/timestamptz NULL",
           "5 writer_protocol_floor integer/int4 NOT NULL DEFAULT 1",
           "6 skill_bundles_enabled boolean/bool NOT NULL DEFAULT false",
-          "7 writer_version_cutoff timestamp with time zone/timestamptz NULL"
+          "7 writer_version_cutoff timestamp with time zone/timestamptz NULL",
+          "8 mode_epoch bigint/int8 NOT NULL DEFAULT 1"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },

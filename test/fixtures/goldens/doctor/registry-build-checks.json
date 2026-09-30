@@ -331,6 +331,10 @@
       },
       {
         "category": "brain",
+        "name": "orphan_persistence_bindings"
+      },
+      {
+        "category": "brain",
         "name": "unbound_source"
       },
       {

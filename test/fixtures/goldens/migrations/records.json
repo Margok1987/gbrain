@@ -1,6 +1,6 @@
 {
   "golden": {
-    "count": 173,
+    "count": 176,
     "gaps": [
       17,
       18,
@@ -13,16 +13,20 @@
       "dropInvalidConcurrentIndex": "6864d844b7dfb2fbecdd0fb9c73e06248473376feb794b3fe58f036c70d2d44c",
       "getFtsLanguage": "0d790b4c4af1f67a2a1bbd59470beb13f434917b381931baf8404a41c5d903db",
       "hnswMaxDimsForType": "a187cdcc520f813b7c39da97ce53da58509232ed9f851627ef41abfe1b68bd26",
+      "isConnectorSourceKind": "75180d44191443ddbfe3d24f7bfa57310d423fe6b9f6aee47e21d144c62369e7",
+      "isSyncDisabledConfig": "9aa8cc95f845029171b9deb80c57d7fede3c08580f26360e07461a14bbd6168c",
       "migrateConnectorCheckpoints": "e0403022a56559556c82a9fa1e90d928f36e1d09c7db570e1d788a87d2dc9521",
       "migrationNotice": "9a6607b26a9719ef1833571b137bc8ebfcd1e16d545e89ff8728cf3ccbcbb409",
       "quietMigrationNotices": "4045c32034a8f46204dd5d89e185ff5c35e8073f560f14caa8b127f8a695957c",
       "readExistingEmbeddingShape": "16d92d7cd52d8ebd7e89982f02e1bbdd8e8d08a6712a4ce57fbcf0952b7a6ca5",
+      "recordConnectorSyncAttempt": "78e461c012f63095576cbee28e440945f3eefb2cd956b674aefa6acc83228cb6",
+      "recordPreUpgradeConnectorAttempts": "ee53901a89ff92630a2d4630bda5e5f59eac8378a571f762f3cd4212f9a8ce2b",
       "repairLegacyClientGrants": "c1dc6b1d0c4933c041583aa1c4eacaefc0ff0ae2a67f56cfad7534f87a5ab309",
       "repairLegacyTimelineSourceRows": "405d4ae158482c020b029b93aff1ae4ac6854e6948cafaf82dbef473e6e5552e",
       "slugifyPath": "401dbca23580865d8b168dd8d84db4a6c708c6610d7cb61abafc7d0ee9809063",
       "verifyProjectionStatistics": "59d9ccfea1c53384d8607874a51209a9c2dfd51b2b85a2cb6269fa4120faf1f3"
     },
-    "latest": 178,
+    "latest": 181,
     "records": [
       {
         "handler": {
@@ -2628,6 +2632,54 @@
         "transaction": "absent",
         "verify": "absent",
         "version": 178
+      },
+      {
+        "handler": "absent",
+        "idempotent": true,
+        "name": "page_versions_source_path",
+        "sql": {
+          "length": 68,
+          "sha256": "1a4363f67e3f224fd6b967c18c4cf83befb6516ff7d4f7bbadcf08929262d11b"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 179
+      },
+      {
+        "handler": {
+          "form": "identifier",
+          "helpers": [
+            "isConnectorSourceKind",
+            "isSyncDisabledConfig",
+            "recordConnectorSyncAttempt",
+            "recordPreUpgradeConnectorAttempts"
+          ],
+          "sha256": "2df677f9135b933d756887741e79f3ebd0d926397d206dabb7dca8aca2dbffab"
+        },
+        "idempotent": true,
+        "name": "connector_sync_attempts",
+        "sql": {
+          "length": 0,
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 180
+      },
+      {
+        "handler": "absent",
+        "idempotent": true,
+        "name": "persistence_mode_epoch",
+        "sql": {
+          "length": 365,
+          "sha256": "10f53615c02f94bc339aa4b533ebee27c9f907206b4b5a7c9d507af49772e7ce"
+        },
+        "sqlFor": "absent",
+        "transaction": "absent",
+        "verify": "absent",
+        "version": 181
       }
     ],
     "versions": [
@@ -2803,7 +2855,10 @@
       175,
       176,
       177,
-      178
+      178,
+      179,
+      180,
+      181
     ]
   },
   "normalizer": "migrations-record-v1"
