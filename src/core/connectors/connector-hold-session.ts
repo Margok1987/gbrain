@@ -31,6 +31,7 @@ export interface HoldRunSummary { held: number; newlyHeld: number; skipped: numb
 export class ConnectorHoldSession {
   readonly holds: ItemHoldsRun;
   private readonly attemptedRetries = new Set<string>();
+  private readonly attempted = new Set<string>();
   private skipped = 0;
   private finished: ItemHoldsFinish | null = null;
 
@@ -52,12 +53,19 @@ export class ConnectorHoldSession {
   shouldAttempt(key: string, version: string | null = null): boolean {
     const attempt = this.holds.shouldAttempt(key, version);
     if (!attempt) this.skipped++;
-    else if (this.retryKeys.has(key)) this.attemptedRetries.add(key);
+    else {
+      this.attempted.add(key);
+      if (this.retryKeys.has(key)) this.attemptedRetries.add(key);
+    }
     return attempt;
   }
 
-  /** Held keys a run with no listing entry for them should still re-attempt (retry-held or a due reconsideration). */
-  dueHeldKeys(): string[] { return this.holds.heldKeys().filter(key => this.holds.shouldAttempt(key)); }
+  /**
+   * Held keys this run has not attempted that it should still re-attempt
+   * (retry-held or a due transient reconsideration), for items no listing of
+   * this run returns.
+   */
+  dueHeldKeys(): string[] { return this.holds.heldKeys().filter(key => !this.attempted.has(key) && this.holds.shouldAttempt(key)); }
 
   isHeld(key: string): boolean { return this.holds.isHeld(key); }
 

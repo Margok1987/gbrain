@@ -74,6 +74,13 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     run: async engine => (await import('./checks/connector-checkpoints.ts')).checkConnectorCheckpoints(engine),
   },
   {
+    id: 'connector_held_items', resolution: 'operator', registration: 'wave',
+    count: d => Number(d.held ?? 0),
+    impact: 'Some connector items are held after repeated failures and are not imported',
+    instruction: 'Inspect them with `gbrain sources status <source>`, fix the cause, then run `gbrain sources retry-held <source>` and `gbrain sync --source <source>` (docs/guides/repair.md#connector-held-items).',
+    run: async (engine, scope) => (await import('./checks/connector-holds.ts')).connectorHeldItemsCheck(engine, scope.sourceIds),
+  },
+  {
     id: 'unbound_source', resolution: 'operator', registration: 'wave',
     count: d => (d.sources ?? []).filter((source: { bound?: boolean }) => source.bound).reduce((sum: number, source: { pages?: number }) => sum + Number(source.pages ?? 0), 0),
     impact: 'Some pages written database-only while their source was unbound now sit outside canonical files',

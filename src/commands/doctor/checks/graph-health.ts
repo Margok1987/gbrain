@@ -266,6 +266,7 @@ export const timelineHistoryEntry: DoctorEntry = {
     'derived_visibility',
     'safe_index_pending',
     'connector_checkpoints',
+    'connector_held_items',
     'unbound_source',
     'writer_version',
     'self_capture',

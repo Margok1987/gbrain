@@ -32,6 +32,11 @@
  */
 import { OperationError } from '../ops/contract.ts';
 import { isCredentialError } from '../creds/errors.ts';
+import { sanitizeForJsonb } from '../batch-rows.ts';
+
+/** Hold records are stored in jsonb: keys and values are well-formed, NUL-free text (#5752). */
+const clean = (value: string): string => sanitizeForJsonb(value);
+const cleanOrNull = (value: string | null | undefined): string | null => (typeof value === 'string' ? clean(value) : value ?? null);
 
 export const HOLD_THRESHOLD_RUNS = 3;
 export const HOLD_BREAKER_MIN_ITEMS = 5;
@@ -214,10 +219,10 @@ export class ItemHoldsRun {
   /** The holds this run started with (what mid-run checkpoints carry). */
   initial(): ItemHoldsState { return structuredClone(this.state); }
 
-  record(key: string): ItemHoldRecord | undefined { return this.state.items[key]; }
+  record(key: string): ItemHoldRecord | undefined { return this.state.items[clean(key)]; }
 
   /** True when the item is currently held (whatever this run decides). */
-  isHeld(key: string): boolean { return this.state.items[key]?.state === 'held'; }
+  isHeld(key: string): boolean { return this.state.items[clean(key)]?.state === 'held'; }
 
   /**
    * False when the item is held and nothing re-admits it this run: no
@@ -226,6 +231,8 @@ export class ItemHoldsRun {
    * resets the item's count.
    */
   shouldAttempt(key: string, upstreamVersion: string | null = null): boolean {
+    key = clean(key);
+    upstreamVersion = cleanOrNull(upstreamVersion);
     const record = this.state.items[key];
     if (!record || record.state !== 'held') return true;
     if (this.retryKeys.has(key)) return true;
@@ -238,6 +245,7 @@ export class ItemHoldsRun {
   heldKeys(): string[] { return Object.values(this.state.items).filter(record => record.state === 'held').map(record => record.key); }
 
   succeed(key: string): void {
+    key = clean(key);
     this.attempted.add(key);
     this.failures.delete(key);
     this.succeeded.add(key);
@@ -245,6 +253,7 @@ export class ItemHoldsRun {
 
   /** An item deleted upstream drops its count or hold. */
   drop(key: string): void {
+    key = clean(key);
     this.failures.delete(key);
     this.succeeded.add(key);
   }
@@ -257,10 +266,13 @@ export class ItemHoldsRun {
   fail(key: string, error: unknown, detail: { version?: string | null; meta?: Partial<ItemHoldMeta>; slug?: string | null; requestId?: string | null; ref?: string | null } = {}): ClassifiedConnectorError {
     const classified = classifyConnectorError(error);
     if (classified.scope !== 'item') return classified;
+    key = clean(key);
     this.attempted.add(key);
     this.succeeded.delete(key);
     const requestId = detail.requestId ?? (error instanceof OperationError ? error.writeRequest?.request_id ?? null : null);
-    if (!this.failures.has(key)) this.failures.set(key, { classified, version: detail.version ?? null, meta: detail.meta ?? {}, slug: detail.slug ?? null, requestId, ref: detail.ref ?? null });
+    const meta = Object.fromEntries(Object.entries(detail.meta ?? {}).map(([k, v]) => [k, cleanOrNull(v)])) as Partial<ItemHoldMeta>;
+    if (!this.failures.has(key)) this.failures.set(key, { classified: { ...classified, message: clean(classified.message) }, version: cleanOrNull(detail.version),
+      meta, slug: cleanOrNull(detail.slug), requestId, ref: cleanOrNull(detail.ref) });
     return classified;
   }
 

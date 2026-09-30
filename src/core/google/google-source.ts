@@ -815,6 +815,13 @@ async function sweepGmail(g: GmailSweep, onCurrent?: () => Promise<void>): Promi
       await saveGoogleState(deps, state);
     }
   }
+  // Held threads no listing of this run reached: re-attempt those retry-held
+  // asked for or whose transient reconsideration is due. A failure keeps the
+  // hold and never blocks the cursor.
+  for (const tid of g.holds.dueHeldKeys()) {
+    if (deps.opts.signal?.aborted) return false;
+    await attemptThread(g, tid, null);
+  }
   const isCurrent = (): boolean => {
     if (delta !== 'done' || state.gmail_gap_floor_ms != null || state.gmail_delta_candidate_history_id) return false;
     if (state.gmail_backfill_done) return true;
