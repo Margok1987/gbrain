@@ -136,6 +136,9 @@ beforeEach(() => {
 });
 afterEach(() => {
   for (const r of restores) r();
+  // Failure paths set the CLI exit verdict (mirrored onto process.exitCode);
+  // the test process must not inherit it.
+  process.exitCode = 0;
 });
 
 describe('CLI dispatch lifecycle (connect / remote-route / drain / disconnect)', () => {
