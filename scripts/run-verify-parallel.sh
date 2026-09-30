@@ -128,6 +128,9 @@ CHECKS=(
   # W5 (refactor wave 1): per-function line ratchet over src/**/*.ts (TS AST,
   # ~1.5s); baseline scripts/function-size-baseline.tsv.
   "check:function-size"
+  # EO10 (refactor wave 1): engine-sql/ and schema-migrations/ never import
+  # back up into the engine façades or migrate.ts (ESM TDZ cycles).
+  "check:layering"
   "check:structural-manifest"
   # v0.50.5.0 security wave: compiled binaries must not autoload a cwd bunfig.toml.
   "check:compile-autoload"

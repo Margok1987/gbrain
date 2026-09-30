@@ -861,7 +861,7 @@ per-file rules. They do not cache passing results. Candidate scanner failures
 fail the guard, and matching files retain the same allowlists and diagnostics.
 
 `scripts/guards-manifest.tsv` is THE single registry of `scripts/check-*`
-guards (currently 57), each classified `scanner` (greps/parses repo sources —
+guards (currently 58), each classified `scanner` (greps/parses repo sources —
 must eventually carry fixtures), `buildfresh`, or `repostate` (build/freshness
 guards are exempt-with-reason, not fixture-tested).
 `scripts/guard-self-test.sh` (`bun run check:guard-self-test`, wired into
@@ -872,6 +872,34 @@ trees under `test/fixtures/guards/<guard>/{bad,good}/` via the
 `scripts/check-*` script that isn't registered in the manifest fails the
 build. A guard whose pattern rots into a permanently-green no-op fails CI
 instead of masquerading as coverage.
+
+A guard may carry extra known-bad trees named `bad-<variant>/`; each one must
+fail on its own. Refactor wave 1 uses them to prove that every scanner naming
+a file the wave splits also scans the new module locations
+(`src/core/engine-sql/`, `src/core/schema-migrations/`, `src/commands/sync/`,
+`src/commands/doctor/checks/`, `src/commands/serve-http-*.ts`,
+`src/core/minions/handlers/`): `check-jsonb-pattern.sh`,
+`check-engine-dynamic-import.sh`, `check-source-config-leak.sh`,
+`check-no-legacy-getconnection.sh`, `check-operations-filter-bypass.sh`,
+`check-source-id-projection.sh` (engine-sql) and `check-search-path.sh` (the
+generated PGLite template) each have a bad fixture placed inside the new path. The checklist
+of every script, workflow, helper and doc that names a split file is
+[`docs/designs/refactor-wave-1/path-consumers.md`](designs/refactor-wave-1/path-consumers.md).
+
+#### Layering guard
+
+`scripts/check-layering.ts` (`bun run check:layering`, in `bun run verify`)
+parses every file under `src/core/engine-sql/` and `src/core/schema-migrations/`
+and fails on any import, type-only included, of an engine façade
+(`pglite-engine.ts`, `postgres-engine.ts`, `engine-factory.ts`) from
+engine-sql, or of `src/core/migrate.ts` from schema-migrations. Those
+directories are loaded by the engines and by `migrate.ts`, so an import back
+up is an ESM cycle that can fail with a temporal-dead-zone error at module
+load. Take the executor as a parameter and import types from
+`src/core/engine.ts`; migration helpers live in `schema-migrations/helpers.ts`
+and the `Migration` type in `schema-migrations/types.ts`. Fixtures:
+`test/fixtures/guards/check-layering.ts/`; forms are driven in
+`test/scripts/layering.test.ts`.
 
 ### Placeholder assertions
 

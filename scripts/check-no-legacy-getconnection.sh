@@ -22,7 +22,11 @@
 
 set -euo pipefail
 
-ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+# Self-test seam: GBRAIN_GUARD_ROOT points at a fixture tree. The scan covers
+# src/core and src/commands recursively, including refactor wave 1's module
+# dirs; code moved out of an ALLOWED façade into a new module needs its own
+# ALLOWED row (the doctor/checks/pglite-worker.ts precedent).
+ROOT=${GBRAIN_GUARD_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}
 cd "$ROOT"
 
 # Files that are allowed to touch the singleton today. Every other file
