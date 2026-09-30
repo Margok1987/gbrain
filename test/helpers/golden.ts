@@ -41,7 +41,9 @@ export function stableStringify(value: unknown): string {
 export function sortKeysDeep(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeysDeep);
   if (value instanceof Map) {
-    return Object.fromEntries([...value.entries()].map(([k, v]) => [String(k), sortKeysDeep(v)]).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    const entries: Array<[string, unknown]> = [...value.entries()].map(([k, v]) => [String(k), sortKeysDeep(v)]);
+    entries.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return Object.fromEntries(entries);
   }
   if (value instanceof Set) return [...value].map(sortKeysDeep).sort(compareJson);
   if (value && typeof value === 'object') {
