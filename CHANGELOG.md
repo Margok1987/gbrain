@@ -10,6 +10,64 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.14.0] - 2026-09-30
+
+**Fix wave 4, Lane D (managed lifecycle): you can leave managed mode, stuck embedding effects have a fix, removed sources stop haunting re-added ones, connectors sync without a stale folder, and `gbrain upgrade` stops reporting failures that did not happen.** (Lane D section; the wave integrator merges it with the other lanes.)
+
+### To take advantage of v0.60.14.0
+
+1. Run `gbrain upgrade`; post-upgrade applies the schema migrations (page version source paths, connector sync attempts, `mode_epoch`).
+2. Run `gbrain doctor`. If it reports `orphan_persistence_bindings` or `stale_embedding_effects`, preview the named repair (`gbrain repair orphan-bindings`, `gbrain repair embedding-effects --source <id>`), then apply it with `--apply` after you agree.
+3. A connector that autopilot never synced stays idle until you run `gbrain sync --source <id>` once.
+4. To leave managed mode, follow the deactivate runbook in `docs/architecture/topologies.md`.
+
+### Fixed (#5693, above the cut line)
+- `gbrain upgrade` no longer reports a failed upgrade after the new version installed, and no longer runs migrations twice. Package postinstall now skips `apply-migrations` when `gbrain upgrade` runs the install (post-upgrade owns migrations), an install step that fails or times out after the new version is in place counts as installed, and the run ends with a `Binary:` line and a separate `Migrations:` line (complete; running, with the other runner's host and pid; or failed, with the exact recovery command).
+- Two `gbrain apply-migrations` runs can no longer orchestrate the same brain at once. The first holds an orchestration lock through its final status: on Postgres a renewable lease in `gbrain_cycle_locks` that works through transaction-mode PgBouncer, on PGLite a separate native lock file, so the holder's own migration steps still open the database. A second run stops with `another apply-migrations is running (host …, pid …)` and exit status 75 before it touches the migration ledger; a holder that died is taken over automatically.
+
+### Behavior changes
+- `bun install` postinstall inside `gbrain upgrade` defers migrations to `gbrain post-upgrade`. Plain `bun install -g` outside `gbrain upgrade` still applies them in postinstall.
+- `gbrain apply-migrations` exits 75 (`migrations_running`) when another run holds the lock. `--list` and `--dry-run` never take the lock.
+
+### Migration note
+- Upgrading from v0.60.13.x or older: the old `gbrain upgrade` binary drives this upgrade, so its postinstall still runs migrations once and post-upgrade then finds them up to date. The new outcome lines appear from the next upgrade on.
+
+### Fixed (#5732)
+- Removing a source no longer leaves its persistence binding behind. `gbrain sources remove`, `gbrain sources purge <id>`, the `sources_remove` operation and the expired-archive purge now delete that source incarnation's binding with the source, and the claim check and doctor's `unbound_source` count only a binding of the source's current incarnation, so a source re-added under the same id syncs again instead of failing with `writer_coordinator_required`. Adopted from community PR #5748 with changes (thanks @harjothkhara).
+- New doctor check `orphan_persistence_bindings` and repair kind `gbrain repair orphan-bindings` (preview by default, `--apply` to delete) for bindings an older release left behind. It runs brain-wide and keeps a binding a pending write request still uses. Never delete binding rows by hand.
+
+### Changed (#5393)
+- `persistence.unbound_write=database_only` now covers every page write to an unbound Postgres filesystem source, not only `put_page`: `capture`, `delete_page`, `restore_page`, `revert_version`, `add_tag`, `remove_tag`, `add_timeline_entry` and the `takes_*` writes save to the database only when the target page has no recorded canonical file, and report `write_through.skipped: "unbound_source"` with a warning, like `put_page`. A page that came from a canonical file keeps refusing with the bind hint, and `revert_version` is also judged on the version it writes (page versions now record the page's canonical file; migration v179, renumbered at integration).
+
+### Behavior changes
+- If you set `persistence.unbound_write=database_only`, `capture`, tag, timeline, takes, delete, restore and revert writes to file-less pages on an unbound source now succeed database-only instead of refusing. Opt out: `gbrain config unset persistence.unbound_write` restores the refusal.
+
+### Fixed (#5673)
+- Autopilot now syncs Gmail, Calendar and GitHub connector sources on its interval regardless of their `local_path`, and no longer hands a connector's stale checkout path to its sync or to the per-source cycle (which the managed filesystem guard refused every interval). A connector that has synced or tried to sync once is dispatched; its sync job carries no repository path, and its per-source cycle runs only its database phases (extract, extract_facts, recompute_emotional_weight) with no brain directory and never resolves the global `sync.repo_path`, so each connector is synced exactly once per interval.
+- New `gbrain sources set-path <id> --clear` clears a connector source's stale `local_path`. It takes no path, refuses a filesystem source (naming `gbrain sources set-path <id> <path>` and `gbrain sources remove <id>`) and refuses a connector bound to a canonical owner (naming `gbrain sources writer status <id>`).
+
+### Behavior changes
+- Connector dispatch no longer depends on `local_path`. Automatic capture stays opt-in: a connector that never synced stays idle, spends nothing, and autopilot prints `gbrain sync --source <id>` once. This release's schema migration (v180, renumbered at integration) records a sync attempt for every connector the previous release's autopilot dispatched (a `local_path` and not `syncEnabled=false`), so nothing autopilot syncs today goes idle. `gbrain sources add --kind google|github` and `gbrain google setup` say that autopilot keeps the source synced after its first sync. Opt out per source with `syncEnabled=false`.
+
+### Fixed (#5629 residual, #5734)
+- Stuck embedding effects now have a supported fix. `gbrain repair embedding-effects [--source <id>]` previews, and `--apply` settles, every embedding effect of a committed write that is queued with no owner run for over an hour or that failed. Each one ends `reconciled` (the page's current vectors pass the effect's verifier, so nothing is spent), `superseded` (the page was deleted, or a newer revision owns its own embedding effect), `retry_queued` (the owner embeds it; a used-up `retry-effects` allowance gets one new bounded retry cycle per explicit apply, bound to that run so a resumed run never grants a second one) or `blocked` with the reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). Settled effects stop blocking receipt compaction and activation. Doctor's `stale_embedding_effects` now also counts failed effects, names the repair command, stays pending while an effect is only re-queued, and reports `operator_required` when no embedding model is configured. `retry-effects` names the repair when its allowance is exhausted.
+
+### Added (#5455, #5628)
+- `gbrain sources writer deactivate` converts a managed brain back to classic mode, as a planned mode conversion (runbook in `docs/architecture/topologies.md#deactivate-runbook`). It is brain-wide and trusted-local, bound by `--admin-intent writer_deactivate --expected-state <admin_state>` (a wrong state prints the current `admin_state`), honors the writer admin lock, and `--dry-run` lists every blocker with its exit and what would change. Pending writes, unsettled effects, recoveries and live connector or maintenance leases refuse with the blocking ids and their exits (`gbrain cancel-write-request <request_id>`, `gbrain sync --source <id> --no-pull --retry-failed`, `gbrain repair embedding-effects --source <id>`, `gbrain sources writer retry-effects <source> --request-id <id> --dry-run`, `gbrain sources writer unlock`). Success retires every worktree (write receipts stay valid), removes source and host bindings, increments the new `mode_epoch`, and records a committed `writer_deactivate` receipt; canonical files and database pages are unchanged.
+- Local managed markers no longer fence classic writers forever (#5628). The first gbrain command from this release on any host removes the markers and registry records of a retired epoch of that brain; a marker from an unknown or newer epoch (for example after restoring an older backup) is kept and reported. Deactivate output and `gbrain sources writer status` report `mode: classic` separately from `local_markers` (`cleared`, or `pending` with each path).
+
+### Migration note
+- Schema migration v181 (renumbered at integration) adds `persistence_brain.mode_epoch` and the `retired` worktree state. Older binaries honor local markers without the new cleanup: after deactivating, run `gbrain sources writer status` once on every other host before an older binary writes there.
+- The `min_writer_version` floor stays deferred: while a brain is managed the database writer guard is the enforcement, and after deactivation that guard is inert.
+
+### Behavior changes (Lane D summary, each with its opt-out)
+- Connector dispatch regardless of `local_path` (opt out per source with `syncEnabled=false`).
+- The widened `persistence.unbound_write=database_only` rule for users who set it (`gbrain config unset persistence.unbound_write` restores the refusal).
+- `gbrain upgrade` owns migrations through post-upgrade; package postinstall skips them only under `gbrain upgrade`.
+
+### Credits
+- Community PR #5748 by @harjothkhara (`sources remove` leaves the persistence binding, #5732), adopted with changes.
+
 ## [0.60.13.0] - 2026-09-30
 
 **Two things: your agent can now ask search for the whole conversation, section or page around each hit in the same call (off by default until a matched study shows it helps), and seven correctness fixes land, led by a privacy one: the entity card no longer shows remote agents that a private page links to a public one.**
