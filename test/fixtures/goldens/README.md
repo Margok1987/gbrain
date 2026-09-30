@@ -5,7 +5,7 @@ reproduce byte for byte. Each file is written by `test/helpers/golden.ts` as
 `{ "normalizer": <name>, "golden": <normalized value> }` with sorted object keys.
 
 - Compare: run the owning test normally (`bun test <file>`).
-- Regenerate (deliberate, reviewer-visible): `GBRAIN_UPDATE_GOLDENS=1 bun test <file>`.
+- Regenerate (deliberate, reviewer-visible): `GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <file>`.
   A regenerated golden needs a reason in the PR body; a refactor commit never
   regenerates one.
 - Every golden names its normalizer. Each normalizer was proven by capturing the

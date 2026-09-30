@@ -8,7 +8,7 @@
  * capturing the golden twice and diffing to empty (`expectNormalizerStable`).
  *
  * Fixtures live under `test/fixtures/goldens/`. Regenerate deliberately with
- * `GBRAIN_UPDATE_GOLDENS=1 bun test <file>`; a regenerated golden is a
+ * `GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <file>`; a regenerated golden is a
  * reviewer-visible diff and must be justified in the PR body.
  */
 
@@ -125,19 +125,19 @@ function render(normalizer: Normalizer<any>, actual: unknown): string {
 
 /**
  * Compare `actual` (after `normalizer`) with `test/fixtures/goldens/<name>.json`.
- * With `GBRAIN_UPDATE_GOLDENS=1` the fixture is (re)written instead.
+ * With `GBRAIN_TEST_UPDATE_GOLDENS=1` the fixture is (re)written instead.
  */
 export function expectGolden<T>(name: string, actual: T, normalizer: Normalizer<T>): void {
   const file = join(GOLDENS_DIR, `${name}.json`);
   const text = render(normalizer, actual);
-  if (process.env.GBRAIN_UPDATE_GOLDENS === '1') {
+  if (process.env.GBRAIN_TEST_UPDATE_GOLDENS === '1') {
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, text);
     return;
   }
   if (!existsSync(file)) {
     throw new Error(
-      `FAIL: missing golden ${file}\nWhy: every W0 golden is captured on master before any move.\nFix: GBRAIN_UPDATE_GOLDENS=1 bun test <this file> on master, then review and commit the fixture.\nSee: test/fixtures/goldens/README.md`,
+      `FAIL: missing golden ${file}\nWhy: every W0 golden is captured on master before any move.\nFix: GBRAIN_TEST_UPDATE_GOLDENS=1 bun test <this file> on master, then review and commit the fixture.\nSee: test/fixtures/goldens/README.md`,
     );
   }
   expect(text).toBe(readFileSync(file, 'utf8'));
