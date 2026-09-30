@@ -12,7 +12,7 @@
  */
 import { expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { commitGitTargets, INDEX_LOCK_GRACE_FOR_TESTS } from '../src/core/persistence/effect-git.ts';
@@ -138,4 +138,23 @@ test('a ref lock with the same wording is not the checkout index lock', async ()
     writeFileSync(join(root, '.git', 'refs', 'heads', 'index.lock'), '');
     await expect(withEnv({ PATH: shim.path }, () => commitGitTargets(root, ['a.md']))).rejects.toMatchObject({ code: 'git_unavailable' });
   } finally { rmSync(root, { recursive: true, force: true }); rmSync(shim.bin, { recursive: true, force: true }); }
+});
+
+test('a lock reported under another spelling of the checkout (symlink) or under a path with a newline is still the index lock', async () => {
+  const parent = mkdtempSync(join(tmpdir(), 'gbrain-spelling-'));
+  try {
+    const real = join(parent, 'line\nbreak-brain');
+    execFileSync('mkdir', [real]);
+    git(real, 'init', '-q');
+    git(real, 'config', 'user.name', 'Example'); git(real, 'config', 'user.email', 'example@example.invalid');
+    writeFileSync(join(real, 'a.md'), 'first\n'); git(real, 'add', '-A'); git(real, 'commit', '-qm', 'seed');
+    writeFileSync(join(real, 'a.md'), 'second\n');
+    writeFileSync(join(real, '.git', 'index.lock'), '');
+    await expect(commitGitTargets(real, ['a.md'])).rejects.toMatchObject({ code: 'git_index_locked' });
+    const alias = join(parent, 'alias');
+    symlinkSync(real, alias);
+    // Git may report the inherited PWD spelling of the same directory.
+    await expect(withEnv({ PWD: alias }, () => commitGitTargets(real, ['a.md']))).rejects.toMatchObject({ code: 'git_index_locked' });
+    await expect(commitGitTargets(alias, ['a.md'])).rejects.toMatchObject({ code: 'git_index_locked' });
+  } finally { rmSync(parent, { recursive: true, force: true }); }
 });
