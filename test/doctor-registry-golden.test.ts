@@ -14,7 +14,9 @@
  * Map/Set iteration). Stability is proven in-test by extracting twice.
  */
 import { describe, expect, test } from 'bun:test';
-import { defineNormalizer, expectGolden, expectNormalizerStable } from './helpers/golden.ts';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { GOLDENS_DIR, defineNormalizer, expectGolden, expectNormalizerStable } from './helpers/golden.ts';
 import { extractDoctorRegistry, type DoctorRegistry } from './helpers/doctor-registry-ast.ts';
 import {
   BRAIN_CHECK_NAMES,
@@ -59,5 +61,25 @@ describe('doctor check registry golden (AST, master order)', () => {
     expect(early_returns_after).toEqual(['db_repair_recurrence', 'connection']);
     expect(names.indexOf('connection')).toBeLessThan(names.indexOf('pgvector'));
     expect(names.at(-1)).toBe('dangling_aliases');
+  });
+
+  test('every runtime doctor golden emits registry names in registry order (extractor recall)', () => {
+    const { names, sequence } = extractDoctorRegistry();
+    const dir = join(GOLDENS_DIR, 'doctor');
+    const files = readdirSync(dir).filter((f) => /^(json-pglite|json-postgres|early-stop)-.*\.json$/.test(f));
+    expect(files.length).toBeGreaterThan(0);
+    for (const f of files) {
+      const golden = (JSON.parse(readFileSync(join(dir, f), 'utf-8')) as { golden: unknown }).golden as
+        | { report?: { checks?: Array<{ name: string }> } }
+        | Array<{ name: string }>;
+      const emitted = (Array.isArray(golden) ? golden : golden.report?.checks ?? []).map((c) => c.name);
+      expect({ f, missing: emitted.filter((n) => !names.includes(n)) }).toEqual({ f, missing: [] });
+      let cursor = 0;
+      for (const n of emitted) {
+        const at = sequence.indexOf(n, cursor);
+        expect({ f, name: n, inOrder: at >= 0 }).toEqual({ f, name: n, inOrder: true });
+        cursor = at + 1;
+      }
+    }
   });
 });

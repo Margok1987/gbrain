@@ -33,6 +33,8 @@ const REPO_ROOT = join(import.meta.dir, '..', '..');
 
 export interface DoctorRegistry {
   names: string[];
+  /** Every reachable name in walk order, repeats kept (one entry per emit site). */
+  sequence: string[];
   early_returns_after: string[];
   unresolved: string[];
 }
@@ -194,6 +196,7 @@ function templateText(expr: ts.TemplateExpression): string {
 
 class Extractor {
   names: string[] = [];
+  sequence: string[] = [];
   unresolved: string[] = [];
   lastAdded: string | null = null;
   private seenNames = new Set<string>();
@@ -201,6 +204,7 @@ class Extractor {
 
   add(name: string) {
     this.lastAdded = name;
+    this.sequence.push(name);
     if (this.seenNames.has(name)) return;
     this.seenNames.add(name);
     this.names.push(name);
@@ -447,5 +451,5 @@ export function extractDoctorRegistry(rel = 'src/commands/doctor.ts', fnName = '
     ts.forEachChild(node, visit);
   };
   visit(body);
-  return { names: x.names, early_returns_after: earlyReturnsAfter, unresolved: x.unresolved };
+  return { names: x.names, sequence: x.sequence, early_returns_after: earlyReturnsAfter, unresolved: x.unresolved };
 }
