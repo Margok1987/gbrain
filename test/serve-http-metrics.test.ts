@@ -19,7 +19,6 @@
 import { describe, expect, test } from 'bun:test';
 import express from 'express';
 import type { Server } from 'http';
-import { readFileSync } from 'node:fs';
 import {
   createMetricsCounters,
   metricsTrackingMiddleware,
@@ -27,6 +26,7 @@ import {
   renderPrometheusMetrics,
   type MetricsCounters,
 } from '../src/commands/serve-http-metrics.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 describe('recordCompletedRequest', () => {
   test('classifies status >= 400 as errors and records latency samples', () => {
@@ -141,7 +141,7 @@ describe('serve-http.ts wiring (structural — the two defects of the original P
   // test-reads-source-ok[trust-boundary]: mount ORDER (middleware before first route) and the requireAdmin
   // gate are wiring properties of the real serve-http.ts; the behavioral tests above run a
   // rebuilt harness app, so only a source scan pins the real module without booting it.
-  const src = readFileSync(new URL('../src/commands/serve-http.ts', import.meta.url), 'utf-8');
+  const src = surfaceFileSource('serve-http', 'src/commands/serve-http.ts');
 
   test('tracking middleware is mounted before the first route registration', () => {
     const mw = src.indexOf('metricsTrackingMiddleware(');

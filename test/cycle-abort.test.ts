@@ -15,6 +15,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 // We can't easily import runCycle with a real engine for unit tests,
 // but we CAN test the checkAborted pattern and CycleOpts contract.
@@ -93,10 +94,7 @@ describe('autopilot-cycle handler contract (v0.20.5)', () => {
   test('handler registration passes signal to runCycle', async () => {
     // Verify the handler code in jobs.ts includes job.signal
     const fs = await import('fs');
-    const jobsSource = fs.readFileSync(
-      new URL('../src/commands/jobs.ts', import.meta.url),
-      'utf8',
-    );
+    const jobsSource = surfaceFileSource('jobs', 'src/commands/jobs.ts');
 
     // The autopilot-cycle handler MUST pass signal to runCycle.
     // Source-level regression guard.

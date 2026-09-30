@@ -9,6 +9,7 @@ import * as path from 'node:path';
 import { withEnv } from './helpers/with-env.ts';
 import { logRerankFailure } from '../src/core/rerank-audit.ts';
 import { doctorSource, doctorFileSource } from './helpers/doctor-source.ts';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
 // Health fixtures configure fake provider keys. Clear the gateway snapshot as
 // well as each fixture's process env so later tests cannot send real requests.
@@ -1406,7 +1407,7 @@ describe('supervisor crash classifier wiring (v0.35.x)', () => {
   });
 
   test('jobs.ts supervisor status uses summarizeCrashes — same wiring as doctor', async () => {
-    const source = await Bun.file(new URL('../src/commands/jobs.ts', import.meta.url)).text();
+    const source = surfaceFileSource('jobs', 'src/commands/jobs.ts');
     // Both surfaces MUST go through the shared helper. Without this, the two
     // CLI commands report drifting crash counts (the bug class codex caught
     // during the eng review outside-voice pass).

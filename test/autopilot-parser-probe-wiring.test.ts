@@ -12,11 +12,9 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { surfaceFileSource } from './helpers/source-surface.ts';
 
-const AUTOPILOT_SRC = resolve('src/commands/autopilot.ts');
-const SOURCE = readFileSync(AUTOPILOT_SRC, 'utf-8');
+const SOURCE = surfaceFileSource('autopilot', 'src/commands/autopilot.ts');
 
 describe('autopilot wiring: conversation-parser probe', () => {
   test('invokes the phase module and the audit trail', () => {
