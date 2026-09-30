@@ -64,7 +64,7 @@ export const SLOT_SPECS: Readonly<Record<DecideSlot, SlotSpec>> = {
   triage: {
     slot: 'triage', lane: 'background', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['dream'],
     egressClasses: ['conversation'], shadowSample: 1, whatIfReproducible: true, questionVersion: 1,
-    failDirection: 'fail open: today\'s triage path', wired: false,
+    failDirection: 'fail open: today\'s triage path', wired: true,
   },
   grounding: {
     slot: 'grounding', lane: 'background', questionKind: 'noul', harmful: true, thresholded: true, callSites: ['dream'],
