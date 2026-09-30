@@ -954,6 +954,42 @@ When a domain moves, delete its members' rows and add its `migrated` row in
 the same commit. Fixtures: `test/fixtures/guards/check-engine-sql-ratchet.ts/`;
 forms are driven in `test/scripts/engine-sql-ratchet.test.ts`.
 
+#### Engine-sql dynamic SQL
+
+`scripts/check-engine-sql-dynamic.ts` (`bun run check:engine-sql-dynamic`, in
+`bun run verify`) parses every file under `src/core/engine-sql/` except
+`fragment.ts`, the renderer, which writes `$n` and splices trusted text by
+design. In engine-sql every value reaches SQL as a bound parameter through
+`sqlFragment`, and only constant text is spliced. Trusted text is a string
+literal; a `const` in the same file initialized with trusted text or an
+`as const` object or array literal (members and element accesses included); a
+`CONSTANT_ALLOWLIST` name (`ENRICH_ORDER_SQL`); a call to a `VETTED_BUILDERS`
+entry (`pageReadFilter`, `buildRecencyComponentSql`,
+`privatePagesFilterFragment`, `currentCodeEdgeFilter`, `buildCJKKeywordSql`,
+`currentTextProjectionFilter`); a template or `+` chain whose parts are all
+trusted or are numbers the same function checked earlier with
+`Number.isFinite(<same expression>)`; or a conditional whose branches are both
+trusted. Both registries live in the script with a one-line reason each. The
+guard fails on:
+
+- `trustedSql(arg)` with an arg that is not trusted text: bind the value with
+  `${value}` in `sqlFragment` instead, or register a new builder with its
+  reason after review;
+- an untagged template or `+` concatenation, passed directly or through a
+  local variable (`let` appends included) as the SQL of `.query(`,
+  `.unsafe(`, `.executeRaw(` or `executeRawJsonb(`, with an untrusted part:
+  compose with `sqlFragment` and run it with `executor.run(fragment)`;
+- a literal `$<digit>`, or a `$` right before a substitution, in a composed
+  string (a template with substitutions, any `sqlFragment` template, any `+`
+  operand): let `renderFragment` number the parameters. A static string passed
+  as-is may carry `$1`;
+- an expanded list, `IN (` right before a substitution or a non-literal `+`
+  operand: bind the array as one parameter, `= ANY(${ids}::text[])`, so
+  prepared-statement caches stay bounded.
+
+Fixtures: `test/fixtures/guards/check-engine-sql-dynamic.ts/`; forms are
+driven in `test/scripts/engine-sql-dynamic.test.ts`.
+
 ### Placeholder assertions
 
 `scripts/check-test-placeholders.mjs` (`bun run check:test-placeholders`, in

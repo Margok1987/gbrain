@@ -134,6 +134,9 @@ CHECKS=(
   # Goal (a) (refactor wave 1): engine SQL only shrinks; baseline
   # scripts/engine-sql-baseline.tsv.
   "check:engine-sql-ratchet"
+  # CQ3 / EO17 (refactor wave 1): engine-sql splices only constant text, no
+  # composed $n, no expanded IN lists.
+  "check:engine-sql-dynamic"
   "check:structural-manifest"
   # v0.50.5.0 security wave: compiled binaries must not autoload a cwd bunfig.toml.
   "check:compile-autoload"
