@@ -543,6 +543,13 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   "src/core/repair/request-indexes.ts": ["test/e2e/persistence-request-indexes-postgres.test.ts"],
   "src/commands/doctor/checks/persistence-requests.ts": ["test/e2e/persistence-request-indexes-postgres.test.ts"],
   "src/core/schema-migrations/v179-persistence-request-sync-run-indexes.ts": ["test/e2e/persistence-request-indexes-postgres.test.ts"],
+  // Security wave ENG-1/ENG-2: credential-safe projection and the existing-brain re-chunk.
+  "src/core/credential-projection.ts": ["test/e2e/credential-projection-repair.test.ts"],
+  "src/core/page-state/credential-reseal.ts": ["test/e2e/credential-projection-repair.test.ts"],
+  "src/core/schema-migrations/v187-pages-credential-projection-pending.ts": ["test/e2e/credential-projection-repair.test.ts"],
+  "src/commands/migrations/v0_60_28.ts": ["test/e2e/credential-projection-repair.test.ts"],
+  "src/commands/doctor/checks/credential-projection.ts": ["test/e2e/credential-projection-repair.test.ts"],
+  "src/core/search/two-pass.ts": ["test/e2e/credential-projection-repair.test.ts"],
   "src/core/persistence/accepted-pending.ts": ["test/e2e/connector-wave3.test.ts"],
   "src/commands/google-attachments.ts": ["test/e2e/google-attachments-postgres.test.ts"],
   "src/core/backup/**": ["test/e2e/backup-coverage-parity.test.ts"],
