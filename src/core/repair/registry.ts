@@ -25,6 +25,7 @@ import { requestIndexesRepair } from './request-indexes.ts';
 import { connectorFencesRepair } from './connector-fences.ts';
 import { orphanBindingsRepair } from './orphan-bindings.ts';
 import { embeddingEffectsRepair } from './embedding-effects.ts';
+import { googleFileModesRepair } from './google-file-modes.ts';
 
 export interface RepairKindSpec {
   kind: RepairKind;
@@ -82,6 +83,12 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     summary: 'Settle stale queued or failed embedding effects of committed writes (#5629, #5734), which block receipt compaction and activation. '
       + 'Each effect is reconciled (current vectors pass the effect verifier), superseded (page deleted, or a newer revision owns its own effect), '
       + 'retry_queued for its owner (paid; a consumed retry allowance gets one new bounded cycle per explicit run) or blocked with the reason. Never drops an obligation.',
+  },
+  'google-file-modes': {
+    handler: googleFileModesRepair, embeds: 'none', checks: ['google_file_modes'],
+    summary: 'Clear group and other permission bits on files and directories gbrain wrote under a Google source directory outside ~/.gbrain '
+      + '(cursor state, mail/calendar/contact pages and the subdirectories gbrain laid out), written before this release with the default umask. '
+      + 'Never the directory you chose, never through a symlink, never another user\'s file. Filesystem only.',
   },
 };
 

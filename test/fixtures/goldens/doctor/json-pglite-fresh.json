@@ -658,6 +658,18 @@
           "status": "ok"
         },
         {
+          "category": "ops",
+          "details": {
+            "count": 0,
+            "docs": "docs/guides/google-connect.md",
+            "repair": "google-file-modes",
+            "sources": []
+          },
+          "message": "No group- or world-readable gbrain files under Google source directories outside ~/.gbrain.",
+          "name": "google_file_modes",
+          "status": "ok"
+        },
+        {
           "category": "brain",
           "message": "Sampled 0 pages; no bare-tweet phrases or external links.",
           "name": "integrity",

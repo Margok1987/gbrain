@@ -274,6 +274,7 @@ export const timelineHistoryEntry: DoctorEntry = {
     'writer_version',
     'self_capture',
     'stale_embedding_effects',
+    'google_file_modes',
   ],
   run: runTimelineHistory,
 };

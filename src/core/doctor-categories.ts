@@ -196,6 +196,7 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'connection',
   'db_only_collector_collision',
   'federation_health',
+  'google_file_modes',
   'google_oauth',
   'home_dir_in_worktree',
   'index_audit',
