@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, unlinkSync, o
 import { dirname } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
-import { atomicWriteFileSync } from '../atomic-write.ts';
+import { atomicWriteFileSync, mkdirPrivate } from '../atomic-write.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { sha256 } from './digest.ts';
 import { authorizeStoredRequest } from './authority.ts';
@@ -38,8 +38,10 @@ interface PreparedMutationBase {
   apply(tx: BrainEngine): Promise<Record<string, unknown>>;
   validate?(tx: BrainEngine): Promise<void>;
 }
+/** A page file target; `publishMode` (Google pages) is the exact mode it publishes with, and its created directories get 0700. */
+export type PageMutationFile = MutationFile & { publishMode?: number };
 export type PreparedMutation = PreparedMutationBase & (
-  | { target?: 'page'; file?: MutationFile; files?: never }
+  | { target?: 'page'; file?: PageMutationFile; files?: never }
   | { target: 'skill_bundle'; file?: never; files: MutationFile[]; validate(tx: BrainEngine): Promise<void> }
 );
 export interface PublicationHooks {
@@ -60,19 +62,21 @@ function flushDirectory(path: string): void {
     if (!(process.platform === 'win32' && ['EISDIR','EPERM','EINVAL','ENOTSUP'].includes(code ?? ''))) throw error;
   } finally { if (fd !== undefined) closeSync(fd); }
 }
-function publishFile(file: NonNullable<PreparedMutation['file']>, stagingPath?: string, afterStagingFlush?: () => void, mode?: number | null): void {
+function publishFile(file: PageMutationFile, stagingPath?: string, afterStagingFlush?: () => void, mode?: number | null): void {
   if (!isWriteTargetContained(file.path, file.root)) throw new OperationError('storage_error', 'Canonical file target escapes its source root.');
-  mkdirSync(dirname(file.path), { recursive: true });
+  if (file.publishMode === undefined) mkdirSync(dirname(file.path), { recursive: true });
+  else mkdirPrivate(dirname(file.path), file.root);
   if (!isWriteTargetContained(file.path, file.root)) throw new OperationError('storage_error', 'Canonical parent path changed during publication.');
+  const openMode = mode ?? file.publishMode;
   if (file.content === null) {
     try { unlinkSync(file.path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-  } else atomicWriteFileSync(file.path, file.content, { durable: true, stagingPath, afterStagingFlush: () => {
+  } else atomicWriteFileSync(file.path, file.content, { durable: true, stagingPath, ...(openMode === undefined ? {} : { mode: openMode }), afterStagingFlush: () => {
+    afterStagingFlush?.();
     if (mode !== undefined && mode !== null && stagingPath) {
       chmodSync(stagingPath, mode);
       const fd = openSync(stagingPath, 'r');
       try { fsyncSync(fd); } finally { closeSync(fd); }
     }
-    afterStagingFlush?.();
   } });
   flushDirectory(file.path);
 }
@@ -343,7 +347,8 @@ export async function recoverPublication(engine: BrainEngine, id: string, hostId
               stageBundleFile(file, restored);
               if (file.content !== null) hooks.fileBoundary?.('restoration_staging_flushed', current, index);
               publishStagedBundleFile(restored, phase => hooks.fileBoundary?.(`restoration_${phase}`, current, index));
-            } else publishFile(file, record.staging?.restoration?.path, undefined, record.mode);
+            } else publishFile(file, record.staging?.restoration?.path,
+              () => hooks.fileBoundary?.('restoration_staging_flushed', current, index), record.mode);
           });
         }
         hooks.fileBoundary?.('after_restore', current, index);

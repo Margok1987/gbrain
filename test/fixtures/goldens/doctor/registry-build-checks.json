@@ -370,6 +370,10 @@
         "name": "stale_embedding_effects"
       },
       {
+        "category": "ops",
+        "name": "google_file_modes"
+      },
+      {
         "category": "brain",
         "name": "integrity"
       },

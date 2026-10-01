@@ -148,6 +148,13 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     impact: 'A committed write still has a stale queued or failed embedding effect that blocks compaction and activation',
     run: async (engine, scope) => (await import('./checks/stale-embedding-effects.ts')).staleEmbeddingEffectsCheck(engine, scope.sourceIds),
   },
+  {
+    id: 'google_file_modes', resolution: 'repair', registration: 'wave',
+    hostOnly: 'File permissions and directory paths on the brain host are host-local filesystem state.',
+    count: d => Number(d.count ?? 0),
+    impact: 'Some files gbrain wrote under a Google source directory outside ~/.gbrain are readable by other local users',
+    run: async (engine, scope) => (await import('./checks/google-file-modes.ts')).checkGoogleFileModes(engine, scope.sourceIds),
+  },
 ];
 
 /** A check that could not run reports unknown, never ok. */
