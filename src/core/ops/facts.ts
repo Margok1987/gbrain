@@ -24,6 +24,7 @@ import { hybridSearchCached, stampContentFlags } from '../search/hybrid.ts';
 import { dedupResults } from '../search/dedup.ts';
 import { bumpLastRetrievedAt } from '../last-retrieved.ts';
 import { packToBudget, estimateTokens, resultTokens } from '../search/token-budget.ts';
+import { redactRetrievalOutput } from '../search/output-redaction.ts';
 import { isAvailable } from '../ai/gateway.ts';
 // #4209: the named entity-hints cap — surfaced in the extract_facts param
 // description and the entity_hints_used/_dropped response fields.
@@ -459,6 +460,11 @@ const recall: Operation = {
       if (applied) ({ results: searchResults, delivery } = await deliverEvidence(ctx.engine, searchResults, applied, { ...searchScope, excludePrivate, requireSafeChunks: ctx.remote !== false }));
     }
 
+    // Pack what is delivered: results redacted for all; facts for remote only (localVerbatim).
+    const view = redactRetrievalOutput([{ facts: rows.map(r => ({ fact: r.fact, context: r.context, source: r.source })), results: searchResults }], {}).results[0];
+    searchResults = view.results;
+    if (ctx.remote !== false) rows = rows.map((r, i) => ({ ...r, ...view.facts[i] }));
+
     let packedFacts = rows;
     let packedResults = searchResults;
     let budgetUsed: number | undefined;
@@ -647,8 +653,12 @@ const context_pack: Operation = {
       maxEntities: PACK_DEFAULT_MAX_ENTITIES,
     });
 
-    let cards = res.cards ?? [];
-    let facts = res.facts ?? [];
+    // Pack, price and render the redacted presentation sets (one echo
+    // dictionary); local callers get the delivered facts back raw below.
+    const rawFacts = res.facts ?? [];
+    const view = redactRetrievalOutput([{ cards: res.cards ?? [], facts: rawFacts }], {}).results[0];
+    let cards = view.cards;
+    let facts = view.facts;
     // The SAME since filter the assembler applied (pre-landing review: the raw
     // flatMap silently dropped the documented `since` contract from the
     // structured array whenever budget packing ran) — shared with the card
@@ -690,7 +700,7 @@ const context_pack: Operation = {
         backlink_count: c.backlink_count,
       })),
       open_threads,
-      facts: facts.map((f) => ({
+      facts: (ctx.remote === false ? rawFacts.slice(0, facts.length) : facts).map((f) => ({
         fact: f.fact,
         kind: f.kind,
         entity_slug: f.entity_slug,
@@ -834,11 +844,17 @@ const delta: Operation = {
 
     // Pages arrive OLDEST first by (updated_at, slug) — no client-side dedup
     // needed; the keyset already excludes everything at/before the cursor.
-    let pages = res.deltaPages ?? [];
-    let facts = res.facts ?? [];
+    // Pack, price and render the redacted presentation sets (one echo
+    // dictionary). The cursor reads the raw page at the delivered index and
+    // local callers get the delivered facts back raw below.
+    const rawPages = res.deltaPages ?? [];
+    const rawFacts = res.facts ?? [];
+    const view = redactRetrievalOutput([{ pages: rawPages, facts: rawFacts, threads: res.openThreads ?? [] }], {}).results[0];
+    let pages = view.pages;
+    let facts = view.facts;
     // Threads are NEVER budget-dropped: they are the commitments a heartbeat
     // must not miss, and they have no keyset of their own to resume from.
-    const threads = res.openThreads ?? [];
+    const threads = view.threads;
     let droppedCount: number | undefined;
     let factsDropped = 0;
     const fetchedPages = pages.length;
@@ -878,7 +894,7 @@ const delta: Operation = {
     // NOT advance (deliver-before-advance; a too-small budget must not eat it).
     const nextCursor =
       pages.length > 0
-        ? { since: pages[pages.length - 1].updated_at, slug: pages[pages.length - 1].slug }
+        ? { since: rawPages[pages.length - 1].updated_at, slug: rawPages[pages.length - 1].slug }
         : { since: effectiveSince, slug: sinceSlug ?? '' };
     if (sessionId) {
       if (pages.length > 0) {
@@ -906,7 +922,7 @@ const delta: Operation = {
       protocol_version: MEMORY_VERBS_VERSION,
       since: effectiveSince,
       pages,
-      facts: facts.map((f) => ({
+      facts: (ctx.remote === false ? rawFacts.slice(0, facts.length) : facts).map((f) => ({
         fact: f.fact,
         kind: f.kind,
         entity_slug: f.entity_slug,
