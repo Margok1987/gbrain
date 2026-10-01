@@ -5351,6 +5351,7 @@
           "localOnly?: boolean | undefined",
           "mutating?: boolean | undefined",
           "name: string",
+          "outputRedaction: OutputRedactionPolicy",
           "params: Record<string, ParamDef>",
           "publishGateKey?: \"mcp.publish_skills\" | \"mcp.publish_advisor\" | undefined",
           "requiredScopes?: readonly string[] | undefined",
