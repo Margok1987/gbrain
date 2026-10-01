@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { randomBytes } from 'node:crypto';
 import {
-  redactRetrievalOutput, OUTPUT_REDACTION_MAX_FIELD_CHARS,
+  redactRetrievalOutput, withOutputRedaction, OUTPUT_REDACTION_MAX_FIELD_CHARS,
   OUTPUT_REDACTION_MAX_TOTAL_CHARS, OUTPUT_REDACTION_LIMIT,
 } from '../../src/core/search/output-redaction.ts';
+import type { OperationContext } from '../../src/core/ops/contract.ts';
 import { encodeDeepResearchId } from '../../src/core/deep-research-id.ts';
 
 const key = 'sk-proj-' + 'syntheticfixture19'.repeat(3);
@@ -355,5 +356,34 @@ describe('retrieval output: identity fields, dates and options', () => {
     expect(row!.facts[0]!.fact).toBe(token);
     expect(row!.text).toBe('<REDACTED:github_token>');
     expect(row!.nested.facts).toBe('<REDACTED:github_token>');
+  });
+});
+
+describe('withOutputRedaction (ENG-4 registration wrapper)', () => {
+  const token = () => ['gh', 'p_'].join('') + rand(36);
+  const ctx = (remote: boolean) => ({ remote }) as unknown as OperationContext;
+
+  test('a retrieval op is redacted on every return path, including an early return', async () => {
+    const secret = token();
+    const handler = async (_ctx: OperationContext, p: Record<string, unknown>) =>
+      p.early ? { text: `early ${secret}` } : { results: [{ chunk: secret, slug: 'notes/a' }] };
+    const wrapped = withOutputRedaction({ handler, outputRedaction: 'retrieval' });
+    expect(await wrapped(ctx(false), { early: true })).toEqual({ text: 'early <REDACTED:github_token>' });
+    expect(await wrapped(ctx(true), {})).toEqual({ results: [{ chunk: '<REDACTED:github_token>', slug: 'notes/a' }] });
+  });
+
+  test('localVerbatim keys stay raw only for the trusted local caller', async () => {
+    const secret = token();
+    const handler = async () => ({ facts: [{ fact: secret }], text: secret });
+    const wrapped = withOutputRedaction({ handler, outputRedaction: { retrieval: { localVerbatim: ['facts'] } } });
+    expect(await wrapped(ctx(false), {})).toEqual({ facts: [{ fact: secret }], text: '<REDACTED:github_token>' });
+    expect(await wrapped(ctx(true), {})).toEqual({ facts: [{ fact: '<REDACTED:github_token>' }], text: '<REDACTED:github_token>' });
+    expect(await wrapped({ remote: undefined } as unknown as OperationContext, {})).toEqual({ facts: [{ fact: '<REDACTED:github_token>' }], text: '<REDACTED:github_token>' });
+  });
+
+  test('exempt and no_stored_text ops keep their handler untouched', () => {
+    const handler = async () => ({});
+    expect(withOutputRedaction({ handler, outputRedaction: { exempt: 'page read' } })).toBe(handler);
+    expect(withOutputRedaction({ handler, outputRedaction: 'no_stored_text' })).toBe(handler);
   });
 });

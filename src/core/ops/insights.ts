@@ -22,6 +22,7 @@ import {
 
 const volunteer_context: Operation = {
   name: 'volunteer_context',
+  outputRedaction: 'retrieval',
   description:
     'Push-based context: volunteer brain pages relevant to a rolling conversation window ' +
     'WITHOUT being asked. Zero-LLM, confidence-gated (alias 0.9 / exact-title 0.8 / ' +
@@ -119,6 +120,7 @@ const volunteer_context: Operation = {
 // v0.33: expertise + relationship-proximity routing. CLI: gbrain whoknows.
 const find_experts: Operation = {
   name: 'find_experts',
+  outputRedaction: 'retrieval',
   description: FIND_EXPERTS_DESCRIPTION,
   scope: 'read',
   params: {
@@ -173,6 +175,7 @@ const find_experts: Operation = {
 // v0.32.6: contradiction probe MCP surface (M3)
 const find_contradictions: Operation = {
   name: 'find_contradictions',
+  outputRedaction: 'retrieval',
   description: FIND_CONTRADICTIONS_DESCRIPTION,
   scope: 'read',
   // Reads eval_contradictions_runs.report_json for the latest run, then
@@ -248,6 +251,7 @@ const find_contradictions: Operation = {
 
 const find_trajectory: Operation = {
   name: 'find_trajectory',
+  outputRedaction: 'retrieval',
   description: FIND_TRAJECTORY_DESCRIPTION,
   scope: 'read',
   // localOnly intentionally NOT set — federated OAuth clients should be

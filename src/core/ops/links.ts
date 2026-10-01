@@ -45,6 +45,7 @@ export const MANAGED_LINK_SOURCES = ['markdown', 'frontmatter', 'mentions', 'wik
 
 const add_link: Operation = {
   name: 'add_link',
+  outputRedaction: 'no_stored_text',
   description: 'Create link between pages',
   params: {
     from: { type: 'string', required: true, description: "Slug of the page the link originates from (the edge renders on this page), e.g. 'people/alice-example'. These are page slugs — there is no `source`/`target` pair." },
@@ -121,6 +122,7 @@ const add_link: Operation = {
 
 const remove_link: Operation = {
   name: 'remove_link',
+  outputRedaction: 'no_stored_text',
   description: 'Remove link between pages',
   params: {
     from: { type: 'string', required: true, description: 'Slug of the page the link originates from (same endpoint order as add_link).' },
@@ -156,6 +158,7 @@ const remove_link: Operation = {
 
 const get_links: Operation = {
   name: 'get_links',
+  outputRedaction: 'retrieval',
   description: 'List outgoing links from a page',
   params: {
     slug: { type: 'string', required: true, description: 'Slug of the page whose outgoing links to list.' },
@@ -184,6 +187,7 @@ const get_links: Operation = {
 
 const get_backlinks: Operation = {
   name: 'get_backlinks',
+  outputRedaction: 'retrieval',
   description: 'List incoming links to a page',
   params: {
     slug: { type: 'string', required: true, description: 'Slug of the page whose incoming links to list.' },
@@ -208,6 +212,7 @@ const get_backlinks: Operation = {
 
 const list_link_sources: Operation = {
   name: 'list_link_sources',
+  outputRedaction: 'no_stored_text',
   // v114 (#1941): the read-side counterpart to link-add/link-rm. Since
   // link_source is now an open kebab provenance (no allowlist), this is how an
   // agent discovers which provenances a brain actually carries.
@@ -246,6 +251,7 @@ const DEFAULT_TRAVERSE_DEPTH = 5;
 
 const traverse_graph: Operation = {
   name: 'traverse_graph',
+  outputRedaction: 'retrieval',
   description: `Traverse link graph from a page. Remote callers default to bidirectional edges (GraphPath[]) at depth ${REMOTE_BIDIRECTIONAL_DEFAULT_DEPTH} (pass depth explicitly for deeper walks); trusted local no-filter callers keep the legacy node shape at depth ${DEFAULT_TRAVERSE_DEPTH}.`,
   params: {
     slug: { type: 'string', required: true, description: "Slug of the page to start the traversal from, e.g. 'people/alice-example'. This is the start-node param — there is no `start` or `root` param." },

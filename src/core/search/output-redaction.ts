@@ -1,5 +1,6 @@
 import { applyRedaction, planRedaction, type RedactionPlan } from '../secret-scan.ts';
 import { DEGRADED_REASONS, DEGRADED_STAGES } from '../types.ts';
+import type { Operation } from '../ops/contract.ts';
 
 export const OUTPUT_REDACTION_MAX_FIELD_CHARS = 64 * 1024;
 export const OUTPUT_REDACTION_MAX_TOTAL_CHARS = 1024 * 1024;
@@ -82,3 +83,18 @@ export function redactRetrievalOutput<T, M>(results: T[], meta: M, opts: Retriev
   return output;
 }
 
+/**
+ * The registration-time wrapper behind `Operation.outputRedaction`: a
+ * retrieval op's whole response (early returns included) passes through the
+ * uncapped redactor; `localVerbatim` keys stay raw for the trusted local CLI.
+ * Every other policy returns the handler unchanged.
+ */
+export function withOutputRedaction(op: Pick<Operation, 'handler' | 'outputRedaction'>): Operation['handler'] {
+  const { handler, outputRedaction: policy } = op;
+  if (policy !== 'retrieval' && !(typeof policy === 'object' && 'retrieval' in policy)) return handler;
+  const localVerbatim = policy === 'retrieval' ? [] : policy.retrieval.localVerbatim;
+  return async (ctx, params) => {
+    const result = await handler(ctx, params);
+    return redactRetrievalOutput([result], {}, { uncapped: true, verbatim: ctx.remote === false ? localVerbatim : [] }).results[0];
+  };
+}
