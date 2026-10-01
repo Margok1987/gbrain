@@ -14,14 +14,14 @@ identifiers and attribution are available in the pre-removal Git revision
 
 **Your brain stops handing stored passwords and keys back to your agents, catches credential shapes it used to miss, and keeps your Gmail pages private on disk.**
 
-If a password, API key or private key ever landed in a note, an email or a chat transcript, older releases could hand it back in a search result or a memory read, straight into an agent's context and from there into transcripts. They also missed some common shapes entirely: a password inside a clone URL, an `Authorization: Basic` header, and a private key whose last line got cut off by a snippet, which printed the key itself. This release closes those gaps. Retrieval now replaces those values with a `<REDACTED:...>` marker, pushes and compiled context catch the new shapes, and your stored pages never change.
+If a password, API key or private key ever landed in a note, an email or a chat transcript, older releases could hand it back in a search result or a memory read, straight into an agent's context and from there into transcripts. They also missed some common shapes entirely: a password inside a clone URL, an `Authorization: Basic` header, and a private key whose last line got cut off by a snippet, which printed the key itself. This release closes those gaps. Retrieval now replaces those values with a `<REDACTED:...>` marker, search chunks never hold private-key material at all, pushes and compiled context catch the new shapes, and your stored pages never change.
 
 Separately, if you sync Google into a folder you picked yourself (outside `~/.gbrain`), older releases wrote your mail, calendar and contact pages readable by every account on the machine. New writes are now private, and one command tightens the old ones.
 
 ### Action required / behavior changes
 
-- **A push can newly be refused.** `gbrain sources push` and bootstrap now block on URLs with a password, Basic auth headers, DigitalOcean tokens and cut-off private keys. The refusal prints the fix: remove and rotate a real credential, or allowlist a reviewed false positive with the exact command it gives you.
-- **Old allowlist entries for cut-off private keys stop matching.** Their fingerprint now covers the key body. The refusal names the stale line and its replacement.
+- **A push can newly be refused.** `gbrain sources push` and bootstrap now block on URLs with a password, Basic auth headers, DigitalOcean tokens and cut-off private keys. The refusal prints the fix: remove and rotate a real credential, or allowlist a reviewed false positive with the exact command it gives you. An old allowlist entry for a cut-off private key stops matching (its fingerprint now covers the key body); the refusal names the stale line and its replacement.
+- **Pages that hold a private key are re-chunked on upgrade.** Until that finishes they are left out of search. The upgrade does it with no provider calls; afterwards run `gbrain embed --stale` when you are ready to pay for their new vectors.
 - **Memory reads redact credentials.** `recall`, `context_pack`, `delta` and `entity` now return `<REDACTED:pattern>` like search does. A credential you asked the brain to remember is withheld from MCP and thin clients by design; read it on the brain host with `gbrain recall`.
 - **Check your custom Google folder.** Files written there before this release keep their old permissions. `gbrain doctor` tells you.
 - **A password inside an `http(s)` URL (`https://<user>:<password>@host`) now counts as a credential.** Placeholder passwords (`<password>`, `${VAR}`, `$VAR`, `****`, `xxxx`) are still ignored.
@@ -44,7 +44,13 @@ gbrain search "scratch redaction check" --json | grep chunk_text
 
 You should see `clone <REDACTED:url_credentials>git.example.com/team/repo.git` and `DB_PASSWORD=\"<REDACTED:high_entropy_assignment>\"`, and no trace of `$PW`. Unset `GBRAIN_HOME` afterwards.
 
-If a Google source lives outside `~/.gbrain` (on your real brain):
+On your real brain after upgrading:
+
+```bash
+gbrain doctor                                        # credential_projection_pending: ok once the re-chunk is done
+```
+
+If a Google source lives outside `~/.gbrain`:
 
 ```bash
 gbrain doctor                                        # google_file_modes names the folder and counts
@@ -74,7 +80,7 @@ A memory relay is the compaction-time handoff of a conversation window; a refuse
 This release protects against stored credentials leaking into agent context and transcripts through retrieval, and against other local users reading your Google pages. It does not:
 
 - **Redact page reads.** `get_page`, `fetch`, `get_chunks`, `get_raw_data` and `get_versions` still return stored text as written. They are explicit requests for a page and follow page visibility.
-- **Redact what goes to providers you configured.** The embedding provider at import, a hosted reranker and `synthesize`/`think` generation still receive unredacted text. That is the next step.
+- **Redact what goes to providers you configured.** The embedding provider at import, a hosted reranker and `synthesize`/`think` generation still receive unredacted text, except private keys, which never enter chunks. That is the next step.
 - **Change your files or database.** If a real credential reached the brain, rotate it and follow the "If a secret reached the brain" steps in `SECURITY.md`.
 
 ### Things to watch
@@ -87,7 +93,15 @@ This release protects against stored credentials leaking into agent context and 
 
 Full guides: [secret scan refusals and redaction](docs/guides/write-refusals.md#secret-scan-refusals-and-redaction), [Google file permissions](docs/guides/google-connect.md#file-permissions).
 
-<!-- S2-PENDING: credential-safe chunking + targeted re-chunk migration (user-facing summary, action/how-to-check additions, upgrade step, itemized section). -->
+### Pages that hold a private key
+
+A long private key can span several search chunks, and a chunk from its middle holds key lines with neither the `BEGIN` nor the `END` line, so no output check can recognize it. Pages are now chunked from a copy in which every private key is replaced by `<REDACTED:private_key_pem>`, with line breaks kept so nothing else shifts. Evidence delivery (`--return-unit window`, `section`, `page`) cuts from the same copy. Key material never reaches a chunk, the embedding provider or delivered evidence. The stored page is unchanged, and `get_page` still returns it.
+
+Pages indexed before this release that contain a `BEGIN` or `END … PRIVATE KEY` line are withheld from search, for every caller, from the first command after the upgrade until the upgrade's migration re-chunks them. The re-chunk makes no provider calls and runs one page at a time, so an interrupted run resumes. Their new chunks have no vectors until you run `gbrain embed --stale`, so until then keyword search finds them and vector search does not. `gbrain doctor` reports pages still waiting as `credential_projection_pending`. A code page with no recorded source file stays withheld until its source syncs again (`gbrain sync --source <id>`).
+
+Not covered: keys inside image OCR text, and key material with no `BEGIN` or `END` line anywhere on the page.
+
+**The post-upgrade re-embed now asks first.** When a chunker change leaves pages to re-embed, `gbrain post-upgrade` prints the cost estimate and asks `Re-embed now? [y/N]`. Enter, `n`, a closed input and every non-interactive upgrade decline and print what to run instead (`gbrain reindex --markdown`, or `gbrain repair safe-chunks --apply --no-embed` then `gbrain embed --stale`). The old 10-second Ctrl-C window and `GBRAIN_REEMBED_GRACE_SECONDS` are gone; `GBRAIN_NO_REEMBED=1` still skips the step. An unattended upgrade never spends money on embeddings.
 
 ## To take advantage of v0.60.29.0
 
@@ -97,13 +111,18 @@ Full guides: [secret scan refusals and redaction](docs/guides/write-refusals.md#
    ```bash
    gbrain apply-migrations --yes --no-autopilot-install
    ```
-   It prints the one-time notice for each Google source outside `~/.gbrain` and changes no file permissions.
-2. **Restart anything long-running** (`gbrain serve`, your agent harness for stdio MCP, `gbrain jobs supervisor`, autopilot) so retrieval redaction applies to every caller.
-3. **Verify the outcome:**
+   It re-chunks pages that hold a private key without provider calls (a failed page leaves the run partial; run the command again to retry), then prints the one-time notice for each Google source outside `~/.gbrain`. It changes no file permissions.
+2. **Embed the re-chunked pages when you are ready.** This calls your embedding provider and can cost money, so it is never automatic:
    ```bash
-   gbrain doctor            # google_file_modes: ok, or a warning with the exact repair commands
+   gbrain embed --stale
    ```
-4. **If any step fails or the numbers look wrong,** please file an issue:
+3. **Your agent reads `skills/migrations/v0.60.29.0.md` the next time you interact with it.** It finishes the migration, asks before embedding or repairing Google file permissions, and explains push refusals and `<REDACTED:...>` tokens. Headless agents need nothing beyond step 1.
+4. **Restart anything long-running** (`gbrain serve`, your agent harness for stdio MCP, `gbrain jobs supervisor`, autopilot) so retrieval redaction applies to every caller.
+5. **Verify the outcome:**
+   ```bash
+   gbrain doctor            # credential_projection_pending: ok; google_file_modes: ok, or a warning with the exact repair commands
+   ```
+6. **If any step fails or the numbers look wrong,** please file an issue:
    https://github.com/garrytan/gbrain/issues with:
    - output of `gbrain doctor`
    - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
@@ -124,6 +143,13 @@ Full guides: [secret scan refusals and redaction](docs/guides/write-refusals.md#
 - The assignment rule (`high_entropy_assignment`, used by retrieval, transcript import, hooks and the memory relay) now matches punctuated passwords: any non-space run inside quotes, and `!#$%*@^~.?<>` unquoted. It still needs 12 or more characters, a digit and high randomness, and rejects URLs, paths, shell expansions, already-redacted tokens and dotted code paths such as `process.env.X`.
 - Findings carry `since` (the version that added or changed the rule) and, for cut-off keys, the old header-only fingerprint so a refusal can point at a stale allowlist line.
 - Known misses (by design, documented): a key body on the same line as its header, keys joined with spaces or quoted with `> `, base64 runs over 128 characters, URL passwords containing a literal `/`, `?` or `#`, Basic values over 2048 characters, digitless assignment values, and unquoted passwords containing `,` or `;`.
+
+#### Private keys in chunks and evidence
+
+- `credentialSafeProjection` (`src/core/credential-projection.ts`) replaces every private-key span the scanner finds with `<REDACTED:private_key_pem>` plus the same number of newlines. The markdown chunker (and the embed paths that use it), fenced-code extraction, the code chunker and evidence delivery's page text all apply it after protected-content sanitizing. Chunker versions are unchanged, so no brain-wide re-chunk or re-embed is triggered.
+- Schema migration v187 marks only live markdown and code pages whose body holds a private-key marker as needing a new text projection, which withholds their old chunks from every search path, local and remote, including the code-walk path. The orchestrated migration re-chunks them provider-free through the same installer as `gbrain repair safe-chunks`, one page per transaction.
+- New doctor check `credential_projection_pending` (brain): pages still waiting, and code pages without a recorded source path that wait for a re-import.
+- `gbrain post-upgrade`'s chunker-bump re-embed needs a `y` on a TTY; otherwise it declines and prints the commands. `GBRAIN_REEMBED_GRACE_SECONDS` is removed.
 
 #### Push and bootstrap refusals
 

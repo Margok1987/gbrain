@@ -8693,7 +8693,7 @@ should also check `results[].complete`.
 | `embedding-effects` | `stale_embedding_effects` | Settles stale queued and failed embedding effects of committed writes, which block receipt compaction and activation: `reconciled` when current vectors pass the effect verifier, `superseded` when the page was deleted or a newer revision owns its own effect, `retry_queued` for the owner (paid; a used-up retry allowance gets one new bounded cycle per explicit apply). See [stale queued embedding effects](#stale-queued-embedding-effects). | `blocked` effects, counted by reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). |
 | `safe-chunks` | `safe_index_pending` (also `contextual_retrieval_coverage`, `details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 | `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync or a connector source before this release), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. `embed_skip`: pages marked to skip embedding keep their stored vectors and are not stamped. |
-| `google-file-modes` | `google_file_modes` | Clears the group and other permission bits on files and directories gbrain wrote under a Google source directory outside `~/.gbrain` (releases before v0.60.28.0 wrote them with the default umask, typically 0644; a looser mode set by hand is cleared too): the sync state (`.google-source.json*`), the mail, calendar and contact pages gbrain recorded for the source under `emails/`, `calendar/` and `people/` (and their leftover `.tmp` files), and the directories between the source directory and those pages. Your own permission bits are kept. It never changes the source directory itself, never follows a symlink and never touches a file another user owns. Filesystem only: no journal admission, no page write, no cost. The preview's sample paths are relative to the source directory and can contain email subject words. Sources inside `~/.gbrain` are skipped (that directory is already private). No-op on Windows. See [Google file permissions](google-connect.md#file-permissions). | `skipped_symlink`, `skipped_foreign_owner`, `skipped_not_regular`: entries left alone because a symlink is on the path, another user owns them, or they are not the expected file type. Fix those by hand. |
+| `google-file-modes` | `google_file_modes` | Clears the group and other permission bits on files and directories gbrain wrote under a Google source directory outside `~/.gbrain` (releases before v0.60.29.0 wrote them with the default umask, typically 0644; a looser mode set by hand is cleared too): the sync state (`.google-source.json*`), the mail, calendar and contact pages gbrain recorded for the source under `emails/`, `calendar/` and `people/` (and their leftover `.tmp` files), and the directories between the source directory and those pages. Your own permission bits are kept. It never changes the source directory itself, never follows a symlink and never touches a file another user owns. Filesystem only: no journal admission, no page write, no cost. The preview's sample paths are relative to the source directory and can contain email subject words. Sources inside `~/.gbrain` are skipped (that directory is already private). No-op on Windows. See [Google file permissions](google-connect.md#file-permissions). | `skipped_symlink`, `skipped_foreign_owner`, `skipped_not_regular`: entries left alone because a symlink is on the path, another user owns them, or they are not the expected file type. Fix those by hand. |
 
 Timeline rows that an earlier version of a page produced and its current text
 no longer has are removals, not history, so `timeline` neither counts nor
@@ -9279,7 +9279,20 @@ password, `http(s)` URLs carrying a password (`url_credentials`) and
 `Authorization: Basic` credentials (`basic_auth`). A private key is caught
 even when a snippet or chunk cut off its `BEGIN` or `END` line: the key body
 lines are redacted along with whichever fence is present.
-<!-- S2-PENDING: credential-safe chunking (a chunk holding key body with neither fence) and the re-chunk migration. -->
+
+Search chunks never hold key material. A page whose text contains a private
+key is chunked from a copy in which each key is replaced by
+`<REDACTED:private_key_pem>` (line breaks kept, so positions do not shift),
+and evidence delivery cuts `window`, `section` and `page` text from the same
+copy. A chunk from the middle of a long key, with neither its `BEGIN` nor
+its `END` line, therefore carries the token instead of key lines, and key
+material never reaches the embedding provider. The stored page is unchanged.
+Pages indexed before v0.60.29.0 that contain a `BEGIN` or `END … PRIVATE
+KEY` line are withheld from search until the upgrade re-chunks them, without
+provider calls; `gbrain doctor` reports them as `credential_projection_pending`
+until then, and `gbrain embed --stale` embeds the new chunks when you choose
+to. Key material with no `BEGIN` or `END` line anywhere on the page, and keys
+inside image OCR text, are not projected.
 
 Retrieval output, transcript import, hooks and the memory relay also run the
 assignment rule (`high_entropy_assignment`): a value of 12 or more characters
@@ -9298,7 +9311,7 @@ credentials.
 PUSH BLOCKED — secret scan findings (nothing committed):
   notes/deploy.md:12 [url_credentials] clone <REDACTED:url_credentials>git.example.com/team/repo.git
     fingerprint: sha256:<16 hex characters>
-    rule [url_credentials] blocks pushes since gbrain v0.60.28.0
+    rule [url_credentials] blocks pushes since gbrain v0.60.29.0
     allow this finding: printf '\n%s\n' sha256:<16 hex characters> >> '/home/you/brain/.gbrain-scan-allow'
 Remove a real credential from the file (and rotate it) first. Allowlist only a reviewed false positive
 with the "allow this finding" command above (it appends to '/home/you/brain/.gbrain-scan-allow'), then retry:
@@ -9347,14 +9360,14 @@ matches, including credentials added later.
 
 ### A stale allowlist entry for a private key
 
-Before v0.60.28.0, a private key whose `END` line was missing (a cut-off
+Before v0.60.29.0, a private key whose `END` line was missing (a cut-off
 excerpt) was matched by its `BEGIN` line alone, and its fingerprint covered
 only that line. The fingerprint now covers the key body too, so an old entry
 for such a key no longer matches and the push is refused again. The refusal
 says so and gives the replacement:
 
 ```text
-    stale allowlist entry: sha256:<old> matched only this key's BEGIN header before gbrain v0.60.28.0; the fingerprint now covers the key body.
+    stale allowlist entry: sha256:<old> matched only this key's BEGIN header before gbrain v0.60.29.0; the fingerprint now covers the key body.
     if the key is a reviewed false positive, replace that line in '/home/you/brain/.gbrain-scan-allow' with: sha256:<new>
 ```
 
@@ -9418,7 +9431,7 @@ other operations to get around it.
   operations) and admin job operations are raw too.
 - **Configured providers.** The embedding provider at import, a hosted
   reranker, and `synthesize`/`think` generation still receive stored text
-  unredacted. Redaction covers what callers receive, not what gbrain sends
+  unredacted, except private keys, which chunks never contain. Redaction covers what callers receive, not what gbrain sends
   to a model provider you configured.
 - **Your files and database.** Redaction never edits stored content. If a
   real credential reached the brain, rotate it, then follow
