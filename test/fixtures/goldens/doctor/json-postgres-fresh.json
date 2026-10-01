@@ -359,19 +359,19 @@
         },
         {
           "category": "ops",
-          "message": "RLS enabled on 93/93 public tables",
+          "message": "RLS enabled on 99/99 public tables",
           "name": "rls",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "Version 183 (latest: 183)",
+          "message": "Version 186 (latest: 186)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "714 column(s) verified against live schema",
+          "message": "807 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -914,6 +914,12 @@
           "category": "ops",
           "message": "No configured collectors declare output paths",
           "name": "db_only_collector_collision",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
+          "message": "System One is off (every decide slot is off; nothing is sent).",
+          "name": "decide_health",
           "status": "ok"
         },
         {
