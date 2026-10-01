@@ -525,38 +525,20 @@ export function blockedSecretsReason(findings: readonly PushSecretFinding[]): st
   return `${head}${shown}${tail}`.slice(0, PUSH_REASON_MAX_CHARS);
 }
 
-const LEGACY_PEM_HEADER_RE = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
-const LEGACY_PEM_BLOCK_RE = new RegExp(
-  '-----BEGIN [A-Z ]*PRIVATE KEY-----(?:[\\s\\S]{0,16384}?-----END [A-Z ]*PRIVATE KEY-----)?',
-  'y',
-);
-
 /**
  * DX-4: before the scanner learned truncated key bodies, a private key with
  * no END fence in view was claimed header-only, so an allowlist line could
- * hold the fingerprint of the bare BEGIN header. Recompute that legacy value
- * for a `private_key_pem` finding (same regex and 16384-char body bound the
- * old scanner used) and return the allowlist entry it matches, if any.
+ * hold the fingerprint of the bare BEGIN header. The scanner reports that
+ * pre-wave fingerprint as `legacyFingerprint`; return the allowlist entry it
+ * matches, if any.
  */
-function staleHeaderOnlyEntry(
-  text: string,
-  lineStarts: readonly number[],
-  line: number,
-  allowlist: readonly string[],
-): string | undefined {
-  const start = lineStarts[line - 1];
-  if (start === undefined) return undefined;
-  const end = text.indexOf('\n', start);
-  const header = LEGACY_PEM_HEADER_RE.exec(text.slice(start, end === -1 ? text.length : end));
-  if (!header) return undefined;
-  LEGACY_PEM_BLOCK_RE.lastIndex = start + header.index;
-  const legacy = LEGACY_PEM_BLOCK_RE.exec(text);
-  if (!legacy || legacy[0] !== header[0]) return undefined;
-  const legacyHex = createHash('sha256').update(header[0]).digest('hex');
+function staleHeaderOnlyEntry(legacyFingerprint: string | undefined, allowlist: readonly string[]): string | undefined {
+  if (!legacyFingerprint) return undefined;
+  const legacyHex = legacyFingerprint.slice('sha256:'.length);
   return allowlist.find((entry) => {
     if (!entry.startsWith('sha256:')) return false;
     const prefix = entry.slice('sha256:'.length).toLowerCase();
-    return prefix.length >= ALLOWLIST_FINGERPRINT_MIN_HEX && legacyHex.startsWith(prefix);
+    return prefix.length >= ALLOWLIST_FINGERPRINT_MIN_HEX && prefix.startsWith(legacyHex);
   });
 }
 
@@ -569,38 +551,24 @@ function pushRetryCommand(opts: WorkspacePushOpts): string {
   ].join(' ');
 }
 
-/**
- * Attach the DX-3 refusal guidance to one file's findings. `text` is the
- * scanned blob, used only to recompute DX-4's legacy header-only key
- * fingerprint; no value ever reaches the output.
- */
+/** Attach the DX-3 refusal guidance to one file's findings; no value ever reaches the output. */
 export function buildPushFindings(input: {
   file: string;
-  text: string;
   findings: readonly SecretFinding[];
   allowlist: readonly string[];
   allowlistPath: string;
   retryCommand: string;
 }): PushSecretFinding[] {
-  const hasFingerprintEntries = input.allowlist.some((e) => e.startsWith('sha256:'));
-  let lineStarts: number[] | undefined;
-  return input.findings.map((f) => {
-    const { since } = f as SecretFinding & { since?: string };
+  return input.findings.map(({ legacyFingerprint, ...f }) => {
     const out: PushSecretFinding = {
       ...f,
       file: input.file,
-      ...(since ? { since } : {}),
       allowlistPath: input.allowlistPath,
       allowCommand: `printf '\\n%s\\n' ${f.fingerprint} >> ${shellQuote(input.allowlistPath)}`,
       retryCommand: input.retryCommand,
       docs: SECRET_SCAN_REFUSAL_DOCS,
     };
-    if (f.pattern !== 'private_key_pem' || !hasFingerprintEntries) return out;
-    if (!lineStarts) {
-      lineStarts = [0];
-      for (let i = input.text.indexOf('\n'); i !== -1; i = input.text.indexOf('\n', i + 1)) lineStarts.push(i + 1);
-    }
-    const entry = staleHeaderOnlyEntry(input.text, lineStarts, f.line, input.allowlist);
+    const entry = staleHeaderOnlyEntry(legacyFingerprint, input.allowlist);
     if (entry) out.staleAllowlistEntry = { entry, replacement: f.fingerprint };
     return out;
   });
@@ -855,7 +823,7 @@ export async function workspacePush(opts: WorkspacePushOpts): Promise<WorkspaceP
       const text = blob.toString('utf-8');
       const fileFindings = scanText(text, { allowlist });
       if (fileFindings.length === 0) continue;
-      for (const f of buildPushFindings({ file: rel, text, findings: fileFindings, allowlist, allowlistPath, retryCommand })) {
+      for (const f of buildPushFindings({ file: rel, findings: fileFindings, allowlist, allowlistPath, retryCommand })) {
         findings.push(f);
       }
     }

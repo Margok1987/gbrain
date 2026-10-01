@@ -41,10 +41,9 @@ function finding(over: Partial<SecretFinding & { since: string }> = {}): SecretF
   };
 }
 
-function build(text: string, findings: SecretFinding[], allowlist: string[] = []): PushSecretFinding[] {
+function build(findings: SecretFinding[], allowlist: string[] = []): PushSecretFinding[] {
   return buildPushFindings({
     file: 'notes/key.md',
-    text,
     findings,
     allowlist,
     allowlistPath: '/ws/.gbrain-scan-allow',
@@ -56,8 +55,8 @@ describe('blockedSecretsReason (ENG-11: reason survives sanitizePushReason)', ()
   test('a long path and long pattern name stay within 140 chars, unclipped and readable', () => {
     const file = `${'deeply/nested/'.repeat(12)}meeting-notes.md`;
     const reason = blockedSecretsReason([
-      { ...build('', [finding({ pattern: 'high_entropy_assignment', line: 1234 })])[0]!, file },
-      { ...build('', [finding()])[0]!, file: 'b.md' },
+      { ...build([finding({ pattern: 'high_entropy_assignment', line: 1234 })])[0]!, file },
+      { ...build([finding()])[0]!, file: 'b.md' },
     ]);
     expect(reason.length).toBeLessThanOrEqual(140);
     expect(sanitizePushReason(reason)).toBe(reason);
@@ -68,7 +67,7 @@ describe('blockedSecretsReason (ENG-11: reason survives sanitizePushReason)', ()
   });
 
   test('a short location is shown whole', () => {
-    const reason = blockedSecretsReason(build('', [finding({ pattern: 'openai', line: 3 })]));
+    const reason = blockedSecretsReason(build([finding({ pattern: 'openai', line: 3 })]));
     expect(reason).toBe('1 secret finding(s), first notes/key.md:3 [openai]; nothing committed. Run gbrain sources push for fix steps');
     expect(sanitizePushReason(reason)).toBe(reason);
   });
@@ -76,7 +75,7 @@ describe('blockedSecretsReason (ENG-11: reason survives sanitizePushReason)', ()
 
 describe('buildPushFindings (DX-3: per-finding guidance)', () => {
   test('carries the fingerprint, allowlist path, append + retry commands and docs anchor', () => {
-    const [f] = build('', [finding({ pattern: 'openai', fingerprint: 'sha256:aaaabbbbccccdddd' })]);
+    const [f] = build([finding({ pattern: 'openai', fingerprint: 'sha256:aaaabbbbccccdddd' })]);
     expect(f!.file).toBe('notes/key.md');
     expect(f!.fingerprint).toBe('sha256:aaaabbbbccccdddd');
     expect(f!.allowlistPath).toBe('/ws/.gbrain-scan-allow');
@@ -89,7 +88,7 @@ describe('buildPushFindings (DX-3: per-finding guidance)', () => {
   });
 
   test("CEO-21: the finding's since version rides through when the scanner reports one", () => {
-    const [f] = build('', [finding({ pattern: 'basic_auth', since: '0.60.28.0' } as Partial<SecretFinding>)]);
+    const [f] = build([finding({ pattern: 'basic_auth', since: '0.60.28.0' } as Partial<SecretFinding>)]);
     expect(f!.since).toBe('0.60.28.0');
   });
 
@@ -101,7 +100,7 @@ describe('buildPushFindings (DX-3: per-finding guidance)', () => {
       const allowlistPath = join(ws, SCAN_ALLOW_FILENAME);
       writeFileSync(allowlistPath, '# reviewed\nnotes/*.tmp');
       const [f] = buildPushFindings({
-        file: 'a.md', text: '', allowlist: [], allowlistPath, retryCommand: 'x',
+        file: 'a.md', allowlist: [], allowlistPath, retryCommand: 'x',
         findings: [finding({ pattern: 'openai', fingerprint: 'sha256:1111222233334444' })],
       });
       const r = spawnSync('bash', ['-c', f!.allowCommand], { cwd: tmpdir(), encoding: 'utf-8' });
@@ -119,52 +118,42 @@ describe('stale header-only private-key allowlist hint (DX-4)', () => {
   const bodyFp = 'sha256:fedcba9876543210';
 
   test('a header-only allowlist entry is named with the replacement fingerprint', () => {
-    const [f] = build(truncated, [finding({ line: 2, fingerprint: bodyFp })], ['notes/*.tmp', headerOnly]);
+    const [f] = build([finding({ fingerprint: bodyFp, legacyFingerprint: headerOnly })], ['notes/*.tmp', headerOnly]);
     expect(f!.staleAllowlistEntry).toEqual({ entry: headerOnly, replacement: bodyFp });
+    expect(f).not.toHaveProperty('legacyFingerprint');
   });
 
-  test('a finding starting mid-line past prose still resolves its BEGIN header', () => {
-    const text = ['a', `key: ${BEGIN}`, ...bodyLines(3)].join('\n');
-    const [f] = build(text, [finding({ line: 2, fingerprint: bodyFp })], [headerOnly]);
-    expect(f!.staleAllowlistEntry?.entry).toBe(headerOnly);
-  });
-
-  test('no hint when the old scanner already claimed the whole block (END in view)', () => {
-    const complete = ['intro', BEGIN, ...bodyLines(6), END].join('\n');
-    const [f] = build(complete, [finding({ line: 2, fingerprint: bodyFp })], [headerOnly]);
-    expect(f!.staleAllowlistEntry).toBeUndefined();
-  });
-
-  test('no hint without a matching entry, for other patterns, or for an END-only finding', () => {
-    expect(build(truncated, [finding({ line: 2 })], ['sha256:9999999999999999'])[0]!.staleAllowlistEntry).toBeUndefined();
-    expect(build(truncated, [finding({ line: 2, pattern: 'openai' })], [headerOnly])[0]!.staleAllowlistEntry).toBeUndefined();
-    const endOnly = [...bodyLines(4), END].join('\n');
-    expect(build(endOnly, [finding({ line: 1 })], [headerOnly])[0]!.staleAllowlistEntry).toBeUndefined();
+  test('no hint without a legacy fingerprint, or without a matching entry', () => {
+    expect(build([finding({ fingerprint: bodyFp })], [headerOnly])[0]!.staleAllowlistEntry).toBeUndefined();
+    expect(build([finding({ legacyFingerprint: headerOnly })], ['sha256:9999999999999999'])[0]!.staleAllowlistEntry).toBeUndefined();
   });
 
   test('a short (< 16 hex) prefix of the header fingerprint does not count as a match', () => {
-    const [f] = build(truncated, [finding({ line: 2, fingerprint: bodyFp })], [headerOnly.slice(0, 'sha256:'.length + 12)]);
+    const [f] = build([finding({ fingerprint: bodyFp, legacyFingerprint: headerOnly })], [headerOnly.slice(0, 'sha256:'.length + 12)]);
     expect(f!.staleAllowlistEntry).toBeUndefined();
   });
 
-  // Exercises the real scanner: runs once the scanner claims a truncated key's
-  // body (security wave A1). Before that change the header-only allowlist
-  // entry still suppresses the finding, so there is nothing to hint about.
-  const claimsBody = scanText(truncated)[0]?.fingerprint !== headerOnly;
-  test.skipIf(!claimsBody)('with the body-claiming scanner, the old entry yields a finding plus the hint', () => {
+  test('with the real scanner, the old entry yields a body finding plus the hint', () => {
     const allowlist = [headerOnly];
     const findings = scanText(truncated, { allowlist });
     expect(findings.length).toBe(1);
-    const [f] = build(truncated, findings, allowlist);
+    expect(findings[0]!.fingerprint).not.toBe(headerOnly);
+    const [f] = build(findings, allowlist);
     expect(f!.staleAllowlistEntry).toEqual({ entry: headerOnly, replacement: findings[0]!.fingerprint });
+  });
+
+  test('with the real scanner, a complete block (END in view) gets no hint', () => {
+    const complete = ['intro', BEGIN, ...bodyLines(6), END].join('\n');
+    const findings = scanText(complete, { allowlist: [headerOnly] });
+    expect(build(findings, [headerOnly])[0]!.staleAllowlistEntry).toBeUndefined();
   });
 });
 
 describe('formatBlockedSecrets (CLI rendering of the structured findings)', () => {
   const allowlistPath = "/home/u/my brain/.gbrain-scan-allow";
-  function one(over: Partial<SecretFinding & { since: string }>, allowlist: string[] = [], text = ''): PushSecretFinding[] {
+  function one(over: Partial<SecretFinding & { since: string }>, allowlist: string[] = []): PushSecretFinding[] {
     return buildPushFindings({
-      file: 'k.md', text, findings: [finding(over)], allowlist, allowlistPath,
+      file: 'k.md', findings: [finding(over)], allowlist, allowlistPath,
       retryCommand: "gbrain sources push --path '/home/u/my brain'",
     });
   }
@@ -191,12 +180,10 @@ describe('formatBlockedSecrets (CLI rendering of the structured findings)', () =
   });
 
   test('DX-4: the stale header-only entry is named with the replacement line', () => {
-    const truncated = [BEGIN, ...bodyLines(3)].join('\n');
     const headerOnly = fp(BEGIN);
     const out = formatBlockedSecrets(one(
-      { line: 1, fingerprint: 'sha256:fedcba9876543210', since: '0.60.28.0' } as Partial<SecretFinding>,
+      { line: 1, fingerprint: 'sha256:fedcba9876543210', since: '0.60.28.0', legacyFingerprint: headerOnly },
       [headerOnly],
-      truncated,
     )).join('\n');
     expect(out).toContain(
       `    stale allowlist entry: ${headerOnly} matched only this key's BEGIN header before gbrain v0.60.28.0; the fingerprint now covers the key body.`,
