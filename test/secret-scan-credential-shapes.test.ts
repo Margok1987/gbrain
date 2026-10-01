@@ -177,7 +177,7 @@ describe('A5 high_entropy_assignment: punctuated values', () => {
   const T = REDACTED('high_entropy_assignment');
 
   test('unquoted values with password punctuation are claimed whole', () => {
-    for (const v of [`!${rand(14)}`, `${rand(10)}!#%${rand(10)}`, `${rand(8)}$*@^~${rand(8)}`, `${rand(8)}.,;?<>${rand(8)}`]) {
+    for (const v of [`!${rand(14)}`, `${rand(10)}!#%${rand(10)}`, `${rand(8)}$*@^~${rand(8)}`, `${rand(8)}.?<>${rand(8)}`]) {
       expect(he(`password=${v}`).text).toBe(`password=${T}`);
       expect(he(`DB_PASSWORD: ${v}`).text).toBe(`DB_PASSWORD: ${T}`);
     }
@@ -189,11 +189,14 @@ describe('A5 high_entropy_assignment: punctuated values', () => {
     expect(he(`{"api_key": '${v}'}`).text).toBe(`{"api_key": '${T}'}`);
   });
 
-  test('`&` and brackets end an unquoted value: sibling query parameters and code calls survive', () => {
+  test('`&`, `,`, `;` and brackets end an unquoted value: query parameters, SQL SET lists and code calls survive', () => {
     const tok = rand(24);
     expect(he(`?token=${tok}&page=2`).text).toBe(`?token=${T}&page=2`);
     expect(he('token = getToken(x1, y2, zz3)').text).toBe('token = getToken(x1, y2, zz3)');
     expect(he('password = process.env.DB_PASSWORD_2').text).toBe('password = process.env.DB_PASSWORD_2');
+    const sql = 'SET execution_token=NULL,claim_expires_at=NULL,error_code=$3,updated_at=now()';
+    expect(he(sql).text).toBe(sql);
+    expect(he(`cookie: session_token=${tok}; path=/`).text).toBe(`cookie: session_token=${T}; path=/`);
   });
 
   test('trailing sentence punctuation is not part of an unquoted value, and the bare echo still scrubs', () => {

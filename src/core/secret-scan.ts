@@ -623,16 +623,19 @@ const HIGH_ENTROPY_REQUIRES_DIGIT_RE = /[0-9]/;
 // the group-2-is-value contract. QUOTED: after an opening `"` or `'`, the
 // value is any run of non-quote, non-whitespace characters (a password like
 // `ab!#%…<…` is one value). UNQUOTED: the legacy class plus the password
-// punctuation `!#$%*@^~.,;?<>` — not `&` (it would swallow sibling query
-// parameters), not `()[]{}` (so `token = getToken(x)` never matches), not `:`
-// — and the last character excludes `.,;?!`, so `TOKEN=<tok>.` claims the
-// token without the sentence's full stop and its bare echoes still scrub.
+// punctuation `!#$%*@^~.?<>` — not `&` (it would swallow sibling query
+// parameters), not `()[]{}` (so `token = getToken(x)` never matches), not `:`,
+// and not `,` / `;` (the false-positive measurement found SQL `SET` lists
+// such as `execution_token=NULL,claim_expires_at=NULL,error_code=$3` read as
+// one value; a password carrying them is matched only when quoted) — and the
+// last character excludes `.?!`, so `TOKEN=<tok>.` claims the token without
+// the sentence's full stop and its bare echoes still scrub.
 // Both keep the 12-4096 bounds and the digit + entropy gates.
 const ASSIGNMENT_KEY =
   '(?:^|[^A-Za-z0-9])(?:secret|token|passwd|password|passphrase|credential|api[_-]?key|apikey)[A-Za-z0-9_-]{0,64}["\']?\\s*[:=]\\s*';
 const ASSIGNMENT_QUOTED_SOURCE = `(${ASSIGNMENT_KEY}["'])([^"'\\s]{12,4096})`;
 const ASSIGNMENT_UNQUOTED_SOURCE =
-  `(${ASSIGNMENT_KEY})([A-Za-z0-9+/_=\\-!#$%*@^~.,;?<>]{11,4095}[A-Za-z0-9+/_=\\-#$%*@^~<>])`;
+  `(${ASSIGNMENT_KEY})([A-Za-z0-9+/_=\\-!#$%*@^~.?<>]{11,4095}[A-Za-z0-9+/_=\\-#$%*@^~<>])`;
 /** The legacy (pre-punctuation) value class, whole-value form. */
 const LEGACY_ASSIGNMENT_VALUE_RE = /^[A-Za-z0-9+/_=-]+$/;
 /** A dotted member path in code (`process.env.DB_PASSWORD_2`): every segment an identifier. */
