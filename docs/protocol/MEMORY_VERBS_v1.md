@@ -507,6 +507,17 @@ Verbs are ordinary operations: they inherit fail-closed `remote` semantics,
 OAuth scope enforcement (`remember`/`forget` are write-scope), and per-source
 isolation on every read. Remote callers see `visibility = world` facts only.
 
+Read verbs redact credential-shaped values in their responses with the
+canonical secret scanner: a value becomes `<REDACTED:pattern>`. `recall`,
+`context_pack` and `delta` redact the facts' `fact`, `context` and `source`
+fields for remote callers (`ctx.remote !== false`; every MCP transport,
+including stdio, and thin clients) and return them as stored to the trusted
+local CLI, so a remembered credential is readable only with `gbrain recall` on
+the brain host. Search results, the rendered `text` and `entity` cards are
+redacted for every caller. Budgets, `budget_used` and the `delta` cursor are
+computed from the text each caller actually receives. See
+[secret scan refusals and redaction](../guides/write-refusals.md#secret-scan-refusals-and-redaction).
+
 ## Conformance + certification
 
 ```bash
