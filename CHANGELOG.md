@@ -71,6 +71,24 @@ The detection rules, budget sharing and fallback codes are in `docs/evidence-del
 - The leak suite's "subset of `get_page`" invariant now runs `search`, `query`, `recall` and `assemble_evidence` for every unit plus the implied default. Besides ranked hits, it uses frozen hits naming every chunk of every page, including fenced code, and a conversation page with its own protected rows. Whole-page blocks must be made of whole `get_page` lines, and `page` requests must not fall back. The old invariant compared only ranked `search` page-unit hits on a corpus with no fenced code, so ranking never reached the header case.
 - The off-path golden now pins `chunk` (explicit and config) to the pre-feature fixture. On a corpus without conversations the implied `auto` must match `chunk` byte for byte, and on the full corpus every non-conversation row must equal its frozen chunk row. The parity suite checks the default against `assemble_evidence` with `auto` on both engines.
 
+## [0.60.21.0] - 2026-09-30
+
+**A `git` command GBrain stops early no longer leaves your brain repo locked.**
+
+v0.60.16.0 gave every background `git` call a deadline so a lost exit signal can't hang the write queue. When it stopped a command, though, it killed `git` outright. If that happened in the middle of `git add` or `git commit`, git never got to remove its lock file, and every later git call in that repo failed until someone deleted the lock. That showed up as pages stuck in the queue with "git unavailable" after the owner process was shut down or restarted mid-write.
+
+Now GBrain asks `git` to stop first and gives it two seconds to clean up its lock. Only then does it force the kill. The deadline still holds: a `git` that ignores the request is stopped at most two seconds later.
+
+Nothing to configure and nothing to run after upgrading. If you hit this on v0.60.16.0, remove the leftover `.git/index.lock` in your brain repo once.
+
+### To take advantage of v0.60.21.0
+
+`gbrain upgrade` is all you need. There is no migration.
+
+### Itemized changes
+
+- `execFileBounded` (`src/core/brain-repo-durability.ts`) now sends SIGTERM at its deadline or on abort, and escalates to SIGKILL after a 2 second grace period. It still settles from its own timer if the exit event never arrives.
+- `test/bounded-child-exec.test.ts` adds a case where a child holding a lock file removes it on SIGTERM, plus one where a child ignoring SIGTERM is still stopped within the bound.
 ## [0.60.20.0] - 2026-09-30
 
 **Fix wave 4: managed syncs stop wedging on big write histories, one bad email or issue no longer stops a connector forever, stuck upgrade migrations finish, and you can finally leave managed mode.**
