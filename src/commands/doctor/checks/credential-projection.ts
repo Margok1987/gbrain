@@ -2,7 +2,7 @@
  * credential_projection_pending doctor check (security wave ENG-2): pages whose
  * canonical body holds a private-key marker and whose chunks are withheld from
  * every search path until the provider-free credential-safe re-chunk seals
- * them. Counts the pages the v0.60.28 migration can re-chunk and, separately,
+ * them. Counts the pages the v0.60.29 migration can re-chunk and, separately,
  * code pages without a recorded source path that wait for their importer.
  */
 import type { BrainEngine } from '../../../core/engine.ts';

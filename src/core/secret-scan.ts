@@ -147,7 +147,7 @@ interface CorePattern {
  * (`digitalocean`, `url_credentials`, `basic_auth`, truncated/split
  * `private_key_pem` bodies).
  */
-const SECURITY_WAVE_SINCE = '0.60.28.0';
+const SECURITY_WAVE_SINCE = '0.60.29.0';
 
 /**
  * Placeholder passwords in documentation URLs: `<password>`, `${VAR}`,

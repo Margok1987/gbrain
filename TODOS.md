@@ -1,6 +1,6 @@
 # TODOS
 
-## Secret redaction and Google file modes follow-ups (filed 2026-10-01, follow-up from v0.60.28.0)
+## Secret redaction and Google file modes follow-ups (filed 2026-10-01, follow-up from v0.60.29.0)
 
 - [ ] **P2 — Sanitize text sent to configured providers (reranker, embeddings, synthesis).**
   **What:** retrieval output is redacted, but the hosted reranker, the embedding provider at ingest and `synthesize`/`think` generation still receive stored text unredacted. **Why:** a stored credential can leave the machine through a provider call even though no retrieval op returns it. **Fix:** run the canonical scanner over provider-bound text at the gateway seam (`src/core/ai/gateway.ts`), with the same echo dictionary, and record a content-free count. **Cons:** redacted embedding input changes vectors for affected chunks; the change needs a measured recall check. **Effort:** M. **Priority:** P2.

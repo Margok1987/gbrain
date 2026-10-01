@@ -200,7 +200,7 @@ credentials.
 PUSH BLOCKED — secret scan findings (nothing committed):
   notes/deploy.md:12 [url_credentials] clone <REDACTED:url_credentials>git.example.com/team/repo.git
     fingerprint: sha256:<16 hex characters>
-    rule [url_credentials] blocks pushes since gbrain v0.60.28.0
+    rule [url_credentials] blocks pushes since gbrain v0.60.29.0
     allow this finding: printf '\n%s\n' sha256:<16 hex characters> >> '/home/you/brain/.gbrain-scan-allow'
 Remove a real credential from the file (and rotate it) first. Allowlist only a reviewed false positive
 with the "allow this finding" command above (it appends to '/home/you/brain/.gbrain-scan-allow'), then retry:
@@ -249,14 +249,14 @@ matches, including credentials added later.
 
 ### A stale allowlist entry for a private key
 
-Before v0.60.28.0, a private key whose `END` line was missing (a cut-off
+Before v0.60.29.0, a private key whose `END` line was missing (a cut-off
 excerpt) was matched by its `BEGIN` line alone, and its fingerprint covered
 only that line. The fingerprint now covers the key body too, so an old entry
 for such a key no longer matches and the push is refused again. The refusal
 says so and gives the replacement:
 
 ```text
-    stale allowlist entry: sha256:<old> matched only this key's BEGIN header before gbrain v0.60.28.0; the fingerprint now covers the key body.
+    stale allowlist entry: sha256:<old> matched only this key's BEGIN header before gbrain v0.60.29.0; the fingerprint now covers the key body.
     if the key is a reviewed false positive, replace that line in '/home/you/brain/.gbrain-scan-allow' with: sha256:<new>
 ```
 

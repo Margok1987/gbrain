@@ -41,7 +41,7 @@ async function seedBrain(home: string): Promise<void> {
   mkdirSync(join(dir, 'migrations'), { recursive: true });
   const databasePath = join(home, 'brain.pglite');
   writeFileSync(join(dir, 'config.json'), JSON.stringify({ engine: 'pglite', database_path: databasePath, ...LEGACY_EMBEDDING_CONFIG }));
-  writeFileSync(join(dir, 'migrations', 'completed.jsonl'), migrations.filter(m => m.version !== '0.60.28')
+  writeFileSync(join(dir, 'migrations', 'completed.jsonl'), migrations.filter(m => m.version !== '0.60.29')
     .map(m => JSON.stringify({ version: m.version, status: 'complete' })).join('\n') + '\n');
   const engine = new PGLiteEngine();
   await engine.connect({ database_path: databasePath });
@@ -122,7 +122,7 @@ describe('post-upgrade with a configured embedding provider', () => {
       expect(run.out).toContain('Not re-embedding without your consent');
       if (tty) expect(run.out).toContain('Re-embed now? [y/N]');
       const ledger = readFileSync(join(home, '.gbrain', 'migrations', 'completed.jsonl'), 'utf8');
-      expect(ledger).toContain('"version":"0.60.28"');
+      expect(ledger).toContain('"version":"0.60.29"');
       const engine = new PGLiteEngine();
       await engine.connect({ database_path: join(home, 'brain.pglite') });
       try {
