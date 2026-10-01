@@ -181,7 +181,20 @@ password, `http(s)` URLs carrying a password (`url_credentials`) and
 `Authorization: Basic` credentials (`basic_auth`). A private key is caught
 even when a snippet or chunk cut off its `BEGIN` or `END` line: the key body
 lines are redacted along with whichever fence is present.
-<!-- S2-PENDING: credential-safe chunking (a chunk holding key body with neither fence) and the re-chunk migration. -->
+
+Search chunks never hold key material. A page whose text contains a private
+key is chunked from a copy in which each key is replaced by
+`<REDACTED:private_key_pem>` (line breaks kept, so positions do not shift),
+and evidence delivery cuts `window`, `section` and `page` text from the same
+copy. A chunk from the middle of a long key, with neither its `BEGIN` nor
+its `END` line, therefore carries the token instead of key lines, and key
+material never reaches the embedding provider. The stored page is unchanged.
+Pages indexed before v0.60.29.0 that contain a `BEGIN` or `END … PRIVATE
+KEY` line are withheld from search until the upgrade re-chunks them, without
+provider calls; `gbrain doctor` reports them as `credential_projection_pending`
+until then, and `gbrain embed --stale` embeds the new chunks when you choose
+to. Key material with no `BEGIN` or `END` line anywhere on the page, and keys
+inside image OCR text, are not projected.
 
 Retrieval output, transcript import, hooks and the memory relay also run the
 assignment rule (`high_entropy_assignment`): a value of 12 or more characters
@@ -320,7 +333,7 @@ other operations to get around it.
   operations) and admin job operations are raw too.
 - **Configured providers.** The embedding provider at import, a hosted
   reranker, and `synthesize`/`think` generation still receive stored text
-  unredacted. Redaction covers what callers receive, not what gbrain sends
+  unredacted, except private keys, which chunks never contain. Redaction covers what callers receive, not what gbrain sends
   to a model provider you configured.
 - **Your files and database.** Redaction never edits stored content. If a
   real credential reached the brain, rotate it, then follow
