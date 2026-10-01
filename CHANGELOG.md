@@ -10,6 +10,40 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.24.0] - 2026-10-01
+
+**CI now runs on Bun 1.4.2, so contributors stop seeing random test hangs.**
+
+Bun 1.3 had a bug where a finished child process could go unnoticed. The process exited, but the "it exited" signal got lost, so whatever was waiting for it waited forever. In GBrain's test suites that showed up as hangs that ended in "killed 1 dangling process" and a red run nobody could reproduce. Bun 1.4 fixes the bug at the source. Every CI job that pinned Bun 1.3.13 now pins 1.4.2, the same version that already compiles the release binaries.
+
+Two things behaved differently on 1.4 and are fixed. The out-of-band watchdog that kills a stuck `gbrain sync` or a wedged PGLite close kept killing on time, but its log lines (`parent alive ...`, `SIGTERM`, `SIGKILL`) stopped appearing while the process was stuck, because Bun 1.4 routes a worker thread's stderr through the main thread. They now go straight to the terminal, so cron logs show why a process died again. One test's fake database server also closed a socket twice, which Bun 1.4 reports as an error.
+
+If you run GBrain from source on Bun 1.3.x, nothing changes. Bun 1.3.11 is still the minimum and CI still tests it on pushes to master and nightly. The worst case of the old bug, a background `git` call that never returns, has been bounded in code since v0.60.16.0.
+
+| CI lane | Before | After |
+| --- | --- | --- |
+| Unit, serial, slow, E2E, verify, release publishing | Bun 1.3.13 | Bun 1.4.2 |
+| Security and persistence matrices | 1.3.11 and 1.3.13 | 1.3.11 and 1.4.2 |
+| Native lock matrix on pull requests | 1.3.13 | 1.4.2 (pushes still run 1.3.11, 1.3.13 and 1.4.2) |
+| Local gates (`ci:local`, `ci:ubicloud`) | Bun 1.3.13 | Bun 1.4.2 |
+
+### To take advantage of v0.60.24.0
+
+Nothing to do. `gbrain upgrade` as usual; there is no migration and no Bun upgrade is required.
+
+### Itemized changes
+
+- The sync hard-deadline watchdog and the stall watchdog (`src/core/process-watchdog.ts`) write log lines with a direct fd 2 write from their worker thread, so heartbeat, SIGTERM and SIGKILL lines stay visible while the main thread is starved on Bun 1.4.
+- New in-agent installs (`scripts/setup-in-agent.sh`) download the checksummed Bun 1.4.2 runtime. A repair keeps the runtime version recorded in its receipt.
+
+### For contributors
+
+- Pins moved from 1.3.13 to 1.4.2: every `bun-version:` in `test.yml`, `e2e.yml`, `heavy-tests.yml`, `macos-validation.yml`, `persistence-validation.yml` and `release.yml`; the `GBRAIN_CI_BUN_TAG` default in `docker-compose.ci.yml`; the `BUN_VERSION` default in `scripts/ubicloud/setup-ci-vm.sh` and the fallback in `scripts/ci-ubicloud.ts`; the `oven/bun` image in `tests/docker/`.
+- `test.yml`'s security matrix and every `persistence-validation.yml` matrix run 1.3.11 and 1.4.2; pull requests still skip 1.3.11. `native-locks.yml` keeps all three versions on full scope and narrows pull requests to 1.4.2.
+- `test/scripts/ci-pr-scope.test.ts` fails when any single-version pin drifts from the primary, or when a matrix stops running the minimum supported Bun.
+- `test/postgres-engine-singleton-lifecycle.test.ts`'s fake endpoint ends each refused socket once.
+- Bun 1.4.2 accepts the committed `bun.lock` unchanged. `package.json` engines stay at `>=1.3.11`.
+
 ## [0.60.22.0] - 2026-09-30
 
 **Links now come back in the same order every time. `get_links`, backlinks and every caller that reads them return edges in the order the links were created, instead of whatever order the database happened to store them in.**
