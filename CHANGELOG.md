@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.24.0] - 2026-10-01
+## [0.60.26.0] - 2026-10-01
 
 **System One: a fast decision model can now make some of your brain's small judgment calls, starting with which chats are worth remembering and which facts replace older ones. If you have a TypeSafe key installed, upgrading turns those two on.**
 
@@ -52,7 +52,7 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
 - The contradiction sweep never changes a fact on its own. It writes proposals you review with `gbrain decide proposals list`, then `accept`, `reject` or `undo`.
 - Third-party decide spend is capped at $1.00 per brain per day by default (`decide.budget.daily_usd`). `gbrain decide disable --all` turns everything off and restores your reranker settings.
 
-## To take advantage of v0.60.24.0
+## To take advantage of v0.60.26.0
 
 `gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
 
@@ -61,7 +61,7 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
    gbrain apply-migrations --yes --no-autopilot-install
    ```
    Schema migrations v184 to v186 create empty tables. They backfill nothing and change no config value.
-2. **Your agent reads `skills/migrations/v0.60.24.0.md` the next time you interact with it.** It explains System One, tells you what the key-aware defaults send and how to opt out, and stops; it never turns a slot on, allows private egress or raises the budget without asking you.
+2. **Your agent reads `skills/migrations/v0.60.26.0.md` the next time you interact with it.** It explains System One, tells you what the key-aware defaults send and how to opt out, and stops; it never turns a slot on, allows private egress or raises the budget without asking you.
 3. **Verify the outcome:**
    ```bash
    gbrain doctor        # no key: "System One is off (every decide slot is off; nothing is sent)."
@@ -151,6 +151,40 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
 - Extension points: `SLOT_SPECS[slot].wired` (`src/core/ai/decide/slots.ts`), `registerEvidenceCoPack` (`src/core/search/decide-stage.ts`), `registerDatasetAdapter` / `registerDatasetBuilder` (`dataset.ts`, including `unpacked` and `aggregate: 'max'` adapters), `registerDecideSubcommand` (`src/commands/decide.ts`), `registerWhatIfReducer` (`src/commands/decide/receipts.ts`), `writeReceipts`, `resolveSlotPolicy` and `stageDeadlineMs`. "How to add a slot" in the contract walks the five steps.
 - Shared eval flags live in `src/eval/decide-eval-flags.ts`; reference calibrations in `src/core/ai/decide/reference-calibrations.ts`. Eval commands opt in to `GBRAIN_DECIDE_SLOTS` through `enableDecideEvalOverride()`, which never bypasses consent, egress or the cap.
 - File map: `docs/architecture/key-files/core-decide.md`. Operator guide: `docs/guides/system-one.md`. Provider and key setup: `docs/ai-providers/typesafe.md`.
+
+## [0.60.25.0] - 2026-10-01
+
+**CI now runs on Bun 1.4.2, so contributors stop seeing random test hangs.**
+
+Bun 1.3 had a bug where a finished child process could go unnoticed. The process exited, but the "it exited" signal got lost, so whatever was waiting for it waited forever. In GBrain's test suites that showed up as hangs that ended in "killed 1 dangling process" and a red run nobody could reproduce. Bun 1.4 fixes the bug at the source. Every CI job that pinned Bun 1.3.13 now pins 1.4.2, the same version that already compiles the release binaries.
+
+Two things behaved differently on 1.4 and are fixed. The out-of-band watchdog that kills a stuck `gbrain sync` or a wedged PGLite close kept killing on time, but its log lines (`parent alive ...`, `SIGTERM`, `SIGKILL`) stopped appearing while the process was stuck, because Bun 1.4 routes a worker thread's stderr through the main thread. They now go straight to the terminal, so cron logs show why a process died again. One test's fake database server also closed a socket twice, which Bun 1.4 reports as an error.
+
+If you run GBrain from source on Bun 1.3.x, nothing changes. Bun 1.3.11 is still the minimum and CI still tests it on pushes to master and nightly. The worst case of the old bug, a background `git` call that never returns, has been bounded in code since v0.60.16.0.
+
+| CI lane | Before | After |
+| --- | --- | --- |
+| Unit, serial, slow, E2E, verify, release publishing | Bun 1.3.13 | Bun 1.4.2 |
+| Security and persistence matrices | 1.3.11 and 1.3.13 | 1.3.11 and 1.4.2 |
+| Native lock matrix on pull requests | 1.3.13 | 1.4.2 (pushes still run 1.3.11, 1.3.13 and 1.4.2) |
+| Local gates (`ci:local`, `ci:ubicloud`) | Bun 1.3.13 | Bun 1.4.2 |
+
+### To take advantage of v0.60.25.0
+
+Nothing to do. `gbrain upgrade` as usual; there is no migration and no Bun upgrade is required.
+
+### Itemized changes
+
+- The sync hard-deadline watchdog and the stall watchdog (`src/core/process-watchdog.ts`) write log lines with a direct fd 2 write from their worker thread, so heartbeat, SIGTERM and SIGKILL lines stay visible while the main thread is starved on Bun 1.4.
+- New in-agent installs (`scripts/setup-in-agent.sh`) download the checksummed Bun 1.4.2 runtime. A repair keeps the runtime version recorded in its receipt.
+
+### For contributors
+
+- Pins moved from 1.3.13 to 1.4.2: every `bun-version:` in `test.yml`, `e2e.yml`, `heavy-tests.yml`, `macos-validation.yml`, `persistence-validation.yml` and `release.yml`; the `GBRAIN_CI_BUN_TAG` default in `docker-compose.ci.yml`; the `BUN_VERSION` default in `scripts/ubicloud/setup-ci-vm.sh` and the fallback in `scripts/ci-ubicloud.ts`; the `oven/bun` image in `tests/docker/`.
+- `test.yml`'s security matrix and every `persistence-validation.yml` matrix run 1.3.11 and 1.4.2; pull requests still skip 1.3.11. `native-locks.yml` keeps all three versions on full scope and narrows pull requests to 1.4.2.
+- `test/scripts/ci-pr-scope.test.ts` fails when any single-version pin drifts from the primary, or when a matrix stops running the minimum supported Bun.
+- `test/postgres-engine-singleton-lifecycle.test.ts`'s fake endpoint ends each refused socket once.
+- Bun 1.4.2 accepts the committed `bun.lock` unchanged. `package.json` engines stay at `>=1.3.11`.
 
 ## [0.60.23.0] - 2026-09-30
 
