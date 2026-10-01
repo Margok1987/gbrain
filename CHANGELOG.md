@@ -10,7 +10,7 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.24.0] - 2026-10-01
+## [0.60.25.0] - 2026-10-01
 
 **CI now runs on Bun 1.4.2, so contributors stop seeing random test hangs.**
 
@@ -27,7 +27,7 @@ If you run GBrain from source on Bun 1.3.x, nothing changes. Bun 1.3.11 is still
 | Native lock matrix on pull requests | 1.3.13 | 1.4.2 (pushes still run 1.3.11, 1.3.13 and 1.4.2) |
 | Local gates (`ci:local`, `ci:ubicloud`) | Bun 1.3.13 | Bun 1.4.2 |
 
-### To take advantage of v0.60.24.0
+### To take advantage of v0.60.25.0
 
 Nothing to do. `gbrain upgrade` as usual; there is no migration and no Bun upgrade is required.
 
