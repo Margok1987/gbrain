@@ -365,7 +365,7 @@
         },
         {
           "category": "meta",
-          "message": "Version 186 (latest: 186)",
+          "message": "Version 187 (latest: 187)",
           "name": "schema_version",
           "status": "ok"
         },
@@ -488,6 +488,18 @@
           },
           "message": "Every re-sealable page is at the safe-chunk index version.",
           "name": "safe_index_pending",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "count": "exact",
+            "kept_pages": 0,
+            "pages_pending": 0,
+            "truncated": false
+          },
+          "message": "No page waits for the credential-safe re-chunk.",
+          "name": "credential_projection_pending",
           "status": "ok"
         },
         {

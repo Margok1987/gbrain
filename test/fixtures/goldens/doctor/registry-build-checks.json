@@ -335,6 +335,10 @@
       },
       {
         "category": "brain",
+        "name": "credential_projection_pending"
+      },
+      {
+        "category": "brain",
         "name": "connector_checkpoints"
       },
       {
