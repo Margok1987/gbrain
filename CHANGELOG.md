@@ -10,15 +10,20 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
-## [0.60.23.0] - 2026-10-01
+## [0.60.24.0] - 2026-10-01
 
-**System One: a fast decision model can now make some of your brain's small judgment calls, starting with which chats are worth remembering and which facts replace older ones. Every part of it is off until you turn it on.**
+**System One: a fast decision model can now make some of your brain's small judgment calls, starting with which chats are worth remembering and which facts replace older ones. If you have a TypeSafe key installed, upgrading turns those two on.**
 
 Your brain makes small calls all day. Is this chat worth turning into notes? Does this new fact replace an old one? Is this search result actually evidence? Today each call is a hand-written rule or a full chat-model call. System One lets a decision model answer them instead: TypeSafe's Jev (fast and cheap) or any chat model you already configured. GBrain's code still owns every threshold and every fallback.
 
-There are nine decision points, called slots. Each is off (today's behavior) or on. Nothing leaves your machine until you turn one on, and with every slot off your brain behaves exactly as before. A TypeSafe key alone changes nothing.
+There are nine decision points, called slots. Each is off (today's behavior) or on. We measured every slot. Two clearly helped, so those two are on by default when a TypeSafe key is installed, and the other seven stay off. Without a key, every slot is off, nothing leaves your machine, and your brain behaves exactly as before.
 
-We measured every slot before deciding what to recommend. Two clearly helped, so the one-command preset turns on only those two.
+**If you have a TypeSafe key installed** (`TYPESAFE_API_KEY` or `JEV_TYPESAFE_API_KEY`, in your shell or `~/.gbrain/.env`), upgrading turns on:
+
+- **Dream triage.** Each dream cycle sends transcript windows (conversation text, including private chats) to TypeSafe to decide what is worth turning into notes. In our end-to-end run it caught every buried decision (10/10 instead of 3/10) and raised dream spend by 73% ($1.50 to $2.60), because it also synthesizes some routine chats.
+- **Contradiction proposals.** After the fact sweep, fact text (facts are private by default) goes to TypeSafe, which proposes which new facts replace old ones. Nothing changes until you accept a proposal.
+
+For these two slots the key counts as your opt-in for that data. Nothing is written to your config. Turn either off with `gbrain decide disable triage` or `gbrain decide disable conflict`, or everything with `gbrain decide disable --all`.
 
 ### How to try it
 
@@ -26,8 +31,7 @@ We measured every slot before deciding what to recommend. Two clearly helped, so
 export TYPESAFE_API_KEY=<your-key>
 gbrain decide probe                         # checks the key; sends a fixed sentence, nothing from your brain
 gbrain decide probe --query "<a question>"  # shows today's order next to Jev's; asks before sending, changes nothing
-gbrain decide enable --recommended          # turns on dream triage + the contradiction sweep
-gbrain decide status
+gbrain decide status                        # triage and conflict: on (default: Jev key present), with the opt-out
 ```
 
 ### What we measured
@@ -37,17 +41,18 @@ gbrain decide status
 | Dream triage | Picks which transcripts get synthesized | Caught 18/18 buried decisions and commitments (today: 8/18). Costs more: it also synthesizes about a third of routine chats, so dream spend went $1.50 to $2.60 in the end-to-end run |
 | Contradiction sweep | Proposes supersedes for facts that contradict older ones | Found 94/97 labelled updates with 1 wrong proposal (today's rule: 0/97) |
 | Search reranking | Jev instead of Voyage | Worse than Voyage (recall 94.8% vs 94.0% at best); Voyage stays the default |
-| The other six | Routing, evidence gate, abstention, injection signal, know-to-ask, claim support | No measurable change, a regression, or too little data to qualify; not in the preset |
+| The other six | Routing, evidence gate, abstention, injection signal, know-to-ask, claim support | No measurable change, a regression, or too little data to qualify; off by default |
 
 No label in these evals is a human hand label. Full tables: `docs/eval/system-one/README.md`.
 
 ### Things to watch
 
-- Triage and the sweep read private data (conversation windows and facts). On Jev, `enable --recommended` refuses them until you run `gbrain config set decide.egress.private allow`, or route them to an `llm:` provider. It names the missing key and changes nothing.
+- With a key, the defaults send private conversation windows and private facts to TypeSafe. They never send pages, and sources in `decide.egress.deny_sources` stay local. An explicit `gbrain config set decide.egress.private deny` or `gbrain config set decide.provider none` turns the defaults off too.
+- Any slot you set yourself (its mode, its provider, or a `deny` on its consent key) is never touched by the default.
 - The contradiction sweep never changes a fact on its own. It writes proposals you review with `gbrain decide proposals list`, then `accept`, `reject` or `undo`.
 - Third-party decide spend is capped at $1.00 per brain per day by default (`decide.budget.daily_usd`). `gbrain decide disable --all` turns everything off and restores your reranker settings.
 
-## To take advantage of v0.60.23.0
+## To take advantage of v0.60.24.0
 
 `gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
 
@@ -56,10 +61,11 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
    gbrain apply-migrations --yes --no-autopilot-install
    ```
    Schema migrations v184 to v186 create empty tables. They backfill nothing and change no config value.
-2. **Your agent reads `skills/migrations/v0.60.23.0.md` the next time you interact with it.** It explains System One and stops; it never turns a slot on, allows private egress or raises the budget without asking you.
+2. **Your agent reads `skills/migrations/v0.60.24.0.md` the next time you interact with it.** It explains System One, tells you what the key-aware defaults send and how to opt out, and stops; it never turns a slot on, allows private egress or raises the budget without asking you.
 3. **Verify the outcome:**
    ```bash
-   gbrain doctor        # decide_health: "System One is off (every decide slot is off; nothing is sent)."
+   gbrain doctor        # no key: "System One is off (every decide slot is off; nothing is sent)."
+                        # with a key: "triage=on (default: Jev key present), conflict=on (default: Jev key present)" and the opt-out
    gbrain decide status
    ```
 4. **If any step fails or the numbers look wrong,** please file an issue:
@@ -70,9 +76,17 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
 
    This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
 
-**Say to your agent:** *"Try System One on my brain without changing anything."* or *"Turn on the recommended System One slots and show me what leaves my machine first."* or *"Show me the contradiction proposals from the last sweep."*
+**Say to your agent:** *"Which System One slots are on, and what do they send?"* or *"Turn off System One dream triage."* or *"Show me the contradiction proposals from the last sweep."*
 
 ### Itemized changes
+
+#### Key-aware defaults
+
+- With a TypeSafe key present and nothing set for the slot, `triage` and `conflict` default on with `typesafe:jev-1.13.0` and their shipped reference calibrations; the other seven slots default off. Without a key every slot is off and output is byte-identical to a brain without System One.
+- The default-on set is computed from the reference calibration rows (verdict win and a passing precision gate), the same computation `enable --recommended` uses, so the two cannot disagree.
+- For those two slots the key is the egress opt-in for their own data (conversation text for triage, fact text for the sweep), as a documented default; nothing is written to config. Page visibility rules, derived-page rules and `decide.egress.deny_sources` are unchanged, and the defaults never send pages.
+- Explicit settings always win: `decide.slots.<slot>.mode`, `decide.slots.<slot>.provider`, `decide.provider none`, `decide.egress.private deny`, a `deny` on the slot's consent key, and `gbrain decide disable <slot>|--all`. Eval commands never use the defaults.
+- `gbrain decide status` and doctor's `decide_health` show `on (default: Jev key present)` and the one-line opt-out. `gbrain decide enable` on a slot that is already on by default says so and writes nothing.
 
 #### `gbrain decide`: turning slots on and off
 
@@ -80,7 +94,7 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
 - `gbrain decide enable <slot>` prints what leaves the machine and to whom, the estimated cost and the daily cap, then writes the provider (always the resolved pinned id, never an alias), the consent keys for that slot's data classes, the calibration and the mode in one confirmed step. It refuses, writes nothing and exits non-zero when the slot could not act, naming the reason, the fix command and a `docs/guides/system-one.md#<reason>` anchor.
 - `gbrain decide enable --recommended` turns on only slots with a recorded eval win and a passing reference calibration for your model. For `jev-1.13.0` that is `triage` and `conflict`. When no slot qualifies it says so and exits non-zero.
 - `gbrain decide disable <slot> | --all` is the kill switch; `disable rerank` restores the reranker settings `enable rerank` changed.
-- `gbrain decide status [--egress] [--json]` shows provider, consent, budget and each slot's readiness (`ready for on`, `needs calibration`, `on (inactive: <reason>)` with the one fix command, `newer reference available`).
+- `gbrain decide status [--egress] [--json]` shows provider, consent, budget and each slot's readiness (`ready for on`, `needs calibration`, `on (default: Jev key present)`, `on (inactive: <reason>)` with the one fix command, `newer reference available`).
 - Advanced: `calibrate`, `qualify`, `calibrations list|adopt|retire|restore`, `dataset --from <source>`, and `receipts [--what-if-threshold <t>]` for calibrating a slot on your own labelled data.
 
 #### The nine slots
@@ -88,7 +102,7 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
 - `rerank` (search reranking), `intent` (query routing), `evidence` (evidence gate), `answerable` (abstention in `think`), `injection` (moves results that look like instructions to an AI agent below clean ones), `recall_needed` (know-to-ask on the hook user-prompt path), `triage` (dream triage), `grounding` (claim support for dream pages) and `conflict` (contradiction proposals after the fact sweep).
 - Every slot fails toward today's behavior on timeout, rate limit, provider error, malformed or partial answers, mixed model versions, budget exhaustion, model drift or a changed policy, and writes a receipt with the reason. No slot can weaken a deterministic floor: verbatim quotes, numbers, visibility and trust rules always win.
 - Slots that can remove or withhold content (evidence gate, abstention, know-to-ask suppression, triage rejection, claim quarantine) turn on only with a qualified calibration that passes a 0.90 precision gate.
-- Upgrades never move an enabled slot: `enable` pins the resolved model id, and a newer reference calibration waits for `gbrain decide calibrations adopt <id>`.
+- Upgrades never move a slot you enabled: `enable` pins the resolved model id, and a newer reference calibration waits for `gbrain decide calibrations adopt <id>`. A slot on only by the key-aware default uses the reference calibration shipped with your binary.
 
 #### Dream triage and the contradiction sweep
 
@@ -98,7 +112,7 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
 
 #### Egress and spend safety
 
-- One egress rule covers every path: a provider receives a data class (query, candidates, facts, conversation) only with your consent for that provider, each `deny` until `enable` writes `allow` after showing you what leaves. Private pages (including derived pages whose origin is private), facts and conversation text never leave without `decide.egress.private allow`. `decide.egress.deny_sources` applies to every provider. `decide.egress_fallback llm:<provider:model>` answers only the items egress refused.
+- One egress rule covers every path: a provider receives a data class (query, candidates, facts, conversation) only with your consent for that provider, each `deny` until `enable` writes `allow` after showing you what leaves (or, for the two key-aware default slots, the key itself). Private pages (including derived pages whose origin is private) never leave without `decide.egress.private allow`; facts and conversation text need it too, except for those two default slots. `decide.egress.deny_sources` applies to every provider. `decide.egress_fallback llm:<provider:model>` answers only the items egress refused.
 - `decide.budget.daily_usd` (default $1.00) caps third-party decide spend per brain per UTC day from a local spend ledger that also charges failed and timed-out requests. Remote MCP callers may use at most `decide.budget.remote_share` (default 0.5) of it.
 - Decision receipts store hashes, never text. Doctor gains `decide_health`: a missing key, alias use, slots on but inactive (with the cause and fix), model drift, a 24-hour error rate over 5%, an exhausted budget, egress refusals and every `force_on` bypass. An all-off brain reports ok.
 
@@ -133,9 +147,32 @@ No label in these evals is a human hand label. Full tables: `docs/eval/system-on
 
 - `docs/architecture/decide.md` is the contract: `runDecide(req, { engine, config })` (or `gateway.decide`) with typed `noul` / `choice` / `score` questions over evidence items that carry provenance; failures throw `DecideError` with a catalogued reason and the caller takes its slot's fail direction. Partial answers are never used.
 - Providers: `typesafe:<model>` (`POST /v1/systemone`, `TYPESAFE_API_KEY` or `JEV_TYPESAFE_API_KEY`) and `llm:<provider:model>` (`chat()` with a JSON schema, validated by the same parser).
+- Key-aware defaults: `readDecideConfig(snapshot, { typesafeKey })` (omitting `typesafeKey` means keyless), `recommendedSlots(provider)` in `reference-calibrations.ts`, `DecideSlotConfig.keyDefault`, and `checkEgress(..., { slot })`. Live call sites pass `hasTypesafeKey()`.
 - Extension points: `SLOT_SPECS[slot].wired` (`src/core/ai/decide/slots.ts`), `registerEvidenceCoPack` (`src/core/search/decide-stage.ts`), `registerDatasetAdapter` / `registerDatasetBuilder` (`dataset.ts`, including `unpacked` and `aggregate: 'max'` adapters), `registerDecideSubcommand` (`src/commands/decide.ts`), `registerWhatIfReducer` (`src/commands/decide/receipts.ts`), `writeReceipts`, `resolveSlotPolicy` and `stageDeadlineMs`. "How to add a slot" in the contract walks the five steps.
 - Shared eval flags live in `src/eval/decide-eval-flags.ts`; reference calibrations in `src/core/ai/decide/reference-calibrations.ts`. Eval commands opt in to `GBRAIN_DECIDE_SLOTS` through `enableDecideEvalOverride()`, which never bypasses consent, egress or the cap.
 - File map: `docs/architecture/key-files/core-decide.md`. Operator guide: `docs/guides/system-one.md`. Provider and key setup: `docs/ai-providers/typesafe.md`.
+## [0.60.22.0] - 2026-09-30
+
+**Links now come back in the same order every time. `get_links`, backlinks and every caller that reads them return edges in the order the links were created, instead of whatever order the database happened to store them in.**
+
+`getLinks` and `getBacklinks` had no `ORDER BY`, so Postgres and PGLite returned rows in storage order. When an edge was rewritten, for example by an auto-link re-run updating its context, Postgres stored the new row version after its siblings, and the edge moved to the end of the list. An index scan could also return endpoint page order instead. That was the recurring `attendance-retrieval` failure on Postgres CI, where the same two attendance edges came back swapped. Both reads now order by link id, which is creation order and never changes when an edge is updated.
+
+| Reading a page's links after one edge is rewritten | Before | After |
+| --- | --- | --- |
+| Order | storage order: the rewritten edge moves last, or index order | link-id (creation) order, stable |
+| `attendance-retrieval-postgres` | intermittent swapped-order failure | deterministic |
+
+No caller changes meaning. The callers look up edges with `find` or `some`, or return the list as is, and the first match by link type is now the oldest such edge, which is what storage order returned before any rewrite.
+
+### To take advantage of v0.60.22.0
+
+`gbrain upgrade`. There is no migration.
+
+### Itemized changes
+
+- `src/core/engine-sql/links.ts`: `getLinks` and `getBacklinks` end every scope branch (federated grant, single source, unscoped) with `ORDER BY l.id`. Both engines share this SQL.
+- New `test/e2e/links-read-order.test.ts` (PGLite, and Postgres when `DATABASE_URL` is set) creates the endpoint pages in reverse and rewrites the oldest edge, then expects link-id order from every branch. It fails without the `ORDER BY`.
+- `test/fixtures/goldens/sql-text/links.json` is regenerated for the 8 `getLinks` / `getBacklinks` variants. The only change is the added `ORDER BY l.id`.
 
 ## [0.60.21.0] - 2026-09-30
 
