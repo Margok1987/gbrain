@@ -545,6 +545,7 @@ function staleHeaderOnlyEntry(legacyFingerprint: string | undefined, allowlist: 
 /** The exact `gbrain sources push` invocation that re-runs this push from any directory. */
 function pushRetryCommand(opts: WorkspacePushOpts): string {
   return [
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- display only: the printed retry command names the caller's own workspace dir; nothing is read or written here.
     'gbrain sources push --path', shellQuote(resolve(opts.dir)),
     ...(opts.branch ? ['--branch', shellQuote(opts.branch)] : []),
     ...(opts.allowUnverifiedRemote ? ['--allow-unverified-remote'] : []),
@@ -794,6 +795,7 @@ export async function workspacePush(opts: WorkspacePushOpts): Promise<WorkspaceP
       stagedDeletions = new Set();
     }
     const allowlist = loadWorkspaceAllowlist(root);
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- fixed filename under the resolved workspace root (same path loadWorkspaceAllowlist reads); used only in printed guidance.
     const allowlistPath = join(root, SCAN_ALLOW_FILENAME);
     const retryCommand = pushRetryCommand(opts);
     const findings: PushSecretFinding[] = [];

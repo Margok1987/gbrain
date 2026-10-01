@@ -90,6 +90,7 @@ export function mkdirPrivate(dir: string, root: string = dir): void {
   }
   let current = root;
   for (const part of below ? below.split(sep) : []) {
+    // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal -- `below` is relative(root, dir), rejected above when it escapes root; parts walk only between root and dir.
     current = join(current, part);
     createPrivateDir(current);
   }
