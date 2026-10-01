@@ -71,6 +71,29 @@ The detection rules, budget sharing and fallback codes are in `docs/evidence-del
 - The leak suite's "subset of `get_page`" invariant now runs `search`, `query`, `recall` and `assemble_evidence` for every unit plus the implied default. Besides ranked hits, it uses frozen hits naming every chunk of every page, including fenced code, and a conversation page with its own protected rows. Whole-page blocks must be made of whole `get_page` lines, and `page` requests must not fall back. The old invariant compared only ranked `search` page-unit hits on a corpus with no fenced code, so ranking never reached the header case.
 - The off-path golden now pins `chunk` (explicit and config) to the pre-feature fixture. On a corpus without conversations the implied `auto` must match `chunk` byte for byte, and on the full corpus every non-conversation row must equal its frozen chunk row. The parity suite checks the default against `assemble_evidence` with `auto` on both engines.
 
+## [0.60.22.0] - 2026-09-30
+
+**Links now come back in the same order every time. `get_links`, backlinks and every caller that reads them return edges in the order the links were created, instead of whatever order the database happened to store them in.**
+
+`getLinks` and `getBacklinks` had no `ORDER BY`, so Postgres and PGLite returned rows in storage order. When an edge was rewritten, for example by an auto-link re-run updating its context, Postgres stored the new row version after its siblings, and the edge moved to the end of the list. An index scan could also return endpoint page order instead. That was the recurring `attendance-retrieval` failure on Postgres CI, where the same two attendance edges came back swapped. Both reads now order by link id, which is creation order and never changes when an edge is updated.
+
+| Reading a page's links after one edge is rewritten | Before | After |
+| --- | --- | --- |
+| Order | storage order: the rewritten edge moves last, or index order | link-id (creation) order, stable |
+| `attendance-retrieval-postgres` | intermittent swapped-order failure | deterministic |
+
+No caller changes meaning. The callers look up edges with `find` or `some`, or return the list as is, and the first match by link type is now the oldest such edge, which is what storage order returned before any rewrite.
+
+### To take advantage of v0.60.22.0
+
+`gbrain upgrade`. There is no migration.
+
+### Itemized changes
+
+- `src/core/engine-sql/links.ts`: `getLinks` and `getBacklinks` end every scope branch (federated grant, single source, unscoped) with `ORDER BY l.id`. Both engines share this SQL.
+- New `test/e2e/links-read-order.test.ts` (PGLite, and Postgres when `DATABASE_URL` is set) creates the endpoint pages in reverse and rewrites the oldest edge, then expects link-id order from every branch. It fails without the `ORDER BY`.
+- `test/fixtures/goldens/sql-text/links.json` is regenerated for the 8 `getLinks` / `getBacklinks` variants. The only change is the added `ORDER BY l.id`.
+
 ## [0.60.21.0] - 2026-09-30
 
 **A `git` command GBrain stops early no longer leaves your brain repo locked.**
