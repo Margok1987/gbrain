@@ -170,6 +170,6 @@ export async function checkUpgradeErrors(
  */
 export function checkBunRuntime(version = typeof Bun === 'undefined' ? '' : Bun.version): Check {
   const refusal = unsupportedBunMessage(version);
-  if (refusal) return { name: 'bun_runtime', status: 'fail', message: refusal.replace('\n', ' ') };
+  if (refusal) return { name: 'bun_runtime', status: 'fail', message: refusal.replaceAll('\n', ' ') };
   return { name: 'bun_runtime', status: 'ok', message: `Bun ${version} (minimum ${MINIMUM_BUN_VERSION})` };
 }
