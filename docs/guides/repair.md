@@ -3,9 +3,11 @@
 `gbrain doctor` finds some damage that it cannot fix on its own: timeline
 history that exists only in the database, derived pages without an explicit
 visibility, pages indexed before the safe-chunk fence, pages imported
-without a contextual retrieval mode, and connector checkpoint rows no source
-can load. `gbrain repair` fixes those five kinds. Every run is a preview
-unless you pass `--apply`.
+without a contextual retrieval mode, connector checkpoint rows no source
+can load, and Google source files other local users can read. `gbrain repair`
+fixes those and the other kinds listed in
+[What each kind fixes](#what-each-kind-fixes). Every run is a preview unless
+you pass `--apply`.
 `gbrain doctor --remediation-plan` lists the same kinds as repair steps, and
 `gbrain doctor --remediate --yes --include-repairs` runs them under a budget
 (see [Run repairs through doctor](#run-repairs-through-doctor)).
@@ -60,6 +62,7 @@ gbrain repair safe-chunks --apply
 gbrain repair safe-chunks --apply --no-embed   # re-seal text now, embed later
 gbrain repair contextual-mode --apply
 gbrain repair request-indexes --apply
+gbrain repair google-file-modes --apply
 gbrain repair --all --apply                    # every kind in order
 ```
 
@@ -68,7 +71,7 @@ gbrain repair --all --apply                    # every kind in order
 any other option the table below does not list, including `--max-usd`: a
 refused run changes nothing. To cap paid embedding work, run the repairs
 through `gbrain doctor --remediate --yes --include-repairs --max-usd <n>`. `--all`
-runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `orphan-bindings`, then `embedding-effects`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `orphan-bindings`, then `embedding-effects`, then `google-file-modes`, and stops at the
 first kind that stops.
 
 Each item is re-checked against the page's current state just before it is
@@ -103,6 +106,7 @@ should also check `results[].complete`.
 | `embedding-effects` | `stale_embedding_effects` | Settles stale queued and failed embedding effects of committed writes, which block receipt compaction and activation: `reconciled` when current vectors pass the effect verifier, `superseded` when the page was deleted or a newer revision owns its own effect, `retry_queued` for the owner (paid; a used-up retry allowance gets one new bounded cycle per explicit apply). See [stale queued embedding effects](#stale-queued-embedding-effects). | `blocked` effects, counted by reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). |
 | `safe-chunks` | `safe_index_pending` (also `contextual_retrieval_coverage`, `details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 | `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync or a connector source before this release), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. `embed_skip`: pages marked to skip embedding keep their stored vectors and are not stamped. |
+| `google-file-modes` | `google_file_modes` | Clears the group and other permission bits on files and directories gbrain wrote under a Google source directory outside `~/.gbrain` (releases before v0.60.28.0 wrote them with the default umask, typically 0644; a looser mode set by hand is cleared too): the sync state (`.google-source.json*`), the mail, calendar and contact pages gbrain recorded for the source under `emails/`, `calendar/` and `people/` (and their leftover `.tmp` files), and the directories between the source directory and those pages. Your own permission bits are kept. It never changes the source directory itself, never follows a symlink and never touches a file another user owns. Filesystem only: no journal admission, no page write, no cost. The preview's sample paths are relative to the source directory and can contain email subject words. Sources inside `~/.gbrain` are skipped (that directory is already private). No-op on Windows. See [Google file permissions](google-connect.md#file-permissions). | `skipped_symlink`, `skipped_foreign_owner`, `skipped_not_regular`: entries left alone because a symlink is on the path, another user owns them, or they are not the expected file type. Fix those by hand. |
 
 Timeline rows that an earlier version of a page produced and its current text
 no longer has are removals, not history, so `timeline` neither counts nor
@@ -405,6 +409,7 @@ walk me through it before changing anything."*
 | Doctor `persistence_request_growth` warns | #5751, #5762 | `gbrain doctor --json` | the printed `gbrain config set persistence.limits.<limit> <value>` | `gbrain doctor --json` (check `persistence_request_growth`) |
 | Working-tree sync prints `legacy file(s) skipped … no contextual retrieval mode` | #5751 | `gbrain repair contextual-mode` | `gbrain repair contextual-mode --apply` | the next `gbrain sync --working-tree` no longer prints the line |
 | Working-tree sync prints `legacy file(s) skipped … not valid UTF-8` | #5751 | `find <checkout> -name '*.md' ! -exec iconv -f UTF-8 -t UTF-8 -o /dev/null {} \; -print` | re-save each listed file as UTF-8 | the next `gbrain sync --working-tree` no longer prints the line |
+| Doctor `google_file_modes` warns, or the upgrade printed `[google] Google source <id> keeps its files in <dir>, outside ~/.gbrain` | #5080 | `gbrain repair google-file-modes --source <id>` | `gbrain repair google-file-modes --source <id> --apply` | `gbrain doctor` (`google_file_modes` ok) |
 
 Hosted and thin-client callers see the same checks in `gbrain remote doctor`
 as one line each, for example
