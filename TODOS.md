@@ -1,5 +1,28 @@
 # TODOS
 
+## Secret redaction and Google file modes follow-ups (filed 2026-10-01, follow-up from v0.60.28.0)
+
+- [ ] **P2 — Sanitize text sent to configured providers (reranker, embeddings, synthesis).**
+  **What:** retrieval output is redacted, but the hosted reranker, the embedding provider at ingest and `synthesize`/`think` generation still receive stored text unredacted. **Why:** a stored credential can leave the machine through a provider call even though no retrieval op returns it. **Fix:** run the canonical scanner over provider-bound text at the gateway seam (`src/core/ai/gateway.ts`), with the same echo dictionary, and record a content-free count. **Cons:** redacted embedding input changes vectors for affected chunks; the change needs a measured recall check. **Effort:** M. **Priority:** P2.
+- [ ] **P2 — Dispatcher-level default redaction for remote callers.**
+  **What:** every operation now declares `outputRedaction`, and only `'retrieval'` ops are wrapped. An op misclassified as `'no_stored_text'` or `{ exempt }` would return stored text raw to an MCP caller. **Fix:** in the shared dispatch path, run `redactRetrievalOutput` over every remote response unless the op is on the explicit raw-read exempt list (`get_page`, `fetch`, `get_chunks`, `get_raw_data`, `get_versions`, the skill catalog, admin job ops). **Effort:** S. **Priority:** P2.
+- [ ] **P3 — `.netrc` and `curl -u` credential shapes.**
+  **What:** `machine <host> login <user> password <pw>` lines and `curl -u user:pw` / `--user user:pw` arguments are not matched by any `secret-scan.ts` pattern. **Fix:** two keyword-anchored patterns with bounded values and placeholder rejection, perf-pinned in `test/secret-scan-perf.test.ts`. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — Should `pass` and `password` count as URL placeholder passwords?**
+  **What:** `url_credentials` skips `<...>`, `${...}`, `$VAR`, all-`*` and all-`x` passwords, but a documentation URL whose password is literally `pass` or `password` now fires (two such literals exist in `src/`). **Decision needed:** treat those two words as placeholders (fewer documentation false positives, misses a real password that happens to be one of them) or keep firing. **Effort:** XS. **Priority:** P3.
+- [ ] **P3 — Evaluate gitleaks-derived vendor rules under the linear-time contract.**
+  **What:** compare the vendor prefixes in the upstream gitleaks rule set with `CORE_PATTERNS` and add the ones with a fixed, low-false-positive shape. **Why:** vendor coverage is the cheapest recall gain. **Cons:** every new rule needs a perf pin and a false-positive budget run (`scripts/secret-scan-fp-budget.ts`). **Effort:** M. **Priority:** P3.
+- [ ] **P3 — Runtime counter for context entries dropped by the sensitivity scan.**
+  **What:** each drop prints one content-free line (`compile-context: omitted <slug> ...`), but there is no running count in doctor or status, so a brain that silently loses many entries looks healthy. **Fix:** a counter (per pattern family, no values) surfaced by `gbrain doctor`. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — Per-brain retrieval redaction override.**
+  **What:** a reviewed false positive can be allowlisted for pushes and compiled context (`.gbrain-scan-allow`), but retrieval redaction has no override. **Fix:** a fingerprint allowlist or `redaction.retrieval.disabled_patterns`, local-config only, never settable over MCP. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — Per-source Google file-mode override.**
+  **What:** Google pages and cursor state are always written 0600, and a looser chmod is reverted on the next rewrite. A user who shares the directory with a group on purpose has no setting. **Fix:** an opt-in per-source mode (for example `g_file_mode`), validated to never grant world access. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — Vault, connector spool and connector credentials adopt `AtomicWriteOpts.mode`.**
+  **What:** `src/core/creds/vault.ts`, `src/core/connectors/spool.ts` and `src/core/connectors/credentials.ts` each set 0600 their own way. Moving them to `atomicWriteFileSync(..., { mode: 0o600 })` reasserts the mode on every write, so a restored or copied loose file tightens. **Effort:** S. **Priority:** P3.
+- [ ] **P3 — Exercise the skipped rows of the retrieval redaction sweep.**
+  **What:** `test/retrieval-op-redaction.test.ts` plants a secret and runs every retrieval op through remote MCP dispatch, but skips the code-intel ops, `synthesize`/`think`, `search_by_image` and `get_agent_job` (wrapper coverage comes from the registration test). **Fix:** run each once fixtures exist (a code-index fixture, a keyed or stubbed composition, image embeddings, a submitted agent job). **Effort:** M. **Priority:** P3.
+
 ## System One v1 follow-ups (filed 2026-09-30; plan: docs/designs/SYSTEM_ONE_JEV_V1.md)
 
 - [ ] **P2 — Local decide provider (CEO E6).**
@@ -208,8 +231,6 @@ Evidence for each item is in `docs/test-audit/2026-09-29/`.
   **What:** `sensitivity-scan.ts` bridges the gap by fingerprint dedupe so short bearer tokens still surface as `pii:bearer`; making secret-scan the single owner would let the PII family drop `jwt` / `bearer` entirely. **Effort:** S. **Priority:** P3.
 - [ ] **P3 — Bulk purge for a leaked transcript session.**
   **What:** a long session lands as `-pN` part pages plus raw metadata; after a leak the operator hand-lists slugs for `gbrain delete <slug> --purge`. A `gbrain transcripts purge --session <file>` would purge every part + raw row of one session. **Effort:** S. **Priority:** P3.
-- [ ] **P3 — Widen `scripts/check-pg-url-redaction.sh` to every scheme `db_url_credentials` covers.**
-  **What:** the guard greps `src/` for `postgres(ql)://…@` literals only; comments could still spell a mysql/mongodb/redis URL with userinfo. **Effort:** XS. **Priority:** P3.
 - [ ] **P3 — `gbrain jobs submit shell --follow` (inline execution) reads the shell opt-in from env only.**
   **What:** `jobs work` gained `--allow-shell-jobs` because the cwd-`.env` quarantine can drop `GBRAIN_ALLOW_SHELL_JOBS`; the inline `--follow` path has no flag equivalent. **Effort:** XS. **Priority:** P3.
 - [ ] **P3 — CLI-spawning tests fail on the runtime gate instead of skipping when the host Bun is below `MINIMUM_BUN_VERSION`.**
