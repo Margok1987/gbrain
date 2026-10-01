@@ -47,7 +47,7 @@ import { maybePromptForUpgrade } from './core/thin-client-upgrade-prompt.ts';
 import { CLI_FLAG_REGISTRY } from './core/cli-flag-registry.generated.ts';
 import { migrationCliArgumentError } from './core/embedding-migration-cli.ts';
 import { VERSION } from './version.ts';
-import { assertSupportedBun } from './core/runtime-version.ts';
+import { exitOnUnsupportedBun } from './core/runtime-version.ts';
 import { bigintToStringReplacer } from './core/utils.ts';
 import {
   CLI_ONLY,
@@ -3095,11 +3095,7 @@ Run gbrain <command> --help for command-specific help.
 // process alive. A fatal error still exits 1 for every command, daemons
 // included (matches the prior unconditional process.exit(1) on rejection).
 if (import.meta.main) {
-  try { assertSupportedBun(); }
-  catch (error) {
-    console.error((error as Error).message);
-    process.exit(1);
-  }
+  exitOnUnsupportedBun(process.argv[2], VERSION);
   // v0.41.6.0 D5: cleanup registry + signal handlers for SIGTERM/SIGHUP/SIGPIPE/
   // uncaughtException. NOT SIGINT (the existing AbortController path owns SIGINT).
   // Installed before main() so locks acquired during boot (e.g. connectEngine's

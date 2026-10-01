@@ -103,6 +103,10 @@
       },
       {
         "category": "ops",
+        "name": "bun_runtime"
+      },
+      {
+        "category": "ops",
         "name": "supervisor"
       },
       {

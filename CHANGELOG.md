@@ -10,6 +10,83 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.27.0] - 2026-10-01
+
+**GBrain now needs Bun 1.4 or newer, because a bug in older Bun releases could make GBrain wait forever on a helper process that had already finished.**
+
+GBrain starts small helper processes all the time: `git` for your brain repo, background workers, syncs. Older Bun releases had a bug where one of those helpers could exit and Bun would never pass the news along, so whatever was waiting for it waited forever. On a laptop that looks like a command that never returns. On an always-on brain it looks like a worker that quietly stops making progress. Bun 1.4 includes the fix, so 1.4.0 is now the minimum.
+
+Compiled release binaries already carry Bun 1.4.2, so if you run the `gbrain` binary there is nothing to do. If you installed from source with Bun, run `bun upgrade` first.
+
+On an older Bun, every command (including `serve`, `jobs work`, hooks and autopilot) stops at startup with one message that names your Bun, the minimum and the fix, instead of starting and hanging later:
+
+```
+GBrain requires Bun 1.4.0 or newer (found Bun 1.3.14).
+Fix: run `bun upgrade`, then restart GBrain. If a `gbrain upgrade` stopped here, finish it with `gbrain post-upgrade`.
+```
+
+| You run GBrain on | What happens after this release |
+| --- | --- |
+| The compiled `gbrain` binary | Nothing changes |
+| Bun 1.4.0 or newer | Nothing changes; `gbrain doctor` shows a new `bun_runtime` row |
+| Bun 1.3.x | Commands refuse with the message above until you run `bun upgrade` |
+
+### Things to watch
+
+- If you run `gbrain upgrade` while still on Bun 1.3, the new version installs but its migrations stop at the runtime check, and the install prints the same message. Run `bun upgrade`, then `gbrain post-upgrade`.
+- Services under launchd, systemd or cron keep retrying and recover by themselves once Bun is upgraded. The refusal is in `~/.gbrain/autopilot.log`.
+- `gbrain --version` still answers on an older Bun, so tools that check the version keep working.
+
+## To take advantage of v0.60.27.0
+
+1. **Upgrade Bun** (source installs only; compiled binaries skip this):
+   ```bash
+   bun upgrade
+   bun --version   # 1.4.0 or newer
+   ```
+2. **Upgrade GBrain, or finish an upgrade that stopped at the runtime check:**
+   ```bash
+   gbrain upgrade        # or, if you already upgraded on the old Bun: gbrain post-upgrade
+   ```
+   Then restart anything long-running: `gbrain serve` (restart your agent harness for stdio MCP), `gbrain jobs supervisor`, autopilot.
+3. **Your agent reads `skills/migrations/v0.60.27.0.md` the next time you interact with it.** It checks the runtime, asks before running `bun upgrade` for you, and finishes the upgrade.
+4. **Verify the outcome:**
+   ```bash
+   gbrain doctor   # bun_runtime: "Bun 1.4.x (minimum 1.4.0)"
+   ```
+5. **If any step fails,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - output of `bun --version` and `which -a bun`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+**Say to your agent:** *"Is my Bun new enough for GBrain?"* or *"Finish upgrading GBrain after the Bun upgrade."*
+
+### Itemized changes
+
+#### Runtime floor
+
+- `MINIMUM_BUN_VERSION` in `src/core/runtime-version.ts` and `engines.bun` in `package.json` are now 1.4.0, the lowest 1.4 release. It carries the Linux child-exit fix (oven-sh/bun#30301, first shipped in 1.3.14), and `test/bounded-child-exec.test.ts` passes on it.
+- `unsupportedBunMessage()` builds the one refusal text: found version, minimum, `bun upgrade`, restart, and `gbrain post-upgrade` for an interrupted upgrade. `assertSupportedBun()` throws it with code `UNSUPPORTED_RUNTIME`.
+- The CLI entrypoint (`src/cli.ts`) checks before any command runs, so every subcommand fails fast with exit 1. `gbrain --version` / `gbrain version` print the version and exit 0, with the refusal on stderr, so an upgrade started by an older gbrain can still confirm what it installed. `gbrain autopilot` also writes the refusal to stdout, because its services log stdout to `autopilot.log` and stderr to an `autopilot.err` nothing points at.
+- `scripts/postinstall.ts` prints the refusal when an install or `bun update` lands on an older Bun, and still exits 0.
+- New doctor check `bun_runtime` (ops): `Bun <version> (minimum 1.4.0)`, or a failure with the fix command.
+- `gbrain bootstrap cloud-setup-script` installs Bun through npm when the sandbox has no Bun or one older than 1.4.0, and its launcher runs that Bun.
+- Install docs (README, `INSTALL_FOR_AGENTS.md`, `BOOTSTRAP_FOR_AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `docs/guides/authorization-upgrade.md`) state Bun 1.4.0 or newer and name `bun upgrade`.
+
+#### What Bun 1.4 does not fix
+
+- Bun still drops a child's pipe events when a callback re-enters the event loop (for example bun:test `expect().resolves`); a raw repro without `execFileBounded` still hangs on 1.4.2. The in-code bounds on `git` children stay, and their comments now say which part Bun fixed.
+
+### For contributors
+
+- The minimum-version CI lanes move to 1.4.0: `test.yml` security regressions and all four `persistence-validation.yml` matrices run 1.4.0 and 1.4.2 (pull requests still skip the minimum). `native-locks.yml` drops 1.3.11 and 1.3.13 and runs 1.4.0 and 1.4.2 on full scope (16 native pairs, 4 musl, 4 per Windows probe).
+- `test/scripts/ci-pr-scope.test.ts` requires every minimum-version matrix to be exactly `[MINIMUM_BUN_VERSION, primary]`. New `test/runtime-version.test.ts` pins the refusal text, the doctor row, and the floor in `package.json` and the cloud setup script.
+- Doctor goldens scrub the running Bun version (`Bun <bun-version>`).
+- If your local Bun is 1.3.x, `bun upgrade` before running the CLI or CLI-spawning tests.
+
 ## [0.60.26.0] - 2026-10-01
 
 **System One: a fast decision model can now make some of your brain's small judgment calls, starting with which chats are worth remembering and which facts replace older ones. If you have a TypeSafe key installed, upgrading turns those two on.**

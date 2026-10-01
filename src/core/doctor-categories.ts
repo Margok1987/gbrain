@@ -227,6 +227,7 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'decide_health',
   'pool_reap_health',
   'self_upgrade_health',
+  'bun_runtime',
   'stale_locks',
   'subagent_capability',
   'subagent_health',
