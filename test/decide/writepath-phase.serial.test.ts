@@ -42,7 +42,7 @@ afterAll(async () => {
   rmSync(dataDir, { recursive: true, force: true });
 });
 
-async function managedRun(decideConfig: Record<string, string>) {
+async function managedRun(decideConfig: Record<string, string>, opts: { typesafeKey?: boolean } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'gbrain-decide-phase-'));
   const root = join(dir, 'brain');
   mkdirSync(root);
@@ -51,7 +51,7 @@ async function managedRun(decideConfig: Record<string, string>) {
   const decideQuestions: Array<{ type: string; text: string }> = [];
   try {
     return await withEnv({ GBRAIN_HOME: join(dir, 'home'), ANTHROPIC_API_KEY: 'sk-test-synthesis' }, async () => {
-      configureGateway({ embedding_model: 'openai:text-embedding-3-large', embedding_dimensions: 1536, env: { TYPESAFE_API_KEY: 'sk-test-typesafe', ANTHROPIC_API_KEY: 'sk-test-synthesis' } });
+      configureGateway({ embedding_model: 'openai:text-embedding-3-large', embedding_dimensions: 1536, env: { ...(opts.typesafeKey === false ? {} : { TYPESAFE_API_KEY: 'sk-test-typesafe' }), ANTHROPIC_API_KEY: 'sk-test-synthesis' } });
       await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
       await engine.executeRaw(`DELETE FROM config WHERE key LIKE 'decide.%'`);
       await engine.executeRaw('DELETE FROM dream_verdicts');
@@ -139,8 +139,8 @@ test('S7 decides triage in the phase and S8 quarantines before the managed publi
   expect(new Set(r.receipts.map((x) => x.slot))).toEqual(new Set(['triage', 'grounding']));
 }, 120_000);
 
-test('with both slots off the phase makes no decide call and reports no decide keys', async () => {
-  const r = await managedRun({});
+test('without a TypeSafe key the phase makes no decide call and reports no decide keys', async () => {
+  const r = await managedRun({}, { typesafeKey: false });
   expect(r.result.status).toBe('ok');
   expect(r.decideQuestions).toHaveLength(0);
   expect(r.chatSystems.some((s) => s.startsWith('You triage'))).toBe(true);
@@ -149,4 +149,23 @@ test('with both slots off the phase makes no decide call and reports no decide k
   expect('grounding' in details.synthesis).toBe(false);
   expect(r.snapshot!.page.compiled_truth).toContain(UNSUPPORTED);
   expect(r.receipts).toHaveLength(0);
+}, 120_000);
+
+test('with a TypeSafe key and no decide keys, S7 triage is on by default in the phase and S8 stays off', async () => {
+  const r = await managedRun({});
+  expect(r.result.status).toBe('ok');
+  expect(r.chatSystems.some((s) => s.startsWith('You triage'))).toBe(false);
+  const details = r.result.details as { triage: { decide?: Record<string, unknown> }; synthesis: Record<string, unknown> };
+  expect(details.triage.decide).toMatchObject({ mode: 'on', provider: 'typesafe:jev-1.13.0', threshold: 0.77, pass: 1 });
+  expect('grounding' in details.synthesis).toBe(false);
+  expect(new Set(r.decideQuestions.map((q) => q.type))).toEqual(new Set(['triage']));
+  expect(new Set(r.receipts.map((x) => x.slot))).toEqual(new Set(['triage']));
+}, 120_000);
+
+test('with a TypeSafe key, decide.slots.triage.mode off keeps today\'s triage', async () => {
+  const r = await managedRun({ 'decide.slots.triage.mode': 'off' });
+  expect(r.result.status).toBe('ok');
+  expect(r.decideQuestions).toHaveLength(0);
+  expect(r.chatSystems.some((s) => s.startsWith('You triage'))).toBe(true);
+  expect('decide' in (r.result.details as { triage: Record<string, unknown> }).triage).toBe(false);
 }, 120_000);

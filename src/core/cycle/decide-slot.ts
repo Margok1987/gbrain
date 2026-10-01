@@ -26,7 +26,7 @@ export function cycleSlotPackShape(slot: 'triage' | 'grounding'): string {
 }
 
 export async function resolveCycleDecideSlot(engine: BrainEngine, slot: 'triage' | 'grounding', callSite = 'dream'): Promise<CycleDecideSlot | undefined> {
-  const cfg = readDecideConfig(await loadConfigSnapshot(engine));
+  const cfg = readDecideConfig(await loadConfigSnapshot(engine), { typesafeKey: hasTypesafeKey() });
   if (cfg.slots[slot as DecideSlot].mode === 'off') return undefined;
   const [calibrations, recent] = await Promise.all([
     listCalibrations(engine, { slot }).catch(() => []),

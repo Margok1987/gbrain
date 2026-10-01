@@ -9,7 +9,13 @@
  * Rows exist only for slots whose recorded verdict is a win and, for
  * harmful-direction slots, whose action_precision_lb passes the 0.90 gate
  * (docs/eval/system-one/README.md).
+ *
+ * `recommendedSlots` is the one place that turns these rows into a slot set:
+ * `gbrain decide enable --recommended` turns it on, and with a TypeSafe key
+ * present it is the key-aware default-on set (readDecideConfig), so the two
+ * can never disagree.
  */
+import { SLOT_SPECS } from './slots.ts';
 import type { DecideSlot } from './types.ts';
 
 export interface ReferenceCalibration {
@@ -54,3 +60,21 @@ export const REFERENCE_CALIBRATIONS: readonly ReferenceCalibration[] = [
     verdict: 'win', shipped_in: '0.60.17.0',
   },
 ];
+
+/**
+ * Wired slots with a `win` reference row for `provider` whose harmful-direction
+ * gate passes (action_precision_lb at or above the slot's min_action_precision).
+ */
+export function recommendedSlots(
+  provider: string,
+  minActionPrecision: (slot: DecideSlot) => number = () => 0.9,
+  references: readonly ReferenceCalibration[] = REFERENCE_CALIBRATIONS,
+): DecideSlot[] {
+  const slots = new Set<DecideSlot>();
+  for (const r of references) {
+    if (r.provider !== provider || r.verdict !== 'win' || !SLOT_SPECS[r.slot].wired) continue;
+    if (SLOT_SPECS[r.slot].harmful && (r.action_precision_lb ?? 0) < minActionPrecision(r.slot)) continue;
+    slots.add(r.slot);
+  }
+  return [...slots];
+}

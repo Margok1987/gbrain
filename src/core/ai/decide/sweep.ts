@@ -228,7 +228,7 @@ export async function runConflictSweep(engine: BrainEngine, opts: ConflictSweepO
   const now = opts.now ?? Date.now;
   const sourceId = opts.sourceId ?? 'default';
   const snapshot = await loadConfigSnapshot(engine);
-  const cfg = readDecideConfig(snapshot);
+  const cfg = readDecideConfig(snapshot, { typesafeKey: hasTypesafeKey() });
   const [calibrations, recent] = await Promise.all([listCalibrations(engine, { slot: 'conflict' }), recentResolvedModels(engine, 24 * 7)]);
   const lastResolved: Record<string, string> = {};
   for (const row of recent) lastResolved[row.provider] ??= row.model_resolved;
@@ -278,7 +278,7 @@ export async function runConflictSweep(engine: BrainEngine, opts: ConflictSweepO
  * output stays byte-identical), else the sweep counts for the phase details.
  */
 export async function conflictSweepTail(engine: BrainEngine, sourceId: string, signal?: AbortSignal): Promise<Record<string, unknown> | undefined> {
-  const cfg = readDecideConfig(await loadConfigSnapshot(engine));
+  const cfg = readDecideConfig(await loadConfigSnapshot(engine), { typesafeKey: hasTypesafeKey() });
   if (cfg.slots.conflict.mode === 'off') return undefined;
   try {
     const r = await runConflictSweep(engine, { sourceId, signal });

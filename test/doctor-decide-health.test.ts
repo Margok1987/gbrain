@@ -55,11 +55,25 @@ async function receipt(over: Record<string, unknown>) {
 }
 
 describe('decide_health', () => {
-  test('ok and categorized ops when System One is off', async () => {
+  test('ok and categorized ops when System One is off (no TypeSafe key)', async () => {
+    configureGateway({ env: {} });
     const c = await run();
     expect(c.status).toBe('ok');
     expect(c.message).toContain('System One is off');
     expect(categorizeCheck('decide_health')).toBe('ops');
+  });
+
+  test('a TypeSafe key and no decide keys: triage and conflict on by default, with the opt-out', async () => {
+    const c = await run();
+    expect(c.status).toBe('ok');
+    expect(c.message).toContain('triage=on (default: Jev key present), conflict=on (default: Jev key present)');
+    expect(c.message).toContain('gbrain decide disable triage && gbrain decide disable conflict');
+  });
+
+  test('explicit off on both default slots reports System One off with a key', async () => {
+    await set({ 'decide.slots.triage.mode': 'off', 'decide.slots.conflict.mode': 'off' });
+    const c = await run();
+    expect(c.message).toContain('System One is off');
   });
 
   test('a slot on without calibration warns with cause and fix', async () => {

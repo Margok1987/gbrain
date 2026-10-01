@@ -229,7 +229,21 @@ beforeEach(async () => {
 });
 
 describe('S7 off', () => {
-  test('no decide keys: the slot resolves to nothing and cached LLM verdicts stay hits (nothing re-triages)', async () => {
+  test('no TypeSafe key and no decide keys: the slot resolves to nothing and cached LLM verdicts stay hits (nothing re-triages)', async () => {
+    configureGateway({ env: {} } as never);
+    try {
+      expect(await resolveTriageDecide(engine)).toBeUndefined();
+      const t0 = routine();
+      await pass([t0]);
+      expect(judgeCalls).toBe(1);
+      expect(bodies).toHaveLength(0);
+    } finally {
+      configureGateway({ env: { TYPESAFE_API_KEY: 'sk-test-typesafe' } } as never);
+    }
+  });
+
+  test('explicit off with a key: the slot resolves to nothing and cached LLM verdicts stay hits (nothing re-triages)', async () => {
+    await setConfig({ 'decide.slots.triage.mode': 'off' });
     expect(await resolveTriageDecide(engine)).toBeUndefined();
     const t = routine();
     await pass([t]);
@@ -242,6 +256,25 @@ describe('S7 off', () => {
     expect(again.cacheHits).toBe(1);
     expect(again.decide).toBeUndefined();
     expect(bodies).toHaveLength(0);
+  });
+});
+
+describe('S7 key-aware default', () => {
+  test('a TypeSafe key and no decide keys: on with the shipped reference calibration, nothing written to config', async () => {
+    const slot = await resolveTriageDecide(engine);
+    expect(slot).toBeDefined();
+    expect(slot!.stats).toMatchObject({ mode: 'on', provider: 'typesafe:jev-1.13.0', threshold: 0.77 });
+    expect(slot!.acting).toBe(true);
+    transport((w) => (w.includes(SIGNAL) ? 0.92 : 0.04));
+    const out = await pass([buried()]);
+    expect(judgeCalls).toBe(0);
+    expect(out.reports[0]!.worth).toBe(true);
+    expect(await engine.executeRaw(`SELECT key FROM config WHERE key LIKE 'decide.%'`)).toEqual([]);
+  });
+
+  test('decide.egress.private deny set explicitly keeps the default off', async () => {
+    await setConfig({ 'decide.egress.private': 'deny' });
+    expect(await resolveTriageDecide(engine)).toBeUndefined();
   });
 });
 

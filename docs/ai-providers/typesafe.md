@@ -6,13 +6,32 @@ probability (yes/no), one option with a probability distribution (choice), or
 a rubric score. GBrain uses it in two places:
 
 - **System One (`decide`)**: typed decisions inside search, `think`, dream and
-  the fact sweep. Every slot is off until you turn it on. The operator guide
-  is [System One](../guides/system-one.md).
+  the fact sweep. With a key installed, the two slots with a measured win,
+  dream triage and contradiction proposals, are on by default; every other
+  slot is off until you turn it on. The operator guide is
+  [System One](../guides/system-one.md).
 - **Search reranking**: `search.reranker.model typesafe:jev-1.13.0`, the
   reranker contract from #5178. Voyage stays the default reranker.
 
-Jev has no chat, synthesis or embedding surface. Setting a key selects
-nothing: a TypeSafe key never turns on a slot or changes your reranker.
+Jev has no chat, synthesis or embedding surface. A key never changes your
+reranker. It does turn on the key-aware defaults below.
+
+## What a key turns on by default
+
+When `TYPESAFE_API_KEY` or `JEV_TYPESAFE_API_KEY` is set (shell or
+`~/.gbrain/.env`) and you have not configured these slots yourself:
+
+| Slot | What it sends to TypeSafe | When | Measured effect |
+|---|---|---|---|
+| `triage` (dream triage) | transcript windows (conversation text) | each dream cycle's triage | caught 18/18 buried decisions vs 8/18; dream spend +73% ($1.50 to $2.60) in the end-to-end run |
+| `conflict` (contradiction proposals) | fact text, including private facts | the sweep after `extract_facts` | found 94/97 updated facts vs 0/97; proposals only, nothing changes until you accept |
+
+For these two slots the key is your opt-in for that data. Nothing is written
+to config; `gbrain decide status` shows `on (default: Jev key present)`.
+Opt out with `gbrain decide disable triage`, `gbrain decide disable conflict`
+or `gbrain decide disable --all`. An explicit `decide.egress.private deny`
+or `decide.provider none` turns the defaults off too. Details:
+[System One defaults](../guides/system-one.md#defaults-on-with-a-key-for-what-measurably-helps).
 
 ## Key setup
 
@@ -185,12 +204,14 @@ keys only after you confirm.
 
 ### What never leaves the machine
 
-- Anything, while every slot is off and the reranker is not Jev. That is the
-  default.
+- Anything, while no key is set (every slot is off) and the reranker is not
+  Jev.
 - Pages whose visibility resolves private, including derived pages whose
-  origin is private, unless you set `decide.egress.private allow`.
+  origin is private, unless you set `decide.egress.private allow`. The
+  key-aware defaults never send pages.
 - Facts, which default to private, and conversation text, which is always
-  private, under the same rule.
+  private, under the same rule, except for the key-aware defaults above
+  (transcript windows for triage, facts for the sweep).
 - Every page and fact from a source listed in `decide.egress.deny_sources`,
   for every provider.
 - Evidence with missing provenance. It is refused before the request is

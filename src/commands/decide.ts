@@ -22,8 +22,8 @@ import {
 } from '../core/ai/decide/config.ts';
 import { runDecide } from '../core/ai/decide/index.ts';
 import { estimateContextTokens, packShape, planBatches } from '../core/ai/decide/pack.ts';
-import { readiness, resolveSlotPolicy, type PolicyInputs, type SlotPolicy } from '../core/ai/decide/policy.ts';
-import { REFERENCE_CALIBRATIONS } from '../core/ai/decide/reference-calibrations.ts';
+import { KEY_DEFAULT_LABEL, keyDefaultOptOut, readiness, resolveSlotPolicy, type PolicyInputs, type SlotPolicy } from '../core/ai/decide/policy.ts';
+import { REFERENCE_CALIBRATIONS, recommendedSlots } from '../core/ai/decide/reference-calibrations.ts';
 import { REFUSAL_CATALOG, SLOT_PLAIN_NAMES, refusalLine } from '../core/ai/decide/outcomes.ts';
 import { toWireQuestion } from '../core/ai/decide/providers/typesafe.ts';
 import { SLOT_SPECS } from '../core/ai/decide/slots.ts';
@@ -38,8 +38,10 @@ import { promptYesNo } from '../core/confirm-prompt.ts';
 
 export const DECIDE_HELP = `Usage: gbrain decide <subcommand> [options]
 
-System One decision support (TypeSafe Jev or an llm: provider). Every slot is off
-by default; each slot is off or on. Runs on the brain host (local CLI only).
+System One decision support (TypeSafe Jev or an llm: provider). Each slot is off
+or on. Without a TypeSafe key every slot is off; with one, the slots with a measured
+win (the enable --recommended set) are on by default until you set them yourself.
+Runs on the brain host (local CLI only).
 
 Subcommands:
   status [--json] [--egress]                 Provider, consent, budget and per-slot readiness
@@ -104,13 +106,13 @@ export interface DecideState {
 
 export async function loadDecideState(engine: BrainEngine): Promise<DecideState> {
   const snapshot = (await loadConfigSnapshot(engine)) ?? {};
-  const cfg = readDecideConfig(snapshot);
   const [calibrations, recent] = await Promise.all([listCalibrations(engine, { includeRetired: true }), recentResolvedModels(engine, 24 * 7)]);
   const lastResolved: Record<string, string> = {};
   for (const r of recent) lastResolved[r.provider] ??= r.model_resolved;
   let env: Record<string, string | undefined> = process.env;
   try { env = requireConfig().env; } catch { /* unconfigured gateway: process env */ }
   const key = typesafeApiKey(env);
+  const cfg = readDecideConfig(snapshot, { typesafeKey: key !== null });
   const { loadSearchModeConfig, resolveSearchMode } = await import('../core/search/mode.ts');
   const modeInput = await loadSearchModeConfig(engine);
   const knobs = resolveSearchMode({ mode: modeInput.mode, overrides: modeInput.overrides });
@@ -155,6 +157,7 @@ export async function printEffectiveModeLines(engine: BrainEngine, slot?: string
 }
 
 const TYPICAL_CANDIDATE = 'x'.repeat(1200);
+const CLASS_TEXT: Record<string, string> = { query: 'query text', candidates: 'candidate text', facts: 'fact text', conversation: 'conversation text' };
 const COST_UNITS: Partial<Record<DecideSlot, { unit: string; questions: number; unpacked?: boolean }>> = {
   rerank: { unit: 'queries', questions: 30 },
   evidence: { unit: 'queries', questions: 20 },
@@ -200,6 +203,7 @@ export async function buildStatus(engine: BrainEngine, state: DecideState) {
       status: !u || u.rows === 0 ? 'pending' : u.skipped === u.rows ? (p.inactive ? 'demoted' : 'blocked') : 'active',
       cost_per_1k: { ...costPer1k(slot, p.provider, u), unit: COST_UNITS[slot]?.unit ?? 'units' },
       effective_line: effectiveModeLine(p),
+      ...(state.cfg.slots[slot].keyDefault ? { key_default: true, opt_out: keyDefaultOptOut(slot) } : {}),
     };
   });
   return {
@@ -231,7 +235,8 @@ async function cmdStatus(engine: BrainEngine, args: string[]): Promise<number> {
     return 0;
   }
   console.log(`System One (decide): provider ${status.provider}${status.provider !== 'none' && !status.provider_pinned ? ' (alias: pin with gbrain decide enable <slot>)' : ''}; key: ${state.key.from ?? 'not set'}`);
-  console.log(`egress: private=${status.egress.private}; consent ${EVIDENCE_CLASSES.map((c) => `${c}=${status.egress.consent[c]}`).join(' ')}; deny_sources: ${status.egress.deny_sources.join(',') || 'none'}; fallback: ${status.egress.fallback}`);
+  const keyDefaults = status.slots.filter((s) => s.key_default).map((s) => `${s.slot} (${SLOT_SPECS[s.slot].egressClasses.join(', ')})`);
+  console.log(`egress: private=${status.egress.private}; consent ${EVIDENCE_CLASSES.map((c) => `${c}=${status.egress.consent[c]}`).join(' ')}; deny_sources: ${status.egress.deny_sources.join(',') || 'none'}; fallback: ${status.egress.fallback}${keyDefaults.length ? `; key default allows: ${keyDefaults.join(', ')}` : ''}`);
   console.log(`budget: $${status.budget.spent_today_usd.toFixed(4)} of $${status.budget.daily_usd.toFixed(2)} today (remote $${status.budget.remote_today_usd.toFixed(4)}, cap ${Math.round(status.budget.remote_share * 100)}%); not covered: ${status.budget.excluded.join('; ')}`);
   console.log(`reranker: ${status.reranker.model} (${status.reranker.enabled ? 'enabled' : 'disabled'}, mode ${status.reranker.search_mode}); Jev called: ${status.reranker.jev_called}`);
   console.log('');
@@ -242,6 +247,7 @@ async function cmdStatus(engine: BrainEngine, args: string[]): Promise<number> {
     console.log(`  ${s.slot.padEnd(14)} ${s.readiness}${threshold}${cost}${activity}${s.wired ? '' : ' (not available in this build)'}`);
     if (s.force_on) console.log(`    WARN: decide.slots.${s.slot}.force_on bypasses the action-precision gate`);
     if (s.newer_reference) console.log(`    newer reference available: ${s.newer_reference} (gbrain decide calibrations adopt ${s.newer_reference})`);
+    if (s.opt_out) console.log(`    on by default because a TypeSafe key is present (sends ${SLOT_SPECS[s.slot].egressClasses.map((c) => CLASS_TEXT[c]).join(', ')} to TypeSafe); opt out: ${s.opt_out}`);
   }
   const lines = status.slots.map((s) => s.effective_line).filter(Boolean);
   if (lines.length) { console.log(''); for (const l of lines) console.log(l); }
@@ -360,6 +366,11 @@ async function cmdEnable(engine: BrainEngine, args: string[]): Promise<number> {
   if (!slot || !(DECIDE_SLOTS as readonly string[]).includes(slot)) { console.error(`Usage: gbrain decide enable <slot>. Slots: ${DECIDE_SLOTS.join(', ')}`); return 1; }
   if (!SLOT_SPECS[slot].wired) { console.error(refusalLine('slot_unavailable', slot)); return 1; }
   const mode = has(args, '--shadow') ? 'shadow' : 'on';
+  if (mode === 'on' && (flagValue(args, '--provider') ?? state.cfg.slots[slot].provider) === state.cfg.slots[slot].provider && state.cfg.slots[slot].keyDefault && !policyFor(state, slot).inactive) {
+    if (json) console.log(JSON.stringify({ slot, requested: 'on', effective: 'on', inactive: null, key_default: true, writes: {} }, null, 2));
+    else console.log(`${slot}: already on (${KEY_DEFAULT_LABEL}); nothing written. Opt out: ${keyDefaultOptOut(slot)}`);
+    return 0;
+  }
   const requestedProvider = flagValue(args, '--provider');
   if (requestedProvider && !isValidProvider(requestedProvider)) { console.error(`--provider must be typesafe:<model> or llm:<provider:model> (got ${requestedProvider})`); return 1; }
   const base = requestedProvider ?? state.cfg.slots[slot].provider;
@@ -382,7 +393,7 @@ async function cmdEnable(engine: BrainEngine, args: string[]): Promise<number> {
   writes.push([`decide.slots.${slot}.mode`, mode]);
   const nextSnapshot = { ...state.snapshot, ...Object.fromEntries(writes) };
   if (slot === 'rerank') { nextSnapshot['search.reranker.model'] = provider; nextSnapshot['search.reranker.enabled'] = 'true'; }
-  const nextCfg = readDecideConfig(nextSnapshot);
+  const nextCfg = readDecideConfig(nextSnapshot, { typesafeKey: state.key.present });
   const nextState: DecideState = { ...state, cfg: nextCfg, snapshot: nextSnapshot, ...(slot === 'rerank' ? { rerankerModel: provider, rerankerEnabled: true } : {}) };
   const policy = policyFor(nextState, slot);
   if (mode === 'on' && policy.inactive && ENABLE_REFUSALS.has(policy.inactive)) {
@@ -415,8 +426,8 @@ async function cmdEnable(engine: BrainEngine, args: string[]): Promise<number> {
 async function enableRecommended(engine: BrainEngine, state: DecideState, args: string[]): Promise<number> {
   const provider = state.cfg.provider !== 'none' ? state.cfg.provider : DEFAULT_TYPESAFE_PROVIDER;
   const model = provider.replace(/^typesafe:/, '');
-  const winners = DECIDE_SLOTS.filter((slot) => SLOT_SPECS[slot].wired && REFERENCE_CALIBRATIONS.some((r) =>
-    r.slot === slot && r.provider === provider && r.verdict === 'win' && (!SLOT_SPECS[slot].harmful || (r.action_precision_lb ?? 0) >= state.cfg.slots[slot].minActionPrecision)));
+  const recommended = recommendedSlots(provider, (slot) => state.cfg.slots[slot].minActionPrecision);
+  const winners = DECIDE_SLOTS.filter((slot) => recommended.includes(slot));
   if (winners.length === 0) {
     console.error(`no slot has a recorded win for ${model}; see docs/eval/system-one/`);
     return 1;

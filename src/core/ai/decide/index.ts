@@ -49,7 +49,7 @@ export interface DecideContext {
 const BACKGROUND_DEFAULT_MS = 60_000;
 
 export async function loadDecideConfig(engine: BrainEngine | null, opts: { evalSlots?: string } = {}): Promise<DecideConfig> {
-  return readDecideConfig(engine ? await loadConfigSnapshot(engine) : null, opts);
+  return readDecideConfig(engine ? await loadConfigSnapshot(engine) : null, { ...opts, typesafeKey: hasTypesafeKey() });
 }
 
 /** TypeSafe key presence in the gateway env snapshot (falls back to process env before configure). */
@@ -79,7 +79,7 @@ export async function runDecide(req: DecideRequest, ctx: DecideContext): Promise
   if (req.questions.length === 0) return emptyResult(provider, lane, {});
   if (new Set(req.questions.map((q) => q.id)).size !== req.questions.length) throw new Error('decide: question ids must be unique');
 
-  const verdict = await checkEgress(ctx.engine, cfg, provider, req.state, req.questions, { consent: req.consent });
+  const verdict = await checkEgress(ctx.engine, cfg, provider, req.state, req.questions, { consent: req.consent, slot: req.slot });
   const refusedIds = new Set(Object.keys(verdict.refused));
   const allowed = req.questions.filter((q) => !refusedIds.has(q.id));
   const withFallback = async (result: DecideResult): Promise<DecideResult> => {

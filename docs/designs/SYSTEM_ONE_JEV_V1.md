@@ -147,7 +147,24 @@ recommended or first step:
   refuses with the catalogued reason unless `force_on` is set; they are not "shadow-only".
 - Readiness strings: `off`, `ready for on`, `on`, `on (inactive: <reason>)`, `needs calibration`.
 
-### Config surface (all default off)
+**Update (2026-10-01): key-aware defaults.** After the eval verdicts, Garry: "turn on by default anything that is
+positive and leave off by default anything that doesn't work. (If you have jev key installed obviously, otherwise all
+off)." This amends "all default off" for the measured winners only:
+
+- With a TypeSafe key present (`TYPESAFE_API_KEY` or `JEV_TYPESAFE_API_KEY`, shell or `~/.gbrain/.env`) and no
+  explicit setting, S7 `triage` and S9 `conflict` default to `on` with `typesafe:jev-1.13.0` and their shipped
+  reference calibrations. The set is derived from the reference-calibration rows (`recommendedSlots`: verdict win
+  and a passing gate), the same function `enable --recommended` uses. Every other slot stays default `off`.
+- Without a key, everything is off and all-off output is byte-identical.
+- For those two slots, key presence is the egress opt-in for the data they send (conversation text for S7, facts for
+  S9), as a documented default; nothing is written to config. Private-page and derived-page rules and
+  `deny_sources` are unchanged, and the defaults never send pages.
+- Explicit settings win: the slot's mode or provider, `decide.provider none`, an explicit
+  `decide.egress.private deny`, a `deny` on the slot's consent key, `gbrain decide disable <slot>|--all`. Eval runs
+  never use the defaults.
+- `decide status` and doctor `decide_health` show `on (default: Jev key present)` and name the opt-out.
+
+### Config surface (all default off; see the 2026-10-01 key-aware defaults above)
 
 ```
 decide.provider              none | typesafe:jev-1.13.0 | llm:<provider:model>

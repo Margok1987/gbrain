@@ -1,8 +1,19 @@
 /**
  * decide.* config keys: the registry `gbrain config set` validates against,
- * and the typed reader every decide surface uses. All keys are DB-plane,
- * default off; no key flips a default.
+ * and the typed reader every decide surface uses. All keys are DB-plane.
+ *
+ * Key-aware defaults (owner decision 2026-10-01): with no TypeSafe key every
+ * slot defaults off. With a key, the measured winners (`recommendedSlots` for
+ * the pinned Jev model: the same set `enable --recommended` turns on) default
+ * on with that provider and their reference calibrations, and the key counts
+ * as the egress opt-in for the data those slots send. Nothing is written to
+ * config. Any explicit setting wins: the slot's mode or provider, an explicit
+ * decide.provider none, decide.egress.private deny, or a deny on one of the
+ * slot's consent keys. Eval runs never get key defaults; their arms say
+ * exactly which slots are on.
  */
+import { recommendedSlots } from './reference-calibrations.ts';
+import { SLOT_SPECS } from './slots.ts';
 import { DECIDE_SLOTS, EVIDENCE_CLASSES, type DecideMode, type DecideSlot, type EvidenceClass } from './types.ts';
 
 export const DEFAULT_TYPESAFE_MODEL = 'jev-1.13.0';
@@ -103,6 +114,8 @@ export interface DecideSlotConfig {
   calibration?: string;
   /** S6 only: suppress reflex injection below this probability (decide.slots.recall_needed.suppress_below). */
   suppressBelow?: number;
+  /** On by the key-aware default (no explicit setting); the key is this slot's egress opt-in. */
+  keyDefault?: true;
 }
 
 export interface DecideConfig {
@@ -156,31 +169,41 @@ export function pickDecideConfig(snapshot: Record<string, string | undefined> | 
   return Object.keys(out).length > 0 || processEvalSlots() ? out : undefined;
 }
 
-export function readDecideConfig(snapshot: Record<string, string | undefined> | null, opts: { evalSlots?: string } = {}): DecideConfig {
+/**
+ * `typesafeKey`: a TypeSafe key is present (hasTypesafeKey() in index.ts). Omitted
+ * means keyless: every slot without an explicit mode is off.
+ */
+export function readDecideConfig(snapshot: Record<string, string | undefined> | null, opts: { evalSlots?: string; typesafeKey?: boolean } = {}): DecideConfig {
   const get = (k: string): string | undefined => snapshot?.[k] ?? undefined;
   const evalSlots = opts.evalSlots ?? processEvalSlots();
   const globalProvider = get('decide.provider');
   const providerValue = globalProvider && isValidProvider(globalProvider) ? globalProvider : 'none';
   const evalModes = parseEvalSlots(evalSlots);
+  const keyDefaultsApply = opts.typesafeKey === true && !evalOverrideEnabled && !evalSlots && globalProvider !== 'none' && get('decide.egress.private') !== 'deny';
   const slots = Object.fromEntries(DECIDE_SLOTS.map((slot) => {
     const k = (name: string) => get(`decide.slots.${slot}.${name}`);
-    const rawMode = evalModes[slot] ?? k('mode');
-    const mode: DecideMode = rawMode === 'on' || rawMode === 'shadow' ? rawMode : 'off';
+    const minActionPrecision = num(k('min_action_precision'), 0.9, SLOT_KEY_VALIDATORS.min_action_precision!);
     const slotProvider = k('provider');
+    const keyDefault = keyDefaultsApply && k('mode') === undefined && (slotProvider === undefined || slotProvider === DEFAULT_TYPESAFE_PROVIDER)
+      && SLOT_SPECS[slot].egressClasses.every((c) => get(`decide.egress.typesafe.${c}`) !== 'deny')
+      && recommendedSlots(DEFAULT_TYPESAFE_PROVIDER, () => minActionPrecision).includes(slot);
+    const rawMode = keyDefault ? 'on' : evalModes[slot] ?? k('mode');
+    const mode: DecideMode = rawMode === 'on' || rawMode === 'shadow' ? rawMode : 'off';
     const threshold = k('threshold');
     const minKeep = k('min_keep');
     const sample = k('shadow_sample');
     const cfg: DecideSlotConfig = {
       mode,
-      provider: slotProvider && isValidProvider(slotProvider) ? slotProvider : providerValue,
+      provider: keyDefault ? DEFAULT_TYPESAFE_PROVIDER : slotProvider && isValidProvider(slotProvider) ? slotProvider : providerValue,
       ...(threshold !== undefined && SLOT_KEY_VALIDATORS.threshold!(threshold) === null ? { threshold: Number(threshold) } : {}),
       ...(minKeep !== undefined && SLOT_KEY_VALIDATORS.min_keep!(minKeep) === null ? { minKeep: Number(minKeep) } : {}),
       forceOn: truthy(k('force_on')),
-      minActionPrecision: num(k('min_action_precision'), 0.9, SLOT_KEY_VALIDATORS.min_action_precision!),
+      minActionPrecision,
       ...(sample !== undefined && SLOT_KEY_VALIDATORS.shadow_sample!(sample) === null ? { shadowSample: Number(sample) } : {}),
       shadowWait: k('shadow_wait') === 'on',
       ...(k('calibration') && calibrationRef(k('calibration')!) === null ? { calibration: k('calibration') } : {}),
       ...(slot === 'recall_needed' ? { suppressBelow: num(k('suppress_below'), RECALL_SUPPRESS_BELOW_DEFAULT, GLOBAL_KEYS['decide.slots.recall_needed.suppress_below']!) } : {}),
+      ...(keyDefault ? { keyDefault: true as const } : {}),
     };
     return [slot, cfg];
   })) as Record<DecideSlot, DecideSlotConfig>;

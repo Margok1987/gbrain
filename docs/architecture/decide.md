@@ -8,7 +8,21 @@ threshold. This page is the contract slot lanes build on; the operator guide
 is `docs/guides/system-one.md`.
 
 Every slot is `off` or `on`. `shadow` exists for diagnostics only (receipts,
-no behavior change) and nothing requires passing through it. A slot requested
+no behavior change) and nothing requires passing through it.
+
+**Key-aware defaults.** `readDecideConfig(snapshot, { typesafeKey })` turns on
+`recommendedSlots(DEFAULT_TYPESAFE_PROVIDER)` (reference rows with verdict
+`win` and a passing gate, the same set `enable --recommended` uses: today
+`triage` and `conflict`) when a TypeSafe key is present and the operator set
+nothing explicit for the slot. Such a slot carries `keyDefault: true`, uses
+the pinned provider, and `checkEgress(..., { slot })` treats the key as
+consent for that slot's classes and the private opt-in for its conversation
+and fact items (never pages). Explicit settings win: the slot's mode or
+provider, `decide.provider none`, `decide.egress.private deny`, a `deny`
+consent key for the slot's class. Callers that omit `typesafeKey` (and every
+eval run) get no defaults. Call sites that read live config pass
+`hasTypesafeKey()`: `loadDecideState`, the dream-cycle slots, the sweep and
+`loadDecideConfig`. A slot requested
 `on` that cannot act (no calibration, drift, a changed policy, the
 action-precision gate, missing consent) runs with **off behavior** for that
 call, writes a receipt with the reason, and shows `on (inactive: <reason>)`

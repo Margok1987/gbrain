@@ -13,10 +13,49 @@ answer the same questions through an `llm:` provider. Setup for the key and
 the reranker: [TypeSafe (Jev)](../ai-providers/typesafe.md). Contract for
 contributors: [`docs/architecture/decide.md`](../architecture/decide.md).
 
-Every decision point is a **slot**. Each slot is **off** (today's behavior,
-the default) or **on** (GBrain acts on the decision). Nothing is sent
-anywhere until you turn a slot on, and with every slot off, output is
-byte-identical to a brain without System One.
+Every decision point is a **slot**. Each slot is **off** (today's behavior)
+or **on** (GBrain acts on the decision). Without a TypeSafe key every slot is
+off, nothing is sent anywhere, and output is byte-identical to a brain
+without System One.
+
+## Defaults: on with a key for what measurably helps
+
+With a TypeSafe key installed (`TYPESAFE_API_KEY` or `JEV_TYPESAFE_API_KEY`,
+in your shell or `~/.gbrain/.env`), the two slots with a measured win are on
+by default: **dream triage** (`triage`) and **contradiction proposals**
+(`conflict`). They use the pinned `typesafe:jev-1.13.0` and their shipped
+reference calibrations. The other seven slots stay off, because on our eval
+sets they either did not help or could not pass the safety gate
+([`docs/eval/system-one/`](../eval/system-one/)). The default-on set is
+exactly the set `gbrain decide enable --recommended` turns on; both come
+from the same reference calibration rows.
+
+What that sends to TypeSafe: transcript windows (conversation text) when a
+dream cycle triages, and fact text when the contradiction sweep runs after
+`extract_facts`. For these two slots only, the key counts as your opt-in for
+that data, including private conversations and private facts. Private and
+derived pages are never sent by these slots, and `decide.egress.deny_sources`
+still applies. Nothing is written to your config: `gbrain decide status`
+shows `on (default: Jev key present)` and the opt-out on the next line.
+
+What it costs: in our end-to-end run, dream spend went from $1.50 to $2.60
+(+73%), because triage also synthesizes about a third of routine chats while
+catching every buried decision. The sweep costs about $0.00002 per fact. The
+daily cap (`decide.budget.daily_usd`, $1.00) applies.
+
+To opt out, any explicit setting wins:
+
+```bash
+gbrain decide disable triage            # or: gbrain decide disable conflict
+gbrain decide disable --all             # every slot off
+gbrain config set decide.egress.private deny   # no default slot sends private data
+gbrain config set decide.provider none         # no decide slot runs at all
+```
+
+A slot's own mode or provider, or a `deny` on its consent key
+(`decide.egress.typesafe.conversation` for triage,
+`decide.egress.typesafe.facts` for the sweep), also turns its default off.
+Eval commands never use these defaults; their arms set every slot.
 
 ## Quickstart
 
@@ -30,8 +69,8 @@ minutes. The first probe sends nothing from your brain.
 export TYPESAFE_API_KEY=<your-key>
 gbrain decide probe
 gbrain decide probe --query "When does Acme Example ship the beta?"
-gbrain decide enable --recommended
 gbrain decide status
+gbrain decide enable --recommended
 ```
 
 Example output from a three-page brain (your latency, cost, pages and
@@ -49,19 +88,19 @@ today  jev  probability  slug
     1    2       0.08  meetings/2026-09-22-weekly-sync
     2    1       0.93  notes/launch-plan
     3    -    private  notes/board-prep
-Next: gbrain decide enable --recommended   (or gbrain decide status)
-$ gbrain decide enable --recommended
-Private content cannot be sent to the provider. (egress_private_denied: decide.egress.private is deny) fix: gbrain config set decide.egress.private allow   # or route the slot to an llm: provider docs: docs/guides/system-one.md#egress_private_denied
-Missing keys: decide.egress.private=allow, or decide.slots.triage.provider llm:<provider:model>, or decide.egress_fallback llm:<provider:model>
-...
+Next: gbrain decide status   (with a key, the slots with a measured win are on by default)
 $ gbrain decide status
 System One (decide): provider none; key: TYPESAFE_API_KEY
-egress: private=deny; consent query=deny candidates=deny facts=deny conversation=deny; deny_sources: none; fallback: none
+egress: private=deny; consent query=deny candidates=deny facts=deny conversation=deny; deny_sources: none; fallback: none; key default allows: triage (conversation), conflict (facts)
 ...
-  rerank         ready for on
+  triage         on (default: Jev key present) threshold 0.770 (reference ref:triage-jev-1.13.0-2026-09-30) ~$2.0227/1k transcripts (estimate)
+    on by default because a TypeSafe key is present (sends conversation text to TypeSafe); opt out: gbrain decide disable triage
 ...
-  evidence       needs calibration
-...
+  conflict       on (default: Jev key present) threshold 0.520 (reference ref:conflict-jev-1.13.0-2026-09-30) ~$0.1618/1k swept facts (estimate)
+    on by default because a TypeSafe key is present (sends fact text to TypeSafe); opt out: gbrain decide disable conflict
+$ gbrain decide enable --recommended
+triage: already on (default: Jev key present); nothing written. Opt out: gbrain decide disable triage
+conflict: already on (default: Jev key present); nothing written. Opt out: gbrain decide disable conflict
 ```
 <!-- system-one-quickstart:end -->
 
@@ -76,21 +115,22 @@ What each step shows:
    Private pages stay local. It changes nothing and stores nothing. In the
    example, today's search ranks a meeting that repeats the question first,
    and Jev ranks the note with the answer first.
-3. `enable --recommended` turns on exactly the slots that have a recorded
+3. `status` shows each slot's readiness. With the key in place, dream
+   triage and the contradiction sweep show `on (default: Jev key present)`
+   (see [Defaults](#defaults-on-with-a-key-for-what-measurably-helps)) and
+   name their opt-out. `ready for on` means `enable` would succeed now;
+   `needs calibration` means the slot needs a calibration before it can act.
+4. `enable --recommended` turns on exactly the slots that have a recorded
    eval win for your model and a reference calibration that passes the
-   precision gate. For `jev-1.13.0` that is dream triage and the
-   contradiction sweep ([`docs/eval/system-one/`](../eval/system-one/) has the
-   measurements, including triage's cost tradeoff). Both read private data
-   (conversation windows and facts), so on a brain that keeps
-   `decide.egress.private=deny`, the example's default, the preset refuses
-   them, names the missing key and changes nothing. Allow it with
+   precision gate: dream triage and the contradiction sweep for
+   `jev-1.13.0`. When they are already on by default it says so and writes
+   nothing. It matters when an explicit setting turned a default off: both
+   slots read private data, so with `decide.egress.private deny` set it
+   refuses them, names the missing key and changes nothing. Allow it with
    `gbrain config set decide.egress.private allow` and run the command again,
    or route those slots to an `llm:` provider. When no slot qualifies for
    your model, it says so and exits non-zero. Turn one slot on yourself with
    `gbrain decide enable <slot>` (see [Turning a slot on](#turning-a-slot-on)).
-4. `status` shows each slot's readiness. `ready for on` means `enable` would
-   succeed now; `needs calibration` means the slot needs a calibration
-   before it can act.
 
 A CI test (`test/decide/quickstart-doc.serial.test.ts`) runs this block
 against a seeded brain with a fixture transport and checks every output line
@@ -187,8 +227,10 @@ The transcript's score is its best window, so one buried signal is enough.
 The top windows become the segment map the synthesizer already reads; the
 synthesizer still reads the full transcript. A transcript is rejected only
 when every window was judged. Turning it on does not re-triage anything you
-already triaged. It sends transcripts, so on Jev it needs
-`decide.egress.private allow`.
+already triaged. It sends transcripts. With a TypeSafe key it is on by
+default and the key is its opt-in for transcript text
+([Defaults](#defaults-on-with-a-key-for-what-measurably-helps)); turned on
+explicitly on Jev, it needs `decide.egress.private allow`.
 
 ### claim support (`grounding`)
 
@@ -209,9 +251,11 @@ run, compares each with its nearest neighbours (same source, entity and
 visibility), and asks whether each pair is a duplicate, a supersede or
 independent. It never supersedes anything by itself: likely supersedes
 become proposals you accept or reject. The first run starts at the newest
-fact, so enabling it never sweeps your whole history silently. Facts
-default to private, so on Jev it needs `decide.egress.private allow`, or
-route it to an `llm:` provider.
+fact, so enabling it never sweeps your whole history silently. With a
+TypeSafe key it is on by default and the key is its opt-in for fact text
+([Defaults](#defaults-on-with-a-key-for-what-measurably-helps)). Turned on
+explicitly, facts default to private, so on Jev it needs
+`decide.egress.private allow`, or route it to an `llm:` provider.
 
 ```bash
 gbrain decide sweep --slot conflict [--since <fact id>] [--source <id>] [--json]   # run the sweep now
@@ -389,7 +433,12 @@ consent for that provider.
   origin is private), facts (private by default) and conversation text
   (always private). This is why know-to-ask, triage, claim support and the
   contradiction sweep need it on Jev, and why `enable` refuses them with
-  `egress_private_denied` unless a permitted route exists.
+  `egress_private_denied` unless a permitted route exists. The one
+  exception is the key-aware default: a slot that is on only because a
+  TypeSafe key is present (triage, the contradiction sweep) treats the key
+  as consent for its own data class and the private opt-in for its
+  conversation or fact items. It never covers pages, and an explicit
+  `decide.egress.private deny` turns those defaults off.
 - **Denied sources**: `decide.egress.deny_sources` (source ids) applies to
   every provider and every path.
 - **`llm:` providers** follow today's chat egress rules: they are providers
@@ -448,7 +497,9 @@ Readiness values:
 
 `gbrain doctor` has one System One check, `decide_health`. With every slot
 off it reports `System One is off (every decide slot is off; nothing is
-sent).` Otherwise it summarizes each active slot and warns about:
+sent).` Otherwise it summarizes each active slot (a key-aware default reads
+`triage=on (default: Jev key present)`, followed by the opt-out command)
+and warns about:
 
 - a TypeSafe provider configured without a key;
 - an alias (`jev-latest`, `jev-preview`) in use, and decisions that failed on

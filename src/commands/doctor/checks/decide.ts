@@ -18,6 +18,7 @@ async function runDecideHealth(ctx: DoctorContext): Promise<Check[]> {
   try {
     const { loadDecideState, policyFor, effectiveModeLine } = await import('../../decide.ts');
     const { isTypesafeAlias, providerKind } = await import('../../../core/ai/decide/config.ts');
+    const { KEY_DEFAULT_LABEL, keyDefaultOptOut } = await import('../../../core/ai/decide/policy.ts');
     const { dailySpend, mixedModelDecisions, recentResolvedModels, receiptStats, slotUsage } = await import('../../../core/ai/decide/store.ts');
     const { DECIDE_SLOTS } = await import('../../../core/ai/decide/types.ts');
     const state = await loadDecideState(engine);
@@ -60,7 +61,10 @@ async function runDecideHealth(ctx: DoctorContext): Promise<Check[]> {
       warns.push('the pinned model is no longer served (pinned_model_unavailable): gbrain config set decide.provider typesafe:<new-id>, then recalibrate or adopt a reference calibration');
     }
     if (spend.total >= state.cfg.dailyUsd) warns.push(`daily decide budget exhausted ($${spend.total.toFixed(4)} of $${state.cfg.dailyUsd.toFixed(2)}); slots take their fail direction until UTC midnight: gbrain config set decide.budget.daily_usd <usd>`);
-    const summary = `${active.map((p) => `${p.slot}=${p.effective === p.requested ? p.requested : `${p.requested}(inactive: ${p.inactive})`}`).join(', ') || 'no decide slots'}${jevReranker ? `; Jev reranker ${state.rerankerModel}` : ''}`;
+    const keyDefaults = active.filter((p) => state.cfg.slots[p.slot].keyDefault).map((p) => p.slot);
+    if (keyDefaults.length > 0) notes.push(`opt out of the key-aware default: ${keyDefaults.map(keyDefaultOptOut).join(' && ')}`);
+    const label = (p: (typeof active)[number]) => state.cfg.slots[p.slot].keyDefault ? ` (${KEY_DEFAULT_LABEL})` : '';
+    const summary = `${active.map((p) => `${p.slot}=${p.effective === p.requested ? `${p.requested}${label(p)}` : `${p.requested}(inactive: ${p.inactive})`}`).join(', ') || 'no decide slots'}${jevReranker ? `; Jev reranker ${state.rerankerModel}` : ''}`;
     checks.push({
       name: 'decide_health',
       status: warns.length > 0 ? 'warn' : 'ok',

@@ -309,12 +309,15 @@ describe('extract_facts cycle phase tail', () => {
     return report.phases.find((p) => p.phase === 'extract_facts')!;
   }
 
-  test('slot off: phase output byte-identical to a brain with no decide keys, and no decide work', async () => {
+  test('slot off: phase output byte-identical to a keyless brain with no decide keys, and no decide work', async () => {
     await remember('[g1][v1] Alice leads research');
     await remember('[g1][v2] Alice leads design');
     await engine.executeRaw(`UPDATE facts SET created_at = now() - interval '5 minutes'`);
     transport(() => P(0.1, 0.9, 0));
+    configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: DIM, env: { OPENAI_API_KEY: 'sk-test' } });
     const baseline = await phase();
+    expect(JSON.stringify(baseline.details)).not.toContain('decide_conflict');
+    configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: DIM, env: { OPENAI_API_KEY: 'sk-test', TYPESAFE_API_KEY: 'sk-test-typesafe' } });
     await setConfig({ ...ON, 'decide.slots.conflict.mode': 'off' });
     const off = await phase();
     const strip = (p: typeof off) => JSON.stringify({ ...p, duration_ms: 0 });
@@ -323,6 +326,30 @@ describe('extract_facts cycle phase tail', () => {
     expect(bodies).toHaveLength(0);
     expect(await receipts()).toHaveLength(0);
     expect(await getSweepWatermark(engine, 'default')).toBeNull();
+  });
+
+  test('key-aware default: a TypeSafe key and no decide keys sweeps with the reference calibration and sends private facts', async () => {
+    await remember('[g1][v1] Alice leads research');
+    await remember('[g1][v2] Alice leads design');
+    await engine.executeRaw(`UPDATE facts SET created_at = now() - interval '5 minutes'`);
+    await setSweepWatermark(engine, 'default', 0);
+    transport(() => P(0.1, 0.8, 0.1));
+    const on = await phase();
+    expect((on.details as Record<string, unknown>).decide_conflict).toMatchObject({ effective: 'on', facts: 2, proposals: 1, skipped: 0 });
+    expect(bodies.length).toBeGreaterThan(0);
+    expect(await proposals()).toHaveLength(1);
+    expect((await facts()).every((f) => f.expired_at === null)).toBe(true);
+    expect(await engine.executeRaw(`SELECT key FROM config WHERE key LIKE 'decide.%'`)).toEqual([]);
+  });
+
+  test('key-aware default: decide disable conflict (mode off) wins', async () => {
+    await remember('[g1][v1] Alice leads research');
+    await setSweepWatermark(engine, 'default', 0);
+    await setConfig({ 'decide.slots.conflict.mode': 'off' });
+    transport(() => P(0.1, 0.8, 0.1));
+    const off = await phase();
+    expect(JSON.stringify(off.details)).not.toContain('decide_conflict');
+    expect(bodies).toHaveLength(0);
   });
 
   test('slot on: the phase tail sweeps and reports proposals in the phase details', async () => {

@@ -12,11 +12,17 @@
  * visibility (default private); conversation text is private by nature.
  * Items with missing provenance are refused. The llm: provider follows
  * today's chat egress rules (only denied sources apply).
+ *
+ * A slot on by the key-aware default (DecideSlotConfig.keyDefault) treats the
+ * TypeSafe key as consent for its own data classes and as the private opt-in
+ * for its conversation and fact items only; page candidates keep the batched
+ * visibility check and denied sources are refused as always.
  */
 import type { BrainEngine } from '../../engine.ts';
 import { privatePagesFilterFragment } from '../../search/private-visibility.ts';
 import type { DecideConfig } from './config.ts';
-import type { DecideQuestion, EvidenceItem } from './types.ts';
+import { SLOT_SPECS } from './slots.ts';
+import type { DecideQuestion, DecideSlot, EvidenceItem } from './types.ts';
 
 export type EgressRefusal = 'egress_private_denied' | 'egress_class_denied' | 'missing_provenance' | 'denied_source';
 
@@ -55,9 +61,10 @@ export async function checkEgress(
   provider: string,
   state: Record<string, EvidenceItem>,
   questions: readonly DecideQuestion[],
-  opts: { consent?: 'decide' | 'reranker' } = {},
+  opts: { consent?: 'decide' | 'reranker'; slot?: DecideSlot } = {},
 ): Promise<EgressVerdict> {
   const thirdParty = provider.startsWith('typesafe:');
+  const keyDefaultClasses: readonly string[] = opts.slot && cfg.slots[opts.slot]?.keyDefault ? SLOT_SPECS[opts.slot].egressClasses : [];
   const denied = new Set(cfg.denySources);
   const all = [...Object.values(state), ...questions.flatMap((q) => Object.values(q.inputs ?? {}))];
   const needsPageCheck = thirdParty && opts.consent !== 'reranker' && cfg.egressPrivate === 'deny' && all.some((i) => i.class === 'candidates');
@@ -77,8 +84,9 @@ export async function checkEgress(
     if (provenanceMissing(item)) return 'missing_provenance';
     // S1 `on`: the reranker selection is the consent for query and candidate text (as with Voyage).
     if (opts.consent === 'reranker' && (item.class === 'query' || item.class === 'candidates')) return undefined;
-    if (!cfg.consent[item.class]) return 'egress_class_denied';
+    if (!cfg.consent[item.class] && !keyDefaultClasses.includes(item.class)) return 'egress_class_denied';
     if (cfg.egressPrivate === 'allow') return undefined;
+    if (keyDefaultClasses.includes(item.class) && (item.class === 'conversation' || item.class === 'facts')) return undefined;
     if (item.class === 'conversation') return 'egress_private_denied';
     if (item.class === 'facts') return item.visibility === 'world' ? undefined : 'egress_private_denied';
     if (item.class === 'candidates') {

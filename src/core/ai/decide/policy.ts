@@ -198,8 +198,18 @@ export function resolveSlotPolicy(inputs: PolicyInputs): SlotPolicy {
   return base;
 }
 
-/** Readiness line for status/doctor: off, ready for on, on, on (inactive: <reason>), needs calibration, shadow. */
+export const KEY_DEFAULT_LABEL = 'default: Jev key present';
+
+/** One-line opt-out for a slot on by the key-aware default. */
+export function keyDefaultOptOut(slot: DecideSlot): string {
+  return `gbrain decide disable ${slot}`;
+}
+
+/** Readiness line for status/doctor: off, ready for on, on, on (default: Jev key present), on (inactive: <reason>), needs calibration, shadow. */
 export function readiness(policy: SlotPolicy, inputs: PolicyInputs): string {
+  if (policy.requested === 'on' && inputs.cfg.slots[policy.slot].keyDefault) {
+    return policy.inactive ? `on (${KEY_DEFAULT_LABEL}; inactive: ${policy.inactive})` : `on (${KEY_DEFAULT_LABEL})`;
+  }
   if (policy.requested === 'on') return policy.inactive ? `on (inactive: ${policy.inactive})` : 'on';
   if (policy.requested === 'shadow') return policy.inactive ? `shadow (inactive: ${policy.inactive})` : 'shadow';
   const spec = SLOT_SPECS[policy.slot];
