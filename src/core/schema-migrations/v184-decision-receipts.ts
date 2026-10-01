@@ -5,8 +5,8 @@ import { DECIDE_RECEIPTS_SCHEMA_SQL } from '../ai/decide/schema.ts';
 // the per-request spend ledger and internal decide state (receipt HMAC salt,
 // sweep watermarks). DDL lives once in src/core/ai/decide/schema.ts, which is
 // also the fresh-install fragment (scripts/build-schema.ts).
-export const v179: Migration = {
-  version: 179,
+export const v184: Migration = {
+  version: 184,
   name: 'decision_receipts',
   idempotent: true,
   sql: DECIDE_RECEIPTS_SCHEMA_SQL,

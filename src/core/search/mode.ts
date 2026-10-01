@@ -879,6 +879,13 @@ export const KNOBS_HASH_VERSION = 29;
  * don't know the column produce a stable hash for the default case.
  */
 export interface KnobsHashContext {
+  /**
+   * #5691: the brain's `embedding_query_prefix`. The query embedding the
+   * cache keys on is computed from prefix + query, so a row written under one
+   * prefix must never serve another. Empty/undefined adds no key part, so
+   * rows written without a prefix keep their key.
+   */
+  queryPrefix?: string;
   /** Resolved column name, e.g. 'embedding', 'embedding_voyage'. */
   embeddingColumn?: string;
   /** Resolved provider:model, e.g. 'voyage:voyage-3-large'. */
@@ -1150,6 +1157,9 @@ export function knobsHash(
     // the all-off key is unchanged and needs no version bump).
     ...(ctx?.decide ? [`dec=${ctx.decide}`] : []),
   ];
+  // #5691 (append-only, no version bump): only a non-empty query prefix adds
+  // a part, so every row written without one keeps its key.
+  if (ctx?.queryPrefix) parts.push(`qp=${createHash('sha256').update(ctx.queryPrefix).digest('hex').slice(0, 16)}`);
   const h = createHash('sha256');
   h.update(parts.join('|'));
   return h.digest('hex').slice(0, 16);
