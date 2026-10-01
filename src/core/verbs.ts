@@ -60,6 +60,7 @@ const PROVENANCE_MAX = 500;
 
 const remember: Operation = {
   name: 'remember',
+  outputRedaction: 'no_stored_text',
   description:
     'MEMORY VERB (v1): save one fact to durable agent memory — the protocol write verb. ' +
     'provenance is REQUIRED (free text, e.g. "conversation 2026-06-12", "user said in chat", "import: notes.md"). ' +
@@ -165,6 +166,7 @@ const remember: Operation = {
 
 const entity: Operation = {
   name: 'entity',
+  outputRedaction: 'retrieval',
   description:
     'MEMORY VERB (v1): inspect ONE known person/company/project card — zero LLM calls, sub-100ms. ' +
     'Resolution: alias > exact title > slug-suffix; ties break on most-recently-touched. ' +
@@ -219,6 +221,7 @@ const SYNTHESIS_FAILURE_CODES: Record<string, string> = {
 
 const synthesize: Operation = {
   name: 'synthesize',
+  outputRedaction: 'retrieval',
   description:
     '[EXPENSIVE / SLOW — makes LLM calls, seconds-to-minutes latency, costs money] ' +
     'MEMORY VERB (v1): answer a broad question using cross-page LLM reasoning with citations and gap analysis. ' +
@@ -341,6 +344,7 @@ const synthesize: Operation = {
 
 const forget: Operation = {
   name: 'forget',
+  outputRedaction: 'no_stored_text',
   description:
     'MEMORY VERB (v1): expire a remembered fact by id — the protocol delete verb. ' +
     '`id` is the opaque string id returned by remember and recall (facts[].fact_id) — never a page slug. ' +

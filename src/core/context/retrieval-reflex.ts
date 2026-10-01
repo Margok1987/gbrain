@@ -30,6 +30,7 @@ import { escapeLikePattern } from '../search/sql-ranking.ts';
 import { slugify } from '../entities/resolve.ts';
 import { stripTakesFence } from '../takes-fence.ts';
 import { stripFactsFence } from '../facts-fence.ts';
+import { redactFindings } from '../secret-scan.ts';
 import type { EntityCandidate } from './entity-salience.ts';
 import { reflexPointerRationale } from './reflex-rationale.ts';
 import { logVolunteerEventsFireAndForget, volunteerEventRowsFrom } from './volunteer-events.ts';
@@ -543,13 +544,15 @@ export function safeSynopsis(
   // run world-only (turn mode never widens).
   const keepVisibility = opts.keepVisibility ?? ['world'];
   const maxLen = opts.maxLen ?? SYNOPSIS_MAX;
+  // Redact the whole source field before collapse/clip: a cut or
+  // space-joined credential no longer matches the scanner.
   const fmSummary = row.frontmatter?.summary;
   if (typeof fmSummary === 'string' && fmSummary.trim()) {
-    return clip(collapse(fmSummary), maxLen);
+    return clip(collapse(redactFindings(fmSummary, { highEntropy: true }).text), maxLen);
   }
   const body = row.compiled_truth ?? '';
   if (!body) return '';
-  const stripped = stripFactsFence(stripTakesFence(body), { keepVisibility });
+  const stripped = redactFindings(stripFactsFence(stripTakesFence(body), { keepVisibility }), { highEntropy: true }).text;
   // Drop frontmatter block, markdown headings, and blank lines; first real prose line.
   const firstProse = stripped
     .replace(/^---[\s\S]*?---\s*/m, '')

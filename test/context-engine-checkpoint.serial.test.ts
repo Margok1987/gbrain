@@ -518,6 +518,26 @@ describe('memorable receipts from compact() (openclaw lane)', () => {
     expect(body).toContain('record --session oc-mem');
   });
 
+  it('MR4: a high-entropy hit refuses the relay with one content-free heartbeat line; the checkpoint is unaffected (DX-7)', async () => {
+    tmpDir = makeWorkspace();
+    const marker = await optIn();
+    const value = require('node:crypto').randomBytes(18).toString('base64url').replace(/[-_]/g, 'q') + '7';
+    const sessionFile = join(home!, 'oc-mem.jsonl');
+    wf(sessionFile, [sessionLine, msg(`deploy with password=${value} later`, 'exec')].join('\n') + '\n');
+    const engine = createGBrainContextEngine({ workspaceDir: tmpDir });
+    const result = await engine.compact({ sessionId: 'oc-mem', sessionFile });
+    expect(result.ok).toBe(true);
+    expect(await receipts()).toEqual([]);
+    expect(existsSync(marker)).toBe(false);
+    const { heartbeatPath } = await import('../src/core/context/hook-heartbeat.ts');
+    const raw = readFileSync(await heartbeatPath(), 'utf8');
+    expect(raw).not.toContain(value);
+    const line = raw.trim().split('\n').map((l) => JSON.parse(l)).find((e) => e.event === 'relay');
+    expect(line).toMatchObject({ outcome: 'degraded', reason: 'secret_scan_refused', pattern: 'high_entropy_assignment' });
+    expect(line.fingerprint).toMatch(/^sha256:[0-9a-f]{16}$/);
+    expect(line.hint).toContain('next window');
+  });
+
   it('MR3: enabled flag WITHOUT the disclosure stamp (out-of-band write) ⇒ no receipt, no spawn', async () => {
     tmpDir = makeWorkspace();
     await optIn();

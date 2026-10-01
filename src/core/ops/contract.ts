@@ -467,11 +467,29 @@ export interface OperationContext {
   localFederatedSourceIds?: string[];
 }
 
+/**
+ * How an op's response is treated before it reaches any caller. `operations.ts`
+ * wraps the handler of every `'retrieval'` op once at registration, so the CLI,
+ * both MCP transports, subagent tools and `gbrain call` all get the same pass:
+ * `redactRetrievalOutput` (canonical scanner, assignment rule on, uncapped)
+ * over the whole response, early returns included.
+ * - `{ retrieval: { localVerbatim } }`: same pass, but the named top-level keys
+ *   are returned unscanned to the trusted local CLI owner (`ctx.remote === false`).
+ * - `{ exempt }`: returns stored text deliberately raw; the reason is required.
+ * - `'no_stored_text'`: returns no page, chunk, fact, take or transcript text.
+ */
+export type OutputRedactionPolicy =
+  | 'retrieval'
+  | { retrieval: { localVerbatim: readonly string[] } }
+  | { exempt: string }
+  | 'no_stored_text';
+
 export interface Operation {
   name: string;
   description: string;
   params: Record<string, ParamDef>;
   handler: (ctx: OperationContext, params: Record<string, unknown>) => Promise<unknown>;
+  outputRedaction: OutputRedactionPolicy;
   mutating?: boolean;
   /**
    * Capability scope required to invoke this op over an authenticated
