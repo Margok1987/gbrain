@@ -640,7 +640,7 @@ async function runPush(engine: BrainEngine, args: string[]): Promise<void> {
     dir = src.local_path;
   }
 
-  const { workspacePush } = await import('../core/workspace-push.ts');
+  const { workspacePush, formatBlockedSecrets } = await import('../core/workspace-push.ts');
   const { SCAN_ALLOW_FILENAME } = await import('../core/secret-scan.ts');
   const res = await workspacePush({
     dir: dir!,
@@ -670,11 +670,7 @@ async function runPush(engine: BrainEngine, args: string[]): Promise<void> {
       return;
     case 'blocked_secrets':
       if (!json) {
-        console.error('PUSH BLOCKED — secret scan findings (nothing committed):');
-        for (const f of res.findings ?? []) {
-          console.error(`  ${f.file}:${f.line} [${f.pattern}] ${f.redactedPreview}`);
-          console.error(`    allow this finding: echo '${f.fingerprint}' >> ${SCAN_ALLOW_FILENAME}`);
-        }
+        for (const line of formatBlockedSecrets(res.findings ?? [])) console.error(line);
       }
       process.exit(5);
       break;
