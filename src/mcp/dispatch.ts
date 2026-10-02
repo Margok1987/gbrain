@@ -720,6 +720,8 @@ export async function dispatchToolCall(
       const block = buildEmptyRetrievalBlock(responseMeta.retrieval);
       if (block) out.content.push({ type: 'text', text: block });
     }
+    const typeFilterNotice = (responseMeta.retrieval as { type_filter_notice?: unknown } | undefined)?.type_filter_notice;
+    if (typeof typeFilterNotice === 'string') out.content.push({ type: 'text', text: typeFilterNotice });
     // WP3/D8: warn-mode unknown-param notices ride the same model-visible
     // extra-block mechanism, so the grace period actually corrects clients
     // (old thin-clients read content[0] only — skew-safe).

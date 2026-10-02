@@ -182,6 +182,40 @@ async function hasUnsealedPagesInScope(ctx: OperationContext, scope: SourceScope
 }
 
 /**
+ * Agents guess page types ("company", "account", "deal") that a brain may not
+ * have, and a filter on a type with no pages silently hides every page
+ * (gbrain-evals Cat 40: type-filtered agent runs failed 62% of tasks against
+ * 51% unfiltered). Requested types with no readable pages in scope are
+ * dropped, the rest stay; when none remain the filter is lifted. Either way
+ * the caller is told which types exist so it can refine.
+ */
+async function reconcileTypeFilter(ctx: OperationContext, scope: SourceScope, excludePrivate: boolean,
+  types: string[] | undefined): Promise<{ types: string[] | undefined; notice?: string }> {
+  if (!types || scope.sourceIds?.length === 0) return { types };
+  const params: unknown[] = [];
+  let present: Set<string>;
+  try {
+    const rows = await ctx.engine.executeRaw<{ type: string }>(
+      `SELECT DISTINCT p.type FROM pages p WHERE ${pageReadFilter('p', { ...scope, excludePrivate }, params, true)} LIMIT 500`, params);
+    present = new Set(rows.map(r => r.type));
+  } catch {
+    return { types };
+  }
+  const keep: string[] = [];
+  const missing: string[] = [];
+  for (const type of types) {
+    let expanded = [type];
+    try { expanded = (await expandEngineTypeFilters(ctx.engine, { types: [type], ...scope })).types ?? [type]; } catch { /* keep the literal type */ }
+    (expanded.some(t => present.has(t)) ? keep : missing).push(type);
+  }
+  if (missing.length === 0) return { types };
+  const available = [...present].sort().join(', ');
+  return keep.length === 0
+    ? { types: undefined, notice: `No pages have type ${missing.join(', ')}, so the type filter was dropped and every page type was searched. Page types in this brain: ${available}.` }
+    : { types: keep, notice: `No pages have type ${missing.join(', ')}; filtered to ${keep.join(', ')}. Page types in this brain: ${available}.` };
+}
+
+/**
  * WP2/D3 + E1: the `retrieval` response-meta payload for the search/query
  * ops. Carries the already-computed HybridSearchMeta signal (vector arm,
  * cache, budget, degradation stages — populated by the search pipeline) plus
@@ -201,7 +235,7 @@ async function buildRetrievalResponseMeta(
   queryText: string,
   results: unknown[],
   meta: HybridSearchMeta | null,
-  opts: { conceptHint?: boolean; types?: string[] } = {},
+  opts: { conceptHint?: boolean; types?: string[]; typeFilterNotice?: string } = {},
 ): Promise<Record<string, unknown>> {
   const m = meta as (HybridSearchMeta & { degraded?: unknown[]; retrieved_count?: number }) | null;
   const hint = opts.conceptHint && looksConceptShaped(queryText)
@@ -238,6 +272,7 @@ async function buildRetrievalResponseMeta(
     } : {}),
     ...((m?.degraded !== undefined || degraded.length > 0) ? { degraded } : {}),
     projection_readiness: readiness,
+    ...(opts.typeFilterNotice ? { type_filter_notice: opts.typeFilterNotice } : {}),
     ...(hint || readiness.hint ? { hint: [hint, readiness.hint].filter(Boolean).join(' ') } : {}),
   };
 }
@@ -369,6 +404,8 @@ const search: Operation = {
     // #4352 — untrusted callers never see `visibility: private` pages
     // (config-gated; trusted local CLI unchanged).
     const excludePrivate = await resolveExcludePrivatePages(ctx.engine, ctx.remote);
+    const typeFilter = await reconcileTypeFilter(ctx, scope, excludePrivate, types);
+    types = typeFilter.types;
 
     // T4/D5 — per-call mode honored ONLY for trusted/local callers so a remote
     // OAuth client can't escalate to the costly tokenmax bundle. Local + unknown
@@ -405,7 +442,7 @@ const search: Operation = {
       maybeCaptureSearch(ctx, queryText, results, Date.now() - startedAt, false);
       // #3800: cap AFTER capture/meta so eval + cache see the real payload.
       return evidenceOutput(ctx, p, results, plan, { ...scope, excludePrivate }, null, snippetCap,
-        rows => buildRetrievalResponseMeta(ctx, scope, queryText, rows, null, { conceptHint: true, types }));
+        rows => buildRetrievalResponseMeta(ctx, scope, queryText, rows, null, { conceptHint: true, types, typeFilterNotice: typeFilter.notice }));
     }
 
     // Cheap-hybrid (D4/D15): full vector+keyword+RRF+pool+title+alias, but
@@ -433,7 +470,7 @@ const search: Operation = {
     maybeCaptureSearch(ctx, queryText, results, latency_ms, true, capturedMeta);
     // #3800: cap AFTER capture/meta so eval + cache see the real payload.
     return evidenceOutput(ctx, p, results, plan, { ...scope, excludePrivate }, capturedMeta, snippetCap,
-      rows => buildRetrievalResponseMeta(ctx, scope, queryText, rows, capturedMeta, { conceptHint: true, types }));
+      rows => buildRetrievalResponseMeta(ctx, scope, queryText, rows, capturedMeta, { conceptHint: true, types, typeFilterNotice: typeFilter.notice }));
   },
   scope: 'read',
   cliHints: { name: 'search', positional: ['query'] },
@@ -663,6 +700,8 @@ const query: Operation = {
     // ctx.sourceId for callers that want to override (per-call multi-source
     // search). When the param is the literal '__all__', force-allow
     // cross-source mode (matches SearchOpts.sourceId contract).
+    const typeFilter = await reconcileTypeFilter(ctx, querySourceScope, excludePrivate, types);
+    types = typeFilter.types;
     let capturedMeta: HybridSearchMeta | null = null;
     // v0.32.x search-lite: route the query op through hybridSearchCached so
     // token budget and intent weighting apply at the operation boundary.
@@ -887,7 +926,7 @@ const query: Operation = {
     // #3800: cap AFTER capture/meta/CRAG so every internal consumer graded
     // and recorded the real payload; only the returned envelope is snipped.
     return evidenceOutput(ctx, p, results, plan, { ...querySourceScope, excludePrivate, detail }, capturedMeta, snippetCap,
-      async rows => ({ ...(await buildRetrievalResponseMeta(ctx, querySourceScope, queryText, rows, capturedMeta, { types })), crag }));
+      async rows => ({ ...(await buildRetrievalResponseMeta(ctx, querySourceScope, queryText, rows, capturedMeta, { types, typeFilterNotice: typeFilter.notice })), crag }));
   },
   scope: 'read',
   cliHints: { name: 'query', positional: ['query'] },
