@@ -381,19 +381,19 @@
         },
         {
           "category": "ops",
-          "message": "RLS enabled on 99/99 public tables",
+          "message": "RLS enabled on 100/100 public tables",
           "name": "rls",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "Version 187 (latest: 187)",
+          "message": "Version 188 (latest: 188)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "807 column(s) verified against live schema",
+          "message": "816 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -510,18 +510,6 @@
           },
           "message": "Every re-sealable page is at the safe-chunk index version.",
           "name": "safe_index_pending",
-          "status": "ok"
-        },
-        {
-          "category": "brain",
-          "details": {
-            "count": "exact",
-            "kept_pages": 0,
-            "pages_pending": 0,
-            "truncated": false
-          },
-          "message": "No page waits for the credential-safe re-chunk.",
-          "name": "credential_projection_pending",
           "status": "ok"
         },
         {
@@ -676,6 +664,20 @@
         {
           "category": "ops",
           "details": {
+            "column": "embedding",
+            "column_type": "vector(1024)",
+            "docs": "docs/guides/troubleshooting.md#hybrid-search-returns-only-keyword-hits",
+            "embedded_chunks_estimate": 0,
+            "outcome": "skipped",
+            "reason": "small_brain"
+          },
+          "message": "Skipped: about 0 embedded chunk(s) in embedding; below 10000 a sequential scan is the right plan.",
+          "name": "vector_plan",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
+          "details": {
             "command": "gbrain repair embedding-effects",
             "count": "exact",
             "docs": "docs/guides/repair.md#stale-queued-embedding-effects",
@@ -689,18 +691,6 @@
           },
           "message": "No committed write has a stale queued or failed embedding effect.",
           "name": "stale_embedding_effects",
-          "status": "ok"
-        },
-        {
-          "category": "ops",
-          "details": {
-            "count": 0,
-            "docs": "docs/guides/google-connect.md",
-            "repair": "google-file-modes",
-            "sources": []
-          },
-          "message": "No group- or world-readable gbrain files under Google source directories outside ~/.gbrain.",
-          "name": "google_file_modes",
           "status": "ok"
         },
         {
@@ -996,6 +986,34 @@
           "category": "ops",
           "message": "System One is off (every decide slot is off; nothing is sent).",
           "name": "decide_health",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "fix": "preview links: gbrain facts relink --dry-run",
+            "inferred_7d": {
+              "mention": 0,
+              "page": 0
+            },
+            "new_7d": {
+              "facts": 0,
+              "no_subject": 0,
+              "unlinked": 0
+            },
+            "no_subject": 0,
+            "origins": [],
+            "relinked_7d": {},
+            "sources": 1,
+            "window": {
+              "active": 0,
+              "capped": false,
+              "fence_owned": 0,
+              "unlinked": 0
+            }
+          },
+          "message": "No active facts yet; nothing to link.",
+          "name": "unlinked_facts",
           "status": "ok"
         },
         {

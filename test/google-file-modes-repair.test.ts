@@ -2,7 +2,7 @@
  * Legacy Google file repair (security fix wave, user challenge UC1): files
  * gbrain wrote under a Google source directory outside `~/.gbrain` before
  * this release keep their 0644 modes. `gbrain doctor` reports them
- * (`google_file_modes`), the v0.60.29 migration prints a one-time notice, and
+ * (`google_file_modes`), the v0.60.31 migration prints a one-time notice, and
  * `gbrain repair google-file-modes` previews by default and tightens only with
  * `--apply`: only gbrain's own layout, never the chosen root, never through a
  * symlink, never another user's file. POSIX modes only: skipped on win32.
@@ -17,7 +17,7 @@ import { withEnv } from './helpers/with-env.ts';
 import { resolveRepairScope } from '../src/core/repair/core.ts';
 import { repairRunner } from '../src/core/repair/registry.ts';
 import { checkGoogleFileModes } from '../src/commands/doctor/checks/google-file-modes.ts';
-import { googleFileModesNoticePhase } from '../src/commands/migrations/v0_60_29-google-file-modes.ts';
+import { googleFileModesNoticePhase } from '../src/commands/migrations/v0_60_31-google-file-modes.ts';
 
 let engine: PGLiteEngine;
 const scratch = mkdtempSync(join(tmpdir(), 'gbrain-google-repair-'));

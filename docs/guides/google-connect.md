@@ -341,7 +341,7 @@ This is deliberate: the pages are your private mail, calendar and contacts,
 and a page that quietly stays group-readable after a sync is the failure
 this rule prevents. There is no per-source setting for a looser mode yet.
 
-### Files written before v0.60.29.0
+### Files written before v0.60.31.0
 
 Older releases wrote these files with your umask, typically 0644 (readable by
 every local user), and an upgrade does not rewrite them. In the default

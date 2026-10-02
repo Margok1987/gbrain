@@ -1,6 +1,6 @@
 /**
  * Credential-safe re-chunk of existing pages (security wave ENG-2). Schema
- * migration v187 unseals every live markdown/code page whose canonical body
+ * migration v189 unseals every live markdown/code page whose canonical body
  * carries a private-key marker, which withholds its old chunks from every
  * retrieval path. This module counts those pages and re-seals them from their
  * unchanged canonical body through the projection installer: no page write,

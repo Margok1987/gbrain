@@ -88,8 +88,8 @@ describe('buildPushFindings (DX-3: per-finding guidance)', () => {
   });
 
   test("CEO-21: the finding's since version rides through when the scanner reports one", () => {
-    const [f] = build([finding({ pattern: 'basic_auth', since: '0.60.29.0' } as Partial<SecretFinding>)]);
-    expect(f!.since).toBe('0.60.29.0');
+    const [f] = build([finding({ pattern: 'basic_auth', since: '0.60.31.0' } as Partial<SecretFinding>)]);
+    expect(f!.since).toBe('0.60.31.0');
   });
 
   test('the append command works verbatim on a path with spaces and quotes, from any cwd', () => {
@@ -173,20 +173,20 @@ describe('formatBlockedSecrets (CLI rendering of the structured findings)', () =
   });
 
   test("CEO-21: a finding's since version names the gbrain version that made the shape blocking", () => {
-    for (const [pattern, since] of [['url_credentials', '0.60.29.0'], ['basic_auth', 'v0.60.29.0'], ['digitalocean', '0.60.29.0']]) {
+    for (const [pattern, since] of [['url_credentials', '0.60.31.0'], ['basic_auth', 'v0.60.31.0'], ['digitalocean', '0.60.31.0']]) {
       const out = formatBlockedSecrets(one({ pattern, since } as Partial<SecretFinding>)).join('\n');
-      expect(out).toContain(`    rule [${pattern}] blocks pushes since gbrain v0.60.29.0`);
+      expect(out).toContain(`    rule [${pattern}] blocks pushes since gbrain v0.60.31.0`);
     }
   });
 
   test('DX-4: the stale header-only entry is named with the replacement line', () => {
     const headerOnly = fp(BEGIN);
     const out = formatBlockedSecrets(one(
-      { line: 1, fingerprint: 'sha256:fedcba9876543210', since: '0.60.29.0', legacyFingerprint: headerOnly },
+      { line: 1, fingerprint: 'sha256:fedcba9876543210', since: '0.60.31.0', legacyFingerprint: headerOnly },
       [headerOnly],
     )).join('\n');
     expect(out).toContain(
-      `    stale allowlist entry: ${headerOnly} matched only this key's BEGIN header before gbrain v0.60.29.0; the fingerprint now covers the key body.`,
+      `    stale allowlist entry: ${headerOnly} matched only this key's BEGIN header before gbrain v0.60.31.0; the fingerprint now covers the key body.`,
     );
     expect(out).toContain(
       "    if the key is a reviewed false positive, replace that line in '/home/u/my brain/.gbrain-scan-allow' with: sha256:fedcba9876543210",

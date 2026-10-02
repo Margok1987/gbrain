@@ -7,11 +7,11 @@ import type { Migration } from './types.ts';
 // every retrieval path, local and remote, reads chunks through the current
 // text-projection seal, so their old chunks are withheld from this statement
 // on. Each page is queued for the keyless projection rebuild (reason
-// 'credential_projection'); the v0.60.29 orchestrated migration re-chunks them
+// 'credential_projection'); the v0.60.31 orchestrated migration re-chunks them
 // with no provider calls. The chunker and safe-fence versions do not change.
 // The marker literal is frozen as shipped; see page-state/credential-reseal.ts.
-export const v187: Migration = {
-  version: 187,
+export const v189: Migration = {
+  version: 189,
   name: 'pages_credential_projection_pending',
   idempotent: true,
   sql: `

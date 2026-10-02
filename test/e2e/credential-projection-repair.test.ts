@@ -25,7 +25,7 @@ import { SAFE_FENCE_CHUNKER_VERSION } from '../../src/core/search/safe-chunks.ts
 import { resealSafeChunks } from '../../src/core/page-state/projections.ts';
 import { hydrateChunks } from '../../src/core/search/two-pass.ts';
 import { credentialProjectionPendingCheck } from '../../src/commands/doctor/checks/credential-projection.ts';
-import { v0_60_29, __setTestEngineOverride } from '../../src/commands/migrations/v0_60_29.ts';
+import { v0_60_31, __setTestEngineOverride } from '../../src/commands/migrations/v0_60_31.ts';
 import * as gateway from '../../src/core/ai/gateway.ts';
 import { LEGACY_EMBEDDING_CONFIG } from '../helpers/legacy-embedding-config.ts';
 import { assertSafeE2eDatabaseUrl } from '../helpers/db-guard.ts';
@@ -159,7 +159,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
 
     test('the orchestrated migration finishes provider-free and is idempotent', async () => {
       __setTestEngineOverride(engine);
-      const result = await v0_60_29.orchestrator({ yes: true, dryRun: false, noAutopilotInstall: true });
+      const result = await v0_60_31.orchestrator({ yes: true, dryRun: false, noAutopilotInstall: true });
       expect(result.status).toBe('complete');
       expect(result.phases[0]).toMatchObject({ name: 'credential_projection', status: 'complete' });
       expect(result.phases[0].detail).toContain('1 page(s) re-chunked without provider calls');
@@ -170,7 +170,7 @@ for (const kind of ['pglite', 'postgres'] as const) {
       expect(leaked(chunks.map(c => c.chunk_text))).toEqual([]);
       expect(chunks.some(c => c.embedded_at === null)).toBe(true);
       expect((await credentialProjectionPendingCheck(engine, [SOURCE])).status).toBe('ok');
-      const rerun = await v0_60_29.orchestrator({ yes: true, dryRun: false, noAutopilotInstall: true });
+      const rerun = await v0_60_31.orchestrator({ yes: true, dryRun: false, noAutopilotInstall: true });
       expect(rerun.phases[0].detail).toContain('0 page(s) re-chunked');
     });
   });
