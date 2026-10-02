@@ -381,7 +381,7 @@
         },
         {
           "category": "meta",
-          "message": "Version 188 (latest: 188)",
+          "message": "Version 189 (latest: 189)",
           "name": "schema_version",
           "status": "ok"
         },
@@ -504,6 +504,18 @@
           },
           "message": "Every re-sealable page is at the safe-chunk index version.",
           "name": "safe_index_pending",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "count": "exact",
+            "kept_pages": 0,
+            "pages_pending": 0,
+            "truncated": false
+          },
+          "message": "No page waits for the credential-safe re-chunk.",
+          "name": "credential_projection_pending",
           "status": "ok"
         },
         {
@@ -681,6 +693,18 @@
           },
           "message": "No committed write has a stale queued or failed embedding effect.",
           "name": "stale_embedding_effects",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
+          "details": {
+            "count": 0,
+            "docs": "docs/guides/google-connect.md",
+            "repair": "google-file-modes",
+            "sources": []
+          },
+          "message": "No group- or world-readable gbrain files under Google source directories outside ~/.gbrain.",
+          "name": "google_file_modes",
           "status": "ok"
         },
         {
