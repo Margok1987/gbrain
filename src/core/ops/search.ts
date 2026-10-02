@@ -249,6 +249,29 @@ export function aliasDeclarations(rows: Array<{ slug: string; title?: string; ch
   return [...out.values()].slice(0, 5);
 }
 
+/**
+ * When the evidence declares another name for the entity the query names,
+ * also search under that name and splice the new pages in after the top two
+ * results, so documents that use only the other name are not left for the
+ * agent to discover (most agents did not act on the notice alone).
+ */
+async function withDeclaredNameFanOut(results: SearchResult[], queryText: string,
+  run: (query: string, limit: number) => Promise<SearchResult[]>): Promise<SearchResult[]> {
+  const [first] = aliasDeclarations(results, queryText);
+  if (!first) return results;
+  const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const usesName = queryText.toLowerCase().includes(first.name.toLowerCase());
+  const alt = usesName
+    ? queryText.replace(new RegExp(esc(first.name), 'i'), first.alias)
+    : queryText.replace(new RegExp(`\\b${esc(first.alias)}\\b`, 'i'), first.name);
+  let extra: SearchResult[];
+  try { extra = await run(alt, 5); } catch { return results; }
+  const seen = new Set(results.map(r => `${r.source_id ?? ''}\u0000${r.slug}`));
+  const fresh = extra.filter(r => !seen.has(`${r.source_id ?? ''}\u0000${r.slug}`));
+  if (fresh.length === 0) return results;
+  return [...results.slice(0, 2), ...fresh, ...results.slice(2)].slice(0, Math.max(results.length, 2 + fresh.length));
+}
+
 export interface SavedFactMatch { id: number; fact: string; entity_slug: string | null; kind: string; valid_from: string; source: string }
 
 /**
@@ -529,7 +552,7 @@ const search: Operation = {
     // Cheap-hybrid (D4/D15): full vector+keyword+RRF+pool+title+alias, but
     // expansion OFF (no per-call LLM cost). `query` op is the full-control variant.
     let capturedMeta: HybridSearchMeta | null = null;
-    const results = (await hybridSearchCached(ctx.engine, queryText, {
+    const searchOpts = {
       limit,
       offset,
       expansion: false,
@@ -543,8 +566,10 @@ const search: Operation = {
       salience: p.salience as 'off' | 'on' | 'strong' | undefined,
       recency: p.recency as 'off' | 'on' | 'strong' | undefined,
       decide: { remote: ctx.remote !== false },
-      onMeta: (m) => { capturedMeta = m; },
-    })).map(r => ({ ...r }));
+    };
+    const primary = await hybridSearchCached(ctx.engine, queryText, { ...searchOpts, onMeta: (m) => { capturedMeta = m; } });
+    const results = (await withDeclaredNameFanOut(primary, queryText,
+      (alt, altLimit) => hybridSearchCached(ctx.engine, alt, { ...searchOpts, limit: altLimit, offset: 0 }))).map(r => ({ ...r }));
     stampDeepResearchIds(results);
     const latency_ms = Date.now() - startedAt;
     bumpLastRetrievedAt(ctx.engine, results.map((r) => r.page_id));
@@ -842,6 +867,10 @@ const query: Operation = {
       // v0.43 — relational recall override. Omitted = smart default (mode bundle).
       relationalRetrieval: typeof p.relational === 'boolean' ? (p.relational as boolean) : undefined,
     });
+    results = await withDeclaredNameFanOut(results, queryText, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {
+      limit: altLimit, excludePrivate, requireSafeChunks: ctx.remote !== false, takesHoldersAllowList: readHolders(ctx),
+      expansion: false, types, ...querySourceScope,
+    }));
     // #1663 — CRAG confidence gate. Grade what retrieval returned (zero-LLM;
     // reads the stamped honesty signals: evidence, exact_lookup, rerank
     // score), attach grade + query shape to the retrieval meta on EVERY call,

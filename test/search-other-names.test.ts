@@ -46,3 +46,13 @@ describe('MCP search with other names', () => {
     expect(extra).toContain('New Person');
   });
 });
+
+describe('search fans out to the other declared name', () => {
+  test('a page that uses only the code is returned for a full-name query', async () => {
+    await importFromContent(engine, 'contracts/numbat-labs-msa', serializeMarkdown({}, 'Master services agreement with Numbat Labs (account code NULA). Payment terms: Net 45.', '', { type: 'contract', title: 'MSA: Numbat Labs', tags: [] }), { noEmbed: true, forceRechunk: true });
+    await importFromContent(engine, 'contracts/amendment-one', serializeMarkdown({}, 'Executed amendment for NULA: payment terms change to Net 30.', '', { type: 'amendment', title: 'Amendment No. 1: NULA', tags: [] }), { noEmbed: true, forceRechunk: true });
+    const r = await dispatchToolCall(engine, 'search', { query: 'Numbat Labs payment terms' }, { remote: true, transport: 'http', sourceId: 'default' });
+    const slugs = (JSON.parse(r.content[0].text!) as Array<{ slug: string }>).map(x => x.slug);
+    expect(slugs).toContain('contracts/amendment-one');
+  });
+});
