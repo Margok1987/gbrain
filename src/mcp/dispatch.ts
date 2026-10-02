@@ -722,6 +722,11 @@ export async function dispatchToolCall(
     }
     const typeFilterNotice = (responseMeta.retrieval as { type_filter_notice?: unknown } | undefined)?.type_filter_notice;
     if (typeof typeFilterNotice === 'string') out.content.push({ type: 'text', text: typeFilterNotice });
+    const savedFacts = (responseMeta.retrieval as { saved_facts?: Array<{ fact: string; entity_slug: string | null; valid_from: string; source: string }> } | undefined)?.saved_facts;
+    if (savedFacts?.length) {
+      out.content.push({ type: 'text', text: `Saved facts (remember) matching this query, newest first; recall returns more:\n${savedFacts
+        .map(f => `- ${f.fact} [entity: ${f.entity_slug ?? 'none'}; saved ${String(f.valid_from).slice(0, 10)}; provenance: ${f.source}]`).join('\n')}` });
+    }
     // WP3/D8: warn-mode unknown-param notices ride the same model-visible
     // extra-block mechanism, so the grace period actually corrects clients
     // (old thin-clients read content[0] only — skew-safe).

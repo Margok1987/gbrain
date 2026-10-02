@@ -26,7 +26,8 @@ import { bumpLastRetrievedAt } from '../last-retrieved.ts';
 import { applySnippetCap, DEFAULT_AGENT_SNIPPET_CHARS } from '../search/snippet-cap.ts';
 import { redactRetrievalOutput } from '../search/output-redaction.ts';
 import { assembleEvidenceForHits, capDeliveredSnippets, deliverEvidence, effectivePlan, resolveEvidencePlan, unsupportedDelivery, type DeliveryMeta, type DeliveryScope, type EvidencePlan, type FrozenHit, type ReturnUnit } from '../search/evidence-delivery.ts';
-import { resolveExcludePrivatePages } from '../search/private-visibility.ts';
+import { privateProvenanceFilterFragment, resolveExcludePrivatePages } from '../search/private-visibility.ts';
+import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { SAFE_FENCE_CHUNKER_VERSION } from '../search/safe-chunks.ts';
 import { expandEngineTypeFilters } from '../schema-pack/query-types.ts';
 import { probeProjectionReadiness } from '../search/projection-readiness.ts';
@@ -215,6 +216,49 @@ async function reconcileTypeFilter(ctx: OperationContext, scope: SourceScope, ex
     : { types: keep, notice: `No pages have type ${missing.join(', ')}; filtered to ${keep.join(', ')}. Page types in this brain: ${available}.` };
 }
 
+const FACT_MATCH_STOPWORDS = new Set(['the', 'and', 'for', 'who', 'what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'our', 'your', 'their', 'now', 'current', 'currently', 'should', 'does', 'did', 'has', 'have', 'how', 'any', 'all', 'about', 'into', 'its', 'next']);
+
+export interface SavedFactMatch { id: number; fact: string; entity_slug: string | null; kind: string; valid_from: string; source: string }
+
+/**
+ * Facts saved with `remember` live in the facts table, not in page chunks, so
+ * page search never returns them (gbrain-evals Cat 40: agents saved a
+ * correction with remember and the next session's search missed it). This
+ * finds active facts whose text or entity shares at least three quarters of the query's words,
+ * under the same source scope and visibility rules recall applies.
+ */
+async function matchingSavedFacts(ctx: OperationContext, scope: SourceScope, queryText: string): Promise<SavedFactMatch[]> {
+  const terms = [...new Set(queryText.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]+/gu) ?? [])]
+    .filter(t => t.length >= 3 && !FACT_MATCH_STOPWORDS.has(t)).slice(0, 12);
+  if (terms.length === 0 || !ctx.emitResponseMeta) return [];
+  const sources = scope.sourceIds?.length ? scope.sourceIds : [scope.sourceId ?? ctx.sourceId ?? 'default'];
+  const remote = ctx.remote !== false;
+  try {
+    const rows = await ctx.engine.executeRaw<SavedFactMatch & { haystack: string }>(
+      `SELECT f.id, f.fact, f.entity_slug, f.kind, f.valid_from::text AS valid_from, f.source,
+         lower(f.fact || ' ' || COALESCE(f.entity_slug, '')) AS haystack
+       FROM facts f
+       WHERE f.source_id = ANY($1::text[])
+         AND f.expired_at IS NULL AND (f.valid_until IS NULL OR f.valid_until > now())
+         AND f.source != ALL($2::text[])
+         AND lower(f.fact || ' ' || COALESCE(f.entity_slug, '')) LIKE ANY($3::text[])
+         ${remote ? `AND f.visibility = 'world' AND ${privateProvenanceFilterFragment('f')}` : ''}
+       ORDER BY f.valid_from DESC, f.id DESC
+       LIMIT 200`,
+      [sources, [...AUDIT_ROW_SOURCES], terms.map(t => `%${t.replace(/[\\%_]/g, m => `\\${m}`)}%`)],
+    );
+    const need = Math.max(Math.min(2, terms.length), Math.ceil(terms.length * 0.75));
+    return rows
+      .map(r => ({ r, hits: terms.filter(t => r.haystack.includes(t)).length }))
+      .filter(x => x.hits >= need)
+      .sort((a, b) => b.hits - a.hits)
+      .slice(0, 5)
+      .map(({ r: { haystack: _h, ...fact } }) => ({ ...fact, id: Number(fact.id) }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * WP2/D3 + E1: the `retrieval` response-meta payload for the search/query
  * ops. Carries the already-computed HybridSearchMeta signal (vector arm,
@@ -252,6 +296,7 @@ async function buildRetrievalResponseMeta(
     types: opts.types,
     excludeSlugPrefixes,
   });
+  const savedFacts = await matchingSavedFacts(ctx, scope, queryText);
   const degraded = [...(m?.degraded ?? [])];
   if (safeIndexPending) degraded.push({ stage: 'safe_index_pending' });
   if (readiness.status !== 'ready') {
@@ -273,6 +318,7 @@ async function buildRetrievalResponseMeta(
     ...((m?.degraded !== undefined || degraded.length > 0) ? { degraded } : {}),
     projection_readiness: readiness,
     ...(opts.typeFilterNotice ? { type_filter_notice: opts.typeFilterNotice } : {}),
+    ...(savedFacts.length ? { saved_facts: savedFacts } : {}),
     ...(hint || readiness.hint ? { hint: [hint, readiness.hint].filter(Boolean).join(' ') } : {}),
   };
 }
