@@ -722,6 +722,11 @@ export async function dispatchToolCall(
     }
     const typeFilterNotice = (responseMeta.retrieval as { type_filter_notice?: unknown } | undefined)?.type_filter_notice;
     if (typeof typeFilterNotice === 'string') out.content.push({ type: 'text', text: typeFilterNotice });
+    const otherNames = (responseMeta.retrieval as { other_names?: Array<{ name: string; alias: string; slug: string }> } | undefined)?.other_names;
+    if (otherNames?.length) {
+      out.content.push({ type: 'text', text: `Other names in these results (documents may use either; search the one you have not tried): ${otherNames
+        .map(n => `${n.alias} = ${n.name} (declared in ${n.slug})`).join('; ')}.` });
+    }
     const savedFacts = (responseMeta.retrieval as { saved_facts?: Array<{ fact: string; entity_slug: string | null; valid_from: string; source: string }> } | undefined)?.saved_facts;
     if (savedFacts?.length) {
       out.content.push({ type: 'text', text: `Saved facts (remember) matching this query, newest first; recall returns more:\n${savedFacts

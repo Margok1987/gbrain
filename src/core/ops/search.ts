@@ -218,6 +218,37 @@ async function reconcileTypeFilter(ctx: OperationContext, scope: SourceScope, ex
 
 const FACT_MATCH_STOPWORDS = new Set(['the', 'and', 'for', 'who', 'what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'our', 'your', 'their', 'now', 'current', 'currently', 'should', 'does', 'did', 'has', 'have', 'how', 'any', 'all', 'about', 'into', 'its', 'next']);
 
+export interface AliasDeclaration { name: string; alias: string; slug: string }
+
+const ALIAS_DECLARATION = /\b(?:account code|also known as|a\.k\.a\.|aka|short name|ticker|code name)\b\s*[:(]?\s*["\u201c']?([A-Z0-9][A-Za-z0-9&.-]{1,24})/gi;
+
+/**
+ * Pages often declare another name for their subject ("Account code: MULI",
+ * "also known as ..."), and documents elsewhere use only that name, so a
+ * search for one name misses them (gbrain-evals Cat 40: amendments and
+ * corrections that named a customer only by its code). This reads the
+ * declarations in the returned evidence; the name is the page title after
+ * its last colon. Only declarations where the query uses one name and not
+ * the other are reported.
+ */
+export function aliasDeclarations(rows: Array<{ slug: string; title?: string; chunk_text?: string }>, queryText: string): AliasDeclaration[] {
+  const q = queryText.toLowerCase();
+  const out = new Map<string, AliasDeclaration>();
+  for (const row of rows.slice(0, 10)) {
+    const name = (row.title ?? '').split(':').pop()!.trim();
+    if (!name) continue;
+    for (const m of (row.chunk_text ?? '').matchAll(ALIAS_DECLARATION)) {
+      const alias = m[1].replace(/[.,;]+$/, '');
+      if (!/[A-Z0-9]/.test(alias) || alias.toLowerCase() === name.toLowerCase()) continue;
+      const hasName = q.includes(name.toLowerCase());
+      const hasAlias = new RegExp(`\\b${alias.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(q);
+      if (hasName === hasAlias) continue;
+      out.set(`${name}\u0000${alias}`, { name, alias, slug: row.slug });
+    }
+  }
+  return [...out.values()].slice(0, 5);
+}
+
 export interface SavedFactMatch { id: number; fact: string; entity_slug: string | null; kind: string; valid_from: string; source: string }
 
 /**
@@ -227,7 +258,9 @@ export interface SavedFactMatch { id: number; fact: string; entity_slug: string 
  * finds active facts whose text or entity shares at least three quarters of the query's words,
  * under the same source scope and visibility rules recall applies.
  */
-async function matchingSavedFacts(ctx: OperationContext, scope: SourceScope, queryText: string): Promise<SavedFactMatch[]> {
+async function matchingSavedFacts(ctx: OperationContext, scope: SourceScope, queryText: string, aliases: AliasDeclaration[] = []): Promise<SavedFactMatch[]> {
+  // A query naming one of two declared names also matches facts saved under the other.
+  for (const a of aliases) queryText += ` ${a.name} ${a.alias}`;
   const terms = [...new Set(queryText.toLowerCase().match(/[\p{L}\p{N}][\p{L}\p{N}'-]+/gu) ?? [])]
     .filter(t => t.length >= 3 && !FACT_MATCH_STOPWORDS.has(t)).slice(0, 12);
   if (terms.length === 0 || !ctx.emitResponseMeta) return [];
@@ -296,7 +329,8 @@ async function buildRetrievalResponseMeta(
     types: opts.types,
     excludeSlugPrefixes,
   });
-  const savedFacts = await matchingSavedFacts(ctx, scope, queryText);
+  const aliases = aliasDeclarations(results as Array<{ slug: string; title?: string; chunk_text?: string }>, queryText);
+  const savedFacts = await matchingSavedFacts(ctx, scope, queryText, aliases);
   const degraded = [...(m?.degraded ?? [])];
   if (safeIndexPending) degraded.push({ stage: 'safe_index_pending' });
   if (readiness.status !== 'ready') {
@@ -319,6 +353,7 @@ async function buildRetrievalResponseMeta(
     projection_readiness: readiness,
     ...(opts.typeFilterNotice ? { type_filter_notice: opts.typeFilterNotice } : {}),
     ...(savedFacts.length ? { saved_facts: savedFacts } : {}),
+    ...(aliases.length ? { other_names: aliases } : {}),
     ...(hint || readiness.hint ? { hint: [hint, readiness.hint].filter(Boolean).join(' ') } : {}),
   };
 }
