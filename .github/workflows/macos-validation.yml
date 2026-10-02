@@ -94,7 +94,7 @@ jobs:
           # the 7 GB runner is lower, so typecheck aborted on heap exhaustion.
           NODE_OPTIONS: --max-old-space-size=4096
         run: |
-          NODE_OPTIONS= node -p '"default node heap limit MB " + require("v8").getHeapStatistics().heap_size_limit / 1048576'
+          NODE_OPTIONS='' node -p '"default node heap limit MB " + require("v8").getHeapStatistics().heap_size_limit / 1048576'
           mkdir -p "$RUNNER_TEMP/bash32"
           ln -sf /bin/bash "$RUNNER_TEMP/bash32/bash"
           export PATH="$RUNNER_TEMP/bash32:$PATH"
