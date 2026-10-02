@@ -84,7 +84,7 @@ beforeAll(async () => {
   await engine.putRawData('notes/n1', 'crm', { owner: planted('raw') }, { sourceId: SRC });
   await engine.logIngest({ source_id: SRC, source_type: 'test', source_ref: 'ref-1', pages_updated: ['notes/n1'], summary: planted('ingest') });
   await engine.insertFact({ fact: planted('fact'), entity_slug: 'people/alice-example', source: planted('fact source'), visibility: 'world', embedding: null, context: planted('fact context') } as never, { source_id: SRC });
-  await engine.mergeOntologyFact({ entitySlug: 'people/alice-example', dimension: 'employer', value: planted('ontology'), confidence: 0.9, source: 'test:x', sourceId: SRC } as never);
+  await engine.mergeOntologyFact({ entitySlug: 'people/alice-example', dimension: 'employer', value: planted('ontology'), confidence: 0.9, source: 'test:x', sourceId: SRC, visibility: 'world' } as never);
   await engine.upsertEventProjection({ depthSlug: 'people/alice-example', eventSlug: 'notes/n1', date: TODAY, summary: planted('event'), sourceId: SRC });
   const page = await engine.getPage('notes/n1', { sourceId: SRC });
   await engine.addTakesBatch([{ page_id: (page as { id: number }).id, row_num: 1, claim: planted('take'), kind: 'view', holder: 'world', weight: 0.8 }] as never);
