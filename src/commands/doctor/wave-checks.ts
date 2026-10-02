@@ -162,6 +162,20 @@ export const WAVE_CHECKS: readonly WaveCheckSpec[] = [
     impact: 'Some files gbrain wrote under a Google source directory outside ~/.gbrain are readable by other local users',
     run: async (engine, scope) => (await import('./checks/google-file-modes.ts')).checkGoogleFileModes(engine, scope.sourceIds),
   },
+  {
+    id: 'atom_provenance_drift', resolution: 'repair', registration: 'doctor.ts',
+    hostOnly: 'Retiring stale atoms is a host-side, explicit-only repair.',
+    count: d => Number(d.drifted ?? 0),
+    impact: 'Some atoms reference a source page that is gone or was edited, and still surface in search with a quote no current page contains',
+    run: async engine => (await import('./checks/extraction-sync.ts')).computeAtomProvenanceDriftCheck(engine),
+  },
+  {
+    id: 'extractor_facts_expired', resolution: 'repair', registration: 'wave',
+    hostOnly: 'Restoring expired extractor facts is a host-side, explicit-only repair.',
+    count: d => Number(d.evidenced ?? 0) + Number(d.ambiguous ?? 0),
+    impact: 'Some conversation-extractor facts were expired by the pre-v0.60.11.0 canonical projection and recall no longer returns them',
+    run: async (engine, scope) => (await import('./checks/extractor-facts.ts')).extractorFactsCheck(engine, scope.sourceIds),
+  },
 ];
 
 /** A check that could not run reports unknown, never ok. */

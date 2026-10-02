@@ -452,7 +452,7 @@ export async function doctorReportRemote(
   checks.push(await checkProjectionReadiness(engine, {
     sourceIds: opts.sourceIds,
     excludePrivate: await resolveExcludePrivatePages(engine, opts.remote),
-  }));
+  }, { resident: engine.kind === 'pglite' && opts.remote === true }));
 
   // issue #1777 — hidden_by_search_policy: chunked pages withheld from default
   // search by the hard-exclude prefix policy. Pure SQL COUNT, safe on the

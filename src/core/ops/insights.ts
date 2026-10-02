@@ -80,6 +80,7 @@ const volunteer_context: Operation = {
     const turns = parseWindow(p.window);
     const { loadConfig: loadCfgForArms } = await import('../config.ts');
     const { lexicalArmsEnabled } = await import('../context/reflex.ts');
+    const { resolveExcludePrivatePages } = await import('../search/private-visibility.ts');
     const pages = await volunteerContext(ctx.engine, turns, {
       sourceIds,
       priorContext: typeof p.prior_context === 'string' ? p.prior_context : undefined,
@@ -88,6 +89,8 @@ const volunteer_context: Operation = {
       // v0.46.15+ kill switch for the lexical recall arms (weak-alias +
       // surname) — file-plane gate, threaded per ResolvePointersOpts.
       lexicalArms: lexicalArmsEnabled(loadCfgForArms()),
+      // N8-1: the same private-page gate remote search applies.
+      excludePrivate: await resolveExcludePrivatePages(ctx.engine, ctx.remote),
     });
 
     // Feedback-loop logging: fire-and-forget batched INSERT through the

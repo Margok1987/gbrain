@@ -166,6 +166,12 @@ export interface DispatchOpts {
    */
   localFederatedSourceIds?: string[];
   /**
+   * #5081: explicit-read admission for a stdio connection bound by
+   * GBRAIN_SOURCE or a .gbrain-source pin. Stdio transport only; see
+   * OperationContext.explicitReadBinding.
+   */
+  explicitReadBinding?: OperationContext['explicitReadBinding'];
+  /**
    * `gbrain serve --source-guard` (plugin lanes): when set, write/admin ops
    * are blocked unless the source resolution tier proves the binding is
    * deliberate or unambiguous (see WRITE_SAFE_SOURCE_TIERS in
@@ -485,6 +491,7 @@ export function buildOperationContext(
     sourceId: opts.sourceId ?? 'default',
     ...(sessionId ? { sessionId } : {}),
     ...(opts.localFederatedSourceIds ? { localFederatedSourceIds: opts.localFederatedSourceIds } : {}),
+    ...(opts.explicitReadBinding ? { explicitReadBinding: opts.explicitReadBinding } : {}),
     ...(opts.surfaceCeiling ? { surfaceCeiling: opts.surfaceCeiling } : {}),
     auth: opts.auth,
   };

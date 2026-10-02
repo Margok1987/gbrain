@@ -1108,6 +1108,25 @@
         "thinClient": "none",
         "thinClientRoutedSubcommands": []
       },
+      "projections": {
+        "hasSwitchCase": false,
+        "phase": "pre-connect-own-engine",
+        "preConnectRules": [
+          {
+            "condition": "command === 'projections'",
+            "connectsEngine": true,
+            "refusesThinClient": false,
+            "routesThinClient": false,
+            "terminates": true,
+            "thinClientCheck": false,
+            "unconditionalFor": [
+              "projections"
+            ]
+          }
+        ],
+        "thinClient": "refuse",
+        "thinClientRoutedSubcommands": []
+      },
       "protocol": {
         "hasSwitchCase": false,
         "phase": "pre-connect",
@@ -1804,6 +1823,16 @@
         "refusesThinClient": false,
         "routesThinClient": false,
         "terminates": true,
+        "thinClientCheck": false,
+        "unconditionalFor": []
+      },
+      {
+        "commands": [],
+        "condition": "command !== 'hook'",
+        "connectsEngine": false,
+        "refusesThinClient": false,
+        "routesThinClient": false,
+        "terminates": false,
         "thinClientCheck": false,
         "unconditionalFor": []
       },

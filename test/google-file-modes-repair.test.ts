@@ -64,7 +64,7 @@ async function legacySource(id = 'gmail', dir = root) {
 
 const repair = (apply: boolean, source?: string) => withEnv({ GBRAIN_HOME: home }, async () => {
   const runner = await repairRunner(engine, { apply, logger: { info() {}, warn() {}, error() {} } });
-  return runner.run('google-file-modes', await resolveRepairScope(engine, source), { sourceFlag: source });
+  return runner.run('google-file-modes', await resolveRepairScope(engine, source), { sourceFlag: source, explicit: true });
 });
 
 describe.skipIf(process.platform === 'win32')('gbrain repair google-file-modes', () => {

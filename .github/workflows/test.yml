@@ -138,9 +138,11 @@ jobs:
           bun-version: ${{ matrix.bun }}
       - run: bun install --frozen-lockfile --ignore-scripts
       - name: Boundary and transport regressions
-        run: bun test --timeout 60000 test/frontmatter-security.test.ts test/data-frontmatter.test.ts test/authorization-boundaries.test.ts test/url-safety.test.ts test/guarded-http.test.ts
+        run: bun test --timeout 60000 test/frontmatter-security.test.ts test/data-frontmatter.test.ts test/authorization-boundaries.test.ts test/url-safety.test.ts test/guarded-http.test.ts test/bundle-files-segments.test.ts
       - name: Isolated TLS and proxy regressions
         run: bun test --timeout 60000 test/guarded-http-tls.serial.test.ts
+      - name: Colon-slug Windows refusals and bound explicit reads (#5032, #5081)
+        run: bun test --timeout 60000 test/colon-slug-windows-5032.test.ts test/cross-lane-5081-5032.test.ts
 
   dependency-audit:
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.native_only != true }}

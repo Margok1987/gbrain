@@ -182,20 +182,34 @@ async function prepareAdmission(engine: BrainEngine, input: WriteAdmission, over
   } };
 }
 
-/** Claims commit before OS-lock waits. An unresolved head blocks its entire root. */
-export async function claimNextWrite(engine: BrainEngine, hostId: string, leaseMs = 30_000, excludeRoots: string[] = []): Promise<WriteRequest | null> {
-  return engine.transactionDirect(async tx => {
-    await declarePersistenceProtocol(tx);
-    const [row] = await tx.executeRaw<WriteRequest>(`SELECT r.* FROM persistence_requests r
-      LEFT JOIN persistence_worktrees w ON w.id=r.worktree_id
-      WHERE r.state='queued' AND (r.worktree_id IS NULL OR (w.owner_host_id=$1::uuid AND w.state='active'))
+/**
+ * The rows `claimNextWrite` may claim, over `persistence_requests r LEFT JOIN
+ * persistence_worktrees w`, with $1 = host id and $2 = excluded root keys. An
+ * unresolved head blocks its entire root.
+ */
+export const CLAIMABLE_WRITE_SQL = `r.state='queued' AND (r.worktree_id IS NULL OR (w.owner_host_id=$1::uuid AND w.state='active'))
       AND NOT (COALESCE(r.worktree_id::text,'db:'||r.source_incarnation::text)=ANY($2::text[]))
       AND NOT EXISTS (SELECT 1 FROM persistence_effects blocked WHERE blocked.worktree_id=r.worktree_id AND blocked.recovery IS NOT NULL)
       AND NOT EXISTS (SELECT 1 FROM persistence_requests blocked WHERE blocked.worktree_id=r.worktree_id AND blocked.recovery IS NOT NULL)
       AND NOT EXISTS (SELECT 1 FROM persistence_requests earlier
         WHERE COALESCE(earlier.worktree_id::text,'db:'||earlier.source_incarnation::text)
               =COALESCE(r.worktree_id::text,'db:'||r.source_incarnation::text)
-        AND earlier.sequence<r.sequence AND earlier.state IN ('queued','running','recovering'))
+        AND earlier.sequence<r.sequence AND earlier.state IN ('queued','running','recovering'))`;
+
+/** #5401: whether `claimNextWrite` would find a row now. Read-only: no lock and no claim. */
+export async function hasClaimableWrite(engine: SqlEngine, hostId: string, excludeRoots: string[] = [], signal?: AbortSignal): Promise<boolean> {
+  const [row] = await engine.executeRaw<{ claimable: boolean }>(`SELECT EXISTS (SELECT 1 FROM persistence_requests r
+      LEFT JOIN persistence_worktrees w ON w.id=r.worktree_id WHERE ${CLAIMABLE_WRITE_SQL} LIMIT 1) AS claimable`, [hostId, excludeRoots], { signal });
+  return row?.claimable === true;
+}
+
+/** Claims commit before OS-lock waits. An unresolved head blocks its entire root. */
+export async function claimNextWrite(engine: BrainEngine, hostId: string, leaseMs = 30_000, excludeRoots: string[] = []): Promise<WriteRequest | null> {
+  return engine.transactionDirect(async tx => {
+    await declarePersistenceProtocol(tx);
+    const [row] = await tx.executeRaw<WriteRequest>(`SELECT r.* FROM persistence_requests r
+      LEFT JOIN persistence_worktrees w ON w.id=r.worktree_id
+      WHERE ${CLAIMABLE_WRITE_SQL}
       ORDER BY r.sequence LIMIT 1 FOR UPDATE OF r SKIP LOCKED`, [hostId, excludeRoots]);
     if (!row) return null;
     const [claimed] = await tx.executeRaw<WriteRequest>(`UPDATE persistence_requests SET state='running',

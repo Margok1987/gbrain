@@ -115,6 +115,27 @@ behave as you'd expect — every page appears in search.
 
 Flip later with `gbrain sources federate <id>` / `unfederate <id>`.
 
+### Explicit reads from a bound agent connection
+
+An agent connection started with `GBRAIN_SOURCE=<id>` (or inside a
+directory pinned by `.gbrain-source`) is bound to that source. Its
+unqualified reads stay on the bound source. It may still name another
+source in an explicit `source_id` read (`search`, `query`, `get_page`,
+`list_pages`, `resolve_slugs`, `recall`) when that source is
+`federated=true`; the result holds only the named source's rows. Writes
+still go to the bound source only.
+
+| Refusal hint | Why | Fix (on the brain host) |
+|--------------|-----|-------------------------|
+| `<id> is not federated` | The named source is not federated. | `gbrain sources federate <id>`, or start the connection without the binding. |
+| `<id> opted out of federation` | The named source was unfederated. | `gbrain sources federate <id>` if it should be readable from other sources. |
+| `<bound> opted out of federation …, so it reads no other source` | The bound source itself is isolated (`federated=false`), so it never reads another source. | `gbrain sources federate <bound>`, or start the connection without the binding. |
+| `Your token is not granted <id>` | An HTTP token or OAuth client whose grant does not include the source. | `gbrain auth rescope-client <client_id> --federated-read <ids>` for an OAuth client. |
+
+`search_by_image`, `open_loops` and the code-intel tools keep their stricter
+rule: an explicit `source_id` must be inside the connection's own source or
+grant.
+
 ## Commands
 
 The most-used subcommands (run `gbrain sources --help` for the full,
@@ -148,7 +169,30 @@ gbrain sources attach <id>     Write .gbrain-source in CWD (like kubectl context
 gbrain sources detach          Remove .gbrain-source from CWD.
 gbrain sources federate <id>
 gbrain sources unfederate <id>
+gbrain sources mirror-readonly <id>
+gbrain sources mirror-writable <id>
 ```
+
+### Read-only mirror sources
+
+A source whose Git remote is the source of truth (a code or docs repository
+you keep current with `git pull --ff-only`) can be marked a read-only mirror:
+
+```bash
+gbrain sources mirror-readonly <id>
+```
+
+On a managed brain, sync then imports canonical metadata (a default title,
+type, tags kept in the brain) into the database only and never writes a file
+back into that checkout, so `git status` stays clean and the next fast-forward
+pull succeeds. A page write into the source (`put_page`, a timeline entry, a
+maintenance write) is stored database-only too; its receipt says
+`storage: "database_only"` with `write_through.skipped: "mirror_read_only"`.
+`gbrain sources list --json` shows `mirror_read_only` per source. Undo it with
+`gbrain sources mirror-writable <id>`; files are written again from the next
+write on, except for pages created while the source was a mirror: those have
+no file in the checkout and stay database-only. Git effects of a mirror's
+writes (for example a `forget`) complete as skipped. The flag is off by default.
 
 ## The git requirement for --path sources
 

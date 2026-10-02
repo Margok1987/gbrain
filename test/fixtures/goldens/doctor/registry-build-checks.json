@@ -202,12 +202,20 @@
         "name": "orphan_clones"
       },
       {
+        "category": "brain",
+        "name": "embedding_key_source"
+      },
+      {
         "category": "ops",
         "name": "pglite_data_dir"
       },
       {
         "category": "brain",
         "name": "pglite_scratch_probe"
+      },
+      {
+        "category": "brain",
+        "name": "text_projection_readiness"
       },
       {
         "category": "ops",
@@ -232,10 +240,6 @@
       {
         "category": "meta",
         "name": "pages_upsert_arbiter"
-      },
-      {
-        "category": "brain",
-        "name": "text_projection_readiness"
       },
       {
         "category": "ops",
@@ -379,6 +383,10 @@
       },
       {
         "category": "brain",
+        "name": "extractor_facts_expired"
+      },
+      {
+        "category": "brain",
         "name": "integrity"
       },
       {
@@ -476,6 +484,10 @@
       {
         "category": "brain",
         "name": "facts_health"
+      },
+      {
+        "category": "ops",
+        "name": "legacy_job_authority"
       },
       {
         "category": "ops",

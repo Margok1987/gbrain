@@ -5372,6 +5372,7 @@
           "dryRun: boolean",
           "emitResponseMeta?: ((key: string, value: unknown) => void) | undefined",
           "engine: BrainEngine",
+          "explicitReadBinding?: ExplicitReadBinding | undefined",
           "jobId?: number | undefined",
           "localFederatedSourceIds?: string[] | undefined",
           "logger: Logger",
@@ -5513,7 +5514,7 @@
         "kind": "function",
         "name": "resolveRequestedScope",
         "signature": [
-          "(ctx: OperationContext, sourceIdParam: string | undefined, allSourcesParam?: boolean) => { sourceId?: string; sourceIds?: string[]; }"
+          "(ctx: OperationContext, sourceIdParam: string | undefined, allSourcesParam?: boolean, explicitReads?: readonly string[]) => { sourceId?: string; sourceIds?: string[]; }"
         ]
       },
       {
@@ -6925,7 +6926,7 @@
         "kind": "function",
         "name": "persistSynthesis",
         "signature": [
-          "(engine: BrainEngine, result: ThinkResult) => Promise<{ slug: string; evidenceInserted: number; warnings: string[]; }>"
+          "(engine: BrainEngine, result: ThinkResult, scope?: { sourceId?: string; allowedSources?: string[]; }) => Promise<{ slug: string; evidenceInserted: number; warnings: string[]; }>"
         ]
       },
       {

@@ -74,7 +74,10 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
     throw new OperationError('revision_conflict', 'The fact entity changed after extraction admission.');
   }
   const facts = (p.facts ?? []).map(fact => ({ ...thawFact(fact), embedding_model: fact.embedding ? p.embedding?.model ?? null : null }));
-  if (!facts.length || facts.some(fact => fact.entity_slug !== null && fact.entity_slug !== row.slug || fact.entity_slug !== null && !snapshot)) {
+  // writeSingleFact's opt-in: an unattributed row keeps its fallback entity slug, database-only.
+  const fallback = (fact: { entity_slug: string | null }) => p.attribute_fallback === true && row.slug === 'memory/unattributed'
+    && fact.entity_slug !== null && fact.entity_slug !== row.slug;
+  if (!facts.length || facts.some(fact => !fallback(fact) && (fact.entity_slug !== null && fact.entity_slug !== row.slug || fact.entity_slug !== null && !snapshot))) {
     throw new OperationError('invalid_params', 'The prepared facts do not match their entity.');
   }
   let body = snapshot?.page.compiled_truth ?? '';
@@ -86,14 +89,14 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
   const seen = new Map<string, number>();
   for (const fact of facts) {
     await assertFactNotWithdrawn(engine, row.source_id, fact);
-    const key = JSON.stringify([fact.fact, fact.visibility]);
+    const key = JSON.stringify([fact.fact, fact.visibility, fact.entity_slug]);
     const earlier = seen.get(key);
     if (earlier !== undefined) { entries.push({ fact, duplicateId: null, duplicateOf: earlier }); continue; }
     seen.set(key, entries.length);
     const decision = await decideSingleFact(engine, row.source_id, fact, fact.embedding ?? null, fact.embedding_model);
     const supersedes = p.supersede === true && decision.status === 'superseded' ? decision.candidate! : undefined;
     if (decision.candidate && !supersedes) { entries.push({ fact, duplicateId: decision.candidate.id }); continue; }
-    const rowNum = fact.entity_slug !== null ? nextRow++ : undefined;
+    const rowNum = fact.entity_slug !== null && !fallback(fact) ? nextRow++ : undefined;
     if (rowNum !== undefined) body = upsertFactRow(body, { rowNum, claim: fact.fact, kind: fact.kind, visibility: fact.visibility,
       confidence: fact.confidence ?? 1, notability: fact.notability ?? 'medium', source: fact.source, context: fact.context ?? undefined,
       validFrom: formatFenceDate(fact.valid_from!), validUntil: fact.valid_until ? formatFenceDate(fact.valid_until) : undefined,

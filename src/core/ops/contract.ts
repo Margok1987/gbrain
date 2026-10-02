@@ -465,6 +465,29 @@ export interface OperationContext {
    * wins, and a context without this field never widens.
    */
   localFederatedSourceIds?: string[];
+  /**
+   * #5081 — explicit-read admission for a stdio connection bound by an
+   * explicit tier (`GBRAIN_SOURCE` or a `.gbrain-source` pin). Set ONLY by
+   * the stdio transport (src/mcp/server.ts), never from caller params and
+   * never for an HTTP token. Unlike `localFederatedSourceIds` it never widens
+   * an unqualified read; `federatedSearchScope` only uses it to admit an
+   * explicit per-call `source_id` inside `sourceIds`.
+   */
+  explicitReadBinding?: ExplicitReadBinding;
+}
+
+/**
+ * #5081 — the bound source, how it was bound, the sources an explicit
+ * `source_id` read may name (the bound source first, then every non-archived
+ * `config.federated === true` source; just the bound source when it opted out
+ * with `config.federated === false`), and the sources that opted out, which
+ * only shape the denial hint.
+ */
+export interface ExplicitReadBinding {
+  sourceId: string;
+  via: 'GBRAIN_SOURCE' | '.gbrain-source';
+  sourceIds: string[];
+  optedOut: string[];
 }
 
 /**

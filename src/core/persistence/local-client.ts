@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { configDir, type GBrainConfig } from '../config.ts';
 import { resolveBrainId } from '../brain-resolver.ts';
+import { getCliOptions } from '../cli-options.ts';
 import { loadMounts, type MountEntry } from '../brain-registry.ts';
 import { inspectLockHolder } from '../pglite-lock.ts';
 import { resolveSourceIdEngineFree } from '../source-resolver.ts';
@@ -27,6 +28,19 @@ export function persistenceConfigForBrain(
   const mount = mounts.find(candidate => candidate.id === brainId || candidate.alias === brainId);
   if (!mount || mount.enabled === false) throw new OperationError('invalid_params', `Brain '${brainId}' is not an enabled mount.`);
   return { engine: mount.engine, database_path: mount.database_path, database_url: mount.database_url } as GBrainConfig;
+}
+
+/**
+ * The persistence config of the brain a resident serve's engine opened, resolved
+ * exactly as the CLI resolves it (--brain, GBRAIN_BRAIN_ID, .gbrain-mount, mount
+ * path), so a mounted serve binds the owner socket the CLI probes (#5237).
+ * Host-level settings stay; only the datastore identity follows the mount.
+ */
+export function residentPersistenceConfig(hostConfig: GBrainConfig | null, cwd = process.cwd()): GBrainConfig | null {
+  const brainId = resolveBrainId(getCliOptions().brain, cwd);
+  if (brainId === 'host') return hostConfig;
+  const brain = persistenceConfigForBrain(hostConfig, brainId, loadMounts())!;
+  return { ...hostConfig, engine: brain.engine, database_path: brain.database_path, database_url: brain.database_url } as GBrainConfig;
 }
 
 /** Reads an existing registration only. Revocation/missing credentials never create a new principal. */
