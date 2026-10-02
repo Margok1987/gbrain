@@ -711,7 +711,7 @@ export async function dispatchToolCall(
         ...(name === 'remember' && typeof r?.status === 'string' ? { remember_status: r.status } : {}),
       });
     }
-    const out: ToolResult = { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    const out: ToolResult = { content: [{ type: 'text', text: JSON.stringify(result) }] };
     // D8: model-visible loudness for empty retrievals. The body stays a bare
     // array (D3 — deployed thin-clients parse content[0] only), and a SECOND
     // text block carries the diagnosis the model actually sees. Structured
