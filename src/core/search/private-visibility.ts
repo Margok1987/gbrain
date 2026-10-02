@@ -44,7 +44,27 @@ function derivedPageSql(pageAlias: string): string {
  */
 export function privatePagesFilterFragment(pageAlias: string): string {
   return `(${privateSnapshotFilterFragment(pageAlias)}
-    AND NOT ${derivedOriginPrivateSql(pageAlias)})`;
+    AND NOT ${derivedOriginPrivateSql(pageAlias)}
+    AND NOT ${declaredLineagePrivateSql(pageAlias)})`;
+}
+
+/**
+ * Declared lineage: a page whose frontmatter `derived_from` names a page (one
+ * slug or a list, `.md` optional) that is explicitly `visibility: private` in
+ * the same source is private too, whatever its own field says. Summaries,
+ * digests and reports written from finance-only or other private material
+ * therefore stay behind the same boundary as their inputs. Only an explicitly
+ * private input propagates; a missing input does not hide the page.
+ */
+function declaredLineagePrivateSql(p: string): string {
+  return `(jsonb_typeof(${p}.frontmatter->'derived_from') IN ('array', 'string') AND EXISTS (
+    SELECT 1 FROM pages declared_origin
+    WHERE declared_origin.source_id = ${p}.source_id
+      AND declared_origin.frontmatter->>'visibility' = 'private'
+      AND declared_origin.slug IN (
+        SELECT regexp_replace(declared.slug, '\\.md$', '') FROM jsonb_array_elements_text(
+          CASE WHEN jsonb_typeof(${p}.frontmatter->'derived_from') = 'array' THEN ${p}.frontmatter->'derived_from'
+            ELSE jsonb_build_array(${p}.frontmatter->'derived_from') END) AS declared(slug))))`;
 }
 
 /**

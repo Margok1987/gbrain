@@ -54,7 +54,11 @@ export async function refreshProjectionStatistics(engine: BrainEngine): Promise<
         await tx.executeRaw("SET LOCAL statement_timeout = '30s'");
         await tx.executeRaw("SET LOCAL lock_timeout = '2s'");
       }
-      await tx.executeRaw('ANALYZE pages(text_projection_revision, knowledge_revision)');
+      // PGLite has no autovacuum, so nothing else ever collects planner statistics there. Without them the
+      // planner sees empty tables and runs search's graph joins as pages-by-pages nested loops (about 50 s
+      // per search on a freshly imported 4,000-page brain; 6 ms after ANALYZE). Postgres keeps the narrow
+      // refresh and leaves the rest to autovacuum.
+      await tx.executeRaw(engine.kind === 'pglite' ? 'ANALYZE' : 'ANALYZE pages(text_projection_revision, knowledge_revision)');
       await verifyProjectionStatistics(tx);
     });
     return true;
