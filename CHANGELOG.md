@@ -10,6 +10,64 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.35.0] - 2026-10-03
+
+**Agents that use gbrain through MCP now finish more company-knowledge tasks than agents with plain files and grep: they keep finance-only material out of derived pages, find what earlier sessions saved with `remember`, follow a customer's other names, and stop losing evidence to page-type guesses. On PGLite, the first search in a new session no longer takes about 50 seconds after a big import.**
+
+gbrain-evals Cat 40 (Model Ladder) gives the same 50 company tasks to agents with different memory: plain Markdown files with grep, plain Postgres search, Anthropic's memory tool, and gbrain's MCP server. The tasks cover which contract term governs, who owns an account now, what a sales rep may see, a five-part renewal brief, and a correction written in one session and needed in the next. On v0.60.27.0, gbrain lost to grep: 8 points lower pooled across 11 models from Claude Haiku 4.5 to GPT-6 Astra, with more leaks of finance-only data than any other setup. With this release, gbrain is 7 points ahead (95% interval +3 to +9). It leads on 8 models, ties on 1 and trails on 2, and leaked nothing.
+
+| Measured on Cat 40, 11 models, 550 runs each | Plain files | gbrain v0.60.27.0 | This release |
+| --- | --- | --- | --- |
+| Tasks finished | 455 | 423 | 494 |
+| Which document governs a term | 93% | 85% | 96% |
+| Who owns an account now / on a date | 82% | 85% | 90% |
+| Permissions (answer or refuse correctly) | 94% | 80% | 100% |
+| Five-part renewal briefs | 57% | 58% | 75% |
+| Correction saved, then used in a new session | 88% | 76% | 88% |
+| Finance-only data repeated in an answer (of 110) | 6 | 22 | 0 |
+| Model cost per task | $0.054 | $0.190 | $0.192 |
+
+Five things changed:
+1. **Private stays private through summaries.** A page whose `derived_from` names a private page is now private too.
+2. **Saved facts show up in search.** `search` and `query` add facts saved with `remember` that match the question.
+3. **Other names are followed.** When a page says "Account code: MULI", gbrain also searches under that name.
+4. **Type guesses no longer hide evidence.** A filter on a page type the brain does not have is lifted, and the reply lists the types that do exist.
+5. **The server instructions teach agents how to research the brain.**
+
+gbrain still costs about 3.5 times as much per task as plain files, because its tool definitions ride along on every turn. Searches also do more work now, so they take longer.
+
+## To take advantage of v0.60.35.0
+
+`gbrain upgrade` installs the binary. There is no schema migration. Restart every `gbrain serve`, autopilot and worker afterwards so agents get the new server instructions and search behavior.
+
+1. **PGLite brains refresh planner statistics on the next sync or import that changes pages.** Nothing to run; until then, the first search in a new session can still be slow on a large brain.
+2. **Mark derived pages.** Summaries, digests and reports written from private material stay hidden from remote agents only if their frontmatter names the inputs: `derived_from: [finance/approvals/q3-discounts]`. Pages without `derived_from` behave as before.
+3. **Verify:**
+   ```bash
+   gbrain search "<a customer name> billing contact"   # saved facts appear after the results when they match
+   gbrain doctor
+   ```
+4. **If any step fails,** file an issue at https://github.com/garrytan/gbrain/issues with the output of `gbrain doctor` and `~/.gbrain/upgrade-errors.jsonl` if it exists.
+
+### Behavior changes
+
+- **`derived_from` carries private visibility.** A page whose frontmatter `derived_from` (a slug or a list, `.md` optional) names a page marked `visibility: private` in the same source is private to remote callers, whatever its own `visibility` says. Only an explicitly private input propagates; a missing input does not hide the page.
+- **`search` and `query` reconcile `types`.** Requested types with no readable pages in scope are dropped from the filter; when none remain, the filter is lifted. A model-visible note names the missing types and the page types that exist. A schema-pack lookup failure still fails the read.
+- **`search` and `query` append saved facts.** Active facts whose text or entity shares at least three quarters of the query's words (at least two) are listed in a separate text block after the results, newest first, up to five, under recall's source scope and visibility rules. They also appear as `_meta.retrieval.saved_facts`.
+- **Other names declared in the evidence are followed.** When a returned page declares another name for its subject ("account code", "also known as", "aka", "short name", "ticker", "code name") and the query uses only one of the two, gbrain also searches under the other name and adds up to five new pages after the top two results. Nothing is dropped. A note lists the pair, `_meta.retrieval.other_names` carries it, and saved facts match under either name.
+- **MCP server instructions** add research guidance: run separate searches for separate parts of a question, search for other names a page lists, prefer the newest governing source over older records, drafts and agent-written notes, and read saved facts with `recall`. Skill discovery is now for procedures and workflows, and capabilities are read only when needed.
+- **PGLite runs a full `ANALYZE` whenever projection statistics refresh** (after imports, syncs and reindexes that change pages). Without it the planner saw empty tables, and the first search in each process ran a pages-by-pages nested loop. At 4,000 pages that took about 50 seconds; after the refresh it takes 6 ms. Postgres keeps its narrow refresh and relies on autovacuum.
+
+### Itemized changes
+
+- `src/core/search/private-visibility.ts`: `declaredLineagePrivateSql` joins `privatePagesFilterFragment`.
+- `src/core/ops/search.ts`: `reconcileTypeFilter`, `matchingSavedFacts`, `aliasDeclarations`, `withDeclaredNameFanOut`; `buildRetrievalResponseMeta` adds `type_filter_notice`, `saved_facts` and `other_names`.
+- `src/mcp/dispatch.ts`: `retrievalNoticeBlocks` renders the empty-retrieval diagnosis and the three notices as extra text blocks; `content[0]` stays the bare result array.
+- `src/mcp/instructions.ts`: research guidance in the operating contract.
+- `src/core/search/projection-statistics.ts`: full `ANALYZE` on PGLite.
+- Tests: `test/declared-lineage-visibility.test.ts`, `test/search-type-filter-reconcile.test.ts`, `test/search-saved-facts.test.ts`, `test/search-other-names.test.ts`, a PGLite statistics case in `test/projection-statistics.test.ts`; SQL-text goldens regenerated for the new visibility predicate.
+- Evidence: gbrain-evals `docs/benchmarks/2026-10-02-model-ladder.md`.
+
 ## [0.60.32.0] - 2026-10-02
 
 **Fix wave 7: automatic capture stops double-storing what you `remember`, the maintenance sweep reads whole transcripts, Gmail commitments and timelines work again on managed brains, `gbrain upgrade` refuses a Bun it can't run, the contradiction judge stops excusing undated conflicts, "who is waiting on me" ages and ranks requests honestly, and 62 community pull requests land.**
