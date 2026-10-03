@@ -14,7 +14,7 @@ identifiers and attribution are available in the pre-removal Git revision
 
 **Agents that use gbrain through MCP now finish more company-knowledge tasks than agents with plain files and grep: they keep finance-only material out of derived pages, find what earlier sessions saved with `remember`, follow a customer's other names, and stop losing evidence to page-type guesses. On PGLite, the first search in a new session no longer takes about 50 seconds after a big import.**
 
-gbrain-evals Cat 40 (Model Ladder) gives the same 50 company tasks to agents with different memory: plain Markdown files with grep, plain Postgres search, Anthropic's memory tool, and gbrain's MCP server. The tasks cover which contract term governs, who owns an account now, what a sales rep may see, a five-part renewal brief, and a correction written in one session and needed in the next. On v0.60.27.0, gbrain lost to grep: 8 points lower pooled across 11 models from Claude Haiku 4.5 to GPT-6 Astra, with more leaks of finance-only data than any other setup. With this release, gbrain is 7 points ahead (95% interval +3 to +9). It leads on 8 models, ties on 1 and trails on 2, and leaked nothing.
+gbrain-evals Cat 40 (Model Ladder) gives the same 50 company tasks to agents with different memory: plain Markdown files with grep, plain Postgres search, Anthropic's memory tool, and gbrain's MCP server. The tasks cover which contract term governs, who owns an account now, what a sales rep may see, a five-part renewal brief, and a correction written in one session and needed in the next. On v0.60.27.0, gbrain lost to grep: 8 points lower pooled across 11 models from Claude Haiku 4.5 to GPT-6 Astra, with more leaks of finance-only data than any other setup. With this release, gbrain is 7 points ahead (95% interval +3 to +9). It leads on 8 models, ties on 1 and trails on 2, and leaked nothing. On a second world generated from a seed nobody looked at during the fixing, run on this exact build with 6 models, it beat v0.60.27.0 by 17 points (+10 to +24) and finished 6 more points of tasks than plain files (−0.2 to +12), so there it is at least level with grep. It again leaked nothing.
 
 | Measured on Cat 40, 11 models, 550 runs each | Plain files | gbrain v0.60.27.0 | This release |
 | --- | --- | --- | --- |
@@ -34,7 +34,7 @@ Five things changed:
 4. **Type guesses no longer hide evidence.** A filter on a page type the brain does not have is lifted, and the reply lists the types that do exist.
 5. **The server instructions teach agents how to research the brain.**
 
-gbrain still costs about 3.5 times as much per task as plain files, because its tool definitions ride along on every turn. Searches also do more work now, so they take longer.
+gbrain still costs 2.5 to 4 times as much per task as plain files, because its tool definitions ride along on every turn. Searches are not slower: replayed alone on a 4,000-page brain, the median search takes 341 ms, against 572 ms on v0.60.27.0.
 
 ## To take advantage of v0.60.35.0
 
