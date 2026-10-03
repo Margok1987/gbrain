@@ -205,9 +205,9 @@ async function reconcileTypeFilter(ctx: OperationContext, scope: SourceScope, ex
   const keep: string[] = [];
   const missing: string[] = [];
   for (const type of types) {
-    let expanded = [type];
-    try { expanded = (await expandEngineTypeFilters(ctx.engine, { types: [type], ...scope })).types ?? [type]; } catch { /* keep the literal type */ }
-    (expanded.some(t => present.has(t)) ? keep : missing).push(type);
+    // A schema-pack lookup failure propagates: typed reads fail closed rather than fall back to literal types.
+    const expanded = (await expandEngineTypeFilters(ctx.engine, { types: [type], ...scope })).types ?? [type];
+    (expanded.length === 0 || expanded.some(t => present.has(t)) ? keep : missing).push(type);
   }
   if (missing.length === 0) return { types };
   const available = [...present].sort().join(', ');
