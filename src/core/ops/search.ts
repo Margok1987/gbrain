@@ -220,6 +220,21 @@ const FACT_MATCH_STOPWORDS = new Set(['the', 'and', 'for', 'who', 'what', 'when'
 
 export interface AliasDeclaration { name: string; alias: string; slug: string }
 
+const isWordChar = (c: string | undefined) => c !== undefined && /\w/.test(c);
+
+/** Case-insensitive index of `word` in `text`; with `wholeWord`, edges that are word characters must sit on word boundaries. */
+function indexOfName(text: string, word: string, wholeWord: boolean): number {
+  const target = word.toLowerCase();
+  for (let i = 0; i + word.length <= text.length; i++) {
+    if (text.slice(i, i + word.length).toLowerCase() !== target) continue;
+    if (!wholeWord) return i;
+    if (isWordChar(word[0]) && isWordChar(text[i - 1])) continue;
+    if (isWordChar(word[word.length - 1]) && isWordChar(text[i + word.length])) continue;
+    return i;
+  }
+  return -1;
+}
+
 const ALIAS_DECLARATION = /\b(?:account code|also known as|a\.k\.a\.|aka|short name|ticker|code name)\b\s*[:(]?\s*["\u201c']?([A-Z0-9][A-Za-z0-9&.-]{1,24})/gi;
 
 /**
@@ -241,7 +256,7 @@ export function aliasDeclarations(rows: Array<{ slug: string; title?: string; ch
       const alias = m[1].replace(/[.,;]+$/, '');
       if (!/[A-Z0-9]/.test(alias) || alias.toLowerCase() === name.toLowerCase()) continue;
       const hasName = q.includes(name.toLowerCase());
-      const hasAlias = new RegExp(`\\b${alias.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(q);
+      const hasAlias = indexOfName(q, alias, true) >= 0;
       if (hasName === hasAlias) continue;
       out.set(`${name}\u0000${alias}`, { name, alias, slug: row.slug });
     }
@@ -261,11 +276,11 @@ async function withDeclaredNameFanOut(results: SearchResult[], queryText: string
   run: (query: string, limit: number) => Promise<SearchResult[]>): Promise<SearchResult[]> {
   const [first] = aliasDeclarations(results, queryText);
   if (!first) return results;
-  const esc = (v: string) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const usesName = queryText.toLowerCase().includes(first.name.toLowerCase());
-  const alt = usesName
-    ? queryText.replace(new RegExp(esc(first.name), 'i'), first.alias)
-    : queryText.replace(new RegExp(`\\b${esc(first.alias)}\\b`, 'i'), first.name);
+  const nameAt = indexOfName(queryText, first.name, false);
+  const [from, to, at] = nameAt >= 0
+    ? [first.name, first.alias, nameAt]
+    : [first.alias, first.name, indexOfName(queryText, first.alias, true)];
+  const alt = queryText.slice(0, at) + to + queryText.slice(at + from.length);
   let extra: SearchResult[];
   try { extra = await run(alt, 5); } catch { return results; }
   const seen = new Set(results.map(r => `${r.source_id ?? ''}\u0000${r.slug}`));
