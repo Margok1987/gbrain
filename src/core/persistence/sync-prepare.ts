@@ -5,7 +5,7 @@ import type { GBrainConfig } from '../config.ts';
 import type { Page } from '../types.ts';
 import { OperationError } from '../ops/contract.ts';
 import { importFromContent, importCodeFile } from '../import-file.ts';
-import { parseMarkdown, serializePageToMarkdown } from '../markdown.ts';
+import { parseMarkdown, resolveParsedSubtype, serializePageToMarkdown } from '../markdown.ts';
 import { resolveSlugForPath, slugifyPath, isCodeFilePath } from '../sync.ts';
 import { SOURCE_CONFIG_OBJECT_SQL } from '../source-config-sql.ts';
 import { sameCanonicalImport } from '../page-state/import-guard.ts';
@@ -15,7 +15,8 @@ import { prepareCanonicalProjections } from './canonical-projections.ts';
 import { digest, sha256 } from './digest.ts';
 import { preserveProtectedTakes } from './protected-takes.ts';
 import { getWorktreeBinding } from './ownership.ts';
-import { assertConfiguredSyncRoot, assertSyncEntryOrigin, syncGit, syncRawHash, type SyncRename } from './sync-discovery.ts';
+import { sourceMirrorReadOnly } from './mirror-read-only.ts';
+import { assertConfiguredSyncRoot, assertSyncEntryOrigin, readSyncFile, syncGit, syncRawHash, type SyncRename } from './sync-discovery.ts';
 import { assertSyncPageOrigin, sameSyncOrigin, syncOriginPath, syncOriginScope, type SyncOriginScope } from './sync-origin.ts';
 import { assertManagedSyncActive, validateSyncAuthority, type SyncAuthority, type SyncProcessingOptions } from './sync-authority.ts';
 import type { PreparedContentImport } from './prepared-import.ts';
@@ -38,6 +39,8 @@ export interface SyncIntent extends Record<string, unknown> {
   expected_revision: string | null; sourcePath: string | null; path: string | null;
   rawHash: string | null; content: string | null; ownerEpoch: string;
   lineEndingOnly?: boolean;
+  /** #5565: the deleted file is no page's origin; publication only re-proves that and commits a no-op. */
+  unownedDeletion?: boolean;
   working?: boolean;
   renameFrom?: SyncRename;
   processingOptions?: SyncProcessingOptions;
@@ -52,6 +55,8 @@ export interface SyncIntent extends Record<string, unknown> {
 export async function prepareManagedSyncMutation(engine: BrainEngine, row: WriteRequest, _config: GBrainConfig): Promise<PreparedMutation> {
   const p = row.intent as SyncIntent | null;
   if (!p || !['managed_sync_import', 'managed_sync_delete', 'managed_sync_checkpoint'].includes(p.kind)) throw new OperationError('invalid_params', 'Unsupported internal sync intent.');
+  if (p.unownedDeletion && p.kind !== 'managed_sync_delete') throw new OperationError('invalid_params', 'Only a deletion can record an unowned path.');
+  const originPageId = p.unownedDeletion ? null : row.page_id;
   await assertManagedSyncActive(engine);
   if (p.kind !== 'managed_sync_delete' && (!p.processingOptions ||
       ['noEmbed', 'noExtract', 'noSchemaPack'].some(key => typeof p.processingOptions?.[key as keyof SyncProcessingOptions] !== 'boolean'))) {
@@ -87,7 +92,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     originContext = { root, gitRoot: realpathSync(syncGit(root, ['rev-parse', '--show-toplevel']).trim()), target: p.target, slugMode: p.slugMode };
     assertSyncEntryOrigin(originContext, origin);
     originScope = syncOriginScope({ ...originContext, sourceId: row.source_id });
-    await assertSyncPageOrigin(engine, row.source_id, p.sourcePath, row.page_id, p.kind === 'managed_sync_delete', originScope);
+    await assertSyncPageOrigin(engine, row.source_id, p.sourcePath, originPageId, p.kind === 'managed_sync_delete', originScope);
     if (p.renameFrom) await assertSyncPageOrigin(engine, row.source_id, p.renameFrom.sourcePath, p.renameFrom.pageId, true, originScope);
   }
   const moved = p.kind === 'managed_sync_import' ? p.renameFrom : undefined;
@@ -113,7 +118,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     if (p.path !== null && syncRawHash(root, p.path) !== p.rawHash) throw new OperationError('source_changed', 'The imported file changed after sync admission.');
     if (origin && originContext) {
       assertSyncEntryOrigin(originContext, origin);
-      await assertSyncPageOrigin(tx, row.source_id, origin.sourcePath, row.page_id, p.kind === 'managed_sync_delete', originScope);
+      await assertSyncPageOrigin(tx, row.source_id, origin.sourcePath, originPageId, p.kind === 'managed_sync_delete', originScope);
       if (moved) await assertSyncPageOrigin(tx, row.source_id, moved.sourcePath, moved.pageId, true, originScope);
       await assertRenameSource(tx);
     }
@@ -151,9 +156,12 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   const snapshot = await engine.readPageSnapshot(row.slug, { ...source, includeDeleted: true });
   assertPageRevision(snapshot, p.expected_revision === null ? {} : { expectedRevision: p.expected_revision });
   const recordedOrigin = moved?.slug === row.slug ? moved.sourcePath : p.sourcePath!;
-  if ((snapshot?.page.id ?? null) !== row.page_id || (snapshot?.page.source_path != null && !sameSyncOrigin(snapshot.page.source_path, recordedOrigin, originScope, snapshot.page.slug))) {
+  const foreignOrigin = snapshot?.page.source_path != null && !sameSyncOrigin(snapshot.page.source_path, recordedOrigin, originScope, snapshot.page.slug);
+  if ((snapshot?.page.id ?? null) !== row.page_id || (p.unownedDeletion ? !foreignOrigin : foreignOrigin)) {
     throw new OperationError('page_identity_changed', 'The imported path no longer names the accepted page.');
   }
+  if (p.unownedDeletion) return { observedRevision: snapshot!.revision, noop: true, validate,
+    apply: async () => ({ status: 'skipped', slug: row.slug, source_id: row.source_id, noop: true, reason: 'unowned_deleted_path' }) };
   if (snapshot && snapshot.page.source_path == null && await isUnboundSourcePage(engine, row.source_id, row.slug)) {
     throw new OperationError('source_changed', UNBOUND_COLLISION_MESSAGE);
   }
@@ -192,15 +200,28 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   if (renamed && (base?.page.id !== renamed.pageId || base.revision !== renamed.revision || base.page.deleted_at != null)) {
     throw new OperationError('revision_conflict', 'The renamed page changed after sync admission.');
   }
-  const parsedInput = parseMarkdown(p.content, row.slug, { activePack });
+  // row.slug is already resolved; parseMarkdown expects a filename, as in importFromContent.
+  const parsedInput = parseMarkdown(p.content, `${row.slug}.md`, { activePack });
+  resolveParsedSubtype(parsedInput, base?.page);
   const expectedSlug = resolveSlugForPath(p.sourcePath);
-  const retainedWindowsOrigin = process.platform === 'win32' && snapshot?.page.source_path != null &&
+  const retainedRecordedOrigin = snapshot?.page.source_path != null &&
     syncOriginPath(snapshot.page.source_path) === syncOriginPath(p.sourcePath) && parsedInput.slug === snapshot.page.slug;
-  if (expectedSlug && parsedInput.slug !== expectedSlug && slugifyPath(parsedInput.slug) !== expectedSlug && !retainedWindowsOrigin) {
+  if (expectedSlug && parsedInput.slug !== expectedSlug && slugifyPath(parsedInput.slug) !== expectedSlug && !retainedRecordedOrigin) {
     throw new OperationError('invalid_params', frontmatterSlugConflictMessage(p.sourcePath, parsedInput.slug, expectedSlug));
   }
   if (!p.companyApproval && base && !p.lineEndingOnly && p.rawHash !== sha256(p.content) && !sameCanonicalImport(base, parsedInput)) {
-    throw new OperationError('source_changed', 'Newer working-tree bytes and the current page disagree with this pinned Git import.');
+    // The pinned commit can simply trail the coordinator: a committed page write reaches the
+    // working tree before its Git effect lands. When the newer working-tree bytes are the
+    // current page itself, there is nothing to import and nothing to protect; the commit that
+    // carries them is imported as a no-op by a later run.
+    // The checkpoint may advance past the pinned commit's bytes because the working tree wins, as for any local edit.
+    const working = renamed ? null : readSyncFile(root, p.path);
+    if (!working || sha256(working) !== p.rawHash
+      || !sameCanonicalImport(base, parseMarkdown(working.toString('utf8'), `${row.slug}.md`, { activePack }))) {
+      throw new OperationError('source_changed', 'Newer working-tree bytes and the current page disagree with this pinned Git import.');
+    }
+    return { observedRevision: snapshot?.revision ?? null, noop: true, contentUnchanged: true, validate,
+      apply: async () => ({ status: 'skipped', slug: row.slug, source_id: row.source_id, chunks: 0, noop: true, imported_file: true }) };
   }
   let importContent = p.content;
   if (row.authority.remote) {
@@ -224,7 +245,8 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     // guarded proof about the other identity. Keep the cursor explicitly blocked.
     throw new OperationError('revision_conflict', 'A different page already owns this file identity; resolve the duplicate before syncing.');
   }
-  const parsed = parseMarkdown(p.content, row.slug, { activePack });
+  const parsed = parseMarkdown(p.content, `${row.slug}.md`, { activePack });
+  resolveParsedSubtype(parsed, base?.page);
   const tags = [...new Set([...(base?.tags ?? []), ...ready.parsedPage.tags])].sort();
   const renderedPage = { ...(base?.page ?? { id: 0, source_id: row.source_id, created_at: new Date(), updated_at: new Date() }), ...ready.parsedPage } as Page;
   if (renamed && parsedInput.typeExplicit !== true) renderedPage.type = parsedInput.type;
@@ -234,16 +256,20 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   const renamedType = renamed && parsedInput.typeExplicit !== true ? parsedInput.type : undefined;
   const overlay = digest(canonical(parsed, parsed.tags)) !== digest(canonical({ ...ready.parsedPage, type: renamedType ?? ready.parsedPage.type }, tags));
   if (overlay && p.companyApproval) throw new OperationError('source_writeback_required', 'Canonical preparation requires a source-content correction; this profile never writes repository files.');
-  if (overlay && !p.lineEndingOnly && p.rawHash !== sha256(p.content)) throw new OperationError('source_changed', 'Canonical sanitization cannot overwrite newer working-tree bytes.');
+  // #5409: a read-only mirror keeps its canonical metadata in the database only; its checkout stays the remote's bytes.
+  const mirrorReadOnly = overlay && await sourceMirrorReadOnly(engine, row.source_id);
+  const writeback = overlay && !mirrorReadOnly;
+  if (writeback && !p.lineEndingOnly && p.rawHash !== sha256(p.content)) throw new OperationError('source_changed', 'Canonical sanitization cannot overwrite newer working-tree bytes.');
   // A rename projects against the moved page (same id), so its pinned timeline rows carry over.
   const project = await prepareCanonicalProjections(engine, ready.parsedPage, row.slug, row.source_id, base, p.companyApproval ? 'immutable' : 'file');
   return { observedRevision: snapshot?.revision ?? null,
     // Tells the #5470 screen the content is unchanged; publication still queues its effects.
-    contentUnchanged: ready.noop && !moved && !overlay,
+    contentUnchanged: ready.noop && !moved && !writeback,
     ...(renamed ? { additionalPageKeys: [{ sourceId: row.source_id, slug: renamed.slug }] } : {}),
     validate: async tx => { await validate(tx); await ready.validate(tx); },
     deferEmbedding: p.processingOptions?.noEmbed,
-    ...(overlay ? { file: { root, path: join(root, p.path), content: serializePageToMarkdown(renderedPage, tags), expectedBeforeHash: p.rawHash } } : {}),
+    ...(writeback ? { file: { root, path: join(root, p.path), content: serializePageToMarkdown(renderedPage, tags), expectedBeforeHash: p.rawHash } } : {}),
+    ...(mirrorReadOnly ? { databaseOnlyReason: 'mirror_read_only' as const } : {}),
     apply: async tx => {
       let applied = ready;
       if (renamed) {

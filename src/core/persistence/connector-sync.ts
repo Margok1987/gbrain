@@ -16,7 +16,7 @@ import { authorizeStoredRequest, authorizeWrite } from './authority.ts';
 import { materializeTimeline, prepareCanonicalProjections } from './canonical-projections.ts';
 import { digest, sha256 } from './digest.ts';
 import { admitWriteInTransaction, assertReplayIntent, getWriteRequest, getWriteRequestById, intentDigest, receiptFor } from './journal.ts';
-import { acquireWorktree, containsPath, getWorktreeBinding, type WorktreeBinding } from './ownership.ts';
+import { acquireWorktree, containsPath, getWorktreeBinding, probeWorktreeWriter, type WorktreeBinding } from './ownership.ts';
 import { localHostId } from './identity.ts';
 import { assertPersistenceAccepting, startPersistenceConsumer, waitForWrite, writeResponse } from './service.ts';
 import { managedSyncAuthority, validateManagedSyncOptions, validateSyncAuthority, type SyncAuthority } from './sync-authority.ts';
@@ -189,7 +189,7 @@ export async function beginConnectorSync(engine: BrainEngine, sourceId: string, 
   const authority = await managedSyncAuthority(engine, sourceId, source.incarnation, source.local_path ?? '');
   const binding = await getWorktreeBinding(engine, sourceId);
   // The locked acquisition re-stamps a device-only physical-root change (#5604) before the root is asserted.
-  if (binding) { checkedConnectorBinding(sourceId, source, binding); await (await acquireWorktree(binding, 0, undefined, engine))?.release(); }
+  if (binding) { checkedConnectorBinding(sourceId, source, binding); await probeWorktreeWriter(binding, engine); }
   else authority.writer.databaseOnlyReason = 'connector_database';
   const canonicalRoot = connectorBindingRoot(sourceId, source, binding);
   const session = new ManagedConnectorSync(engine, sourceId, identity, source, authority, binding, canonicalRoot, opts.noEmbed === true, opts.noSchemaPack === true,
@@ -637,12 +637,14 @@ export class ManagedConnectorSync {
    * committed cursor state plus the updated `item_holds`, so the cursor never
    * moves past an uncommitted receipt. A stale publication is refused by the
    * `checkpointBefore` digest; any failure records nothing and returns false.
+   * `extra` carries connector bookkeeping that is not a cursor (#5867/#5868
+   * loop recovery state) and is published with the holds.
    */
-  async publishHolds(empty: Record<string, unknown>, holds: unknown): Promise<boolean> {
+  async publishHolds(empty: Record<string, unknown>, holds: unknown, extra: Record<string, unknown> = {}): Promise<boolean> {
     if (this.resetRequested || this.stopped) return false;
     const committed = (this.checkpoint[0] as { state?: Record<string, unknown> | null } | undefined)?.state ?? null;
-    if (digest(committed?.item_holds ?? { version: 1, items: {} }) === digest(holds)) return true;
-    const state = { ...empty, ...(committed ?? {}), item_holds: holds };
+    const state = { ...empty, ...(committed ?? {}), ...extra, item_holds: holds };
+    if (digest({ ...(committed ?? {}), item_holds: committed?.item_holds ?? { version: 1, items: {} } }) === digest({ ...(committed ?? {}), ...extra, item_holds: holds })) return true;
     const next = [{ generation: Number((this.checkpoint[0] as { generation?: number } | undefined)?.generation ?? 0) + 1, state }];
     try {
       await this.submit('connector_v2_checkpoint', CHECKPOINT_SLUG, null, { checkpointAfter: next, receipts: [], fresh: false });
@@ -935,7 +937,9 @@ export async function prepareConnectorMutation(engine: BrainEngine, row: WriteRe
   const project = await prepareCanonicalProjections(engine, ready.parsedPage, row.slug, row.source_id, snapshot, 'preserving');
   const tags = [...new Set([...(snapshot?.tags ?? []), ...ready.parsedPage.tags])].sort();
   const page: Page = { ...(snapshot?.page ?? { id: 0, slug: row.slug, source_id: row.source_id, created_at: new Date(row.created_at), updated_at: new Date(row.created_at) }), ...ready.parsedPage };
-  const file = await connectorFileTarget(engine, row, snapshot, serializePageToMarkdown(page, tags), p.sourcePath, p.canonicalRoot);
+  const target = await connectorFileTarget(engine, row, snapshot, serializePageToMarkdown(page, tags), p.sourcePath, p.canonicalRoot);
+  // Google pages hold private mail: derived here from the stored connector, never submitted, so request ids are unchanged.
+  const file = target && p.connector === 'google' ? { ...target, publishMode: 0o600 } : target;
   if (file && (file.path !== p.filePath || file.expectedBeforeHash !== p.fileBeforeHash)) throw new OperationError('source_changed', 'The connector canonical file changed during preparation.');
   return { observedRevision: ready.observedRevision, sourceExclusive: true,
     validate: async tx => { await validate(tx); await ready.validate(tx); },

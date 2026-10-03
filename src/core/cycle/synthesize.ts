@@ -1,5 +1,6 @@
 import { maintenancePreflight, publishMaintenancePage, type MaintenanceAuthority } from '../persistence/prepared-maintenance.ts';
-import { postprocessManagedSynthesis } from './synthesize-postprocess.ts';
+import { postprocessManagedSynthesis, withPublishPending } from './synthesize-postprocess.ts';
+import { acceptedPendingReceipt } from '../persistence/accepted-pending.ts';
 /**
  * Synthesize phase (v0.23; #4152 two-stage cascade) — conversation-to-brain
  * pipeline. Cheap-model triage gates frontier-model synthesis:
@@ -344,6 +345,8 @@ export interface SynthesizePhaseOpts {
   to?: string;
   /** #4348: clock seam for deterministic cycle-date bucketing (tests). */
   now?: () => Date;
+  /** Test seam for the triage time budget; defaults to the real clock. */
+  triageNow?: () => number;
   /** C-15: the cycle's calendar date (runCycle resolves one per cycle); --date still wins. */
   cycleDate?: string;
   /** #4168 sibling: absolute wall-clock deadline (epoch ms) of the enclosing
@@ -475,7 +478,7 @@ async function runPhaseSynthesizeInner(
       );
     }
 
-    const maintenance = opts.dryRun ? null : await maintenancePreflight(engine, opts.sourceId ?? 'default', opts.brainDir);
+    const maintenance = opts.dryRun ? null : await maintenancePreflight(engine, opts.sourceId ?? 'default', opts.brainDir, { deadlineAtMs: opts.deadlineAtMs });
 
     // v0.32.6 M2: pre-fetch prior contradictions from the most recent probe
     // run (if any). Surfaced as an informational block to the synthesize
@@ -533,7 +536,7 @@ async function runPhaseSynthesizeInner(
       maxTokens: config.triage.maxTokens,
       threshold: config.triage.threshold,
       concurrency: config.triage.concurrency,
-      maxMs: config.triage.maxMs,
+      maxMs: config.triage.maxMs, now: opts.triageNow,
       signal: opts.signal,
       rescue: rescueConfigOf(config.triage), decide: await resolveTriageDecide(engine),
     }, opts.yieldDuringPhase);
@@ -1141,6 +1144,7 @@ async function runPhaseSynthesizeInner(
     // chunks or the markdown body. Fail-open (abort still unwinds); kill
     // switch: dream.synthesize.quote_verify=false.
     let quoteVerifyStats: QuoteVerifyStats | null = null;
+    let publishPending = 0;
     const sinceByTranscript = await loadChildWriteEpochs(engine, childIds, jobRawSource, verifySince);
     const grounding = config.quoteVerify ? await resolveGroundingDecide(engine) : undefined;
     if (maintenance) {
@@ -1148,6 +1152,7 @@ async function runPhaseSynthesizeInner(
         worthProcessing, { cycleDate: summaryDate, quoteVerify: config.quoteVerify, sinceByTranscript, signal: opts.signal, grounding });
       writtenRefs = processed.writtenRefs;
       finalizedRefs = processed.finalizedRefs;
+      publishPending = processed.pending;
       quoteVerifyStats = config.quoteVerify ? processed.stats : null;
     } else if (config.quoteVerify && writtenRefs.length > 0) {
       const transcriptsForVerify = new Map<string, TranscriptForVerify>(worthProcessing.map(t => [t.filePath, { content: t.content }]));
@@ -1168,9 +1173,10 @@ async function runPhaseSynthesizeInner(
 
     const summarySlug = buildDreamSummarySlug(config.outputRoot, summaryDate);
     const writtenSlugs = writtenRefs.map(r => r.slug);
-    if (SUMMARY_SLUG_RE.test(summarySlug)) {
+    if (SUMMARY_SLUG_RE.test(summarySlug) && !publishPending) {
       const preserveSummary = maintenance && !writtenRefs.length && await engine.readPageSnapshot(summarySlug, { sourceId: cycleSourceId });
-      if (!preserveSummary) await writeSummaryPage(engine, opts.brainDir, summarySlug, summaryDate, finalizedRefs.map(r => r.slug), childOutcomes, cycleSourceId, opts.signal, maintenance);
+      if (!preserveSummary) await writeSummaryPage(engine, opts.brainDir, summarySlug, summaryDate, finalizedRefs.map(r => r.slug), childOutcomes, cycleSourceId, opts.signal, maintenance)
+        .catch((e: unknown) => { if (!acceptedPendingReceipt(e)) throw e; publishPending++; });
     }
 
     // #4077: nothing below runs for a cancelled cycle — no phase-end embed
@@ -1323,11 +1329,11 @@ async function runPhaseSynthesizeInner(
     // still-unknown keys) AND nothing was budget-deferred (#4168 adversarial:
     // "deferred transcripts retry next cycle" is a lie if the next cycle is
     // cooldown-skipped for half a day).
-    if (failedChildren.length === 0 && budgetExhaustedDeferrals.length === 0 && pass.deferred === 0) {
+    if (failedChildren.length === 0 && budgetExhaustedDeferrals.length === 0 && pass.deferred === 0 && publishPending === 0) {
       await engine.setConfig('dream.synthesize.last_completion_ts', new Date().toISOString());
     } else {
       process.stderr.write(
-        `[dream] synthesize: ${failedChildren.length}/${childOutcomes.length} child job(s) incomplete + ${budgetExhaustedDeferrals.length} synthesis-budget deferred + ${pass.deferred} triage-deferred — cooldown NOT stamped so the next run retries them.\n`,
+        `[dream] synthesize: ${failedChildren.length}/${childOutcomes.length} child job(s) incomplete + ${budgetExhaustedDeferrals.length} synthesis-budget deferred + ${pass.deferred} triage-deferred + ${publishPending} publish-deferred — cooldown NOT stamped so the next run retries them.\n`,
       );
     }
 
@@ -1341,7 +1347,7 @@ async function runPhaseSynthesizeInner(
     const turnsSamples = childOutcomes.filter(
       (o): o is { jobId: number; status: string; turns: number } => typeof o.turns === 'number',
     );
-    return ok(`${submittedTranscripts} transcript(s) synthesized in ${(ms / 1000).toFixed(1)}s${deferralSuffix}`, {
+    return withPublishPending(publishPending, ok(`${submittedTranscripts} transcript(s) synthesized in ${(ms / 1000).toFixed(1)}s${deferralSuffix}`, {
       transcripts_discovered: transcripts.length,
       transcripts_processed: submittedTranscripts,
       pages_written: writtenSlugs.length,
@@ -1407,7 +1413,7 @@ async function runPhaseSynthesizeInner(
         // child counters + triage pass usage). cost_usd null when unpriced.
         spend: spendBlock,
       },
-    });
+    }));
   } catch (e) {
     return failed(makeError('InternalError', 'SYNTH_PHASE_FAIL',
       e instanceof Error ? (e.message || 'synthesize phase threw') : String(e)));

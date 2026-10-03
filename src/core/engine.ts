@@ -534,6 +534,8 @@ export interface FactRow {
   embedding: Float32Array | null;
   embedded_at: Date | null;
   created_at: Date;
+  /** Set only when the list call asked for `fingerprint` (#5888 hot-memory collapse). */
+  fact_fingerprint?: string;
 }
 
 /** Input for insertFact. source_id supplied via the ctx arg. */
@@ -633,6 +635,8 @@ export interface FactListOpts {
    * unaffected.
    */
   excludeAuditRows?: boolean;
+  /** #5888: listFactsSince/listFactsBySession also select `gbrain_fact_fingerprint(fact)` as `fact_fingerprint`. */
+  fingerprint?: boolean;
 }
 
 /** Per-source operational health snapshot consumed by `gbrain doctor`. */
@@ -1690,7 +1694,7 @@ export interface BrainEngine {
     title: string;
     domain: string | null;
     type?: string | null;
-    quarantined?: boolean;
+    quarantined?: boolean; source_id?: string;
   }>>;
 
   // Tags
@@ -1785,7 +1789,7 @@ export interface BrainEngine {
   /** Meta-ontology: which dimensions exist across the brain, and how widely. */
   discoverOntologyDimensions(opts?: { sourceId?: string; sourceIds?: string[] }): Promise<OntologyDimensionStat[]>;
   /** Dimensions with ≥2 distinct current-open values from ≥2 provenances. */
-  findOntologyConflicts(opts?: PageReadScope & { minConfidence?: number }): Promise<OntologyConflict[]>;
+  findOntologyConflicts(opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts['visibility'] }): Promise<OntologyConflict[]>;
 
   // Raw data
   /**

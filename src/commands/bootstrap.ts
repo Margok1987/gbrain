@@ -203,6 +203,17 @@ const SUBCOMMAND_HELP: Record<string, string> = {
   interview:
     'gbrain bootstrap interview --init | --set KEY "value" | --skip KEY | --status | --show | --confirm <hash>\n' +
     '  Create/record/read interview state. See `gbrain bootstrap --help` for the per-flag description.',
+  // #5488: `gbrain bootstrap harness --help` previously fell through into the
+  // real apply because harness was missing from SUBCOMMAND_HELP. Without this
+  // entry the dispatch's `Object.hasOwn(SUBCOMMAND_HELP, sub)` guard was
+  // false, so `--help` after the subcommand name ran the harness apply path.
+  harness:
+    'gbrain bootstrap harness [--harness claude-code|codex|opencode|all] [--url U | --port N] [--source ID]\n' +
+    '                       [--token-name NAME | --token TOK] [--name MCPNAME] [--project DIR]...\n' +
+    '                       [--no-hooks] [--no-capture] [--force] [--status] [--remove] [--yes] [--json]\n' +
+    '  Wire framework-spawned Claude Code / Codex / opencode sessions to a RUNNING `gbrain serve --http`\n' +
+    '  on this box (#4043). Idempotent; --remove tears it down. (--local is an accepted no-op alias.)\n' +
+    '  See `gbrain bootstrap --help` for the per-flag description.',
 };
 
 /**

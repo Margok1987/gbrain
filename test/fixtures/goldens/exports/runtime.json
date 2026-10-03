@@ -221,6 +221,7 @@
         "executeRaw",
         "executeRawDirect",
         "expireFact",
+        "explainVectorSearch",
         "findAnomalies",
         "findByTitleFuzzy",
         "findCandidateDuplicates",
@@ -332,6 +333,7 @@
         "rlsScopeBindingEnabled",
         "runMigration",
         "runUnsafe",
+        "runVectorAttempt",
         "searchKeyword",
         "searchKeywordChunks",
         "searchTakes",
@@ -364,6 +366,7 @@
         "upsertChunks",
         "upsertEventProjection",
         "upsertFile",
+        "vectorIterativeScanSupported",
         "withReservedConnection",
         "withScopedReadTransaction",
         "writeContradictionsRun"
@@ -577,6 +580,7 @@
         "extractStaleFromDB",
         "extractTimelineForSlugs",
         "extractTimelineFromContent",
+        "filterRefsSince",
         "logBatchRetry",
         "reconcileSourceLinks",
         "resolveBasenameMatchesFromSlugs",
@@ -657,6 +661,7 @@
         "isRelativeFileUri",
         "parseMarkdown",
         "resolvePageFilePath",
+        "resolveParsedSubtype",
         "resolveSourceLocalFilePath",
         "serializeMarkdown",
         "serializePageToMarkdown",
@@ -719,6 +724,8 @@
         "isProcessAlive",
         "msSinceLastReap",
         "peekLock",
+        "readBootId",
+        "readPidNs",
         "releaseLock"
       ],
       "./search/evidence-delivery": [

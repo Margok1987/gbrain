@@ -86,7 +86,7 @@ describe('list_pages truncation signal', () => {
     expect(result.length).toBe(50);
     expect(warnings.length).toBe(1);
     expect(warnings[0]).toContain('truncated at 50 rows');
-    expect(warnings[0]).toContain('sort=updated_asc');
+    expect(warnings[0]).toContain('updated_after_slug');
   }, 30_000);
 
   test('explicit honored limit: no warning even when more rows exist', async () => {

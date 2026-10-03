@@ -56,6 +56,7 @@ import { resolvePageFilePath, resolveSourceLocalFilePath } from './markdown.ts';
 import { sanitizeRecordedSourcePath, recordedPathFromFileUri, scannerSlugRootMode } from './write-through.ts';
 import { isWriteTargetContained, msysToNativePath } from './path-confine.ts';
 import { atomicWriteFileSync } from './atomic-write.ts';
+import { commitWriteThroughFile, isDurabilityHardened } from './brain-repo-durability.ts';
 
 export type TakesWriteErrorCode =
   | 'page_not_found'      // slug has no pages row (scoped)
@@ -354,7 +355,7 @@ function readPageBody(path: string): string {
  * not escape), then atomic temp+rename so a reader never observes a torn file
  * and a crash mid-write leaves only a tmp sibling.
  */
-function writePageBody(path: string, body: string, writeRoot: string): void {
+function writePageBody(path: string, body: string, writeRoot: string, slug: string): void {
   if (!isWriteTargetContained(path, writeRoot)) {
     throw new TakesWriteError(
       'mirror_unavailable',
@@ -364,6 +365,9 @@ function writePageBody(path: string, body: string, writeRoot: string): void {
   }
   mkdirSync(dirname(path), { recursive: true });
   atomicWriteFileSync(path, body);
+  // Same #2426 contract as put_page write-through: a durability-hardened repo
+  // gets a best-effort, path-limited commit; a failed commit never fails the write.
+  if (isDurabilityHardened(writeRoot)) commitWriteThroughFile(writeRoot, path, slug);
 }
 
 /**
@@ -559,7 +563,7 @@ export async function addTakeToPage(
       sinceDate: input.sinceDate,
       active: true,
     });
-    writePageBody(path, nextBody, writeRoot);
+    writePageBody(path, nextBody, writeRoot, target.slug);
     let mirrorWarning: string | undefined;
     try {
       await target.engine.addTakesBatch([{
@@ -620,7 +624,7 @@ export async function appendTakesToPageMdFirst(
     // mirror_unavailable) — see the contract note above.
     const body = readPageBody(path);
     const { body: nextBody, rowNums } = appendTakesToPageBody(body, rows);
-    writePageBody(path, nextBody, writeRoot);
+    writePageBody(path, nextBody, writeRoot, target.slug);
     // Mirror md→DB with the reconcile primitive, exactly as the fence now
     // states the appended rows.
     const appended = new Set(rowNums);
@@ -676,7 +680,7 @@ export async function updateTakeOnPage(
       sinceDate: fields.sinceDate ?? targetRow.sinceDate,
     };
     const allRows = parsed.takes.map(t => (t.rowNum === rowNum ? updated : t));
-    writePageBody(path, replaceFence(body, allRows), writeRoot);
+    writePageBody(path, replaceFence(body, allRows), writeRoot, target.slug);
     // Mirror md→DB with the reconcile primitive (upsert on (page_id,row_num));
     // base columns only, resolution columns preserved by the DO UPDATE list.
     let mirrorWarning: string | undefined;
@@ -738,7 +742,7 @@ export async function supersedeTakeOnPage(
       sinceDate: input.sinceDate,
       source: input.source,
     });
-    writePageBody(path, nextBody, writeRoot);
+    writePageBody(path, nextBody, writeRoot, target.slug);
     // Mirror BOTH affected rows exactly as the fence now states them:
     // old → inactive + superseded_by pointer, new → active append.
     const after = parseTakesFence(nextBody).takes;
@@ -808,7 +812,7 @@ export async function resolveTakeOnPage(
       resolvedBy: input.resolvedBy,
     };
     const allRows = parsed.takes.map(t => (t.rowNum === rowNum ? updated : t));
-    writePageBody(path, replaceFence(body, allRows), writeRoot);
+    writePageBody(path, replaceFence(body, allRows), writeRoot, target.slug);
     // Resolution fields aren't in TakeBatchInput — mirror via resolveTake.
     // A drifted DB missing the row is self-healed md→DB (upsert the base row,
     // then resolve): the markdown is the truth being propagated.

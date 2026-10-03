@@ -308,20 +308,20 @@ export async function runOrphanRatioCheck(config: GBrainConfig): Promise<RemoteC
   // locally; point them at the brain server's operator.
   const url = config.remote_mcp?.mcp_url ?? '<your brain server>';
   const hint =
-    `Ask the brain operator at ${url} to run: gbrain extract links --by-mention ` +
+    `Ask the brain operator at ${url} to run: gbrain extract links --by-mention --source db ` +
     `(auto-links entity mentions in body text).`;
   if (ratio > 0.8) {
     return {
       name: 'orphan_ratio',
       status: 'fail',
-      message: `Orphan ratio ${pct}% (${data.total_orphans}/${entityCount} linkable pages have no inbound links). ${hint}`,
+      message: `Orphan ratio ${pct}% (${data.total_orphans}/${entityCount} linkable pages have no links in either direction). ${hint}`,
     };
   }
   if (ratio > 0.5) {
     return {
       name: 'orphan_ratio',
       status: 'warn',
-      message: `Orphan ratio ${pct}% (${data.total_orphans}/${entityCount} linkable pages have no inbound links). ${hint}`,
+      message: `Orphan ratio ${pct}% (${data.total_orphans}/${entityCount} linkable pages have no links in either direction). ${hint}`,
     };
   }
   return {

@@ -22,6 +22,7 @@
 import { OperationError, type Operation, type OperationContext } from './contract.ts';
 import { resolveRequestedScope, sourceScopeOpts } from './context.ts';
 import { validateSourceId } from '../utils.ts';
+import { closedLoopWithActiveFact, retireLoopFact } from '../persistence/loop-fact-retirement.ts';
 import {
   addSuppression,
   closeOpenLoop,
@@ -33,6 +34,26 @@ import {
 } from '../loops/loops-store.ts';
 
 const STALE_AFTER_MS = 24 * 3_600_000;
+
+/** Does this source carry Google content? A loops suppression row is only
+ *  ever consulted by the detector inside a google source — a mute written
+ *  anywhere else can never match. */
+async function sourceHasGoogleContent(ctx: OperationContext, sourceId: string): Promise<boolean> {
+  try {
+    const rows = await ctx.engine.executeRaw<{ config: unknown }>(
+      `SELECT config FROM sources WHERE id = $1`,
+      [sourceId],
+    );
+    const c = rows[0]?.config;
+    const cfg =
+      typeof c === 'string'
+        ? (JSON.parse(c) as Record<string, unknown>)
+        : ((c ?? {}) as Record<string, unknown>);
+    return cfg.kind === 'google';
+  } catch {
+    return false;
+  }
+}
 
 interface GoogleSourceFreshness {
   id: string;
@@ -215,14 +236,14 @@ interface CounterpartyGroup {
   context?: unknown;
 }
 
-function rankGroups(groups: CounterpartyGroup[], backlinks: Map<string, number>): CounterpartyGroup[] {
+function rankGroups(groups: CounterpartyGroup[], backlinks: Map<string, number>, nowMs: number): CounterpartyGroup[] {
   const score = (g: CounterpartyGroup): number => {
     let s = g.loop_count * 10;
     if (g.nearest_due_at) {
-      const days = (Date.parse(g.nearest_due_at) - Date.now()) / 86_400_000;
+      const days = (Date.parse(g.nearest_due_at) - nowMs) / 86_400_000;
       s += days <= 0 ? 50 : days <= 3 ? 30 : days <= 7 ? 15 : 5;
     }
-    const ageDays = (Date.now() - Date.parse(g.oldest_opened_at)) / 86_400_000;
+    const ageDays = (nowMs - Date.parse(g.oldest_opened_at)) / 86_400_000;
     s += Math.min(20, ageDays);
     if (g.counterparty_slug) s += Math.min(20, backlinks.get(g.counterparty_slug) ?? 0);
     return s;
@@ -231,7 +252,7 @@ function rankGroups(groups: CounterpartyGroup[], backlinks: Map<string, number>)
 }
 
 function renderText(groups: CounterpartyGroup[], stale: boolean, noGoogleSources: boolean,
-  coverage: { completeness: 'complete' | 'partial'; held: HeldItemView[] } = { completeness: 'complete', held: [] }): string {
+  coverage: { completeness: 'complete' | 'partial'; held: HeldItemView[] }, nowMs: number): string {
   const lines: string[] = [];
   const { held } = coverage;
   if (stale) lines.push('⚠ google sources have not synced recently — this may be out of date.');
@@ -264,7 +285,7 @@ function renderText(groups: CounterpartyGroup[], stale: boolean, noGoogleSources
       const due = l.due_at ? ` — due ${l.due_at.slice(0, 10)}` : '';
       // Age renders at READ time from last_activity_at — stored summaries
       // deliberately carry no age (it would freeze at detection time).
-      const ageDays = Math.max(0, Math.floor((Date.now() - Date.parse(l.last_activity_at)) / 86_400_000));
+      const ageDays = Math.max(0, Math.floor((nowMs - Date.parse(l.last_activity_at)) / 86_400_000));
       const age = Number.isFinite(ageDays) ? ` (${ageDays}d)` : '';
       lines.push(`- [${l.loop_type}] ${l.summary}${age}${due}`);
       if (l.quote) lines.push(`  > "${l.quote}"`);
@@ -276,6 +297,7 @@ function renderText(groups: CounterpartyGroup[], stale: boolean, noGoogleSources
 
 const open_loops: Operation = {
   name: 'open_loops',
+  outputRedaction: 'retrieval',
   description:
     'The open-loop engine\'s killer output: who is waiting on you, what you promised, and the context ' +
     'needed to respond. Grouped by counterparty (default, ranked) or flat. Loops come from the ' +
@@ -293,11 +315,16 @@ const open_loops: Operation = {
     include_context: { type: 'boolean', description: 'Attach the counterparty entity card per group (trusted local only). Default true.' },
     source_id: { type: 'string', description: "Scope to one source (e.g. the google source, when the caller's transport is bound elsewhere). Remote callers must hold a grant covering it." },
     all_sources: { type: 'boolean', description: 'Trusted local: span every source in the brain. Remote callers stay inside their grant.' },
+    as_of: { type: 'string', description: 'Reference time (ISO 8601) for due-date proximity, loop age and rendered ages. Default: now. Pin it to reproduce a ranking.' },
   },
   scope: 'read',
   annotations: { readOnlyHint: true },
   handler: async (ctx, p) => {
     const trusted = ctx.remote === false;
+    const nowMs = p.as_of === undefined ? Date.now() : Date.parse(String(p.as_of));
+    if (!Number.isFinite(nowMs)) {
+      throw new OperationError('invalid_params', `open_loops: as_of must be an ISO 8601 timestamp, got ${JSON.stringify(p.as_of)}`);
+    }
     const groupBy = (p.group_by as string | undefined) ?? 'counterparty';
     const status = ((p.status as string | undefined) ?? 'open') as LoopStatus;
     // Per-call scope via the canonical trust+grant resolver: an MCP caller
@@ -417,7 +444,7 @@ const open_loops: Operation = {
     } catch { /* rank without backlinks */ }
 
     const limit = Math.min(Math.max((p.limit as number | undefined) ?? 3, 1), 50);
-    const groups = rankGroups([...byKey.values()], backlinks).slice(0, limit);
+    const groups = rankGroups([...byKey.values()], backlinks, nowMs).slice(0, limit);
 
     // Entity-card context (zero-LLM, trusted local only).
     if (trusted && (p.include_context as boolean | undefined) !== false) {
@@ -445,13 +472,15 @@ const open_loops: Operation = {
       held: coverage.held,
       no_google_sources: noGoogleSources,
       redacted: !trusted,
-      ...(trusted ? { text: renderText(groups, freshness.stale, noGoogleSources, coverage) } : {}),
+      as_of: new Date(nowMs).toISOString(),
+      ...(trusted ? { text: renderText(groups, freshness.stale, noGoogleSources, coverage, nowMs) } : {}),
     };
   },
 };
 
 const loops_close: Operation = {
   name: 'loops_close',
+  outputRedaction: 'no_stored_text',
   description:
     "Close an open loop by id: status 'done' (handled) or 'dropped' (not going to). Closing is a state " +
     'transition with an audit trail, never a delete. Thread loops also close automatically when a reply lands.',
@@ -459,24 +488,49 @@ const loops_close: Operation = {
     id: { type: 'number', required: true, description: 'Loop id (from open_loops).' },
     status: { type: 'string', required: true, enum: ['done', 'dropped'], description: 'Terminal state.' },
     note: { type: 'string', description: 'Optional closed_by note (default: manual).' },
+    source_id: {
+      type: 'string',
+      description:
+        "The loop's home source (e.g. the google source, when the caller's transport is bound " +
+        'elsewhere). Remote callers must be write-bound to it — a federated read grant does not ' +
+        'authorize the close. When omitted, the caller\'s bound write source is used.',
+    },
   },
   mutating: true,
   scope: 'write',
   handler: async (ctx, p) => {
-    const scope = sourceScopeOpts(ctx);
-    // Remote callers stay inside their granted source scope; trusted local
+    const requested = p.source_id as string | undefined;
+    if (requested) validateSourceId(requested);
+    // Remote callers stay inside their bound write source; trusted local
     // closes across sources (null = unscoped).
     let sourceId: string | null = null;
     if (ctx.remote !== false) {
-      sourceId = scope.sourceId ?? (scope.sourceIds && scope.sourceIds.length === 1 ? scope.sourceIds[0] : null);
-      if (!sourceId) {
+      // Write authority is the caller's bound write source
+      // (auth.sourceId, dual-written to ctx.sourceId) ONLY — the federated
+      // allowedSources array is a READ grant and must never authorize a
+      // close+fact-expiry write in a sibling source (contract.ts).
+      const writeSource = (ctx.auth?.sourceId ?? ctx.sourceId) as string | undefined;
+      if (!writeSource) {
         // Enumerated error envelope (dispatch classifies + request-logs it),
         // never a success-shaped { closed:false } payload.
         throw new OperationError(
           'permission_denied',
-          'loops_close: remote callers need a single-source scope',
+          'loops_close: remote callers need a bound write source',
         );
       }
+      if (requested && requested !== writeSource) {
+        throw new OperationError(
+          'permission_denied',
+          `loops_close: source "${requested}" is outside the caller's write scope`,
+        );
+      }
+      // No cross-source SELECT: the close runs scoped to the write source,
+      // so a loop living in a grant-adjacent source is indistinguishable
+      // from a missing id — both answer closed:false, and neither the row's
+      // existence nor its home source name ever leaves the boundary.
+      sourceId = writeSource;
+    } else {
+      sourceId = requested ?? null;
     }
     if (ctx.dryRun) return { dry_run: true, action: 'loops_close', id: p.id, status: p.status };
     const row = await closeOpenLoop(
@@ -485,24 +539,21 @@ const loops_close: Operation = {
       p.id as number,
       p.status as 'done' | 'dropped',
       (p.note as string | undefined)?.slice(0, 200) || 'manual',
-    );
+    ) ?? await closedLoopWithActiveFact(ctx.engine, sourceId, p.id as number);
     if (!row) return { closed: false, reason: 'not_found_or_already_closed' };
-    // A closed commitment loop expires its projected fact so entity cards
-    // stop carrying it (fence round-trip happens on the next facts sweep).
-    if (row.fact_id !== null) {
-      try {
-        await ctx.engine.executeRaw(
-          `UPDATE facts SET expired_at = now() WHERE id = $1 AND expired_at IS NULL`,
-          [row.fact_id],
-        );
-      } catch { /* best-effort */ }
-    }
-    return { closed: true, id: row.id, status: row.status, fact_expired: row.fact_id !== null };
+    // #5869: a closed commitment loop retires its fact (expired + fence row
+    // struck) through one coordinated publication. A loop already closed whose
+    // fact is still active re-attempts it, so a refused retirement is retryable.
+    if (row.fact_id === null) return { closed: true, id: row.id, status: row.status, fact_expired: false, retryable: false };
+    const retired = await retireLoopFact(ctx, row.id);
+    return { closed: true, id: row.id, status: row.status, fact_expired: retired.fact_expired, retryable: retired.retryable,
+      ...(retired.reason && retired.reason !== 'already_expired' ? { reason: retired.reason } : {}) };
   },
 };
 
 const loops_mute: Operation = {
   name: 'loops_mute',
+  outputRedaction: 'no_stored_text',
   description:
     'Suppress a sender (email address) or thread id from opening NEW loops — the detector feedback ' +
     'primitive behind "never track this sender". Existing loops keep their state.',
@@ -516,22 +567,29 @@ const loops_mute: Operation = {
   handler: async (ctx, p) => {
     const sourceId = (p.source_id as string | undefined) ?? ctx.sourceId ?? 'default';
     validateSourceId(sourceId);
-    // Remote callers stay strictly inside their grant (mirrors loops_close):
-    // a scalar-scoped caller may only mute within its own source; federated
-    // grants must include the target. Trusting p.source_id for a remote
-    // WRITE would let any remote client plant suppression rows into
+    // Remote callers stay strictly inside their bound write source (mirrors
+    // loops_close): the federated allowedSources array is a READ grant and
+    // never authorizes the write. Trusting it (or p.source_id alone) for a
+    // remote WRITE would let any remote client plant suppression rows into
     // arbitrary sources (targeted denial-of-loop-detection).
     if (ctx.remote !== false) {
-      const scope = sourceScopeOpts(ctx);
-      const granted =
-        (scope.sourceId && scope.sourceId === sourceId) ||
-        (scope.sourceIds?.includes(sourceId) ?? false);
-      if (!granted) {
+      const writeSource = (ctx.auth?.sourceId ?? ctx.sourceId) as string | undefined;
+      if (!writeSource || sourceId !== writeSource) {
         throw new OperationError(
           'permission_denied',
-          `loops_mute: source "${sourceId}" is outside the caller's scope`,
+          `loops_mute: source "${sourceId}" is outside the caller's write scope`,
         );
       }
+    }
+    // A suppression is only consulted inside a google source — when the
+    // caller omits source_id and the resolved target holds no Google
+    // content, the row can never match. Refuse instead of planting a dead
+    // mute (remote callers bound to a non-google source hit exactly this).
+    if (p.source_id === undefined && !(await sourceHasGoogleContent(ctx, sourceId))) {
+      throw new OperationError(
+        'invalid_params',
+        `loops_mute: source "${sourceId}" holds no Google content — a suppression there can never match; pass source_id naming the google source`,
+      );
     }
     if (ctx.dryRun) return { dry_run: true, action: 'loops_mute', kind: p.kind, value: p.value };
     await addSuppression(ctx.engine, sourceId, p.kind as 'sender' | 'thread', p.value as string);
@@ -541,6 +599,7 @@ const loops_mute: Operation = {
 
 const loops_unmute: Operation = {
   name: 'loops_unmute',
+  outputRedaction: 'no_stored_text',
   description:
     'Remove a sender/thread suppression added by loops_mute, so the detector can open NEW loops for ' +
     'it again. Exact-match only. Does not reopen loops closed while the mute was in place.',
@@ -554,20 +613,27 @@ const loops_unmute: Operation = {
   handler: async (ctx, p) => {
     const sourceId = (p.source_id as string | undefined) ?? ctx.sourceId ?? 'default';
     validateSourceId(sourceId);
-    // Same grant check as loops_mute — an unmute is equally a targeted write:
-    // letting a remote caller lift another source's suppression would re-open
-    // the very noise channel its owner silenced.
+    // Same write-source check as loops_mute — an unmute is equally a targeted
+    // write, and a federated read grant does not confer it: letting a remote
+    // caller lift another source's suppression would re-open the very noise
+    // channel its owner silenced.
     if (ctx.remote !== false) {
-      const scope = sourceScopeOpts(ctx);
-      const granted =
-        (scope.sourceId && scope.sourceId === sourceId) ||
-        (scope.sourceIds?.includes(sourceId) ?? false);
-      if (!granted) {
+      const writeSource = (ctx.auth?.sourceId ?? ctx.sourceId) as string | undefined;
+      if (!writeSource || sourceId !== writeSource) {
         throw new OperationError(
           'permission_denied',
-          `loops_unmute: source "${sourceId}" is outside the caller's scope`,
+          `loops_unmute: source "${sourceId}" is outside the caller's write scope`,
         );
       }
+    }
+    // Mirrors loops_mute: an omitted source_id resolving to a source with no
+    // Google content can never hold a live suppression — refuse rather than
+    // answer removed:false on a row that should never have existed.
+    if (p.source_id === undefined && !(await sourceHasGoogleContent(ctx, sourceId))) {
+      throw new OperationError(
+        'invalid_params',
+        `loops_unmute: source "${sourceId}" holds no Google content — pass source_id naming the google source`,
+      );
     }
     if (ctx.dryRun) return { dry_run: true, action: 'loops_unmute', kind: p.kind, value: p.value };
     const removed = await removeSuppression(

@@ -52,10 +52,12 @@ GBRAIN_NO_AUTOPILOT_INSTALL=1 GBRAIN_NO_REEMBED=1 gbrain upgrade --no-autopilot-
 The autopilot opt-out reaches package postinstall hooks and migration
 orchestrators, and skips existing service-unit rewrites. Other migrations still
 run. `GBRAIN_NO_REEMBED=1` independently skips potentially paid reindexing.
-For a clone linked with Bun, use `git pull --ff-only`, then
-`GBRAIN_NO_AUTOPILOT_INSTALL=1 bun install`,
-`gbrain apply-migrations --yes --no-autopilot-install`, and
-`GBRAIN_NO_REEMBED=1 gbrain post-upgrade --no-autopilot-install`.
+The same command upgrades a clone linked with Bun: it fetches, checks the new
+release's Bun floor, fast-forwards to the checked commit and runs
+`bun install`. Avoid a bare `git pull`, which skips that check. When the new
+release needs a newer Bun, `gbrain upgrade` refuses and changes nothing (exit
+78): run `bun upgrade`, then the upgrade again
+([Bun floor](guides/upgrades-auto-update.md#bun-floor)).
 Verify a known keyword result, saved fact and process reopen after upgrading.
 See the [agent upgrade steps](../INSTALL_FOR_AGENTS.md#upgrade).
 
@@ -179,6 +181,8 @@ Connect to someone else's brain without running a local engine:
 
 ```bash
 gbrain init --mcp-only            # configures remote MCP, skips local DB
+# requires: --issuer-url --mcp-url --oauth-client-id --oauth-client-secret
+# (or GBRAIN_REMOTE_ISSUER_URL / GBRAIN_REMOTE_MCP_URL / ... env vars)
 ```
 
 Useful for: team mounts, brain-as-a-service deployments, dev machines without disk space. Most local commands refuse with a paste-ready hint. See [`docs/architecture/topologies.md`](architecture/topologies.md).

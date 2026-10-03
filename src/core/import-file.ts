@@ -7,7 +7,7 @@ import { readFileSync, statSync, lstatSync } from 'fs';
 import { basename, extname, resolve } from 'path';
 import { createHash } from 'crypto';
 import type { BrainEngine, FileSpec } from './engine.ts';
-import { parseMarkdown } from './markdown.ts';
+import { parseMarkdown, resolveParsedSubtype, type ParseOpts } from './markdown.ts';
 import { classifyStoredType } from './schema-pack/type-usage.ts';
 import { prepareMarkdownChunks } from './markdown-chunks.ts';
 import { prepareCodeChunks, installCodeChunkEdges } from './code-chunks.ts';
@@ -264,7 +264,7 @@ export async function importFromContent(
      * Callers thread this from `loadActivePack(ctx)` once per command —
      * NEVER per file inside sync (codex perf finding #7).
      */
-    activePack?: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; aliases?: ReadonlyArray<string> }> };
+    activePack?: ParseOpts['activePack'];
     /**
      * v0.39.3.0 provenance write-through (WARN-8). When set, threaded to
      * `tx.putPage` so the page's `source_kind`, `source_uri`,
@@ -631,7 +631,7 @@ export async function importFromContent(
   if (parsed.typeExplicit !== true && existing) {
     parsed.type = existing.type;
   }
-
+  resolveParsedSubtype(parsed, existing);
   // Alias-footgun visibility: an explicit frontmatter `type:` that is an
   // ALIAS of a canonical pack type (or entirely undeclared) is stored
   // literally and never re-normalized — different agents can silently file
@@ -1603,7 +1603,7 @@ export async function importCodeFile(
           to_chunk_id: null,
           from_symbol_qualified: from.symbol_name_qualified,
           to_symbol_qualified: e.toSymbol,
-          edge_type: e.edgeType,
+          edge_type: e.edgeType, ...(e.memberCall ? { edge_metadata: { member_call: true } } : {}),
           // Stamp the source: getCallersOf/getCalleesOf add
           // `AND source_id = <scoped>` whenever a worktree pin / --source is
           // in play, and a NULL here never matches that filter — so every

@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 200378,
-    "stdoutSha256": "c23df35de49ce6ca01006bf4db2ce92fb57d2f37f089f82fef292c047982b00e",
+    "stdoutBytes": 204505,
+    "stdoutSha256": "361a0a6ada8208de169e71c9f95264e6bd6e6a3dc652a6148f46230a824035af",
     "toolNames": [
       "remember",
       "entity",
@@ -168,6 +168,7 @@
           "expected_revision": "string?",
           "fact": "string",
           "force": "boolean?",
+          "infer_entity": "boolean?",
           "kind": "string?",
           "provenance": "string",
           "request_id": "string?",
@@ -191,6 +192,10 @@
             },
             "force": {
               "description": "Explicitly overwrite the current revision. Mutually exclusive with expected_revision; does not bypass authorization or the empty-content guard.",
+              "type": "boolean"
+            },
+            "infer_entity": {
+              "description": "Default true. When `entity` is omitted, link the fact to the one entity page the text names exactly (response `entity_inferred: \"mention\"`); pass false to save it unattributed.",
               "type": "boolean"
             },
             "kind": {
@@ -467,7 +472,7 @@
         }
       },
       {
-        "description": "List pages with optional filters. For 'what's recent / what did I touch this week' questions, use list_pages with sort=updated_desc instead of semantic search. Default 50 rows; remote callers are capped at 100 (local CLI callers' explicit limits are honored). A result with exactly `limit` rows may be truncated. For exhaustive listing, page with sort=updated_asc + updated_after=<last row's updated_at> until a page returns fewer rows than the limit.",
+        "description": "List pages with optional filters. For 'what's recent / what did I touch this week' questions, use list_pages with sort=updated_desc instead of semantic search. Default 50 rows; remote callers are capped at 100 (local CLI callers' explicit limits are honored). A result with exactly `limit` rows may be truncated. For exhaustive listing, page with updated_after=<last row's updated_at_iso> + updated_after_slug=<last row's slug> until a page returns fewer rows than the limit (the keyset forces sort=updated_asc; a bare updated_after cursor skips rows sharing the cursor timestamp).",
         "name": "list_pages",
         "parameters": {
           "include_deleted": "boolean?",
@@ -477,7 +482,8 @@
           "source_id": "string?",
           "tag": "string?",
           "type": "string?",
-          "updated_after": "string?"
+          "updated_after": "string?",
+          "updated_after_slug": "string?"
         },
         "schema": {
           "properties": {
@@ -516,7 +522,11 @@
               "type": "string"
             },
             "updated_after": {
-              "description": "ISO date (YYYY-MM-DD) or full timestamp. Returns pages with updated_at > value.",
+              "description": "ISO date (YYYY-MM-DD) or full timestamp. Returns pages with updated_at > value. Bare (without updated_after_slug) this is LOSSY across rows sharing one timestamp — a bulk sync stamps one now() across a transaction; pair with updated_after_slug to page exactly.",
+              "type": "string"
+            },
+            "updated_after_slug": {
+              "description": "Keyset cursor slug: pass the last row's slug together with updated_after set to that row's updated_at_iso (column precision — a millisecond-rounded value re-selects same-millisecond rows). Resumes strictly after (updated_at, slug) and forces sort=updated_asc.",
               "type": "string"
             }
           },
@@ -1322,12 +1332,22 @@
         "description": "List outgoing links from a page",
         "name": "get_links",
         "parameters": {
-          "slug": "string"
+          "all_sources": "boolean?",
+          "slug": "string",
+          "source_id": "string?"
         },
         "schema": {
           "properties": {
+            "all_sources": {
+              "description": "Span sources (equivalent to source_id=__all__): every source locally, only your readable sources remotely.",
+              "type": "boolean"
+            },
             "slug": {
               "description": "Slug of the page whose outgoing links to list.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Scope the read to one source (a multi-source brain can hold the same slug in several sources). Omitted: your granted sources remotely (a connection with no grant reads every federated source); locally, the resolved source, or every federated source when no --source / GBRAIN_SOURCE / .gbrain-source pinned it. '__all__' spans every source for trusted local callers and only your readable sources for remote callers.",
               "type": "string"
             }
           },
@@ -1341,12 +1361,22 @@
         "description": "List incoming links to a page",
         "name": "get_backlinks",
         "parameters": {
-          "slug": "string"
+          "all_sources": "boolean?",
+          "slug": "string",
+          "source_id": "string?"
         },
         "schema": {
           "properties": {
+            "all_sources": {
+              "description": "Span sources (equivalent to source_id=__all__): every source locally, only your readable sources remotely.",
+              "type": "boolean"
+            },
             "slug": {
               "description": "Slug of the page whose incoming links to list.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Scope the read to one source (a multi-source brain can hold the same slug in several sources). Omitted: your granted sources remotely (a connection with no grant reads every federated source); locally, the resolved source, or every federated source when no --source / GBRAIN_SOURCE / .gbrain-source pinned it. '__all__' spans every source for trusted local callers and only your readable sources for remote callers.",
               "type": "string"
             }
           },
@@ -1370,13 +1400,19 @@
         "description": "Traverse link graph from a page. Remote callers default to bidirectional edges (GraphPath[]) at depth 2 (pass depth explicitly for deeper walks); trusted local no-filter callers keep the legacy node shape at depth 5.",
         "name": "traverse_graph",
         "parameters": {
+          "all_sources": "boolean?",
           "depth": "number?",
           "direction": "string?",
           "link_type": "string?",
-          "slug": "string"
+          "slug": "string",
+          "source_id": "string?"
         },
         "schema": {
           "properties": {
+            "all_sources": {
+              "description": "Span sources (equivalent to source_id=__all__): every source locally, only your readable sources remotely.",
+              "type": "boolean"
+            },
             "depth": {
               "description": "Max traversal depth (capped at 10). Default 5, except a remote call that lets direction default to 'both' uses 2 (bidirectional path enumeration is combinatorial on hubs); an explicit depth is always honored up to the cap.",
               "type": "number"
@@ -1396,6 +1432,10 @@
             },
             "slug": {
               "description": "Slug of the page to start the traversal from, e.g. 'people/alice-example'. This is the start-node param — there is no `start` or `root` param.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Scope the read to one source (a multi-source brain can hold the same slug in several sources). Omitted: your granted sources remotely (a connection with no grant reads every federated source); locally, the resolved source, or every federated source when no --source / GBRAIN_SOURCE / .gbrain-source pinned it. '__all__' spans every source for trusted local callers and only your readable sources for remote callers.",
               "type": "string"
             }
           },
@@ -3916,7 +3956,7 @@
         }
       },
       {
-        "description": "Life Chronicle: sweep existing meeting/conversation/calendar pages into timeline events by enqueuing chronicle_extract jobs (one per eligible page). --dry-run counts without enqueuing. Local-only bulk op. CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--limit N] [--dry-run]`.",
+        "description": "Life Chronicle: sweep existing meeting/conversation/calendar pages into timeline events by enqueuing chronicle_extract jobs (one per eligible page). A page whose current content was already enqueued is skipped (already_enqueued), so repeat runs move on to pages not yet swept. --dry-run counts without enqueuing. Local-only bulk op. CLI: `gbrain chronicle-backfill [--since YYYY-MM-DD] [--limit N] [--dry-run]`.",
         "name": "chronicle_backfill",
         "parameters": {
           "dry_run": "boolean?",
@@ -3930,7 +3970,7 @@
               "type": "boolean"
             },
             "limit": {
-              "description": "Max pages per type to sweep (default 1000).",
+              "description": "Max pages per type to enqueue in this run (default 1000); pages already enqueued for their current content do not count.",
               "type": "number"
             },
             "since": {
@@ -5081,6 +5121,7 @@
         "name": "open_loops",
         "parameters": {
           "all_sources": "boolean?",
+          "as_of": "string?",
           "counterparty": "string?",
           "group_by": "string?",
           "include_context": "boolean?",
@@ -5094,6 +5135,10 @@
             "all_sources": {
               "description": "Trusted local: span every source in the brain. Remote callers stay inside their grant.",
               "type": "boolean"
+            },
+            "as_of": {
+              "description": "Reference time (ISO 8601) for due-date proximity, loop age and rendered ages. Default: now. Pin it to reproduce a ranking.",
+              "type": "string"
             },
             "counterparty": {
               "description": "Filter to one counterparty (slug or email).",
@@ -5151,6 +5196,7 @@
         "parameters": {
           "id": "number",
           "note": "string?",
+          "source_id": "string?",
           "status": "string"
         },
         "schema": {
@@ -5161,6 +5207,10 @@
             },
             "note": {
               "description": "Optional closed_by note (default: manual).",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "The loop's home source (e.g. the google source, when the caller's transport is bound elsewhere). Remote callers must be write-bound to it — a federated read grant does not authorize the close. When omitted, the caller's bound write source is used.",
               "type": "string"
             },
             "status": {

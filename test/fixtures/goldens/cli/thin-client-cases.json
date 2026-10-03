@@ -102,7 +102,7 @@
       "argv": "config",
       "exitCode": 1,
       "stderr": [
-        "`gbrain config` is not routable. config reads/writes the host brain's config plane. Edit the host's .gbrain/config.json (file-plane keys) or run on the host with GBRAIN_HOME set.",
+        "`gbrain config` is not routable. config reads/writes the host brain's config plane. Edit the host's .gbrain/config.json (file-plane keys) or run on the host with GBRAIN_HOME set. self_upgrade.* keys are machine-local and work here.",
         "(thin-client of http://127.0.0.1:1/mcp)"
       ],
       "stdout": []

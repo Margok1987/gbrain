@@ -23,7 +23,7 @@ gbrain config set spend.posture gated      # default — gates enforce
 | Value | Effect |
 |-------|--------|
 | `gated` (default) | Every cost gate enforces its limit as documented below. |
-| `tokenmax` | Every embedding-spend gate in the table below prints its estimate and **proceeds** — informational only. Spend is still recorded to the ledger; posture removes the *ceiling*, not the *accounting*. (Commands with their own LLM cost caps outside this doc's embedding scope — e.g. `extract-conversation-facts --max-cost-usd`, `dream retriage --max-usd` (an estimate-based soft stop) — don't resolve posture; their per-call flags govern.) |
+| `tokenmax` | Every embedding-spend gate in the table below prints its estimate and **proceeds** — informational only. Spend is still recorded to the ledger; posture removes the *ceiling*, not the *accounting*. (Commands with their own LLM cost caps outside this doc's embedding scope — e.g. `extract-conversation-facts --max-cost-usd`, `dream retriage --max-usd` (an estimate-based soft stop), `facts relink --max-usd` (default $1.00; its free tiers and moved rows spend nothing) — don't resolve posture; their per-call flags govern.) |
 
 `spend.posture` is deliberately separate from `search.mode=tokenmax` (which governs
 retrieval payload size, not embedding spend). When a gate fires and
@@ -62,7 +62,9 @@ The USD-limit knobs accept `off`, `unlimited`, or `none` (case-insensitive) to m
 | `migrate embeddings` consent gate | — (plan + estimate before provider migration) | — | TTY y/N prompt / non-TTY refuse + exit 2 | `--yes` | estimate marked informational, but **still prompts** (guards a destructive schema rebuild, not just spend) |
 | `enrich` / `onboard --auto` | `--max-usd` (per-call) | — | refuse without a cap (non-TTY) | `--max-usd off` | runs uncapped (still ledgered) |
 | Image-OCR per-run ceiling | `embedding_image_ocr_max_images` / `embedding_image_ocr_max_usd` | `200` images / `$1.00` (estimated) | skips OCR over-cap (import continues; skips counted in `ocr_skipped_budget`, surfaced by doctor `ocr_health`) | `0` disables that cap | **not** bypassed (per-run cap, not a tracker gate) |
-| Dream `extract_atoms` phase budget | `cycle.extract_atoms.budget_usd` | `0.30` | caps the phase's budget tracker | — | **not** consulted (phase budget enforces regardless) |
+| Dream `extract_atoms` phase budget | `cycle.extract_atoms.budget_usd` | `0.30` | caps the phase's budget tracker (one tracker per drain attempt, across all its batches) | — | **not** consulted (phase budget enforces regardless) |
+| Atom auto-drain daily cap | `autopilot.auto_drain.max_usd_per_day` | `2.00` | daily cap on drain **attempts** (`floor(max / 0.30)` = 6), not a dollar ledger | `gbrain config set autopilot.auto_drain.enabled false` | **not** consulted |
+| Connector email/meeting atoms | `cycle.extract_atoms.connector_pages` | `false` (opt-in) | Gmail/Calendar `email`/`meeting` pages are skipped by atom extraction | leave unset / `false` | **not** consulted |
 | Dream `synthesize` per-run budget | `dream.synthesize.budget_usd` | `5` | defers the transcript and the rest of the run before submission (estimate: prompt size + child output cap, x `max_turns` in agentic mode) | `unlimited` (`0` = submit nothing) | **not** consulted |
 | Dream `synthesize` daily submission cap | `dream.synthesize.max_submissions_per_source_per_day` | `0` (off) | skips whole files; a failed count query submits nothing that run | `0` | **not** consulted |
 | Dream `BudgetMeter` phases (auto_think, drift, propose/grade takes, calibration) | `dream.auto_think.budget`, `dream.drift.budget`, `cycle.<phase>.budget_usd` | per phase | refuses the next submit past the cap | `unlimited` (`0` = spend nothing) | **not** consulted |
@@ -114,6 +116,42 @@ estimate is `delta + stale backlog`, labeled as such.
   over-count used only when a precise delta can't be computed: a first sync, a chunker
   version drift (forces a full re-chunk), or git being unavailable. Unchanged files
   still skip via `content_hash` at execution, so the ceiling over-states real spend.
+
+### Atom extraction: auto-drain cap and connector pages
+
+**Say to your agent:** *"Extract atoms from my Gmail and Calendar pages too"* or
+*"Stop spending on automatic atom extraction."*
+
+When the active schema pack does not run `extract_atoms` in the routine cycle,
+autopilot (Postgres brains) submits a bounded `extract-atoms-drain` job per
+source with a backlog. Each drain **attempt** runs under one BudgetTracker
+capped at `cycle.extract_atoms.budget_usd` ($0.30 by default), shared by all of
+its batches. The daily cap `autopilot.auto_drain.max_usd_per_day` ($2.00) is a
+count of attempts at that per-attempt estimate (6 a day), so a retried job
+uses one slot per attempt. A job refused before any model call (no active
+canonical owner on this host, untrusted caller) dead-letters once with
+`structural_refusal:` and uses no slot; autopilot also skips a source whose
+writer would refuse, and logs why. Checkout-backed and connector sources take
+turns for the daily slots. With a model the tracker cannot price, the dollar
+limit is not enforced (see above); only the attempt count bounds the drain.
+
+Connector pages are opt-in. Gmail threads (`email`) and Calendar events
+(`meeting`) from a Google or GitHub connector source are skipped by atom
+discovery, the backlog count, the routine cycle, `gbrain dream --drain` and
+the auto-drain until you turn them on:
+
+```bash
+gbrain config set cycle.extract_atoms.connector_pages true    # opt in
+gbrain config set cycle.extract_atoms.connector_pages false   # opt out again
+gbrain config set autopilot.auto_drain.enabled false          # stop all automatic atom drains
+```
+
+What leaves the machine when you opt in: the page text of each extracted email
+thread or calendar event (message bodies, subjects, participants as rendered on
+the page, up to `cycle.extract_atoms.max_input_chars`) is sent to the
+configured `extract_atoms` chat model (`models.dream.extract_atoms`, a
+utility-tier model by default), under the caps above. Atoms already extracted
+stay; turning the setting off only stops new extraction.
 
 ## Notes & limits
 

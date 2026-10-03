@@ -60,7 +60,7 @@ op	migrate_embeddings	no_canonical_write	Embedding projections under the migrati
 op	schema_apply_mutations	no_canonical_write	Schema-pack files outside the brain database.
 op	run_onboard	no_canonical_write	Runs remediation steps; each step keeps its own writer boundary.
 op	run_skillopt	no_canonical_write	Skill files and proposals outside the brain database.
-op	loops_close	no_canonical_write	open_loops state rows.
+op	loops_close	coordinator	open_loops state rows; the commitment fact is retired (expired, fence row struck) through the loop-fact-retirement coordinator mutation (#5869).
 op	loops_mute	no_canonical_write	Loop suppression rows.
 op	loops_unmute	no_canonical_write	Loop suppression rows.
 cli	src/commands/enrich.ts	coordinator	gbrain enrich preflights maintenance authority, then publishMaintenancePage per page.

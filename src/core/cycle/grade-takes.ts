@@ -37,6 +37,7 @@
 import { createHash } from 'node:crypto';
 import { BaseCyclePhase, effectivePhaseDeadlineMs, type ScopedReadOpts, type BasePhaseOpts } from './base-phase.ts';
 import { hybridSearch } from '../search/hybrid.ts';
+import { INTERNAL_BREADTH_SEARCH_OPTS } from '../search/internal-breadth.ts';
 import type { SearchResult } from '../types.ts';
 import { chat as gatewayChat, getChatModel } from '../ai/gateway.ts';
 import { createGlobalLlmHaltTracker, haltedClassOf, type GlobalLlmErrorClass } from '../ai/errors.ts';
@@ -389,6 +390,7 @@ export async function defaultEvidenceRetriever(
 ): Promise<string> {
   try {
     const hits = await hybridSearch(engine, take.claim, {
+      ...INTERNAL_BREADTH_SEARCH_OPTS,
       limit: EVIDENCE_SEARCH_LIMIT,
       expansion: false,
       ...(scope.sourceIds && scope.sourceIds.length > 0

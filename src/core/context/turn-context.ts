@@ -6,7 +6,8 @@
  * existing, deterministic sources —
  *
  *   1. reflex pointers   — extractCandidatesFromWindow → resolveEntitiesToPointers
- *                          (slug-only suppression, the windowed contract)
+ *                          (slug-only suppression, the windowed contract;
+ *                          private pages excluded like remote search, N8-2)
  *   2. volunteered pages — volunteerContext (confidence-gated, ≤3, deduped
  *                          against section 1 via excludeSlugs)
  *   3. hot facts         — getBrainHotMemoryMeta's cache + shape [ENG-11], with
@@ -34,6 +35,7 @@ import {
 } from './retrieval-reflex.ts';
 import { volunteerContext, type VolunteeredPage } from './volunteer.ts';
 import { getBrainHotMemoryMeta } from '../facts/meta-hook.ts';
+import { collapseHotFacts } from '../facts/capture-dedup.ts';
 import { buildEntityCard, type EntityCard, type EntityOpenThread } from '../verbs/entity-card.ts';
 import { estimateTokens } from '../search/token-budget.ts';
 import type { DecideSlotMeta } from '../search/decide-stage.ts';
@@ -73,6 +75,8 @@ export interface TurnContextFact {
   kind: string;
   notability?: string | null;
   entity_slug: string | null;
+  /** #5888: every entity of a collapsed duplicate group (representative first). */
+  entity_slugs?: string[];
   valid_from?: string;
   /** Recording time (v0.45.7) — delta's "new since" filter prefers this over valid_from. */
   created_at?: string;
@@ -240,6 +244,7 @@ export async function assembleTurnContext(
           suppression: 'slug-only',
           maxPointers: DEFAULT_MAX_POINTERS,
           lexicalArms: opts.lexicalArms,
+          excludePrivate: true,
         });
         pointers = block?.pointers ?? [];
       }
@@ -261,6 +266,7 @@ export async function assembleTurnContext(
           // v0.46.15+ lexical-arms kill switch rides the same threading as the
           // pointer arm above (ResolvePointersOpts.lexicalArms).
           lexicalArms: opts.lexicalArms,
+          excludePrivate: true,
         });
       }
     } catch {
@@ -603,8 +609,10 @@ async function assembleDelta(
           activeOnly: true,
           limit: 50,
           visibility,
+          fingerprint: true,
         });
-        acc.facts = rows
+        // #5888: duplicates collapse to their newest representative, as in hot memory.
+        acc.facts = (await collapseHotFacts(engine, opts.sourceId, rows))
           .filter((r) => !since || isAfter(r.created_at.toISOString(), since))
           .map((r) => ({
             id: r.id,
@@ -612,6 +620,7 @@ async function assembleDelta(
             kind: r.kind,
             notability: r.notability,
             entity_slug: r.entity_slug,
+            ...(r.entity_slugs ? { entity_slugs: r.entity_slugs } : {}),
             valid_from: r.valid_from.toISOString(),
             created_at: r.created_at.toISOString(),
             // #4206: provenance context rides delta like the other projections.

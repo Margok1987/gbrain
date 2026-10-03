@@ -1917,7 +1917,7 @@ EXAMPLES
   gbrain init --pglite                      # Local-only, no API keys
   gbrain init --supabase                    # Interactive Supabase setup
   gbrain init --url postgresql://...        # Use a custom Postgres
-  gbrain init --mcp-only --url https://...  # Thin-client mode
+  gbrain init --mcp-only --issuer-url https://host:3001 --mcp-url https://host:3001/mcp --oauth-client-id <id> --oauth-client-secret <secret>  # Thin-client mode
 
 NOTES
   - Bare \`gbrain init\` always defaults to PGLite at ~/.gbrain/brain.pglite.

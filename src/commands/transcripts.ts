@@ -25,6 +25,7 @@ import { isGrokSessionSidecarStrict } from '../core/transcripts/grok.ts';
 import {
   isClaudeCodeSubagentFile,
   isClaudeCodeWorkflowArtifactFile,
+  isClaudeCodeRemoteControlStateFile,
 } from '../core/transcripts/claude-code.ts';
 
 interface RecentOpts {
@@ -248,7 +249,10 @@ const IMPORTABLE_EXTENSIONS = ['.jsonl', '.db', '.json'];
  * via the STRICT (evidence-checked) grok predicate: these are user-supplied
  * paths with no format scope, and the broad bare-UUID heuristic silently
  * dropped explicit sessions that merely lived under a UUID-named directory.
- * Exported for tests.
+ * Claude Code Remote Control state files (`<uuid>.ccr-tip.json`,
+ * `bridge-pointer.json`) are excluded the same way (#5597): they match the
+ * `.json` importable extension, are not transcripts, and would otherwise
+ * fail every run with `unknown format`. Exported for tests.
  */
 /**
  * Shell-style tilde expansion for a user path spec: a bare `~` or a leading
@@ -298,7 +302,8 @@ export async function expandPaths(specs: string[]): Promise<string[]> {
       !isOpenclawCheckpointFile(p) &&
       !isGrokSessionSidecarStrict(p) &&
       !isClaudeCodeSubagentFile(p) &&
-      !isClaudeCodeWorkflowArtifactFile(p),
+      !isClaudeCodeWorkflowArtifactFile(p) &&
+      !isClaudeCodeRemoteControlStateFile(p),
   );
 }
 

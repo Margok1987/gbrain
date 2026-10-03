@@ -10,6 +10,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { ListToolsRequestSchema, CallToolRequestSchema, type CallToolRequest } from '@modelcontextprotocol/sdk/types.js';
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { opAllowedForBoundClient } from '../core/operations.ts';
+import { authTransport } from '../core/ops/contract.ts';
 import type { AuthInfo, Operation } from '../core/operations.ts';
 import { disabledOpsForPublishGates } from '../mcp/publish-gates.ts';
 import { resolveMcpInstructions } from '../mcp/instructions.ts';
@@ -181,7 +182,7 @@ function createMcpRequestServer(
     },
   );
   installCapabilitiesResource(server, async () => {
-    return { transport: authInfo.clientId.startsWith('gbrain_cl_') ? 'oauth' : 'legacy', client_id: authInfo.clientId,
+    return { transport: authTransport(authInfo), client_id: authInfo.clientId,
       ...await resolveAuthCapabilities(authInfo, engine, config), administration: mcpAdministrationGuidance(mcpResourceUrl.toString()) };
   }, createSkillResources(engine, async () => {
     const sourceId = authInfo.sourceId ?? 'default';

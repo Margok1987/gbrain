@@ -815,10 +815,18 @@ async function runSingleSourceSync(
     // v0.42.42.0 (#2139, Step 4b): the inline gate auto-deferred this run's
     // embeds (non-TTY, above floor) — enqueue a capped backfill job so the
     // NULL-embedded chunks get embedded out of band instead of being stranded.
+    // Mirror --all: an intrinsic >100-file deferral is delivered on a worker-backed
+    // engine when federated v2 is on, and as a manual drain when no worker exists.
+    // An explicit --no-embed never submits a backfill.
+    let singleV2Enabled = false;
+    if (result.embedDeferralReason === 'large_sync' && !noEmbed && !singleSourceNoWorkerSurface) {
+      const { isFederatedV2Enabled } = await import('../../core/feature-flags.ts');
+      singleV2Enabled = await isFederatedV2Enabled(engine);
+    }
     let singleEmbedBackfill: SyncEmbedBackfillOutcome | undefined;
     if (
       !companyPolicy && (singleSourceAutoDefer || (
-        singleSourceNoWorkerSurface && result.embedDeferralReason === 'large_sync'
+        result.embedDeferralReason === 'large_sync' && (singleSourceNoWorkerSurface || singleV2Enabled)
       )) &&
       result.status !== 'dry_run' &&
       result.status !== 'up_to_date' &&

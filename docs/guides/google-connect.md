@@ -159,6 +159,42 @@ deep backfill carries on. A thread that keeps failing is held (see
 source synced after its first sync; a source that has never synced stays idle
 until you run `gbrain sync --source <id>` once.
 
+### What runs on synced mail and calendar pages
+
+**Say to your agent:** *"Make sure my Gmail threads are checked for open loops
+and linked to the people in them"* or *"Also extract atoms from my email and
+calendar pages."*
+
+- **Links and timelines.** Every autopilot or dream cycle extracts links and
+  timeline entries for connector pages straight from the database (a connector
+  source has no checkout), source-scoped and bounded by the cycle's 3-minute
+  stale-drain budget; a large backlog finishes over later cycles. The cycle
+  reports `extract: ok` with `database_only: true`. On demand:
+  `gbrain extract --stale`.
+- **Open loops.** Every Gmail sweep queues commitment extraction for the
+  threads it touched, on managed and unmanaged brains. The sync result carries
+  `loops_enqueue` (`enqueued`, `deferred`, `skipped_reason`), and every skip is
+  logged with its reason (extraction off, no chat model, the enqueue ceiling).
+  On a managed brain the first sweep also runs a one-time catch-up over email
+  threads whose newest message is from the last 30 days, so threads synced
+  before extraction was queued are analyzed once; it finishes over later
+  sweeps when the enqueue ceiling binds.
+- **Quiet threads.** A thread still inside its waiting window (24 h for
+  inbound, 72 h for your own question) is re-checked when the window ends,
+  even if no new mail arrives, and opens its loop then. See
+  [open loops](open-loops.md#quiet-threads-and-grace-holds).
+- **Atoms (opt-in).** Atom extraction skips Gmail threads and Calendar events
+  until you opt in with `gbrain config set cycle.extract_atoms.connector_pages
+  true`. After that, the text of each extracted email thread or calendar event
+  is sent to the configured `extract_atoms` model under the daily auto-drain
+  cap. `gbrain config set cycle.extract_atoms.connector_pages false` stops new
+  extraction. Caps, the off switch and exactly what leaves the machine:
+  [spend controls](../operations/spend-controls.md#atom-extraction-auto-drain-cap-and-connector-pages).
+
+`gbrain doctor`'s `orphan_ratio` reports orphaned email and meeting renders of
+a connector source apart (`connector_renders_excluded`), since a mail page
+with no links is normal, and leaves them out of the ratio.
+
 ### Rate limits during backfill
 
 A large mailbox backfilling a wide `--history-days` window can trip Gmail's
@@ -302,6 +338,8 @@ upstream failures rather than triggering a full re-list.
 
 - Tokens: local vault only, 0600, atomic writes. `sources.config` stores an
   account *pointer*, never a secret. `gbrain creds list` is always redacted.
+- Mail, calendar and contact pages and the sync state: 0600 files in 0700
+  directories gbrain creates. See [File permissions](#file-permissions).
 - Disconnect: `gbrain google disconnect <email>` removes local tokens; revoke
   Google-side at <https://myaccount.google.com/permissions>.
 - Upgrade/transfer: `gbrain creds export` produces a passphrase-encrypted
@@ -311,6 +349,107 @@ upstream failures rather than triggering a full re-list.
   capped per sweep) to your configured chat provider. Kill switch:
   `gbrain config set loops.extraction_enabled false`. The deterministic
   unanswered-thread detector is free and always on.
+- Atom extraction from email and calendar pages is off until you run
+  `gbrain config set cycle.extract_atoms.connector_pages true`; then page
+  text goes to the `extract_atoms` model under the auto-drain cap
+  ([spend controls](../operations/spend-controls.md#atom-extraction-auto-drain-cap-and-connector-pages)).
+
+## File permissions
+
+A Google source keeps its files in one directory: by default
+`~/.gbrain/clones/<source-id>-google`, or the directory you passed with
+`gbrain sources add <id> --kind google --account <email> --dir <path>`. gbrain
+writes these files there:
+
+- `.google-source.json`, the sync cursors (and `.google-source.json.corrupt`
+  if a damaged state file was set aside),
+- one Markdown page per email thread under `emails/`, per event under
+  `calendar/` and per contact under `people/`.
+
+Each of those files is written with mode 0600 (readable only by you).
+Directories gbrain creates for the source, including the source directory
+itself when it does not exist yet, are created 0700. A directory that
+already exists, such as one you chose with `--dir`, is never chmod-ed. The
+same modes apply when managed persistence publishes the pages. On Windows
+gbrain does not set modes.
+
+**gbrain enforces 0600.** Every time gbrain rewrites one of these files it
+sets 0600 again, so a looser mode you set by hand (for example
+`chmod 644` to share a page with a group) is reverted on the next rewrite.
+Pages that did not change are not rewritten and keep whatever mode they have.
+This is deliberate: the pages are your private mail, calendar and contacts,
+and a page that quietly stays group-readable after a sync is the failure
+this rule prevents. There is no per-source setting for a looser mode yet.
+
+### Files written before v0.60.31.0
+
+Older releases wrote these files with your umask, typically 0644 (readable by
+every local user), and an upgrade does not rewrite them. In the default
+directory that is harmless, because gbrain keeps `~/.gbrain` at 0700. In a
+custom `--dir` outside `~/.gbrain`, older pages stay readable by other local
+users until they are rewritten.
+
+The upgrade prints a one-time notice for each Google source outside
+`~/.gbrain`, naming the directory, how many readable entries it found and
+the repair commands. `gbrain doctor` checks the same thing on every run:
+
+```text
+  [WARN] google_file_modes: Google source gmail-you: 412 file(s) and 9 directories gbrain wrote under /data/mail are readable by other local users (written before this release). Preview: gbrain repair google-file-modes --source gmail-you — apply after the user agrees: gbrain repair google-file-modes --source gmail-you --apply
+```
+
+The check reports counts per directory, never file names (Gmail page names
+contain subject words). `gbrain doctor --json` carries `source_id`, `dir`,
+`loose_files`, `loose_dirs` and both commands under `details.sources`.
+
+**Fix it with gbrain (recommended):**
+
+```bash
+gbrain repair google-file-modes --source <id>          # preview: counts and up to 10 sample paths
+gbrain repair google-file-modes --source <id> --apply  # clear group and other permission bits
+```
+
+The repair only touches gbrain's own layout: `.google-source.json*`, the
+pages gbrain recorded for that source under `emails/`, `calendar/` and
+`people/` (and their leftover `.tmp` files), and the directories between the
+source directory and those pages. It clears the group and other bits and
+keeps your own. It never changes the source directory itself, never follows
+a symlink, and skips files owned by another user (counted as residuals).
+Without `--source` it covers every Google source outside `~/.gbrain`. The
+preview's sample paths are relative to the source directory, so they can
+show subject words; run it on the brain host. See
+[`gbrain repair`](repair.md#what-each-kind-fixes).
+
+**Or fix it with chmod.** If the directory holds only this source:
+
+```bash
+chmod -R go-rwx /path/to/google/dir
+```
+
+If the directory also holds other files you want to keep shared, limit the
+change to gbrain's files:
+
+```bash
+DIR=/path/to/google/dir
+chmod go-rwx "$DIR"/.google-source.json*
+chmod -R go-rwx "$DIR"/emails "$DIR"/calendar "$DIR"/people
+```
+
+**Verify:**
+
+```bash
+find /path/to/google/dir \( -perm -040 -o -perm -004 \) -print | head   # prints nothing
+gbrain doctor   # [OK] google_file_modes
+```
+
+### Related messages
+
+- `[google] could not secure the quarantined state file <path>: <chmod|rename> failed (<error>). It may be readable by other local users; run chmod 600 <path> or delete it.`
+  A damaged state file was set aside, but gbrain could not make the copy
+  private. The sync continues from empty cursors. Run the printed `chmod` or
+  delete the file.
+- `Stale temporary path <path>.tmp is a directory; remove it and re-run the sync.`
+  A directory sits where gbrain writes a page's temporary file. That item
+  fails until you remove the directory.
 
 ## For agents ([SHOW USER] protocol)
 

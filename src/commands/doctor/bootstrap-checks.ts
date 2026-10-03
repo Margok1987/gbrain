@@ -437,7 +437,7 @@ export async function bootstrapDoctorChecks(engine: BrainEngine | null): Promise
   try {
     const dataDir = resolveBrainDataDir(home);
     const holder = probeLivePgliteHolder(dataDir);
-    if (holder) {
+    if (holder && !holder.isSelf) {
       checks.push({
         name: 'bootstrap_serve_lock',
         status: holder.serve ? 'ok' : 'warn',

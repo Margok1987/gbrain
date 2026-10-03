@@ -7,7 +7,7 @@
  */
 
 import type { Operation } from './contract.ts';
-import { OperationError } from './contract.ts';
+import { OperationError, authTransport } from './contract.ts';
 import { assertSourceInCallerScope, assertSourceInCallerWriteScope, sourceScopeOpts } from './context.ts';
 import { resolveAuthCapabilities } from '../harness/capabilities.ts';
 
@@ -15,6 +15,7 @@ import { resolveAuthCapabilities } from '../harness/capabilities.ts';
 
 const whoami: Operation = {
   name: 'whoami',
+  outputRedaction: 'no_stored_text',
   description:
     'Introspect the calling identity. Returns one of three transport shapes: ' +
     '{transport: "oauth", client_id, client_name, scopes, expires_at, source_id, federated_read}, ' +
@@ -48,11 +49,9 @@ const whoami: Operation = {
           'or set ctx.remote === false.',
       );
     }
-    // OAuth tokens have client_id starting with 'gbrain_cl_'; legacy
-    // access_tokens reuse `name` as both clientId and clientName (verifyAccessToken
-    // at oauth-provider.ts:417-430). Detect by inspecting the prefix.
-    const isOauth = ctx.auth.clientId.startsWith('gbrain_cl_');
-    if (isOauth) {
+    // Legacy access_tokens reuse `name` as both clientId and clientName, so the
+    // transport comes from the verifier-set principal (prefix only as fallback).
+    if (authTransport(ctx.auth) === 'oauth') {
       return {
         transport: 'oauth',
         client_id: ctx.auth.clientId,
@@ -72,6 +71,7 @@ const whoami: Operation = {
 
 const sources_add: Operation = {
   name: 'sources_add',
+  outputRedaction: 'no_stored_text',
   description:
     'Register a new source. Supports either --path (existing v0.17 behavior) ' +
     'or --url (v0.28 federated remote-clone path: parses the URL through the ' +
@@ -154,6 +154,7 @@ const sources_add: Operation = {
 
 const sources_list: Operation = {
   name: 'sources_list',
+  outputRedaction: 'no_stored_text',
   description:
     'List registered sources with page counts and remote_url. v0.28 surfaces ' +
     'the new remote_url field so a remote MCP caller can confirm a source is ' +
@@ -193,6 +194,7 @@ const sources_list: Operation = {
 
 const sources_remove: Operation = {
   name: 'sources_remove',
+  outputRedaction: 'no_stored_text',
   description:
     'Hard-remove a source (cascades pages/chunks/embeddings). Refuses to ' +
     'delete the auto-managed clone dir unless its resolved path is confined ' +
@@ -241,6 +243,7 @@ const sources_remove: Operation = {
 
 const sources_status: Operation = {
   name: 'sources_status',
+  outputRedaction: 'no_stored_text',
   description:
     'Per-source diagnostic. Returns clone_state ("healthy" | "missing" | ' +
     '"not-a-dir" | "no-git" | "url-drift" | "corrupted" | "not-applicable") ' +
@@ -269,6 +272,7 @@ const sources_status: Operation = {
 
 const sources_inspect: Operation = {
   name: 'sources_inspect',
+  outputRedaction: 'no_stored_text',
   description: 'Inspect committed company Markdown on the trusted local host without importing, registering a source, changing access, or invoking providers.',
   params: {
     path: { type: 'string', required: true, description: 'Local committed Git repository directory.' },

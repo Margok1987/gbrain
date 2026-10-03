@@ -132,6 +132,16 @@ export async function buildMemoryWritebackCheck(engine: BrainEngine | null): Pro
       counters_note: `local, append-only, loss-tolerant observability over the last ${COUNTER_WINDOW_DAYS}d — never a source of truth`,
     };
 
+    // #5888: capture-lane exact duplicates dropped (every capture lane runs
+    // whether or not writeback is on) and near duplicates counted in shadow
+    // mode only (kept, never dropped).
+    try {
+      const cutoff = Date.now() - COUNTER_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+      const dedup = (await readHeartbeatTail(2000)).filter((e) => e.event === 'writeback_dedup' && Date.parse(e.ts) >= cutoff);
+      details.cross_lane_duplicates_7d = dedup.reduce((n, e) => n + (e.duplicate ?? 0), 0);
+      details.near_duplicates_shadow_7d = dedup.reduce((n, e) => n + (e.near_duplicate ?? 0), 0);
+    } catch { /* heartbeat unreadable — counters stay absent */ }
+
     // Plane comparison (the dual-write design's promised surfacing): the DB
     // row is authoritative at runtime; a disagreeing file mirror means a
     // failed dual-write, a foreign writer, or another machine's `config set`

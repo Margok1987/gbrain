@@ -40,6 +40,7 @@ import type { OperationContext } from '../core/operations.ts';
 import { configureGatewayIfUninitialized, isAvailable, chat, getChatModel, withBudgetTracker } from '../core/ai/gateway.ts';
 import { BudgetTracker, BudgetExhausted, loadPricingOverrides, type BudgetReason } from '../core/budget/budget-tracker.ts';
 import { hybridSearch } from '../core/search/hybrid.ts';
+import { INTERNAL_BREADTH_SEARCH_OPTS } from '../core/search/internal-breadth.ts';
 import { serializeMarkdown } from '../core/markdown.ts';
 import { listSources } from '../core/sources-ops.ts';
 import {
@@ -307,6 +308,7 @@ async function retrieveEvidence(
   // 3. Hybrid search on the entity name — pages that mention it.
   try {
     const hits = await hybridSearch(engine, title || slug, {
+      ...INTERNAL_BREADTH_SEARCH_OPTS,
       limit: HYBRID_SEARCH_LIMIT,
       sourceId,
     });

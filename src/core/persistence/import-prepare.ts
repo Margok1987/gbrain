@@ -16,6 +16,7 @@ import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-gu
 import { getWorktreeBinding } from './ownership.ts';
 import { localHostId } from './identity.ts';
 import { sha256 } from './digest.ts';
+import { isReservedSkillBundlePath } from '../skill-reserved-paths.ts';
 import { prepareCanonicalProjections } from './canonical-projections.ts';
 import type { PreparedContentImport } from './prepared-import.ts';
 import type { PreparedMutation } from './coordinator.ts';
@@ -41,7 +42,7 @@ export function managedImportContent(sourcePath: string, bytes: Buffer, activePa
   if (isAbsolute(sourcePath) || sourcePath.split(/[\\/]/).some(part => part === '..') || hasMalformedPathSegment(sourcePath)) {
     throw new OperationError('invalid_params', 'The import path must be a well-formed source-relative path.');
   }
-  if (/(^|\/)skills(\/|$)/i.test(sourcePath.replaceAll('\\', '/')) || /(^|\/)skillpack\.json$/i.test(sourcePath)) {
+  if (isReservedSkillBundlePath(sourcePath)) {
     throw new OperationError('skill_bundle_required', 'Import cannot publish skill paths. Use the shared skill publisher.');
   }
   if (isImageFilePath(sourcePath)) return { slug: sourcePath.replaceAll('\\', '/').toLowerCase(), content: bytes.toString('base64') };

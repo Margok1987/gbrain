@@ -57,9 +57,13 @@ export type CheckCategory = 'brain' | 'skill' | 'ops' | 'meta';
 export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'abandoned_threads',
   'atom_provenance_drift',
+  'captured_facts_active',
   'connector_checkpoints',
   'connector_held_items',
+  'credential_projection_pending',
   'derived_visibility',
+  'extractor_facts_expired',
+  'loop_facts_drift',
   'orphan_persistence_bindings',
   'safe_index_pending',
   'self_capture',
@@ -85,6 +89,8 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'embed_staleness',
   'embedding_column_registry',
   'embedding_env_override',
+  // #5137: an env provider key shadowing a different config key.
+  'embedding_key_source',
   'embedding_migration_state',
   'embedding_provider',
   // #5691: query-instruction advisory for instruction-style embedding models.
@@ -135,6 +141,8 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'sync_freshness',
   'takes_count',
   'takes_weight_grid',
+  // #5836: active facts with no entity (invisible to entity recall and the conflict sweep).
+  'unlinked_facts',
   'text_projection_readiness',
   'timeline_coverage',
   'timeline_orphans',
@@ -196,6 +204,7 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'connection',
   'db_only_collector_collision',
   'federation_health',
+  'google_file_modes',
   'google_oauth',
   'home_dir_in_worktree',
   'index_audit',
@@ -207,6 +216,7 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'persistence_request_growth',
   'persistence_request_indexes',
   'stale_embedding_effects',
+  'vector_plan',
   'writer_version',
   'pgbouncer_prepare',
   'pglite_data_dir',
@@ -220,6 +230,8 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'pool_budget',
   'progressive_batch_audit_health',
   'queue_health',
+  // #5157: queued jobs from before the v0.50 authority cutover block every worker.
+  'legacy_job_authority',
   'reranker_health',
   'rls',
   'rls_event_trigger',

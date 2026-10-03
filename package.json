@@ -140,6 +140,7 @@
     "check:schema-migrations": "bash scripts/check-schema-migrations-fresh.sh",
     "check:schema-fresh": "bash scripts/check-schema-fresh.sh",
     "check:retired-phrases": "bash scripts/check-retired-phrases.sh",
+    "check:bash32": "bash scripts/check-bash32.sh",
     "check:schema-migration-order": "bun scripts/check-schema-migration-order.ts",
     "check:compile-autoload": "bash scripts/check-compile-autoload.sh",
     "check:structural-manifest": "bash scripts/check-structural-manifest.sh",
@@ -156,7 +157,7 @@
     ]
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.71",
+    "@ai-sdk/anthropic": "^3.0.125",
     "@ai-sdk/google": "^3.0.64",
     "@ai-sdk/openai": "^3.0.53",
     "@ai-sdk/openai-compatible": "^2.0.41",
@@ -204,9 +205,9 @@
     "bun": ">=1.4.0"
   },
   "license": "MIT",
-  "version": "0.60.27.0",
+  "version": "0.60.32.0",
   "overrides": {
-    "@ai-sdk/provider-utils": "4.0.33",
+    "@ai-sdk/provider-utils": "4.0.56",
     "@hono/node-server": "^2.0.5",
     "fast-uri": "3.1.8",
     "body-parser": "^2.3.0",

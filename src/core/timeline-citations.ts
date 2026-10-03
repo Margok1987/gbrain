@@ -60,7 +60,7 @@ export function parseInlineCitationTimelineEntries(
     const matches = [...paragraph.text.matchAll(CITATION_TIMELINE_RE)];
     if (matches.length === 0) continue;
     const summary = paragraph.text
-      .replace(/\[Source:[^\]]*\]/g, '')
+      .replace(/\[Source:[^\]]*\](?:\((?:[^()]|\([^()]*\))*\))?/g, '')
       .replace(/^[-*>#\s]+/, '')
       .replace(/\s+/g, ' ')
       .trim()

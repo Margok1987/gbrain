@@ -37,9 +37,25 @@ export interface ReconcileState {
   /** The `source_path` apply records for a `slug_derived` origin. */
   originSourcePath: string | null;
 }
+/**
+ * Cycle bookkeeping that `cycle.ts` stamps into `sources.config` after every
+ * successful source cycle. It is not reconcile policy, so it stays out of the
+ * policy digest: otherwise an autopilot cycle between preview and apply made
+ * every reconcile preview stale.
+ */
+const CYCLE_STAMP_KEYS = ['last_source_cycle_at', 'last_full_cycle_at'];
+
 export async function reconcilePolicyDigest(engine: BrainEngine, sourceId: string): Promise<string> {
   const config = await loadConfigWithEngine(engine, loadConfig());
-  const [source] = await engine.executeRaw('SELECT config,contextual_retrieval_mode,trust_frontmatter_overrides FROM sources WHERE id=$1', [sourceId]);
+  const [row] = await engine.executeRaw<Record<string, unknown>>('SELECT config,contextual_retrieval_mode,trust_frontmatter_overrides FROM sources WHERE id=$1', [sourceId]);
+  let sourceConfig = row?.config;
+  if (typeof sourceConfig === 'string') {
+    try { sourceConfig = JSON.parse(sourceConfig); } catch { /* digest the raw text */ }
+  }
+  if (sourceConfig && typeof sourceConfig === 'object' && !Array.isArray(sourceConfig)) {
+    sourceConfig = Object.fromEntries(Object.entries(sourceConfig).filter(([key]) => !CYCLE_STAMP_KEYS.includes(key)));
+  }
+  const source = row ? { ...row, config: sourceConfig } : row;
   return digest({ version: 1, config, source, literals: loadOperatorLiterals(), disabled: process.env.GBRAIN_NO_SANITY ?? null });
 }
 export function staleReconcile(what: string): never {
@@ -108,7 +124,8 @@ export async function readReconcileState(engine: BrainEngine, sourceId: string, 
   if (!Buffer.from(text).equals(raw)) throw new OperationError('invalid_params', 'The canonical file must contain valid UTF-8.');
   try { parseDataFrontmatter(text); }
   catch { throw new OperationError('invalid_params', 'Canonical file metadata cannot be parsed losslessly; repair its syntax before previewing.'); }
-  const parsed = parseMarkdown(text, slug, { validate: true, expectedSlug: slug });
+  // Preserve a terminal .md in the page key while parsing the canonical Markdown.
+  const parsed = parseMarkdown(text, `${slug}.md`, { validate: true, expectedSlug: slug });
   const errors = parsed.errors?.filter(e => !['MISSING_OPEN', 'MISSING_CLOSE', 'EMPTY_FRONTMATTER'].includes(e.code)) ?? [];
   if (errors.length || parsed.errors?.some(e => e.code === 'MISSING_CLOSE') || parsed.slug !== slug) {
     throw new OperationError('invalid_params', 'Canonical file metadata cannot be parsed losslessly; repair its syntax before previewing.');

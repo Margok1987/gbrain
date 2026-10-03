@@ -342,6 +342,16 @@ describe('runLoops', () => {
     expect(rows[0].status).toBe('dropped');
   });
 
+  test('--note records a closed_by note instead of "manual" (#5446)', async () => {
+    await upsertOpenLoop(engine, loop());
+    const r = await captured(() => runLoops(engine, ['done', '1', '--note', 'handled in person']));
+    expect(r.out).toContain('Loop 1 done.');
+    const rows = await engine.executeRaw<{ closed_by: string }>(
+      `SELECT closed_by FROM open_loops WHERE id = 1`,
+    );
+    expect(rows[0].closed_by).toBe('handled in person');
+  });
+
   test('done without a numeric id hard-exits with usage code 2', async () => {
     const r = await captured(() => runLoops(engine, ['done']));
     expect(r.exitCalled).toBe(2);

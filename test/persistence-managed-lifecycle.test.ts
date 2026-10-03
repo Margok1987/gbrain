@@ -92,6 +92,24 @@ test('two files mapping to one slug skip the loser instead of blocking the whole
   }
 }), 180_000);
 
+test('removing the skipped slug twin keeps the page its kept file backs (#5565)', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  for (const engine of engines) {
+    const f = await fixture(engine, {
+      'notes/Foo Bar.md': note('Foo Bar spaced', 'Apples and orchards.'),
+      'notes/foo-bar.md': note('foo-bar dashed', 'Oranges and groves.'),
+    });
+    expect(await performManagedSync(engine, { sourceId: f.id, noPull: true })).toMatchObject({ status: 'first_sync', added: 1 });
+    const kept = await engine.readPageSnapshot('notes/foo-bar', { sourceId: f.id });
+    expect(kept?.page.source_path).toBe('notes/foo-bar.md');
+    rmSync(join(f.root, 'notes/Foo Bar.md'));
+    const head = commit(f.root, 'remove the skipped twin');
+    expect(await performManagedSync(engine, { sourceId: f.id, noPull: true })).toMatchObject({ status: 'synced', deleted: 0, toCommit: head });
+    expect(await engine.readPageSnapshot('notes/foo-bar', { sourceId: f.id })).toEqual(kept);
+    expect(readFileSync(join(f.root, 'notes/foo-bar.md'), 'utf8')).toContain('Oranges');
+    expect((await engine.executeRaw<{ last_commit: string }>('SELECT last_commit FROM sources WHERE id=$1', [f.id]))[0].last_commit).toBe(head);
+  }
+}), 180_000);
+
 test('a live page keeps its slug when a later file maps onto it', async () => withEnv({ GBRAIN_HOME: home }, async () => {
   for (const engine of engines) {
     const f = await fixture(engine, { 'notes/Foo Bar.md': note('Foo Bar spaced', 'Apples and orchards.') });

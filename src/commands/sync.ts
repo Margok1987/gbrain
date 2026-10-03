@@ -30,7 +30,7 @@ export interface SyncResult {
   /** Pages re-embedded during this sync's auto-embed step. 0 if --no-embed or skipped. */
   embedded: number;
   embedDeferralReason?: 'large_sync';
-  pagesAffected: string[];
+  pagesAffected: string[]; /** #5867: a Google sweep's loops_extract enqueue (sweep plus managed catch-up). */ loops_enqueue?: { enqueued: number; deferred: number; skipped_reason: string | null };
   failedFiles?: number; // count of parse failures (Bug 9)
   /**
    * #3875: code breakdown of the blocking failures (set on
@@ -49,7 +49,8 @@ export interface SyncResult {
   /** #5751: unchanged managed working-tree files skipped although a no-op publication cannot resolve their admit reason. */
   legacySkips?: { contextualMode: number; canonicalBytes: number };
   /** Managed sync: files skipped because another origin keeps their slug, and links derived after the checkpoint. */
-  slugCollisions?: import('../core/persistence/sync-discovery.ts').SyncSlugCollision[]; links?: import('../core/persistence/links-maintenance.ts').ManagedLinkExtraction;
+  slugCollisions?: import('../core/persistence/sync-discovery.ts').SyncSlugCollision[];
+  fileRefusals?: import('../core/persistence/sync-discovery.ts').SyncFileRefusal[]; links?: import('../core/persistence/links-maintenance.ts').ManagedLinkExtraction;
   /**
    * Aggregated alias/undeclared explicit-type warnings (schema.type_warnings,
    * default on) — one entry per distinct non-canonical type this run.

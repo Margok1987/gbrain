@@ -28,6 +28,8 @@ import { unverifiedExtractionFragment } from '../../../core/extraction-review.ts
 import { isSyncDisabledConfig } from '../../../core/sync-policy.ts';
 import type { Check } from '../../doctor.ts';
 import { ownedContentFreshness } from '../../../core/shared-skills/content-freshness.ts';
+import { connectorAuthorities } from '../../../core/persistence/connector-authority.ts';
+import { parseSourceConfig } from '../../../core/sources-load.ts';
 
 /** Local aliases; the shared warn-once memo lives in core so it can't fork per module. */
 const _resolveEnvNumber = resolveEnvNumber;
@@ -390,19 +392,22 @@ export async function checkUndeclaredDbOnlyPages(engine: BrainEngine): Promise<C
   try {
     // #3880: archived sources are out of scope for filesystem audits (v34
     // legacy fallback, house style per pickSoleNonDefaultSource).
-    let sources: Array<{ id: string; local_path: string | null }>;
+    let sources: Array<{ id: string; local_path: string | null; config: unknown }>;
     try {
-      sources = await engine.executeRaw<{ id: string; local_path: string | null }>(
-        `SELECT id, local_path FROM sources WHERE local_path IS NOT NULL AND archived IS NOT TRUE`,
+      sources = await engine.executeRaw<{ id: string; local_path: string | null; config: unknown }>(
+        `SELECT id, local_path, config FROM sources WHERE local_path IS NOT NULL AND archived IS NOT TRUE`,
       );
     } catch {
-      sources = await engine.executeRaw<{ id: string; local_path: string | null }>(
-        `SELECT id, local_path FROM sources WHERE local_path IS NOT NULL`,
+      sources = await engine.executeRaw<{ id: string; local_path: string | null; config: unknown }>(
+        `SELECT id, local_path, config FROM sources WHERE local_path IS NOT NULL`,
       );
     }
-    const checkable = sources.filter(s => s.local_path && existsSync(s.local_path));
+    const authorities = await connectorAuthorities(engine, sources.map(s => ({ id: s.id, kind: parseSourceConfig(s.config).kind })));
+    const connectorDb = new Set([...authorities].filter(([, a]) => a === 'connector_database').map(([id]) => id));
+    const connectorNote = connectorDb.size > 0 ? ` ${connectorDb.size} API connector source(s) skipped: connector_database pages are DB-only by design (recover them with gbrain sync --source <id> --full).` : '';
+    const checkable = sources.filter(s => s.local_path && existsSync(s.local_path) && !connectorDb.has(s.id));
     if (checkable.length === 0) {
-      return { name, status: 'ok', message: 'Not applicable (no sources with a local repo path on this host)' };
+      return { name, status: 'ok', message: `Not applicable (no sources with a local repo path on this host).${connectorNote}` };
     }
     let total = 0;
     const samples: string[] = [];
@@ -446,13 +451,13 @@ export async function checkUndeclaredDbOnlyPages(engine: BrainEngine): Promise<C
       return {
         name,
         status: 'ok',
-        message: `Every DB page is file-backed or under a declared/default db_only path (derive-phase defaults: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})`,
+        message: `Every DB page is file-backed or under a declared/default db_only path (derive-phase defaults: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')}).${connectorNote}`,
       };
     }
     return {
       name,
       status: 'warn',
-      message: `${total} DB page(s) have no backing file and sit outside every declared/default db_only path — invisible to file-lane backup/recovery. Sample: ${samples.join('; ')}. Fix: restore or export the files, or declare their prefixes under storage.db_only in gbrain.yml (derive-phase defaults already cover: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})`,
+      message: `${total} DB page(s) have no backing file and sit outside every declared/default db_only path — invisible to file-lane backup/recovery. Sample: ${samples.join('; ')}. Fix: restore or export the files, or declare their prefixes under storage.db_only in gbrain.yml (derive-phase defaults already cover: ${DERIVE_PHASE_DB_ONLY_DEFAULTS.join(' ')})${connectorNote}`,
       details: { total, per_source: perSource, sample_slugs: samples },
     };
   } catch (e) {
@@ -840,7 +845,10 @@ export async function computeAtomProvenanceDriftCheck(
       // metric omitted, verdict untouched).
       `WITH atom AS (
          SELECT a.source_id,
-                a.frontmatter->>'source_hash' AS sh,
+                -- managed atoms keep their provisional prefix for good (#5770)
+                CASE WHEN a.frontmatter->>'managed_extraction' = 'true'
+                     THEN regexp_replace(a.frontmatter->>'source_hash', '^pending:', '')
+                     ELSE a.frontmatter->>'source_hash' END AS sh,
                 -- NULL = slug-unbound: transcript-minted (source_path only) or
                 -- pre-binding-era. \`ss IS NULL\` is THE predicate for that
                 -- population everywhere below (#4799 / #4806).
@@ -851,8 +859,8 @@ export async function computeAtomProvenanceDriftCheck(
           WHERE a.type = 'atom'
             AND a.deleted_at IS NULL
             AND a.frontmatter->>'source_hash' IS NOT NULL
-            -- in-flight marker written before the extraction commits
-            AND a.frontmatter->>'source_hash' NOT LIKE 'pending:%'
+            -- in-flight marker written before an unmanaged extraction commits
+            AND (a.frontmatter->>'source_hash' NOT LIKE 'pending:%' OR a.frontmatter->>'managed_extraction' = 'true')
        -- Lookup sets are built ONCE and joined (#4937). A correlated EXISTS in
        -- the SELECT list is not rewritten to a semi-join — Postgres re-runs it
        -- per atom over substring(content_hash), which no index serves, so the
@@ -888,7 +896,7 @@ export async function computeAtomProvenanceDriftCheck(
       [],
     );
     const r = rows?.[0];
-    if (!r) return { name, status: 'warn', message: 'atom provenance query returned no rows' };
+    if (!r) return { name, status: 'warn', message: 'atom provenance query returned no rows', details: { health: 'unknown' } };
 
     const num = (v: string | number | null | undefined) => (v == null ? 0 : Number(v));
     const total = num(r.total);
@@ -922,11 +930,9 @@ export async function computeAtomProvenanceDriftCheck(
 
     if (drifted >= MIN_DRIFTED && ratio > WARN_RATIO) {
       const fix =
-        "review before acting — most drift is an edited source, not a dead one. " +
-        "List them with: SELECT slug, frontmatter->>'source_slug' FROM pages a WHERE a.type='atom' " +
-        "AND a.deleted_at IS NULL AND NULLIF(a.frontmatter->>'source_slug','') IS NOT NULL " +
-        "AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.source_id=a.source_id " +
-        "AND p.deleted_at IS NULL AND substring(p.content_hash from 1 for 16)=a.frontmatter->>'source_hash')";
+        "preview the atoms that are safe to retire with gbrain repair stale-atoms (source gone, or source edited and " +
+        "already re-extracted), then apply with the --expect hash it prints. Atoms of an edited page that was not " +
+        "re-extracted yet are the extract_atoms backlog, not stale";
       return {
         name, status: 'warn',
         message:
@@ -944,7 +950,7 @@ export async function computeAtomProvenanceDriftCheck(
       details,
     };
   } catch (err) {
-    return { name, status: 'warn', message: `atom_provenance_drift check failed: ${(err as Error).message}` };
+    return { name, status: 'warn', message: `atom_provenance_drift check failed: ${(err as Error).message}`, details: { health: 'unknown' } };
   }
 }
 

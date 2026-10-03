@@ -96,3 +96,18 @@ describe('shouldEscalateRetrieval / confidenceRank (#1663)', () => {
     expect(confidenceRank('moderate')).toBeGreaterThan(confidenceRank('weak'));
   });
 });
+
+// gbrain-evals A4-2: on the keyword path every natural question graded
+// moderate, although the rank-1 row was an OR-relaxed match for 120 of 120
+// unanswerable questions (and 80 of 120 answerable ones).
+describe('A4-2: an OR-relaxed keyword top is weak', () => {
+  test('keyword_relaxed top → weak / keyword_relaxed_top, even when labelled keyword_exact upstream', () => {
+    const g = gradeRetrievalConfidence([r({ keyword_relaxed: true, evidence: 'keyword_exact' })]);
+    expect(g).toEqual({ level: 'weak', reason: 'keyword_relaxed_top', top_evidence: 'keyword_exact' });
+  });
+  test('a strict keyword top stays moderate; identity and rerank signals still win over relaxed', () => {
+    expect(gradeRetrievalConfidence([r({ evidence: 'keyword_exact' })]).reason).toBe('keyword_exact_top');
+    expect(gradeRetrievalConfidence([r({ keyword_relaxed: true, evidence: 'exact_title_match' })]).level).toBe('strong');
+    expect(gradeRetrievalConfidence([r({ keyword_relaxed: true, rerank_score: 0.9 })]).reason).toBe('rerank_top');
+  });
+});

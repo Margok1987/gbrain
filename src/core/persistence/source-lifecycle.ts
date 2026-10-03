@@ -5,11 +5,12 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { isValidSourceId } from '../source-id.ts';
+import { EXPIRED_ARCHIVE_SQL } from '../source-delete.ts';
 import { parseSourceConfig } from '../sources-load.ts';
 import { redactSourceConfig } from '../source-config-redact.ts';
 import { discoverGitRoot } from '../sync-git.ts';
 import { isInsideGitRepo, hasTrackedContent } from '../git-remote.ts';
-import { containsPath, getWorktreeBinding, type WorktreeBinding, worktreeManifest } from './ownership.ts';
+import { containsPath, getWorktreeBinding, humanManifestProgress, type WorktreeBinding, type WorktreeManifest, worktreeManifest } from './ownership.ts';
 import { localHostId } from './identity.ts';
 import { advanceTopology, lockTopologyPrincipal, lockTopologyRows, settleTopologyRequests, topologyCanonicalStamp, topologyPrincipal, withTopologyLocks } from './topology-locks.ts';
 import { priorTopologyChange, recordTopologyChange, topologyReceipt } from './topology-receipts.ts';
@@ -104,10 +105,10 @@ export async function runManagedSourceLifecycle(engine:BrainEngine,input:SourceL
   return withTopologyLocks(engine,input.sourceId,async bindings=>{
     // Hash canonical bytes while holding native exclusion, without a database
     // connection checked out. The final transaction rejects new pending mirrors.
-    const manifests=new Map<string,ReturnType<typeof worktreeManifest>>();
+    const manifests=new Map<string,WorktreeManifest>();
     for(const path of new Set([...bindings.map(binding=>binding.local_path!).filter(Boolean),...(root?[root.worktree]:[])])) {
       if(!existsSync(path)) {if(input.operation==='add'&&input.createDirectory&&path===root?.worktree)continue;throw new OperationError('recovery_required','The canonical checkout is missing; restore its verified manifest first.');}
-      const manifest=worktreeManifest(path);
+      const manifest=worktreeManifest(path,{progress:humanManifestProgress()});
       if(Buffer.byteLength(JSON.stringify(manifest))>1_048_576) throw new OperationError('request_too_large','The verified source manifest exceeds the 1 MiB administration metadata bound.');
       manifests.set(path,manifest);
     }
@@ -133,7 +134,7 @@ export async function runManagedSourceLifecycle(engine:BrainEngine,input:SourceL
       throw new OperationError('writer_transfer_required','The source already has a different canonical binding. Use rebind or verified ownership transfer.');
     if(input.operation==='claim'&&!currentBinding&&source?.local_path&&realpathSync(source.local_path)!==root!.source)
       throw new OperationError('source_changed','The requested claim path differs from the configured source root.');
-    const expired=input.expiredOnly?await tx.executeRaw('SELECT id FROM sources WHERE id=$1 AND archived=true AND archive_expires_at<=now()',[input.sourceId]):null;
+    const expired=input.expiredOnly?await tx.executeRaw(`SELECT id FROM sources WHERE id=$1 AND ${EXPIRED_ARCHIVE_SQL}`,[input.sourceId]):null;
     const noop=expired?.length===0 || input.operation==='archive'&&source?.archived || input.operation==='restore'&&!source?.archived
       || input.operation==='claim'&&!!currentBinding || input.operation==='rebind'&&sameBinding;
     if(noop){

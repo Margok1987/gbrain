@@ -8,6 +8,8 @@ import { getWriteRequest } from '../persistence/journal.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 import { publishMaintenancePage, type MaintenanceAuthority } from '../persistence/prepared-maintenance.ts';
 import { writeResponse } from '../persistence/service.ts';
+import { acceptedPendingReceipt } from '../persistence/accepted-pending.ts';
+import type { PhaseResult } from '../cycle.ts';
 import type { DiscoveredTranscript } from './transcript-discovery.ts';
 import { emptyQuoteVerifyStats, groundSource, isDreamOwnedPage, resolveVerifyPrior, verifyDreamPage, type GroundedSource, type GroundingPass } from './synthesize-verify.ts';
 
@@ -26,7 +28,8 @@ export async function postprocessManagedSynthesis(
   const stats = emptyQuoteVerifyStats();
   const writtenRefs: OutputRef[] = [];
   const finalizedRefs: OutputRef[] = [];
-  if (!refs.length) return { writtenRefs, finalizedRefs, stats };
+  let pending = 0;
+  if (!refs.length) return { writtenRefs, finalizedRefs, stats, pending };
   const outputs = await engine.executeRaw<RetainedOutput>(
     `SELECT t.job_id,j.idempotency_key AS job_key,row_to_json(p) AS request
        FROM subagent_tool_executions t JOIN minion_jobs j ON j.id=t.job_id
@@ -89,10 +92,29 @@ export async function postprocessManagedSynthesis(
       content = serializePageToMarkdown(page, snapshot.tags);
     }
     throwIfAborted(opts.signal, '[dream] synthesis postprocessing');
-    await publishMaintenancePage(engine, authority, ref.slug, content, { requestId, expectedRevision: revision });
+    try {
+      await publishMaintenancePage(engine, authority, ref.slug, content, { requestId, expectedRevision: revision });
+    } catch (error) {
+      if (!acceptedPendingReceipt(error)) throw error;
+      pending++;
+      continue;
+    }
     writtenRefs.push(finalizedRef);
     finalizedRefs.push(finalizedRef);
     await new Promise(resolve => setTimeout(resolve, 0));
   }
-  return { writtenRefs, finalizedRefs, stats };
+  return { writtenRefs, finalizedRefs, stats, pending };
+}
+
+export const SYNTH_PUBLISH_DEFERRED = 'publish deferred (writer busy); finishes next cycle, no action needed';
+
+/**
+ * #5854: an output publish still pending after its wait is deferred, never
+ * counted as written: the phase warns, the cooldown stays unstamped, and the
+ * next cycle resumes the same request id.
+ */
+export function withPublishPending(pending: number, result: PhaseResult): PhaseResult {
+  if (!pending) return result;
+  return { ...result, status: 'warn', summary: `${result.summary}; ${SYNTH_PUBLISH_DEFERRED}`,
+    details: { ...result.details, publish_pending: pending, publish_deferred: SYNTH_PUBLISH_DEFERRED } };
 }

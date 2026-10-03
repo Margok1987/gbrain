@@ -43,16 +43,16 @@ afterAll(async () => {
   });
   await closePostgres?.(); rmSync(home, { recursive: true, force: true });
 });
-async function fixture(engine: BrainEngine, enabled = false, body = 'A useful durable example observation.') {
+async function fixture(engine: BrainEngine, enabled = false, body = 'A useful durable example observation.', slug = 'notes/example') {
   await disposePersistenceConsumer(engine);
   await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
-  const id = `reconcile-${randomUUID().slice(0, 12)}`, root = join(home, id), slug = 'notes/example';
+  const id = `reconcile-${randomUUID().slice(0, 12)}`, root = join(home, id);
   mkdirSync(join(root, 'notes'), { recursive: true });
   await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,\'{}\')', [id, root]);
   const content = `---\ntype: note\ntitle: Example\ncustom_database: kept\nprofile:\n  role: example-role\n---\n${body}\n`;
-  await importFromContent(engine, slug, content, { sourceId: id, sourcePath: 'notes/example.md', noEmbed: true });
+  await importFromContent(engine, slug, content, { sourceId: id, sourcePath: `${slug}.md`, noEmbed: true });
   const snapshot = (await engine.readPageSnapshot(slug, { sourceId: id }))!;
-  const file = join(root, 'notes/example.md');
+  const file = join(root, `${slug}.md`);
   writeFileSync(file, serializePageToMarkdown({ ...snapshot.page, frontmatter: { profile: { location: 'example-place' }, custom_file: 'kept' } }, snapshot.tags));
   const binding = await claimWorktree(engine, id, root);
   await engine.executeRaw('UPDATE persistence_brain SET enabled=$1 WHERE singleton=1', [enabled]);
@@ -644,3 +644,29 @@ test('candidate-origin fanout stops at a bounded verification limit rather than 
     expect(await engine.executeRaw('SELECT id FROM persistence_requests WHERE source_id=$1', [f.id])).toHaveLength(0);
   });
 }), 120_000);
+
+// The parser must not normalize an already-resolved identity a second time.
+// Existing reconcile cases only covered extension-free page keys.
+test.each(['notes/example.md', 'notes/example.md.md'])('reconciliation preserves extension-bearing identity %s', async slug =>
+  isolated(async engine => {
+    const f = await fixture(engine, true, 'A durable extension-bearing observation.', slug);
+    expect(readFileSync(f.file, 'utf8')).not.toContain('slug:');
+    await local(engine, f.registration, async () => {
+      const { preview, status } = await runReconcilePreview(engine, { source_id: f.id, slug });
+      expect(status).toBe('ready');
+      expect(preview.preconditions.slug).toBe(slug);
+      const receipt = await runReconcileApply(engine, { source_id: f.id, slug, preview, request_id: randomUUID() });
+      expect(receipt.state).toBe('committed');
+      const page = await engine.getPage(slug, { sourceId: f.id });
+      expect(page?.id).toBe(f.snapshot.page.id);
+      expect(page?.source_path).toBe(`${slug}.md`);
+      expect(page?.compiled_truth).toContain('A durable extension-bearing observation.');
+      expect(page?.frontmatter).toMatchObject({ custom_database: 'kept', custom_file: 'kept' });
+      expect(await engine.getPage(slug.slice(0, -3), { sourceId: f.id })).toBeNull();
+      const file = readFileSync(f.file, 'utf8');
+      writeFileSync(f.file, file.replace('---\n', '---\nslug: notes/other\n'));
+      await expect(runReconcilePreview(engine, { source_id: f.id, slug })).rejects.toMatchObject({ code: 'invalid_params' });
+      expect((await engine.getPage(slug, { sourceId: f.id }))?.id).toBe(f.snapshot.page.id);
+      expect(await engine.getPage('notes/other', { sourceId: f.id })).toBeNull();
+    });
+  }), 120_000);

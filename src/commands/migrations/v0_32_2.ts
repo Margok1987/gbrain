@@ -11,8 +11,10 @@
  *   A. Schema       — assert migration v51 has run.
  *   B. Fence facts  — backfill DB facts → entity-page fences (dry-run
  *                     by default; explicit --write required).
- *   C. Verify       — re-parse each fence-owned page, count rows, compare
- *                     against the DB rows for that page; partial on
+ *   C. Verify       — re-parse each fence-owned page and compare its fence
+ *                     row numbers with the DB rows for that page; a
+ *                     duplicate active fence row may be absent from the
+ *                     index (extract_facts indexes it once). Partial on
  *                     mismatch. Conversation-miner (`cli:`) facts are not
  *                     fence-owned (extract-conversation-facts writes the
  *                     chat log as source of truth) and are excluded.
@@ -43,6 +45,7 @@ import type { BrainEngine } from '../../core/engine.ts';
 import { loadConfig, toEngineConfig } from '../../core/config.ts';
 import { createEngine } from '../../core/engine-factory.ts';
 import { formatFenceDate, parseFactsFence, renderFactsTable, replaceOrInsertFactsFence } from '../../core/facts-fence.ts';
+import { duplicateActiveFenceRows } from '../../core/facts/extract-from-fence.ts';
 import { resolvePageWriteTarget } from '../../core/write-through.ts';
 import { serializePageToMarkdown } from '../../core/markdown.ts';
 import { managedPersistenceEnabled } from '../../core/persistence/ownership.ts';
@@ -455,6 +458,14 @@ function fenceFactsResult(outcome: PhaseBOutcome): OrchestratorPhaseResult {
 
 // ── Phase C — Verify ────────────────────────────────────────
 
+/** Row numbers a drift detail names per side before it summarizes the rest. */
+const DRIFT_ROWS_SHOWN = 5;
+
+function listDriftRows(rows: number[]): string {
+  const shown = rows.slice(0, DRIFT_ROWS_SHOWN).join(', ');
+  return rows.length > DRIFT_ROWS_SHOWN ? `${shown}, +${rows.length - DRIFT_ROWS_SHOWN} more` : shown;
+}
+
 async function phaseCVerify(
   engine: BrainEngine | null,
   opts: OrchestratorOpts,
@@ -464,7 +475,8 @@ async function phaseCVerify(
 
   try {
     // Per touched page (= any page with a fenced row in the DB), re-parse
-    // the fence from disk and compare row counts to the DB.
+    // the fence (the canonical file, or the database copy on a managed
+    // brain) and compare its row numbers to the DB's.
     const sources = await engine.executeRaw<SourceLookup>(
       `SELECT id, local_path FROM sources`,
     );
@@ -475,8 +487,8 @@ async function phaseCVerify(
     // (chat-log shape is the source of truth). Same cli: exclusion as
     // extract_facts reconciliation. Counting them here fails every brain
     // that ran extract-conversation-facts.
-    const groups = await engine.executeRaw<{ source_id: string; source_markdown_slug: string; n: string }>(
-      `SELECT source_id, source_markdown_slug, COUNT(*) AS n
+    const groups = await engine.executeRaw<{ source_id: string; source_markdown_slug: string; row_nums: number[] }>(
+      `SELECT source_id, source_markdown_slug, array_agg(row_num ORDER BY row_num) AS row_nums
          FROM facts
         WHERE row_num IS NOT NULL
           AND COALESCE(source, '') NOT LIKE 'cli:%'
@@ -510,10 +522,20 @@ async function phaseCVerify(
         body = readFileSync(target.filePath, 'utf-8');
       }
       const parsed = parseFactsFence(body);
-      const fenceCount = parsed.facts.length;
-      const dbCount = parseInt(g.n, 10);
-      if (fenceCount !== dbCount) {
-        mismatches.push(`${g.source_markdown_slug} (fence=${fenceCount}, db=${dbCount})`);
+      const indexed = new Set(g.row_nums.map(Number));
+      const fenced = new Set(parsed.facts.map(f => f.rowNum));
+      // #5814: a duplicate active row may be absent from the index.
+      // extract_facts indexes it once (#1781) while the managed publication
+      // projection indexes every fence row, so both states are in sync.
+      const duplicates = duplicateActiveFenceRows(parsed.facts);
+      const notIndexed = [...fenced].filter(n => !indexed.has(n) && !duplicates.has(n)).sort((a, b) => a - b);
+      const notInFence = [...indexed].filter(n => !fenced.has(n)).sort((a, b) => a - b);
+      if (notIndexed.length > 0 || notInFence.length > 0) {
+        const missing = [
+          notIndexed.length > 0 ? `not indexed: ${listDriftRows(notIndexed)}` : '',
+          notInFence.length > 0 ? `not in fence: ${listDriftRows(notInFence)}` : '',
+        ].filter(Boolean).join('; ');
+        mismatches.push(`${g.source_markdown_slug} (fence=${parsed.facts.length}, db=${indexed.size}; ${missing})`);
       }
       pagesChecked += 1;
     }

@@ -20,17 +20,26 @@ export interface ConnectorSourceStatus {
   last_run: ConnectorRunCounts | null;
   /** Fix wave 4: every held item (the human view shows HELD_STATUS_LIMIT). */
   held: ItemHoldRecord[];
+  /** Set when this source's hold state could not be read: coverage is unknown, not hold-free. */
+  held_error?: string;
 }
 
 export async function readConnectorSourceStatuses(engine: Pick<BrainEngine, 'executeRaw'>): Promise<Map<string, ConnectorSourceStatus>> {
   const sources = await engine.executeRaw<{ id: string; incarnation: string }>(
     "SELECT id,incarnation::text FROM sources WHERE NOT archived AND config->>'kind' IN ('google','github')");
   const statuses = new Map<string, ConnectorSourceStatus>();
-  const holds = new Map((await readAllSourceHolds(engine).catch(() => [])).map(entry => [entry.sourceId, entry.held]));
   for (const source of sources) {
     const state = await readManagedConnectorState(engine, source.id, source.incarnation);
+    let held: ItemHoldRecord[] = [];
+    let heldError: string | undefined;
+    try {
+      held = (await readAllSourceHolds(engine, { sourceIds: [source.id] }))[0]?.held ?? [];
+    } catch (error) {
+      heldError = (error instanceof Error ? error.message : String(error)).split('\n')[0].slice(0, 160) || 'unknown error';
+    }
     statuses.set(source.id, { upgrade_recovery: state.upgrade_recovery, resumed_from: state.resumed_from, account_pinned: state.account !== null,
-      continuity_unverified: state.continuity_unverified, pending: state.pending.length, last_run: state.last_run, held: holds.get(source.id) ?? [] });
+      continuity_unverified: state.continuity_unverified, pending: state.pending.length, last_run: state.last_run, held,
+      ...(heldError ? { held_error: heldError } : {}) });
   }
   return statuses;
 }
@@ -47,7 +56,8 @@ export function connectorStatusLines(sourceId: string, status: ConnectorSourceSt
     lines.push('    re-walking its window once after the upgrade (an expected admission spike, not #5470 churn)');
   }
   if (status.continuity_unverified) lines.push('    account pinned on its first post-upgrade run; continuity before the upgrade is unverified');
-  lines.push(...heldItemLines(sourceId, status.held));
+  if (status.held_error) lines.push(`    hold state unreadable: ${status.held_error}; coverage is unknown until it can be read`);
+  else lines.push(...heldItemLines(sourceId, status.held));
   return lines;
 }
 

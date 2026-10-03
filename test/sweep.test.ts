@@ -724,6 +724,7 @@ describe('runMaintenanceSweep — budget + never-throw', () => {
       linksExtracted: 1,
       linksRemoved: 0,
       timelineExtracted: 0,
+      corpus_files: [],
       skipped: [{ reason: 'budget_exhausted:corpus', count: 2 }],
       durationMs: 10,
     };

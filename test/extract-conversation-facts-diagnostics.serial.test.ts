@@ -53,6 +53,7 @@ beforeEach(async () => {
   await engine.executeRaw('TRUNCATE facts, pages, op_checkpoints, extract_rollup_7d CASCADE');
   await engine.executeRaw('DELETE FROM gbrain_cycle_locks');
   await engine.setConfig('facts.extraction_enabled', 'true');
+  await engine.setConfig('facts.extraction_model', 'anthropic:claude-sonnet-4-6');
   await engine.setConfig('conversation_parser.llm_fallback_enabled', 'false');
   await engine.setConfig('cycle.conversation_facts_backfill.enabled', 'true');
   await engine.setConfig('cycle.conversation_facts_backfill.workers', '3');
@@ -72,6 +73,39 @@ beforeEach(async () => {
 });
 
 describe('#5364 diagnostics across workers, sources, CLI, and cycle', () => {
+  // #5823: execute CLI diagnostics and parsing, not source-text assertions.
+  test('explicit unpriced cap names pricing recovery rather than recommending a larger cap', async () => {
+    await engine.setConfig('facts.extraction_model', 'anthropic:synthetic-unpriced-model');
+    const log = spyOn(console, 'log').mockImplementation(() => {});
+    const exit = spyOn(process, 'exit').mockImplementation(((code: number) => { throw new Error(`exit:${code}`); }) as never);
+    try {
+      await expect(runExtractConversationFacts(engine, ['--source-id', 'speaker-a', '--max-cost-usd', '0.1', '--sleep', '0'])).rejects.toThrow('exit:1');
+      const summary = log.mock.calls.map(call => call.join(' ')).join('\n');
+      expect(summary).toContain('no_pricing: anthropic:synthetic-unpriced-model');
+      expect(summary).toContain('pricing.overrides');
+      expect(summary).not.toContain('Re-run with a higher --max-cost-usd');
+      expect(calls).toBe(0);
+    } finally {
+      exit.mockRestore();
+      log.mockRestore();
+    }
+  });
+
+  test.each(['0', '-1', 'invalid', '1junk', 'Infinity', undefined])('invalid explicit cap %s is rejected before extraction or background submission', async value => {
+    const error = spyOn(console, 'error').mockImplementation(() => {});
+    const exit = spyOn(process, 'exit').mockImplementation(((code: number) => { throw new Error(`exit:${code}`); }) as never);
+    const args = ['--source-id', 'speaker-a', '--max-cost-usd', ...(value === undefined ? [] : [value])];
+    try {
+      await expect(runExtractConversationFacts(engine, args)).rejects.toThrow('exit:1');
+      await expect(runExtractConversationFacts(engine, ['--background', ...args])).rejects.toThrow('--max-cost-usd requires a positive finite number');
+      expect(error.mock.calls[0]?.[0]).toContain('--max-cost-usd requires a positive finite number');
+      expect(calls).toBe(0);
+    } finally {
+      exit.mockRestore();
+      error.mockRestore();
+    }
+  });
+
   test('dry-run help promises segmentation without model calls', async () => {
     const log = spyOn(console, 'log').mockImplementation(() => {});
     try {
@@ -123,6 +157,34 @@ describe('#5364 diagnostics across workers, sources, CLI, and cycle', () => {
       expect(await engine.executeRaw('SELECT * FROM op_checkpoints')).toEqual([]);
       expect(await engine.executeRaw('SELECT * FROM extract_rollup_7d')).toEqual([]);
     } finally {
+      log.mockRestore();
+    }
+  });
+
+  test('#5448: --json (a universal registry flag) prints one JSON envelope on stdout instead of Unknown flag', async () => {
+    const log = spyOn(console, 'log').mockImplementation(() => {});
+    const error = spyOn(console, 'error').mockImplementation(() => {});
+    const exit = spyOn(process, 'exit').mockImplementation(((code: number) => { throw new Error(`exit:${code}`); }) as never);
+    try {
+      await runExtractConversationFacts(engine, ['--dry-run', '--sleep', '0', '--types', 'conversation', '--json']);
+      expect(log.mock.calls).toHaveLength(1);
+      const envelope = JSON.parse(String(log.mock.calls[0]![0]));
+      expect(envelope).toMatchObject({
+        dry_run: true,
+        outcome: '(dry run) segmentation only; no facts extracted',
+        pages_considered: 10,
+        pages_processed: 6,
+        segments_processed: 6,
+        pages_skipped: 4,
+        spent_usd: 0,
+        budget_exhausted: false,
+        no_pricing_models: [],
+      });
+      expect([...envelope.sources].sort()).toEqual(['default', 'speaker-a', 'speaker-b']);
+      expect(calls).toBe(0);
+    } finally {
+      exit.mockRestore();
+      error.mockRestore();
       log.mockRestore();
     }
   });

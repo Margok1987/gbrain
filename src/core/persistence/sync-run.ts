@@ -117,6 +117,7 @@ function result(cursor: Cursor | CursorHeader, status: SyncResult['status'], rea
     toCommit: cursor.authority.writer.remote ? '' : cursor.target, added: cursor.counts.added, modified: cursor.counts.modified,
     deleted: cursor.counts.deleted, renamed: cursor.counts.renamed ?? 0, chunksCreated: cursor.counts.chunks, embedded: 0, pagesAffected: [],
     ...(cursor.slugCollisions?.length ? { slugCollisions: cursor.slugCollisions } : {}),
+    ...(cursor.fileRefusals?.length ? { fileRefusals: cursor.fileRefusals } : {}),
     filesImported: cursor.index, bankedFiles: cursor.index, ...(cursor.uncommitted ? { uncommitted: cursor.uncommitted } : {}), ...(reason ? { reason } : {}),
     ...(cursor.counts.skippedContextualMode || cursor.counts.skippedCanonicalBytes ? { legacySkips: {
       contextualMode: cursor.counts.skippedContextualMode ?? 0, canonicalBytes: cursor.counts.skippedCanonicalBytes ?? 0 } } : {}) };
@@ -179,8 +180,8 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
     occupantRebound = occupant !== null;
     const moved = entry.renameFrom;
     const recorded = moved?.slug === slug ? moved.sourcePath : entry.sourcePath;
-    if ((snapshot?.page.id ?? null) !== pageId || (snapshot?.revision ?? null) !== revision ||
-        (snapshot?.page.source_path != null && !sameSyncOrigin(snapshot.page.source_path, recorded, originScope, snapshot.page.slug))) {
+    const foreignOrigin = snapshot?.page.source_path != null && !sameSyncOrigin(snapshot.page.source_path, recorded, originScope, snapshot.page.slug);
+    if ((snapshot?.page.id ?? null) !== pageId || (snapshot?.revision ?? null) !== revision || (entry.unownedDeletion ? !foreignOrigin : foreignOrigin)) {
       throw new OperationError('revision_conflict', 'A page changed after this sync cursor was enumerated.');
     }
     if (moved && moved.slug !== slug) {
@@ -196,6 +197,7 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
   assertActive();
   return { requestId: randomUUID(), slug, pageId, ...(occupantRebound ? { rebound: true as const } : {}), intent: { kind: !entry ? 'managed_sync_checkpoint' : entry.action === 'import' ? 'managed_sync_import' : 'managed_sync_delete',
     expected_revision: revision, sourcePath: entry?.sourcePath ?? null, path: entry?.path ?? null, rawHash, content, lineEndingOnly,
+    ...(entry?.unownedDeletion ? { unownedDeletion: true } : {}),
     ...(entry?.renameFrom ? { renameFrom: entry.renameFrom } : {}),
     processingOptions: cursor.processingOptions,
     // A cursor created before its options were recorded has the same key, so this run's options are its options.
@@ -216,7 +218,7 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
  */
 async function alreadyImportedAtOrigin(engine: BrainEngine, cursor: Cursor, entry: Cursor['entries'][number], originScope: ReturnType<typeof syncOriginScope>) {
   try {
-    await assertSyncPageOrigin(engine, cursor.sourceId, entry.sourcePath, entry.pageId ?? null, entry.action === 'delete', originScope);
+    await assertSyncPageOrigin(engine, cursor.sourceId, entry.sourcePath, entry.unownedDeletion ? null : entry.pageId ?? null, entry.action === 'delete', originScope);
     return null;
   } catch (error) {
     if (!(error instanceof OperationError) || error.code !== 'page_identity_changed' || entry.action !== 'import' || (entry.pageId ?? null) !== null
@@ -320,7 +322,7 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
         const failed = cursor.pending ? await getWriteRequest(engine, cursor.authority.writer.principal, cursor.pending.requestId) : null;
         const recorded = await engine.executeRaw("SELECT 1 FROM op_checkpoints WHERE op='managed-sync-failure' AND fingerprint=$1 AND completed_keys->0->>'run_id'=$2", [key, cursor.runId]);
         assertActive();
-        if ((failed && ['failed', 'conflict', 'cancelled'].includes(failed.state)) || (!failed && recorded.length)) {
+        if ((failed && ['failed', 'conflict', 'cancelled'].includes(failed.state)) || (recorded.length && (failed?.state === 'committed' || !failed))) {
           phase = 'discovery';
           discoveryTarget = syncGit(context.gitRoot, ['rev-parse', 'HEAD']).trim();
           const discovery = await discoverManagedSync(engine, opts, context);

@@ -63,4 +63,31 @@ describe('chronicle_backfill op', () => {
       { slug: 'meetings/other-src', sourceId: 'other-src' },
     ]);
   });
+
+  // #5329: repeat runs used to enqueue the same head pages forever.
+  test('#5329: repeat runs with a small limit progress through every page, then enqueue nothing', async () => {
+    for (const n of [1, 2, 3]) await engine.putPage(`meetings/m${n}`, { type: 'meeting', title: `m${n}`, compiled_truth: LONG });
+    type R = { enqueued: number; already_enqueued: number };
+    const run = async () => await operationsByName.chronicle_backfill.handler(mkCtx(), { limit: 1 }) as R;
+    for (let i = 0; i < 3; i++) expect((await run()).enqueued).toBe(1);
+    await engine.executeRaw(`UPDATE minion_jobs SET status = 'completed', finished_at = now() WHERE name = 'chronicle_extract'`);
+    const again = await run();
+    expect(again.enqueued).toBe(0);
+    expect(again.already_enqueued).toBe(3);
+    const slugs = await engine.executeRaw<{ slug: string }>(`SELECT data->>'slug' AS slug FROM minion_jobs WHERE name = 'chronicle_extract' ORDER BY 1`);
+    expect(slugs.map(r => r.slug)).toEqual(['meetings/m1', 'meetings/m2', 'meetings/m3']);
+  });
+
+  test('#5329: an edited page is swept again; a dead job does not block a retry', async () => {
+    await engine.putPage('meetings/m1', { type: 'meeting', title: 'm1', compiled_truth: LONG });
+    await engine.putPage('meetings/m2', { type: 'meeting', title: 'm2', compiled_truth: LONG });
+    await operationsByName.chronicle_backfill.handler(mkCtx(), {});
+    await engine.putPage('meetings/m1', { type: 'meeting', title: 'm1', compiled_truth: LONG + ' edited' });
+    await engine.executeRaw(`UPDATE minion_jobs SET status = 'dead' WHERE name = 'chronicle_extract' AND data->>'slug' = 'meetings/m2'`);
+    const dry = await operationsByName.chronicle_backfill.handler(mkCtx(), { dry_run: true }) as { eligible: number; already_enqueued: number };
+    expect(dry.already_enqueued).toBe(0);
+    const r = await operationsByName.chronicle_backfill.handler(mkCtx(), {}) as { enqueued: number; already_enqueued: number };
+    expect(r.enqueued).toBe(2);
+    expect(r.already_enqueued).toBe(0);
+  });
 });

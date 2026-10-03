@@ -133,7 +133,7 @@ async function runOrphanRatio(ctx: DoctorContext): Promise<Check[]> {
 
   // 9b. v0.41.18.0 — orphan_ratio check (migration #1 of #1409).
   //
-  // Surfaces the fraction of linkable pages with no inbound links.
+  // Surfaces the fraction of linkable pages with no links in either direction.
   // Consumes the same canonical getOrphansData() pure fn as
   // `gbrain orphans --count` (D1), so the two surfaces cannot disagree.
   //
@@ -174,26 +174,30 @@ async function runOrphanRatio(ctx: DoctorContext): Promise<Check[]> {
         entityCount < 100
           ? ` — low scale (${entityCount} entity pages <100), interpret with caution`
           : '';
+      // #5877: --by-mention only runs against the database (`--source db`);
+      // the bare command exits 2 on the default fs source.
       const hint =
-        'Run: gbrain extract links --by-mention   (auto-links entity mentions in body text). ' +
-        'Run gbrain orphans for the list.';
-      if (ratio > 0.8) {
+        `Run: gbrain extract links --by-mention --source db${srcId ? ` --source-id ${srcId}` : ''}   (auto-links entity mentions in body text). ` +
+        `Run gbrain orphans${srcId ? ` --source ${srcId}` : ''} for the list.`;
+      const rendersExcluded = data.connector_renders_excluded ?? 0;
+      const renders = rendersExcluded > 0
+        ? ` ${rendersExcluded} connector email/meeting renders are reported apart and left out of the ratio.`
+        : '';
+      const details = { connector_renders_excluded: rendersExcluded };
+      const counts = `${data.total_orphans}/${data.total_linkable} linkable pages have no links in either direction`;
+      if (ratio > 0.5) {
         checks.push({
           name: 'orphan_ratio',
-          status: 'fail',
-          message: `Orphan ratio ${pct}%${inSource} (${data.total_orphans}/${data.total_linkable} linkable pages have no inbound links)${caveat}. ${hint}`,
-        });
-      } else if (ratio > 0.5) {
-        checks.push({
-          name: 'orphan_ratio',
-          status: 'warn',
-          message: `Orphan ratio ${pct}%${inSource} (${data.total_orphans}/${data.total_linkable} linkable pages have no inbound links)${caveat}. ${hint}`,
+          status: ratio > 0.8 ? 'fail' : 'warn',
+          message: `Orphan ratio ${pct}%${inSource} (${counts})${caveat}.${renders} ${hint}`,
+          details,
         });
       } else {
         checks.push({
           name: 'orphan_ratio',
           status: 'ok',
-          message: `Orphan ratio ${pct}%${inSource} (${data.total_orphans}/${data.total_linkable} linkable pages)${caveat}`,
+          message: `Orphan ratio ${pct}%${inSource} (${data.total_orphans}/${data.total_linkable} linkable pages)${caveat}${renders ? `.${renders}` : ''}`,
+          details,
         });
       }
     }
@@ -265,6 +269,7 @@ export const timelineHistoryEntry: DoctorEntry = {
     'timeline_history',
     'derived_visibility',
     'safe_index_pending',
+    'credential_projection_pending',
     'connector_checkpoints',
     'persistence_request_indexes',
     'persistence_request_growth',
@@ -273,7 +278,12 @@ export const timelineHistoryEntry: DoctorEntry = {
     'unbound_source',
     'writer_version',
     'self_capture',
+    'vector_plan',
     'stale_embedding_effects',
+    'google_file_modes',
+    'extractor_facts_expired',
+    'captured_facts_active',
+    'loop_facts_drift',
   ],
   run: runTimelineHistory,
 };

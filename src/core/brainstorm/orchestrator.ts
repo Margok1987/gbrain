@@ -34,6 +34,7 @@
 import type { BrainEngine } from '../engine.ts';
 import { chat as defaultChat, embedQuery, type ChatResult, type ChatOpts } from '../ai/gateway.ts';
 import { hybridSearch, hybridSearchCached } from '../search/hybrid.ts';
+import { INTERNAL_BREADTH_SEARCH_OPTS } from '../search/internal-breadth.ts';
 import { fetchFar, type CloseRef, type FarPage } from './domain-bank.ts';
 import { StructuredAgentError } from '../errors.ts';
 import { classifyBrainstormError } from './error-classify.ts';
@@ -626,6 +627,7 @@ async function _runBrainstormInner(
 
   // hybridSearch for close-set. Limit to profile.k_close. Source-scoped.
   let closeResults = await hybridSearch(engine, opts.question, {
+    ...INTERNAL_BREADTH_SEARCH_OPTS,
     limit: profile.k_close,
     sourceId: opts.sourceId,
     sourceIds: opts.sourceIds,

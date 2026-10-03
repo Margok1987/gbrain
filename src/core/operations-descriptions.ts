@@ -63,8 +63,10 @@ export const LIST_PAGES_DESCRIPTION =
   "with sort=updated_desc instead of semantic search. " +
   "Default 50 rows; remote callers are capped at 100 (local CLI callers' explicit " +
   "limits are honored). A result with exactly `limit` rows may be truncated. " +
-  "For exhaustive listing, page with sort=updated_asc + " +
-  "updated_after=<last row's updated_at> until a page returns fewer rows than the limit.";
+  "For exhaustive listing, page with updated_after=<last row's updated_at_iso> + " +
+  "updated_after_slug=<last row's slug> until a page returns fewer rows than the " +
+  "limit (the keyset forces sort=updated_asc; a bare updated_after cursor skips " +
+  "rows sharing the cursor timestamp).";
 
 export const QUERY_DESCRIPTION =
   "Hybrid search with vector + keyword + multi-query expansion. " +

@@ -34,7 +34,7 @@ beforeAll(async () => {
     await engine.executeRaw('DELETE FROM sources WHERE id=$1', [sourceId]);
     await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,$3::text::jsonb)',
       [sourceId, root, JSON.stringify({ managed_clone: true, remote_url: 'https://example.com/brain.git' })]);
-    await engine.executeRaw("INSERT INTO sources(id,name,archived,archive_expires_at) VALUES($1,$1,true,now()-interval '1 hour')", [`${sourceId}-expired`]);
+    await engine.executeRaw("INSERT INTO sources(id,name,archived,archived_at,archive_expires_at) VALUES($1,$1,true,now()-interval '4 days',now()-interval '1 hour')", [`${sourceId}-expired`]);
     await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
   }
 }, 120_000);

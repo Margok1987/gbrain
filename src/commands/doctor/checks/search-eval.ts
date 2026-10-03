@@ -9,7 +9,7 @@ import type { Check } from '../../doctor.ts';
 import { loadConfig, type GBrainConfig } from '../../../core/config.ts';
 // Leaf module (no flag surface of its own) — see that file for why this
 // isn't imported from extract-conversation-facts.ts directly (#4135).
-import { ALLOWED_TYPES } from '../../../core/facts/conversation-types.ts';
+import { ALLOWED_TYPES, conversationFactsEligibleSql, pageTypesForAllowed, isConversationFactsEligiblePage, requireParseableConversationFlag } from '../../../core/facts/conversation-types.ts';
 
 function hasNonEmptyChatFallbackChain(value: unknown): boolean {
   if (Array.isArray(value)) {
@@ -560,6 +560,9 @@ export async function computeConversationFactsBacklogCheck(
       }
     }
 
+    // #5330: the extractor's eligibility rule (aliases + conversation_parseable), not type alone.
+    const concreteTypes = pageTypesForAllowed(types as Parameters<typeof pageTypesForAllowed>[0]);
+    const strict = await requireParseableConversationFlag(engine);
     const rows = await engine.executeRaw<{
       backlog: string | number;
       completed: string | number;
@@ -583,7 +586,7 @@ export async function computeConversationFactsBacklogCheck(
           AND f.source_session = f.source || ':' || p.slug || ':page-' ||
             p.content_hash || '-' ||
             COALESCE(TO_CHAR(p.effective_date AT TIME ZONE 'UTC', 'YYYY-MM-DD'), 'none')
-         WHERE p.type = ANY($1::text[])
+         WHERE ${conversationFactsEligibleSql('p', '$1', strict)}
            AND p.deleted_at IS NULL
            AND COALESCE(BTRIM(p.frontmatter->>'raw_transcript'), '') = ''
            AND p.content_hash IS NOT NULL
@@ -594,7 +597,7 @@ export async function computeConversationFactsBacklogCheck(
          COALESCE(SUM(completed), 0) AS completed,
          COALESCE(SUM(CASE WHEN completed = 0 THEN non_extractable ELSE 0 END), 0) AS non_extractable
        FROM outcomes`,
-      [types],
+      [concreteTypes],
     );
 
     let backlog = Number(rows[0]?.backlog ?? 0);
@@ -610,17 +613,17 @@ export async function computeConversationFactsBacklogCheck(
     const verifierSources = await engine.executeRaw<{ source_id: string }>(
       `SELECT DISTINCT source_id
          FROM pages
-        WHERE type = ANY($1::text[])
+        WHERE ${conversationFactsEligibleSql('pages', '$1', strict)}
           AND deleted_at IS NULL
           AND (
             COALESCE(BTRIM(frontmatter->>'raw_transcript'), '') <> ''
             OR content_hash IS NULL
           )
         ORDER BY source_id`,
-      [types],
+      [concreteTypes],
     );
     for (const { source_id: sourceId } of verifierSources) {
-      for (const type of types) {
+      for (const type of concreteTypes) {
         let offset = 0;
         // eslint-disable-next-line no-constant-condition
         while (true) {
@@ -632,6 +635,7 @@ export async function computeConversationFactsBacklogCheck(
           });
           if (batch.length === 0) break;
           const verifyInProcess = batch.filter((page) => {
+            if (!isConversationFactsEligiblePage(page, concreteTypes, strict)) return false;
             const raw = page.frontmatter?.raw_transcript;
             return (typeof raw === 'string' && raw.trim().length > 0) ||
               page.content_hash == null;

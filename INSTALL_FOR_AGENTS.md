@@ -525,21 +525,21 @@ DB-only export, explicit regrants, parent/client reconnection, and native
 verification are separate stages; report pending stages rather than claiming
 the whole migration completed.
 
-For memory-only upgrades, keep services and paid reindexing opt-in. If you
-installed via `bun install -g`:
+For memory-only upgrades, keep services and paid reindexing opt-in. The same
+command works for `bun install -g` and `git clone + bun link` installs:
 
 ```bash
 GBRAIN_NO_AUTOPILOT_INSTALL=1 GBRAIN_NO_REEMBED=1 gbrain upgrade --no-autopilot-install
 ```
 
-If you installed via `git clone + bun link`:
-
-```bash
-cd ~/gbrain && git pull --ff-only origin master
-GBRAIN_NO_AUTOPILOT_INSTALL=1 bun install
-gbrain apply-migrations --yes --no-autopilot-install
-GBRAIN_NO_REEMBED=1 gbrain post-upgrade --no-autopilot-install
-```
+On a clone it fetches, checks the new release's Bun floor, fast-forwards to
+exactly the checked commit and runs `bun install`; a bare `git pull` skips the
+check and can leave a release the host's Bun cannot start. When the floor is
+above the host's Bun, the upgrade refuses with `requires Bun >=<floor>` and
+changes nothing (exit 78): run `bun upgrade`, then the same upgrade command
+again. Pass `--no-bun-floor-check` only after checking the target yourself
+when the floor cannot be read (offline). See
+[Bun floor](docs/guides/upgrades-auto-update.md#bun-floor).
 
 The autopilot opt-out skips installation and service rewrites, including package
 postinstall hooks; it does not skip other migrations. Keep the environment form
