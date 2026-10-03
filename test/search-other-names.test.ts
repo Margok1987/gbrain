@@ -56,3 +56,12 @@ describe('search fans out to the other declared name', () => {
     expect(slugs).toContain('contracts/amendment-one');
   });
 });
+
+describe('fan-out keeps every original result', () => {
+  test('pages from the first search are never displaced by the other-name search', async () => {
+    const before = await dispatchToolCall(engine, 'search', { query: 'NULA payment' }, { remote: true, transport: 'http', sourceId: 'default' });
+    const slugs = (JSON.parse(before.content[0].text!) as Array<{ slug: string }>).map(x => x.slug);
+    expect(slugs).toContain('contracts/amendment-one');
+    expect(slugs).toContain('contracts/numbat-labs-msa');
+  });
+});

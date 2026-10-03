@@ -253,7 +253,9 @@ export function aliasDeclarations(rows: Array<{ slug: string; title?: string; ch
  * When the evidence declares another name for the entity the query names,
  * also search under that name and splice the new pages in after the top two
  * results, so documents that use only the other name are not left for the
- * agent to discover (most agents did not act on the notice alone).
+ * agent to discover (most agents did not act on the notice alone). Nothing is
+ * dropped: cutting the tail to make room lost the page that answered
+ * (gbrain-evals Cat 40, family B).
  */
 async function withDeclaredNameFanOut(results: SearchResult[], queryText: string,
   run: (query: string, limit: number) => Promise<SearchResult[]>): Promise<SearchResult[]> {
@@ -269,7 +271,7 @@ async function withDeclaredNameFanOut(results: SearchResult[], queryText: string
   const seen = new Set(results.map(r => `${r.source_id ?? ''}\u0000${r.slug}`));
   const fresh = extra.filter(r => !seen.has(`${r.source_id ?? ''}\u0000${r.slug}`));
   if (fresh.length === 0) return results;
-  return [...results.slice(0, 2), ...fresh, ...results.slice(2)].slice(0, Math.max(results.length, 2 + fresh.length));
+  return [...results.slice(0, 2), ...fresh, ...results.slice(2)];
 }
 
 export interface SavedFactMatch { id: number; fact: string; entity_slug: string | null; kind: string; valid_from: string; source: string }
