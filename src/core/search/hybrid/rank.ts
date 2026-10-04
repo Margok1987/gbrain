@@ -11,6 +11,7 @@ import { type FusionListEntry, type VectorArm, composeFusionLists } from '../fus
 import { type HybridRequest, applyIdentityBoosts, emitHybridMeta } from './request.ts';
 import type { KeywordArmConfidenceDecision } from '../arm-confidence.ts';
 import { type MetadataBoostGateDecision, decideMetadataBoosts, lexicalArmsVoted } from '../metadata-boost-gate.ts';
+import type { HubDampeningMeta } from '../hub-dampening.ts';
 import { type PostFusionOpts, RRF_K, cosineReScore, resolveWalkDedupCap, rrfFusionWeighted, runPostFusionStages, stampContentFlags, stampUnverifiedExtractions, textVectorArmNonEmpty } from '../hybrid.ts';
 import { type RelationalEvidenceSlotDecision, ensureRelationalEvidenceSlot } from '../relational-recall.ts';
 import { type RelationalRerankPinDecision, pinRelationalRows } from '../relational-rerank-pin.ts';
@@ -150,6 +151,7 @@ export async function fuseArms(
   // Phase E3 (Cat 13): metadata boost gate — decided from the SAME lexical
   // lists composeFusionLists just fused (post relaxed-row demotion); image
   // modality never skips (no lexical arm ran); stamped on meta even under `always`.
+  let hubDampening: HubDampeningMeta | undefined;
   const metadataBoostGate = decideMetadataBoosts({
     gate: resolvedMode.metadata_boost_gate, modality: effectiveModality,
     lexicalVoted: lexicalArmsVoted({
@@ -164,13 +166,14 @@ export async function fuseArms(
   if (fused.length > 0) {
     await runPostFusionStages(engine, fused, {
       ...postFusionOpts, skipMetadataBoosts: !metadataBoostGate.boosts_applied,
+      onHubDampening: (m) => { hubDampening = m; },
     });
     // v0.32.x search-lite: intent exact-match boost (entity/event intents).
     // No-op when boost factor is 1.0 (general intent or weighting disabled).
     await applyIdentityBoosts(req, fused);
     fused.sort((a, b) => b.score - a.score);
   }
-  return { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate };
+  return { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate, hubDampening };
 }
 
 /** A2 two-pass structural expansion (default off); grows `fused` in place and returns the dedup options. */
@@ -428,7 +431,7 @@ export async function sizeReturnPool(
 export async function finalizeHybridResults(
   req: HybridRequest,
   returnPool: SearchResult[],
-  { relaxedDropped, adaptiveDecision, autocutDecision, relationalSlotDecision, relationalRerankPin, keywordArmConfidence, metadataBoostGate }: {
+  { relaxedDropped, adaptiveDecision, autocutDecision, relationalSlotDecision, relationalRerankPin, keywordArmConfidence, metadataBoostGate, hubDampening }: {
     relaxedDropped: number;
     adaptiveDecision: AdaptiveReturnDecision | undefined;
     autocutDecision: AutocutDecision | undefined;
@@ -436,6 +439,7 @@ export async function finalizeHybridResults(
     relationalRerankPin: RelationalRerankPinDecision | undefined;
     keywordArmConfidence: KeywordArmConfidenceDecision | undefined;
     metadataBoostGate: MetadataBoostGateDecision;
+    hubDampening?: HubDampeningMeta;
   },
 ): Promise<SearchResult[]> {
   const { engine, opts, resolvedMode, resolvedCol, limit, offset, suggestions, detailResolved, degraded } = req;
@@ -469,6 +473,7 @@ export async function finalizeHybridResults(
     ...(relationalRerankPin ? { relational_rerank_pin: relationalRerankPin } : {}),
     ...(keywordArmConfidence ? { keyword_arm_confidence: keywordArmConfidence } : {}),
     metadata_boost_gate: metadataBoostGate,
+    ...(hubDampening ? { hub_dampening: hubDampening } : {}),
   });
   return budgeted;
 }

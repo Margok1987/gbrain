@@ -37,6 +37,7 @@ import { DEFAULT_RERANKER_MODEL } from '../ai/defaults.ts';
 import { normalizeExpansionVariantBudget } from './fusion-lists.ts';
 import { DEFAULT_RELATIONAL_RERANK_PIN, normalizeRelationalRerankPin } from './relational-rerank-pin.ts';
 import { normalizeKeywordArmConfidenceFloor } from './arm-confidence.ts';
+import { DEFAULT_HUB_DAMPENING, hubDampeningHashPart, normalizeHubDampening, type HubDampening } from './hub-dampening.ts';
 import {
   DEFAULT_METADATA_BOOST_GATE,
   normalizeMetadataBoostGate,
@@ -422,6 +423,15 @@ export interface ModeBundle {
    * HybridSearchOpts.metadataBoostGate → `search.metadata_boost_gate` config → bundle. knobsHash part `mbg=`.
    */
   metadata_boost_gate: MetadataBoostGate;
+  /**
+   * Hub dampening (hub-dampening.ts): `off`, or the half degree H at which the
+   * backlink and graph-signal lifts are halved for high-degree pages. Every
+   * bundle is `off` until a sealed held-out verdict sets a default.
+   * Parse contract in ONE place: `normalizeHubDampening`. Override: per-call
+   * HybridSearchOpts.hubDampening → `search.hub_dampening` config → bundle.
+   * knobsHash part `hd=` (emitted only when not `off`).
+   */
+  hub_dampening: HubDampening;
 }
 
 /**
@@ -490,6 +500,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     keyword_arm_confidence_floor: null,
     // Phase E3 — metadata boost gate `lexical` (flipped on the Cat 13 held-out receipt); `always` restores the pre-wave pipeline.
     metadata_boost_gate: 'lexical',
+    hub_dampening: DEFAULT_HUB_DAMPENING,
   }),
   balanced: Object.freeze({
     cache_enabled: true,
@@ -556,6 +567,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     keyword_arm_confidence_floor: null,
     // Phase E3 — metadata boost gate `lexical` (flipped on the Cat 13 held-out receipt); `always` restores the pre-wave pipeline.
     metadata_boost_gate: 'lexical',
+    hub_dampening: DEFAULT_HUB_DAMPENING,
   }),
   tokenmax: Object.freeze({
     cache_enabled: true,
@@ -622,6 +634,7 @@ export const MODE_BUNDLES: Readonly<Record<SearchMode, Readonly<ModeBundle>>> = 
     keyword_arm_confidence_floor: null,
     // Phase E3 — metadata boost gate `lexical` (flipped on the Cat 13 held-out receipt); `always` restores the pre-wave pipeline.
     metadata_boost_gate: 'lexical',
+    hub_dampening: DEFAULT_HUB_DAMPENING,
   }),
 });
 
@@ -687,6 +700,8 @@ export interface SearchKeyOverrides {
   keyword_arm_confidence_floor?: number | null;
   // Ranker wave (Phase E3) — metadata boost gate override (`always` | `lexical`).
   metadata_boost_gate?: MetadataBoostGate;
+  // Hub dampening override (`off` | half degree).
+  hub_dampening?: HubDampening;
   autocut_jump?: number;
   autocut_min_top?: number;
   autocut_min_keep?: number;
@@ -754,6 +769,8 @@ export interface SearchPerCallOpts {
   keyword_arm_confidence_floor?: number | null;
   // Ranker wave (Phase E3) — metadata boost gate per-call override (`always` | `lexical`).
   metadata_boost_gate?: MetadataBoostGate;
+  // Hub dampening per-call override (`off` | half degree).
+  hub_dampening?: HubDampening;
 }
 
 /**
@@ -860,6 +877,7 @@ export function resolveSearchMode(input: ResolveSearchModeInput): ResolvedSearch
     relational_chain_slots: pick('relational_chain_slots'),
     keyword_arm_confidence_floor: pick('keyword_arm_confidence_floor'),
     metadata_boost_gate: pick('metadata_boost_gate'),
+    hub_dampening: pick('hub_dampening'),
     resolved_mode,
     mode_valid: valid,
   };
@@ -1204,6 +1222,9 @@ export function knobsHash(
     ...(knobs.relational_planner ? ['rp=1'] : []),
     ...(knobs.relational_orient_onehop ?? knobs.relational_planner ? ['ro=1'] : []),
     ...(knobs.relational_planner && knobs.relational_chain_slots ? [`rcs=${knobs.relational_chain_slots}`] : []),
+    // Hub dampening (append-only, emitted only when not `off`, so every
+    // existing key is unchanged and needs no version bump).
+    ...(typeof knobs.hub_dampening === 'number' ? [`hd=${hubDampeningHashPart(knobs.hub_dampening)}`] : []),
   ];
   // #5691 (append-only, no version bump): only a non-empty query prefix adds
   // a part, so every row written without one keeps its key.
@@ -1456,6 +1477,13 @@ export function loadOverridesFromConfig(
     const g = normalizeMetadataBoostGate(mbg);
     if (g !== undefined) out.metadata_boost_gate = g;
   }
+  // Hub dampening: `off` or a half degree; anything else falls through to the
+  // bundle. ONE parse contract: normalizeHubDampening (hub-dampening.ts).
+  const hd = get('search.hub_dampening');
+  if (hd !== undefined) {
+    const h = normalizeHubDampening(hd);
+    if (h !== undefined) out.hub_dampening = h;
+  }
 
   return out;
 }
@@ -1510,6 +1538,7 @@ export const KNOB_CONFIG_KEY: Readonly<Record<keyof ModeBundle, string>> = Objec
   relational_chain_slots: 'search.relational_chain_slots',
   keyword_arm_confidence_floor: 'search.keyword_arm_confidence_floor',
   metadata_boost_gate: 'search.metadata_boost_gate',
+  hub_dampening: 'search.hub_dampening',
 });
 
 /** The full list of config keys this module reads. Used by `gbrain search modes --reset`. */

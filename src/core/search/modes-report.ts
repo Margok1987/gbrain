@@ -67,6 +67,7 @@ export const KNOB_DESCRIPTIONS: Record<keyof ModeBundle, string> = {
   keyword_arm_confidence_floor: 'Keyword-arm confidence floor: below this margin ratio the keyword + title lists fuse at half weight (null = off; (0, 1])',
   // Ranker wave (Phase E3) metadata boost gate
   metadata_boost_gate: 'Post-fusion metadata boosts (backlink/salience/recency/graph/alias): always, or lexical = only when a keyword/title/relational row fused',
+  hub_dampening: 'Hub dampening of backlink/graph lifts: off, or the inbound degree at which a high-degree page keeps half its lift',
 };
 
 /**

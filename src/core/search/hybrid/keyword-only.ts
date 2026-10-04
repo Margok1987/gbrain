@@ -8,6 +8,7 @@ import type { LexicalArms } from './arms.ts';
 import { type PostFusionOpts, RRF_K, rrfFusionWeighted, runPostFusionStages, stampContentFlags, stampUnverifiedExtractions } from '../hybrid.ts';
 import { type RelationalEvidenceSlotDecision, ensureRelationalEvidenceSlot } from '../relational-recall.ts';
 import type { SearchResult } from '../../types.ts';
+import type { HubDampeningMeta } from '../hub-dampening.ts';
 import { applyAliasHop } from '../alias-hop.ts';
 import { applyExactLookupTier } from '../exact-lookup.ts';
 import { dedupResults } from '../dedup.ts';
@@ -35,6 +36,7 @@ export async function searchWithoutEmbeddings(
   // boost skips them (flag survives fusion's result spread).
   await stampUnverifiedExtractions(engine, [...keywordResults, ...titleResults, ...relationalList], opts);
   let noEmbedResults = keywordResults;
+  let hubDampening: HubDampeningMeta | undefined;
   if (relationalList.length > 0 || titleResults.length > 0) {
     const fk = opts?.rrfK ?? RRF_K;
     const noEmbedLists = [{ list: keywordResults, k: fk }];
@@ -43,7 +45,7 @@ export async function searchWithoutEmbeddings(
     noEmbedResults = rrfFusionWeighted(noEmbedLists, ctBoost);
   }
   if (noEmbedResults.length > 0) {
-    await runPostFusionStages(engine, noEmbedResults, postFusionOpts);
+    await runPostFusionStages(engine, noEmbedResults, { ...postFusionOpts, onHubDampening: (m) => { hubDampening = m; } });
     await applyIdentityBoosts(req, noEmbedResults);
     noEmbedResults.sort((a, b) => b.score - a.score);
   }
@@ -115,6 +117,7 @@ export async function searchWithoutEmbeddings(
       ? { token_budget: noEmbedBudgetMeta }
       : {}),
     ...(noEmbedRelSlot ? { relational_evidence_slot: noEmbedRelSlot } : {}),
+    ...(hubDampening ? { hub_dampening: hubDampening } : {}),
   });
   return noEmbedBudgeted;
 }
@@ -138,6 +141,7 @@ export async function searchVectorFallback(
   // no-embedding-provider path for rationale).
   await stampUnverifiedExtractions(engine, [...keywordResults, ...titleResults, ...relationalList], opts);
   let fallbackResults = keywordResults;
+  let hubDampening: HubDampeningMeta | undefined;
   if (relationalList.length > 0 || titleResults.length > 0) {
     const fk = opts?.rrfK ?? RRF_K;
     const fallbackLists = [{ list: keywordResults, k: fk }];
@@ -146,7 +150,7 @@ export async function searchVectorFallback(
     fallbackResults = rrfFusionWeighted(fallbackLists, ctBoost);
   }
   if (fallbackResults.length > 0) {
-    await runPostFusionStages(engine, fallbackResults, postFusionOpts);
+    await runPostFusionStages(engine, fallbackResults, { ...postFusionOpts, onHubDampening: (m) => { hubDampening = m; } });
     await applyIdentityBoosts(req, fallbackResults);
     fallbackResults.sort((a, b) => b.score - a.score);
   }
@@ -191,6 +195,7 @@ export async function searchVectorFallback(
       ? { token_budget: kwBudgetMeta }
       : {}),
     ...(kwRelSlot ? { relational_evidence_slot: kwRelSlot } : {}),
+    ...(hubDampening ? { hub_dampening: hubDampening } : {}),
   });
   return kwBudgeted;
 }

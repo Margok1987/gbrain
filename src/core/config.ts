@@ -1361,6 +1361,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'search.keyword_arm_confidence_floor',
   // Ranker wave (Phase E3): metadata boost gate — `lexical` skips post-fusion metadata boosts when the vector arm was the only voter (mode.ts reads; `always` | `lexical`).
   'search.metadata_boost_gate',
+  'search.hub_dampening',
   'search.crag_escalation',
   'search.crag_think',
   // Evidence delivery (search/evidence-delivery.ts): default unit (auto),

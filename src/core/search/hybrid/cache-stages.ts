@@ -19,6 +19,7 @@ import { loadConfigWithEngine } from '../../config.ts';
 import { normalizeExpansionVariantBudget } from '../fusion-lists.ts';
 import { normalizeKeywordArmConfidenceFloor } from '../arm-confidence.ts';
 import { normalizeMetadataBoostGate } from '../metadata-boost-gate.ts';
+import { normalizeHubDampening } from '../hub-dampening.ts';
 import { normalizeRelationalRerankPin } from '../relational-rerank-pin.ts';
 import { recordSearchTelemetry } from '../telemetry.ts';
 import { resolveEffectiveRecency, resolveEffectiveSalience } from './effective-modes.ts';
@@ -90,6 +91,8 @@ export async function resolveCacheSearchMode(engine: BrainEngine, opts: HybridSe
       keyword_arm_confidence_floor: normalizeKeywordArmConfidenceFloor(opts?.keywordArmConfidenceFloor),
       // Ranker wave (Phase E3) — threaded here too so knobsHash's `mbg=` part reflects the per-call gate.
       metadata_boost_gate: normalizeMetadataBoostGate(opts?.metadataBoostGate),
+      // Hub dampening per-call thread-through (eval A/B); same normalizer in both resolutions.
+      hub_dampening: normalizeHubDampening(opts?.hubDampening),
     },
   });
   return { modeInputForCache, resolvedForCache, knobsHash };
