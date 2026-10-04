@@ -87,9 +87,8 @@ Two more tips:
   request and why it waits. `gbrain doctor` reports a managed cursor's
   remaining entries and ETA from any process.
 
-Before this drain shipped, the workaround was a shell loop around
-`gbrain sync --source <id> --no-pull` until it printed `synced`. That loop
-still works, and each run now drains as far as its deadline allows.
+A shell loop around `gbrain sync --source <id> --no-pull` until it prints
+`synced` also works; each run drains as far as its deadline allows.
 
 ## Implementation
 

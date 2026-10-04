@@ -257,7 +257,7 @@ export const SECTIONS: DocSection[] = [
       },
       {
         title: "docs/guides/exit-codes.md",
-        description: "Exit statuses (3 = confirmation_required only, 10 pending write, 11 resumable budget stop), plus the per-command exits contract v1 changed.",
+        description: "Exit statuses (3 = confirmation_required only, 10 pending write, 11 resumable budget stop) and what the agent does on each.",
         path: "docs/guides/exit-codes.md",
       },
       {

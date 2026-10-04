@@ -76,9 +76,10 @@ describe('exit code table', () => {
     expect(offenders).toEqual([]);
   });
 
-  test('the exit-codes guide documents every value', () => {
+  test('the exit-codes guide documents every value; the CHANGELOG carries the contract v1 exit changes', () => {
     const doc = readFileSync(join(ROOT, 'docs/guides/exit-codes.md'), 'utf8');
     for (const v of [0, 1, 2, 3, 10, 11, 75, 124, 130]) expect(doc).toContain(`| ${v} |`);
-    expect(doc).toContain('## Changed in this release');
+    expect(doc).toContain('CHANGELOG.md#exit-code-changes-by-command');
+    expect(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8')).toContain('#### Exit code changes by command');
   });
 });
