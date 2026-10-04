@@ -1,9 +1,9 @@
 import type { BrainEngine, ReservedConnection } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
-import { CLAIMABLE_WRITE_SQL, claimGroupFollowers, claimNextWrite, compactWriteReceipts, hasClaimableWrite, getWriteRequestById, releaseUnpublishedClaim, renewWriteClaim, vacuumPersistenceQueues } from './journal.ts';
+import { CLAIMABLE_WRITE_SQL, claimGroupFollowers, claimNextWrite, publicationGroupKey, compactWriteReceipts, hasClaimableWrite, getWriteRequestById, releaseUnpublishedClaim, renewWriteClaim, vacuumPersistenceQueues } from './journal.ts';
 import { finishUnpublishedFailure, publishMutation, recoverPublication, type PreparedMutation } from './coordinator.ts';
 import { localHostId } from './identity.ts';
-import { executeClaimedGroup } from './group-publish.ts';
+import { executeClaimedGroup, PAGE_BATCH_GROUP_MAX } from './group-publish.ts';
 import { isTerminal, type WriteRequest } from './model.ts';
 import { refreshManagedFilesystemRoots } from './filesystem-guard.ts';
 import { PROJECTION_RETRY_READY_SQL, rebuildPendingPageProjections } from '../page-state/projections.ts';
@@ -266,11 +266,11 @@ export class PersistenceConsumer {
     this.idleDelayMs = this.pollMs;
     this.nextDelayMs = this.pollMs;
     const scan = !afterProgress || Date.now() - this.lastScan >= this.pollMs;
-    if (scan) {
-      this.lastScan = Date.now();
-      await this.phase('refresh_roots', signal => refreshManagedFilesystemRoots(this.engine,
-        this.engine.kind === 'pglite' ? this.config.database_path : undefined, signal));
-    }
+    // #6007: a tick after progress claims first and runs its due scans after the claim, while the claimed
+    // write prepares; the claim predicate itself excludes recovering roots, so no claim depends on a scan.
+    const scanAfterClaim = scan && afterProgress;
+    if (scan) this.lastScan = Date.now();
+    if (scan && !scanAfterClaim) await this.refreshRoots();
     if (this.stopping) return;
     if (scan && !this.topologyWorker) this.topologyWorker = import('./topology-recovery.ts')
       .then(({ recoverSourceTopologies }) => recoverSourceTopologies(this.engine, { hostId: this.hostId, limit: 2,
@@ -295,41 +295,11 @@ export class PersistenceConsumer {
     // proves that a previous process can no longer be publishing this root.
     const now = Date.now();
     for (const [root, retryAt] of this.rootRetryAfter) if (retryAt <= now) this.rootRetryAfter.delete(root);
-    if (scan) {
-      const excluded = [...this.activeRoots, ...this.rootRetryAfter.keys()];
-      const recovery = await this.phase('recovery_scan', signal => this.engine.executeRaw<WriteRequest>(`SELECT r.* FROM persistence_requests r
-        JOIN persistence_worktrees w ON w.id=r.worktree_id
-        WHERE w.owner_host_id=$1::uuid AND r.recovery IS NOT NULL AND NOT(r.worktree_id::text=ANY($2::text[]))
-        AND NOT EXISTS (SELECT 1 FROM persistence_requests earlier WHERE earlier.worktree_id=r.worktree_id
-          AND earlier.recovery IS NOT NULL AND earlier.sequence<r.sequence)
-        ORDER BY r.updated_at,r.sequence LIMIT 16`, [this.hostId, excluded], { signal }));
-      for (const row of recovery) {
-        const root = row.worktree_id!;
-        // Always skip at least the next scheduled poll for an unresolved root.
-        // This preserves its FIFO head while allowing the next root into LIMIT 16.
-        const delay = Math.max(1000, (this.opts.pollMs ?? 250) * 2);
-        this.rootRetryAfter.set(root, Date.now() + delay);
-        try {
-          const recovered = await this.phase('recovery', () => recoverPublication(this.engine, row.id, this.hostId));
-          if (isTerminal(recovered)) this.settled(recovered);
-          if (!recovered.recovery) this.rootRetryAfter.delete(root);
-          else if (recovered.blocked_reason === 'unexpected_file_bytes') this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
-        } catch (error) {
-          this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
-          this.report(error);
-        }
-      }
-      await this.phase('expired_claims', signal => this.engine.executeRaw(`WITH expired AS (
-        SELECT r.id FROM persistence_requests r WHERE r.state='running' AND r.recovery IS NULL
-        AND r.publication_started=false AND r.claim_expires_at<now() AND ${PERSISTENCE_PROTOCOL_PREDICATE}
-        AND (r.worktree_id IS NULL OR EXISTS (SELECT 1 FROM persistence_worktrees w WHERE w.id=r.worktree_id AND w.owner_host_id=$1::uuid))
-        ORDER BY r.sequence LIMIT 100 FOR UPDATE OF r SKIP LOCKED)
-        UPDATE persistence_requests r SET state='queued',execution_token=NULL,claim_expires_at=NULL
-        FROM expired WHERE r.id=expired.id`, [this.hostId], { signal }));
-    }
+    if (scan && !scanAfterClaim) await this.recoveryScans();
     if (publicationConcurrency(this.engine) === 0) {
       await this.phase('capacity', signal => this.engine.executeRaw(`UPDATE persistence_requests SET blocked_reason='writer_pool_capacity'
         WHERE state='queued' AND blocked_reason IS DISTINCT FROM 'writer_pool_capacity' AND ${PERSISTENCE_PROTOCOL_PREDICATE}`, undefined, { signal }));
+      if (scanAfterClaim) { await this.refreshRoots(); await this.recoveryScans(); }
       return;
     }
     const concurrency = this.opts.concurrency ?? 2;
@@ -350,6 +320,44 @@ export class PersistenceConsumer {
       });
       this.active.add(task);
     }
+    if (scanAfterClaim && !this.stopping) { await this.refreshRoots(); if (!this.stopping) await this.recoveryScans(); }
+  }
+  private async refreshRoots(): Promise<void> {
+    await this.phase('refresh_roots', signal => refreshManagedFilesystemRoots(this.engine,
+      this.engine.kind === 'pglite' ? this.config.database_path : undefined, signal));
+  }
+  /** Recovers this owner's roots with a recovery record, then requeues expired unpublished claims. */
+  private async recoveryScans(): Promise<void> {
+    const excluded = [...this.activeRoots, ...this.rootRetryAfter.keys()];
+    const recovery = await this.phase('recovery_scan', signal => this.engine.executeRaw<WriteRequest>(`SELECT r.* FROM persistence_requests r
+      JOIN persistence_worktrees w ON w.id=r.worktree_id
+      WHERE w.owner_host_id=$1::uuid AND r.recovery IS NOT NULL AND NOT(r.worktree_id::text=ANY($2::text[]))
+      AND NOT EXISTS (SELECT 1 FROM persistence_requests earlier WHERE earlier.worktree_id=r.worktree_id
+        AND earlier.recovery IS NOT NULL AND earlier.sequence<r.sequence)
+      ORDER BY r.updated_at,r.sequence LIMIT 16`, [this.hostId, excluded], { signal }));
+    for (const row of recovery) {
+      const root = row.worktree_id!;
+      // Always skip at least the next scheduled poll for an unresolved root.
+      // This preserves its FIFO head while allowing the next root into LIMIT 16.
+      const delay = Math.max(1000, (this.opts.pollMs ?? 250) * 2);
+      this.rootRetryAfter.set(root, Date.now() + delay);
+      try {
+        const recovered = await this.phase('recovery', () => recoverPublication(this.engine, row.id, this.hostId));
+        if (isTerminal(recovered)) this.settled(recovered);
+        if (!recovered.recovery) this.rootRetryAfter.delete(root);
+        else if (recovered.blocked_reason === 'unexpected_file_bytes') this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
+      } catch (error) {
+        this.rootRetryAfter.set(root, Date.now() + Math.max(delay, 30_000));
+        this.report(error);
+      }
+    }
+    await this.phase('expired_claims', signal => this.engine.executeRaw(`WITH expired AS (
+      SELECT r.id FROM persistence_requests r WHERE r.state='running' AND r.recovery IS NULL
+      AND r.publication_started=false AND r.claim_expires_at<now() AND ${PERSISTENCE_PROTOCOL_PREDICATE}
+      AND (r.worktree_id IS NULL OR EXISTS (SELECT 1 FROM persistence_worktrees w WHERE w.id=r.worktree_id AND w.owner_host_id=$1::uuid))
+      ORDER BY r.sequence LIMIT 100 FOR UPDATE OF r SKIP LOCKED)
+      UPDATE persistence_requests r SET state='queued',execution_token=NULL,claim_expires_at=NULL
+      FROM expired WHERE r.id=expired.id`, [this.hostId], { signal }));
   }
   /** Effects keep pace with publication: full batches continue without waiting for the next tick. */
   private async drainEffects(): Promise<void> {
@@ -508,15 +516,22 @@ export class PersistenceConsumer {
   }
   /** #5984: a claimed bulk sync head takes its directly following group members along; one row runs the single path. */
   private async executeOrGroup(row: WriteRequest): Promise<boolean> {
-    const group = typeof row.intent?.group === 'string' ? row.intent.group : null;
+    const group = publicationGroupKey(row);
     if (!group || this.engine.kind !== 'postgres') return this.execute(row);
-    const followers = await claimGroupFollowers(this.engine, row, group, 63);
+    // #6007: a put_pages batch publishes in groups of at most PAGE_BATCH_GROUP_MAX pages.
+    const followers = await claimGroupFollowers(this.engine, row, group, group.startsWith('batch:') ? PAGE_BATCH_GROUP_MAX - 1 : 63);
     if (!followers.length) return this.execute(row);
     const rows = [row, ...followers];
     for (const member of rows) this.executing.add(member.id);
     try {
       return await executeClaimedGroup(this.engine, rows, { hostId: this.hostId, prepare: member => this.prepare(this.engine, member, this.config),
-        settled: done => { this.executing.delete(done.id); this.settled(done); } });
+        settled: done => {
+          this.executing.delete(done.id);
+          if (done.state === 'committed' && done.worktree_id && !String(done.intent?.kind).startsWith('managed_sync_')) {
+            this.foregroundCounts.set(done.worktree_id, this.foregroundCompletions(done.worktree_id) + 1);
+          }
+          this.settled(done);
+        } });
     } finally { for (const member of rows) this.executing.delete(member.id); }
   }
   /** Mandatory barrier: engine.close must be sequenced AFTER this promise. */

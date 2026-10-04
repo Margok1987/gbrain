@@ -28,6 +28,10 @@
  * the rows the merge raised are the annotation bytes (+22 to +36) plus the
  * F10 template text that brought sub-60-character descriptions up to
  * purpose + next step + scope, and query's key-dependence sentence.
+ * #6007 raised put_page (wait_ms param, put_pages and remote mention-link
+ * disclosure), get_write_request (poll cadence and final states),
+ * add_timeline_entry (when no call is needed) and the instructions (write
+ * guidance); the served list still fits 25,000 model-visible characters.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -40,10 +44,10 @@ import { cl100kAvailable, estimateTokens } from '../src/core/chunkers/token-esti
 
 const SERVED_STARTER_MAX_CHARS = 25_000;
 const SERVED_STARTER_MAX_TOKENS = 5_700;
-/** The whole tools/list JSON, annotations included (25,735 measured at v0.60.46.0). */
-const SERVED_STARTER_MAX_JSON_CHARS = 26_000;
+/** The whole tools/list JSON, annotations included (25,735 measured at v0.60.46.0; 26,030 with #6007's put_page wait_ms param and write guidance). */
+const SERVED_STARTER_MAX_JSON_CHARS = 26_100;
 /** 4,042 at the cost wave + 586 for the operator contract's error protocol, notice prefix and memory loop (F1); no schema guidance moved here. */
-const INSTRUCTIONS_MAX_CHARS = 4_628;
+const INSTRUCTIONS_MAX_CHARS = 4_868; // #6007: +240 for the issue-required write guidance (put_pages, wait_ms)
 const DESCRIPTION_HARD_CAP = 1_200;
 const PARAM_DESCRIPTION_HARD_CAP = 200;
 
@@ -53,11 +57,11 @@ const PARAM_DESCRIPTION_HARD_CAP = 200;
  * before compaction), measured at 1,499; the served starter list stays under 25,000.
  */
 const TOOL_BUDGETS: Record<string, number> = {
-  add_timeline_entry: 640, cancel_job: 270, cancel_write_request: 350, capture: 1250, context_pack: 760,
+  add_timeline_entry: 680, cancel_job: 270, cancel_write_request: 350, capture: 1250, context_pack: 760,
   delete_skill: 810, delta: 830, edit_page: 1090, entity: 460, find_anomalies: 520, forget: 560, get_agent_job: 270,
   get_backlinks: 430, get_ingest_log: 280, get_page: 810, get_recent_salience: 660, get_skill: 910,
-  get_skill_asset: 790, get_write_request: 330, join_brain: 560, leave_brain: 540, list_brain_skillpack: 230,
-  list_link_sources: 220, list_pages: 1090, list_skills: 670, list_write_requests: 450, put_page: 1320,
+  get_skill_asset: 790, get_write_request: 400, join_brain: 560, leave_brain: 540, list_brain_skillpack: 230,
+  list_link_sources: 220, list_pages: 1090, list_skills: 670, list_write_requests: 450, put_page: 1490,
   put_skill: 1420, query: 3250, recall: 1590, remember: 1500, request_tools: 560, resolve_slugs: 410, search: 1760,
   submit_agent: 750, sync_brain_skills: 770, synthesize: 550, traverse_graph: 680, whoami: 230,
 };

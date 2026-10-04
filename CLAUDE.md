@@ -217,8 +217,8 @@ routing eval evidence, and shared conventions.
 Durable facts and preferences belong in shared memory with provenance. Transient
 task state, credentials, local configuration, and harness activation state do not.
 Automatic capture is opt-in. Withdrawal is not physical erasure. Remote
-`put_page` does not extract graph links inline: stdio has best-effort startup/idle
-sweeps; HTTP needs explicit maintenance or authorized `add_link`. Configured
+`put_page` links plain mentions of existing visible pages post-commit (`links`
+effect); typed edges need the stdio sweep, maintenance or `add_link`. Configured
 providers can receive text, and Markdown export is not a full database backup.
 Read [memory boundaries](docs/guides/memory-boundaries.md).
 

@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 197118,
-    "stdoutSha256": "ce99e077240ea4576ae5892cf07f8af2e7a5b37fec963ab6bdaf1d06e4abf122",
+    "stdoutBytes": 199575,
+    "stdoutSha256": "549e0804d5e73d95d677573d1dcd87c5fc772e723c6be2abcb4a0e2d4d061f5b",
     "toolNames": [
       "remember",
       "entity",
@@ -18,6 +18,7 @@
       "capture",
       "fetch",
       "edit_page",
+      "put_pages",
       "get_write_request",
       "list_write_requests",
       "cancel_write_request",
@@ -172,10 +173,9 @@
         "parameters": {
           "entity": "string?",
           "expected_revision": "string?",
-          "fact": "string?",
+          "fact": "string",
           "force": "boolean?",
           "infer_entity": "boolean?",
-          "items": "array?",
           "kind": "string?",
           "provenance": "string",
           "request_id": "string?",
@@ -205,13 +205,6 @@
             "infer_entity": {
               "description": "Default true.",
               "type": "boolean"
-            },
-            "items": {
-              "description": "Up to 20 facts in one call (e.g. before compaction) instead of fact: [{fact, entity?, kind?, ttl?, provenance?}].",
-              "items": {
-                "type": "object"
-              },
-              "type": "array"
             },
             "kind": {
               "description": "Default fact.",
@@ -250,6 +243,7 @@
             }
           },
           "required": [
+            "fact",
             "provenance"
           ],
           "type": "object"
@@ -398,7 +392,7 @@
         "scope": "read"
       },
       {
-        "description": "Replace a complete Markdown page: content REPLACES the whole page. Read get_page include_content:true; pass its revision as expected_revision (omit to create). Keep a request_id UUID; retry with identical arguments. Remote callers: graph links are skipped; a stdio `gbrain serve` sweeps them later, `gbrain serve --http` does not self-sweep. Small changes: edit_page.",
+        "description": "Replace a complete Markdown page: content REPLACES the whole page. Read get_page include_content:true; pass its revision as expected_revision (omit to create). Keep a request_id UUID; retry with identical arguments. Remote callers: [[wikilinks]] to existing pages become mention links after commit; typed links are skipped (a stdio `gbrain serve` sweeps them later, `gbrain serve --http` does not self-sweep). Small changes: edit_page. Over 3 pages: put_pages.",
         "idempotent": true,
         "local_only": false,
         "mutating": true,
@@ -413,7 +407,8 @@
           "slug": "string",
           "source_id": "string?",
           "source_kind": "string?",
-          "source_uri": "string?"
+          "source_uri": "string?",
+          "wait_ms": "number?"
         },
         "required_scopes": [],
         "schema": {
@@ -457,6 +452,10 @@
             "source_uri": {
               "description": "Server-stamped remotely.",
               "type": "string"
+            },
+            "wait_ms": {
+              "description": "Commit wait ms (0-30000, default 5000).",
+              "type": "number"
             }
           },
           "required": [
@@ -823,7 +822,72 @@
         "scope": "write"
       },
       {
-        "description": "Read the receipt of your write by request_id (after write_pending or a lost reply).",
+        "description": "Write up to 50 complete Markdown pages (8 MB total) in one call; use instead of put_page for more than 3 pages. Each page replaces its whole page, like put_page. Keep one request_id UUID per batch: replaying the identical call never writes twice, and put_pages with ONLY request_id reports progress without resending content. Waits up to wait_ms (default 25000) for commits; follow the returned `next`. Needs put_page permission.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": true,
+        "name": "put_pages",
+        "parameters": {
+          "pages": "array?",
+          "request_id": "string",
+          "source_id": "string?",
+          "wait_ms": "number?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "pages": {
+              "description": "1-50 pages; omit to read the batch status.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "allow_empty": {
+                    "description": "Allow emptying a non-empty page.",
+                    "type": "boolean"
+                  },
+                  "content": {
+                    "description": "Complete markdown with frontmatter.",
+                    "type": "string"
+                  },
+                  "expected_revision": {
+                    "description": "Revision read; omit to create.",
+                    "type": "string"
+                  },
+                  "slug": {
+                    "description": "Page slug.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "slug",
+                  "content"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "request_id": {
+              "description": "Batch UUID; reuse it to replay or poll.",
+              "type": "string"
+            },
+            "source_id": {
+              "description": "Write source.",
+              "type": "string"
+            },
+            "wait_ms": {
+              "description": "Hold the reply up to this many ms (0-30000, from arrival) for commits. Default 25000. Not part of the write.",
+              "type": "number"
+            }
+          },
+          "required": [
+            "request_id"
+          ],
+          "type": "object"
+        },
+        "scope": "write"
+      },
+      {
+        "description": "Read your write's receipt by request_id (after write_pending or a lost reply). Poll no faster than retry_after_ms until committed/conflict/failed/cancelled.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,
@@ -1476,7 +1540,7 @@
         "scope": "read"
       },
       {
-        "description": "Create a typed link (edge) from one page to another in the same source. Use when recording a relationship (works_at, invested_in, mentions). Needs write scope; an explicit link_type must be declared by the active schema pack. On page_not_found: resolve both slugs with resolve_slugs.",
+        "description": "Create a typed link (edge) from one page to another in the same source. Use when recording a relationship (works_at, invested_in, mentions); remote page writes already link [[wikilinks]] to existing pages as mentions (receipt auto_links), so add only typed links or ones the text lacks. Needs write scope; an explicit link_type must be declared by the active schema pack. On page_not_found: resolve both slugs with resolve_slugs.",
         "idempotent": false,
         "local_only": false,
         "mutating": true,
@@ -1698,7 +1762,7 @@
         "scope": "read"
       },
       {
-        "description": "Append a dated entry to a page timeline. Replaying the same entry changes nothing.",
+        "description": "Append a dated entry to a page timeline. Replaying the same entry changes nothing. A page's own Timeline section needs no call.",
         "idempotent": true,
         "local_only": false,
         "mutating": true,
@@ -5170,14 +5234,14 @@
         "scope": "read"
       },
       {
-        "description": "MEMORY VERB (v1): core memory plus budget-packed cards, open threads and hot facts for up to 8 entities, zero LLM. Call at session start and after compaction.",
+        "description": "MEMORY VERB (v1): budget-packed cards, open threads and hot facts for up to 8 entities, zero LLM. Call at session start and after compaction.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,
         "name": "context_pack",
         "parameters": {
           "budget_tokens": "number?",
-          "entities": "string?",
+          "entities": "string",
           "include_private": "boolean?",
           "session_id": "string?",
           "since": "string?"
@@ -5190,7 +5254,7 @@
               "type": "number"
             },
             "entities": {
-              "description": "Comma-separated names or slugs (max 8); omit for core only.",
+              "description": "Comma-separated names or slugs (max 8).",
               "type": "string"
             },
             "include_private": {
@@ -5206,7 +5270,9 @@
               "type": "string"
             }
           },
-          "required": [],
+          "required": [
+            "entities"
+          ],
           "type": "object"
         },
         "scope": "read"

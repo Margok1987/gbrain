@@ -38,9 +38,11 @@ export async function lockPageKeys(engine: Pick<BrainEngine, 'executeRaw'>, keys
 }
 
 /**
- * Guards a PGLite transaction already holds, chained through its open
- * savepoints. The single PGLite session owns them until the transaction or
- * savepoint ends, so they are not re-acquired.
+ * Guards a transaction already holds, chained through its open savepoints.
+ * The transaction's session owns them until the transaction or savepoint
+ * ends, so they are not re-acquired. That includes a key whose pages row was
+ * absent when it was locked: the only pages INSERT (engine-sql/pages.ts
+ * putPage) runs after both engines' putPage take the same guard.
  */
 export interface HeldPageKeys { keys: Set<string>; parent: HeldPageKeys | null }
 function pageGuardKey(key: PageKey): string | null {

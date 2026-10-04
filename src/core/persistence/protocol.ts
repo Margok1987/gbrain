@@ -10,6 +10,17 @@ export async function declarePersistenceProtocol(tx: SqlEngine): Promise<void> {
   if (inTransaction) declared.add(tx);
 }
 
+/**
+ * #6007: the protocol declaration plus the durable-write settings (synchronous
+ * commit, lock and statement timeouts) in one round trip. Later
+ * `declarePersistenceProtocol` calls on the same transaction engine are free.
+ */
+export async function declareDurablePersistence(tx: SqlEngine, lockTimeout = '1s', statementTimeout = '5s'): Promise<void> {
+  await tx.executeRaw(`SELECT set_config('gbrain.persistence_protocol','2',true),set_config('synchronous_commit','on',true),
+    set_config('lock_timeout',$1,true),set_config('statement_timeout',$2,true)`, [lockTimeout, statementTimeout]);
+  if ((tx as { _pageTransaction?: boolean })._pageTransaction === true) declared.add(tx);
+}
+
 export const PERSISTENCE_PROTOCOL_PREDICATE = "set_config('gbrain.persistence_protocol','2',true)='2'";
 
 export function assertMutationProtocol(row: Pick<WriteRequest, 'target_kind' | 'protocol_version'>): void {

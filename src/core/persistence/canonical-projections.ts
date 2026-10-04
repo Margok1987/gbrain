@@ -249,7 +249,7 @@ function takeCollision(): OperationError {
  * what this writer actually edited.
  */
 export async function prepareCanonicalProjections(engine: BrainEngine, page: ParsedPage, slug: string, sourceId: string,
-  prior: PageSnapshot | null, writer: ProjectionWriter): Promise<(tx: BrainEngine) => Promise<void>> {
+  prior: PageSnapshot | null, writer: ProjectionWriter): Promise<(tx: BrainEngine, livePageId?: number) => Promise<void>> {
   const { factRows, takes } = compileCanonicalProjections(page, slug, sourceId);
   const { timeline, exactIncoming, pinned } = classifyTimeline(prior ? await storedTimeline(engine, prior.page.id) : [],
     page, prior?.page ?? null, slug, writer);
@@ -265,9 +265,10 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
     JOIN jsonb_to_recordset($2::text::jsonb) AS n(row_num integer,claim text,kind text,holder text) ON n.row_num=k.row_num
     WHERE k.page_id=$1 AND (k.claim,k.kind,k.holder) IS DISTINCT FROM (n.claim,n.kind,n.holder) LIMIT 1`, [pageId, newTakes])).length > 0;
   if (prior && await collides(engine, prior.page.id)) throw takeCollision();
-  return async tx=>{
-    const snapshot=await tx.readPageSnapshot(slug,{sourceId});
-    if (!snapshot) return;
+  // #6007: `livePageId` is the id of the page the caller just wrote live in this transaction; it replaces the snapshot read.
+  return async (tx, livePageId?: number)=>{
+    const snapshot=livePageId === undefined ? await tx.readPageSnapshot(slug,{sourceId}) : null;
+    if (livePageId === undefined && !snapshot) return;
     // Fact IDs in permanent receipts remain meaningful when a canonical row is
     // removed/replaced. Expire and detach its row position instead of deleting it.
     // Conversation-extractor rows share the page coordinate without a fence
@@ -290,9 +291,10 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
         fact.valid_until?.toISOString()??null,fact.expired_at?.toISOString()??null,fact.source,fact.confidence,
         fact.claim_metric??null,fact.claim_value??null,fact.claim_unit??null,fact.claim_period??null]);
     }
-    const pageId=snapshot.page.id;
-    if (await collides(tx,pageId)) throw takeCollision();
-    await tx.executeRaw('DELETE FROM takes WHERE page_id=$1 AND row_num=ANY($2::integer[])',[pageId,takeRowsGone]);
+    const pageId=livePageId ?? snapshot!.page.id;
+    // Statements whose input set is empty change nothing and are skipped.
+    if (newTakes !== '[]' && await collides(tx,pageId)) throw takeCollision();
+    if (takeRowsGone.length) await tx.executeRaw('DELETE FROM takes WHERE page_id=$1 AND row_num=ANY($2::integer[])',[pageId,takeRowsGone]);
     if (takes.length) await tx.addTakesBatch(takes.map(t=>takesPreparation.toCanonicalBatchInput(pageId,t)));
     // Full canonical versions include resolution fields; a revert restores those
     // fields from Markdown too, without the ordinary immutable-resolution API.
@@ -302,12 +304,12 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
         take.resolvedQuality==='correct'?true:take.resolvedQuality==='incorrect'?false:null,
         take.resolvedEvidence??null,take.resolvedValue??null,take.resolvedUnit??null,take.resolvedBy??null]);
     // Event-page references have a different canonical origin and remain intact.
-    await tx.executeRaw(`DELETE FROM timeline_entries t USING jsonb_to_recordset($2::text::jsonb) AS d(id integer,date date,source text,summary text,detail text)
+    if (deletions !== '[]') await tx.executeRaw(`DELETE FROM timeline_entries t USING jsonb_to_recordset($2::text::jsonb) AS d(id integer,date date,source text,summary text,detail text)
       WHERE t.page_id=$1 AND t.event_page_id IS NULL AND t.id=d.id AND t.date=d.date AND t.source=d.source
         AND t.summary=d.summary AND t.detail=d.detail`,[pageId,deletions]);
     // New rows carry their Markdown detail on insert; pinned rows refresh only from their preimage.
     for (const entry of timeline.values()) await tx.addTimelineEntry(slug,entry,{sourceId});
-    await tx.executeRaw(`UPDATE timeline_entries t SET detail=r.next FROM jsonb_to_recordset($2::text::jsonb) AS r(id integer,detail text,next text)
+    if (refreshes !== '[]') await tx.executeRaw(`UPDATE timeline_entries t SET detail=r.next FROM jsonb_to_recordset($2::text::jsonb) AS r(id integer,detail text,next text)
       WHERE t.page_id=$1 AND t.event_page_id IS NULL AND t.id=r.id AND t.detail=r.detail`,[pageId,refreshes]);
   };
 }

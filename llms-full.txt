@@ -393,6 +393,42 @@ brain data. To end one client's access, follow the distinct preview/revision
 flows for token invalidation, revocation, or deletion in
 [MCP administration](../mcp/ADMIN.md#invalidate-tokens-revoke-or-delete).
 
+## Writing many pages
+
+Say to your agent: *"When you save more than three pages to gbrain, use
+put_pages with one request_id per batch and wait_ms 25000."*
+
+- **`put_pages`** writes 1-50 complete pages (8 MB of content at most) in one
+  call. Every page is an ordinary `put_page` write with the same fences,
+  revision checks and receipts; the pages are admitted together, so the
+  writer queue has room for the whole batch or the call refuses with
+  `queue_capacity` and admits none of them. Keep 5-8 large pages per call:
+  the model has to write every page into the tool arguments.
+- **One receipt per batch.** The reply lists each page's state, revision or
+  error (with its own `fix`), counts, and `next`: `done`, `poll` or
+  `fix_pages`. A page refused for its own reason (an invalid slug, a slug
+  outside the grant, a revision conflict) does not stop the others.
+- **Replays and progress.** Replaying the identical call with the same
+  `request_id` never writes twice. Calling `put_pages` with only the
+  `request_id` reads the batch's progress without resending the pages. A
+  replay with different pages refuses with `idempotency_conflict` and names
+  the pages that changed.
+- **`wait_ms`** (put_page and put_pages, 0-30000 ms) holds the reply until
+  the commit. It is not part of the write, so changing it on a replay is
+  safe. When a reply is still pending, follow `next` no sooner than
+  `retry_after_ms`.
+- **Links.** For remote writes, `[[wikilinks]]` in a page body that point at
+  pages already in the same source become plain `mentions` links after the
+  commit, and a batch links pages to each other once its last page commits.
+  The batch receipt's `links` field shows when they have landed; agents do
+  not add them by hand. Typed links still need `add_link`. Turn this off with
+  `gbrain config set mcp.remote_auto_links false`.
+- **Embedding** runs after the commit. New text is searchable by keyword
+  immediately and by meaning once its embedding effect finishes.
+- **Request size.** `gbrain serve --http` reads the whole request; the
+  simpler HTTP transport caps a request at `GBRAIN_HTTP_MAX_BODY_BYTES`
+  (1 MiB by default) and its 413 reply tells the agent to split the batch.
+
 ## PGLite brains
 
 PGLite is single-writer. While the service runs, host-side commands that open
@@ -1686,8 +1722,10 @@ Recall relevant saved context before answering. Save explicit requests to rememb
 Durable preferences and facts belong in shared memory when the user wants them
 recalled later. Transient task state, credentials, local configuration, and harness
 activation state do not. Remote `put_page` saves references as text without inline
-graph extraction; stdio has best-effort startup/idle sweeps, while HTTP requires
-explicit host maintenance or authorized `add_link` calls. Configured model
+graph extraction; a post-commit `links` effect then adds plain mention edges to
+existing pages the writer can see (`mcp.remote_auto_links`, on by default). Typed
+edges rely on stdio's best-effort startup/idle sweeps, explicit host maintenance
+or authorized `add_link` calls. Configured model
 providers can receive text; Markdown export is not a full database backup.
 Read [memory boundaries](docs/guides/memory-boundaries.md) before promising
 portability, graph freshness, privacy, or recovery.
@@ -2102,8 +2140,8 @@ routing eval evidence, and shared conventions.
 Durable facts and preferences belong in shared memory with provenance. Transient
 task state, credentials, local configuration, and harness activation state do not.
 Automatic capture is opt-in. Withdrawal is not physical erasure. Remote
-`put_page` does not extract graph links inline: stdio has best-effort startup/idle
-sweeps; HTTP needs explicit maintenance or authorized `add_link`. Configured
+`put_page` links plain mentions of existing visible pages post-commit (`links`
+effect); typed edges need the stdio sweep, maintenance or `add_link`. Configured
 providers can receive text, and Markdown export is not a full database backup.
 Read [memory boundaries](docs/guides/memory-boundaries.md).
 
@@ -2716,8 +2754,10 @@ gbrain stats                                             # verify links > 0
 
 For brand-new empty brains, skip this backfill: there is nothing to extract yet.
 Trusted local page writes auto-link when enabled. Remote `put_page` (both stdio
-and HTTP MCP) saves references as text without inline graph extraction. Stdio
-`gbrain serve` runs bounded startup/idle sweeps; `gbrain serve --http` does not
+and HTTP MCP) saves references as text without inline graph extraction; a
+post-commit `links` effect then adds plain mention edges to existing pages the
+writer can see (`gbrain config set mcp.remote_auto_links off` disables it). Stdio
+`gbrain serve` runs bounded startup/idle sweeps for typed edges; `gbrain serve --http` does not
 self-sweep. For HTTP, arrange explicit host-side `gbrain sweep --once` or
 extraction; use authorized `add_link` calls for edges needed immediately.
 

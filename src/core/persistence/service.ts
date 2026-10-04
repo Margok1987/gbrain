@@ -21,6 +21,26 @@ const services = new WeakMap<BrainEngine, Service>();
 type ProgressRead = { row: WriteRequestProgress | null } | { error: unknown } | { cancelled: true };
 const receiptReads = new WeakMap<BrainEngine, Map<string, { read: Promise<ProgressRead>; abort: AbortController }>>();
 const settledWaiters = new WeakMap<BrainEngine, Map<string, Set<(row: WriteRequest) => void>>>();
+/** #6007: when this process last settled requests, for pending retry_after_ms estimates. */
+const settlements = new WeakMap<BrainEngine, number[]>();
+const SETTLEMENT_SAMPLES = 21;
+function recordSettlement(engine: BrainEngine): void {
+  let times = settlements.get(engine);
+  if (!times) { times = []; settlements.set(engine, times); }
+  times.push(performance.now());
+  if (times.length > SETTLEMENT_SAMPLES) times.shift();
+}
+/**
+ * #6007: a pending receipt's retry_after_ms from this process's recent pace:
+ * `remaining` requests at the median gap between settlements, clamped to
+ * 250 ms-30 s. Null until this process has settled at least two requests.
+ */
+export function estimatedRetryAfterMs(engine: BrainEngine, remaining: number): number | null {
+  const times = settlements.get(engine) ?? [];
+  if (times.length < 2 || remaining <= 0) return null;
+  const gaps = times.slice(1).map((at, i) => at - times[i]!).sort((a, b) => a - b);
+  return Math.round(Math.min(30_000, Math.max(250, gaps[Math.floor(gaps.length / 2)]! * remaining)));
+}
 const preparers = new Map<string, { prepare: PrepareMutation; target: 'page' | 'skill_bundle' }>();
 export function registerMutationPreparer(operation: string, prepare: PrepareMutation, target: 'page' | 'skill_bundle' = 'page'): void {
   preparers.set(operation, { prepare, target });
@@ -66,7 +86,7 @@ export function startPersistenceConsumer(engine: BrainEngine, config: GBrainConf
     return prior.consumer;
   }
   const consumer = new PersistenceConsumer(engine, config, preparePersistedMutation,
-    { onSettled: row => { for (const listener of settledWaiters.get(engine)?.get(row.id) ?? []) listener(row); } });
+    { onSettled: row => { recordSettlement(engine); for (const listener of settledWaiters.get(engine)?.get(row.id) ?? []) listener(row); } });
   const service: Service = { consumer, stopping: false };
   services.set(engine, service);
   const lifecycle = engine as BrainEngine & { registerBeforeDisconnect?: (run: () => Promise<void>) => unknown };
@@ -217,6 +237,14 @@ async function readProgress(engine: BrainEngine, id: string, remaining: number):
 export async function waitForWrite(engine: BrainEngine, row: WriteRequest, config: GBrainConfig, waitMs = 5000): Promise<WriteRequest> {
   return (await awaitWrite(engine, row, config, { waitMs })).row;
 }
+/**
+ * #6007: wait for several admitted writes against one deadline. Every row waits at once, so each one's consumer handoff is registered
+ * before a grouped publication settles them together; waiting one after
+ * another left all but the first to the progress polls.
+ */
+export async function waitForWrites(engine: BrainEngine, rows: readonly WriteRequest[], config: GBrainConfig, waitMs = 5000): Promise<WriteRequest[]> {
+  return Promise.all(rows.map(row => waitForWrite(engine, row, config, waitMs)));
+}
 /** B4: what a terminal receipt means for the caller, without guessing a mutation. */
 function terminalReceiptHint(row: WriteRequest, reason: string): string {
   const what = `The ${row.operation ? `${row.operation} ` : ''}write (request_id ${row.request_id}) ended ${row.state} with ${reason}; it will not publish.`;
@@ -224,8 +252,10 @@ function terminalReceiptHint(row: WriteRequest, reason: string): string {
     ? `${what} Submit again only if the change is still wanted, with a new request_id.`
     : `${what} Read the receipt and the current state before deciding to submit again; a new attempt needs a new request_id.`;
 }
-export function writeResponse(row: WriteRequest): Record<string, unknown> {
+export function writeResponse(row: WriteRequest, hints: { retryAfterMs?: number | null } = {}): Record<string, unknown> {
   const receipt = receiptFor(row);
+  // #6007: an in-process estimate beats the fixed fallback, never an owner-inspection hold.
+  if (!isTerminal(row) && hints.retryAfterMs != null && receipt.diagnostic?.next_action !== 'inspect_owner') receipt.retry_after_ms = hints.retryAfterMs;
   if (row.state === 'committed') return { ...receipt, write_request: receipt };
   const reason = !isTerminal(row) ? 'write_pending' : row.error_code ?? (row.state === 'cancelled' ? 'cancelled' : 'storage_error');
   const delivered = isTerminal(row) ? receiptDeliveredHint(row) : null;
@@ -235,7 +265,7 @@ export function writeResponse(row: WriteRequest): Record<string, unknown> {
   const held = isTerminal(row) && reason === 'source_changed' ? heldFileDiagnostic(row.error_message, row.source_id) : null;
   const error = new OperationError(reason, !isTerminal(row) ? 'The write is accepted and is still pending.'
     : row.error_message ?? 'The write did not commit.', !isTerminal(row)
-      ? pendingWriteHint(receipt)
+      ? pendingWriteHint(receipt, row.operation)
       : delivered?.suggestion ?? content?.suggestion ?? held?.suggestion ?? terminalReceiptHint(row, reason), delivered?.docs);
   if (delivered?.detail ?? held?.reason) error.detail = delivered?.detail ?? held?.reason;
   if (content) {

@@ -10,6 +10,63 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.54.0] - 2026-10-04
+
+**An agent connected to a remote brain can now save a stack of long pages in under a minute, and gbrain tells it how.**
+
+Agents writing to a brain over MCP (for example through `gbrain serve --http` on another machine) used to save pages one at a time, and each page cost several seconds of back-and-forth with the database. A large page also outlasted the reply's built-in wait, so the agent got "still pending" and had to keep asking. Writing 27 long research pages took about 15 minutes, followed by around 30 more calls to wire up links the pages already contained.
+
+Now the agent sends its pages in batches with `put_pages`, waits for the commit in the same reply with `wait_ms`, and the server links `[[wikilinks]]` between the pages by itself. The server also does far less database work per page and publishes a whole batch in one transaction. The instructions every MCP agent receives at connect time say all of this up front.
+
+Measured with 25 pages of 60 KB each, written over MCP to a Postgres brain 30 ms away (round trip), with embeddings and Git on:
+
+| | Before | Now |
+| --- | --- | --- |
+| 25 pages, one `put_page` at a time, with polling | nearly 5 minutes (about 11 s a page) | not needed |
+| 25 pages, 4 `put_pages` calls sent one after another | not available | 51 s, no polling |
+| One 60 KB `put_page` | 7.2 s reply saying "pending", then polls (about 11 s total) | committed in about 6 s, in the reply |
+| SQL statements on one page's publish path | 139 | 111 |
+| Backlinks between the pages you just wrote | about 30 manual `add_link` calls | built automatically after the commit |
+
+## To take advantage of v0.60.54.0
+
+`gbrain upgrade` should do this automatically. Remote agents pick up the new instructions the next time they connect.
+
+1. **Tell your agent** (or let the connect-time instructions do it): *"When you save more than three pages to gbrain, use put_pages with one request_id per batch and wait_ms 25000."*
+2. **Turn mention links off** if you don't want them: `gbrain config set mcp.remote_auto_links false`.
+3. **Verify:** `gbrain call put_pages '{"request_id":"<uuid>","pages":[{"slug":"notes/test-a","content":"# A"},{"slug":"notes/test-b","content":"# B\n\nSee [[notes/test-a]]."}],"wait_ms":25000}'` returns `"state": "committed"`, and `gbrain call get_links '{"slug":"notes/test-b"}'` shows the `mentions` link to `notes/test-a`.
+
+### Itemized changes
+
+#### Batch writes
+- New MCP tool `put_pages` (full surface): 1-50 complete pages, 8 MB of content at most, per call. Every page is an ordinary `put_page` write with the same fences, revision checks and receipts. The pages are accepted together, so queue capacity (request count and bytes) is reserved for the whole batch, or the call refuses with `queue_capacity` and accepts none.
+- One receipt per batch: the state of each page with its revision or its own error envelope, totals, `links`, and `next` (`done`, `poll` or `fix_pages`). A page refused for its own reason does not stop the others. A grant that cannot write refuses the whole call with one `permission_denied`.
+- Replaying the identical call with the same `request_id` never writes twice. `put_pages` with only `request_id` reports progress without resending content. A replay with different pages refuses with `idempotency_conflict` and names the changed pages.
+- Every page needs `put_page` permission; bound clients get each page's slug fenced like `put_page`.
+
+#### Waiting for the commit
+- `put_page` and `put_pages` accept `wait_ms` (0-30000, counted from arrival; default 5000 for `put_page`, 25000 for `put_pages`). It is not part of the write's identity, so a replay with a different wait is still the same write. Out-of-range values refuse with `invalid_write_wait` before anything is accepted.
+- A pending receipt's `retry_after_ms` comes from the server's recent publishing pace instead of a fixed 1 s.
+- `get_write_request` states its poll cadence and final states; a pending `put_page` names `wait_ms` and `put_pages`.
+
+#### Faster publishing
+- A `put_pages` batch publishes up to 8 pages per database transaction, with file-safe recovery: if one page fails, the group rolls back, every file is restored, and the pages publish one at a time so each failure stays with its own page.
+- Fewer database round trips per write: claiming, admission, recovery records and completion each take fewer statements, a page's own writes skip repeated reads, and a batch's shared admission reads run once.
+- Connector writes wait for a pending withdrawal rewrite of the same page before reading its file, so a sync right after a `forget` no longer fails with `source_changed`.
+
+#### Links for remote writes
+- Remote `put_page`, `put_pages`, `capture` and `edit_page` writes queue a `links` effect after the commit. It turns `[[wikilinks]]` and markdown links in the page body into plain `mentions` links to pages that already exist in the same source, are visible to the writer and sit inside its slug grant. Typed, frontmatter and timeline edges stay off for untrusted writes. A batch links its pages to each other once its last page commits.
+- On by default; `mcp.remote_auto_links false` turns it off. Receipts report `auto_links.mention_links` and the effect's `added`/`removed` counts.
+
+#### Agent guidance
+- The connect-time instructions put the prompt-critical lines first, so harnesses that read only the first 2,048 characters still see them: `context_pack` at session start, `put_page` replaces the whole page, and the writing guidance (`put_pages`, `wait_ms`, following `next`).
+- `put_page`, `add_link` and `add_timeline_entry` descriptions say when links and timeline entries come from the page itself.
+- The simple HTTP transport's 413 reply tells the agent to split the request and names `GBRAIN_HTTP_MAX_BODY_BYTES`.
+
+### For contributors
+- New e2e coverage: Postgres statement budgets per write phase, two-connection page-guard tests, grouped `put_page` publication (happy path and per-member failure), and the remote links effect on both engines.
+- The initialize-instructions and served-schema budgets grew for the write guidance; a new test pins the prompt-critical lines inside the first 2,048 characters.
+
 ## [0.60.48.0] - 2026-10-04
 
 **A managed Postgres brain now catches up a big sync backlog in one `gbrain sync` run, about 4.6 times faster, and the run tells your agent exactly what happened and what to do next (#5984).**
