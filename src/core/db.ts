@@ -1,4 +1,5 @@
 import postgres from '#postgres'
+import { traceSqlOptions } from './sql-trace.ts';
 import { GBrainError, type EngineConfig } from './types.ts';
 import { SCHEMA_SQL } from './schema-embedded.generated.ts';
 import { applyPostgresForwardReferenceBootstrap } from './engine-sql/bootstrap.ts';
@@ -314,7 +315,7 @@ export async function connect(config: EngineConfig, hooks: { onpoisoned?: (statu
         );
       }
     }
-    sql = postgres(url, opts);
+    sql = postgres(url, traceSqlOptions(opts, 'module'));
 
     // Test connection
     await sql`SELECT 1`;

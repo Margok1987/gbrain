@@ -1074,6 +1074,7 @@
           "private _connectionStyle",
           "private _disconnectPromise",
           "private _factsEmbeddingCastSuffix",
+          "private _heldPageKeys",
           "private _ownsModuleSingleton",
           "private _pageTransaction",
           "private _reconnecting",
@@ -1350,7 +1351,7 @@
           "slug: string",
           "source_id?: string | undefined",
           "source_subject?: string | undefined",
-          "stale: boolean",
+          "stale: boolean | { held_since: string; last_indexed_revision: string | null; }",
           "status?: string | undefined",
           "supersede_penalty?: number | undefined",
           "superseded?: boolean | undefined",
@@ -1756,7 +1757,7 @@
         "kind": "type",
         "name": "ToolLoopStopReason",
         "signature": [
-          "\"length\" | \"end\" | \"refusal\" | \"content_filter\" | \"max_turns\" | \"aborted\" | \"unrecoverable\""
+          "\"length\" | \"unrecoverable\" | \"end\" | \"refusal\" | \"content_filter\" | \"max_turns\" | \"aborted\""
         ]
       },
       {
@@ -4185,10 +4186,12 @@
           "error?: string | undefined",
           "flag_reason?: \"markup_heavy\" | \"oversized\" | undefined",
           "flagged?: boolean | undefined",
+          "frontmatter_recovery?: { quoted: boolean; comment_value: boolean; } | undefined",
           "parsedPage?: ParsedPage | undefined",
           "quarantined?: boolean | undefined",
+          "refusal?: ContentRefusal | undefined",
           "resealed?: { pendingChunks: number; pendingChars: number; } | undefined",
-          "skip_reason?: \"malformed_path\" | \"slug_collision\" | undefined",
+          "skip_reason?: \"content_rejected\" | \"file_too_large\" | \"frontmatter_slug_conflict\" | \"invalid_frontmatter\" | \"parser_regression\" | \"rename_held\" | \"malformed_path\" | \"slug_collision\" | undefined",
           "slug: string",
           "status: \"error\" | \"imported\" | \"skipped\"",
           "type_warning?: { kind: \"alias_of\" | \"undeclared\"; type: string; canonical?: string; directory?: string; } | undefined"
@@ -4305,6 +4308,13 @@
         "name": "pLimit",
         "signature": [
           "(concurrency: number) => <T>(fn: () => Promise<T>) => Promise<T>"
+        ]
+      },
+      {
+        "kind": "variable",
+        "name": "slugConflictHoldMessage",
+        "signature": [
+          "(relativePath: string, expectedSlug: string) => string"
         ]
       },
       {
@@ -4809,6 +4819,92 @@
       {
         "kind": "interface",
         "members": [
+          "code: \"file_too_large\" | \"frontmatter_slug_conflict\" | \"invalid_frontmatter\" | \"parser_regression\" | \"rename_held\"",
+          "key?: string | undefined",
+          "line?: number | undefined",
+          "message: string",
+          "reason?: \"yaml_parse\" | \"needs_interpretation\" | \"ambiguous_identity_key\" | \"ambiguous_protected_key\" | undefined"
+        ],
+        "name": "ContentHold"
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "block: string",
+          "column?: number | undefined",
+          "key?: string | undefined",
+          "line?: number | undefined",
+          "recovery_version: number",
+          "status: FrontmatterRecoveryStatus",
+          "steps: FrontmatterRecoveryStep[]",
+          "yamlReason?: string | undefined"
+        ],
+        "name": "FrontmatterRecovery"
+      },
+      {
+        "kind": "type",
+        "name": "FrontmatterRecoveryStatus",
+        "signature": [
+          "\"needs_interpretation\" | \"ambiguous_identity_key\" | \"ambiguous_protected_key\" | \"clean\" | \"recovered\" | \"unrecoverable\""
+        ]
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "key: string",
+          "kind: RecoveryKind",
+          "line: number",
+          "original: string",
+          "otherLine?: number | undefined",
+          "replacement: string | null"
+        ],
+        "name": "FrontmatterRecoveryStep"
+      },
+      {
+        "kind": "variable",
+        "name": "HOLD_CODES",
+        "signature": [
+          "readonly [\"invalid_frontmatter\", \"frontmatter_slug_conflict\", \"file_too_large\", \"rename_held\", \"parser_regression\"]"
+        ]
+      },
+      {
+        "kind": "type",
+        "name": "HoldCode",
+        "signature": [
+          "\"file_too_large\" | \"frontmatter_slug_conflict\" | \"invalid_frontmatter\" | \"parser_regression\" | \"rename_held\""
+        ]
+      },
+      {
+        "kind": "variable",
+        "name": "IDENTITY_FRONTMATTER_KEYS",
+        "signature": [
+          "readonly string[]"
+        ]
+      },
+      {
+        "kind": "variable",
+        "name": "INVALID_FRONTMATTER_REASONS",
+        "signature": [
+          "readonly [\"yaml_parse\", \"needs_interpretation\", \"ambiguous_identity_key\", \"ambiguous_protected_key\"]"
+        ]
+      },
+      {
+        "kind": "type",
+        "name": "InvalidFrontmatterReason",
+        "signature": [
+          "\"yaml_parse\" | \"needs_interpretation\" | \"ambiguous_identity_key\" | \"ambiguous_protected_key\""
+        ]
+      },
+      {
+        "kind": "variable",
+        "name": "PROTECTED_FRONTMATTER_KEYS",
+        "signature": [
+          "readonly string[]"
+        ]
+      },
+      {
+        "kind": "interface",
+        "members": [
           "activePack?: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; subtypes?: ReadonlyArray<{ name: string; when: { path_pattern?: string; frontmatter_field?: string; frontmatter_value?: unknown; }; }>; }>; } | undefined",
           "expectedSlug?: string | undefined",
           "validate?: boolean | undefined"
@@ -4827,9 +4923,31 @@
         "members": [
           "code: ParseValidationCode",
           "line?: number | undefined",
-          "message: string"
+          "message: string",
+          "recoverable?: boolean | undefined",
+          "recovery?: { kind: RecoveryKind; key: string; line: number; recovery_version: number; }[] | undefined"
         ],
         "name": "ParseValidationError"
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "code: ParseWarningCode",
+          "key: string",
+          "kind?: RecoveryKind | undefined",
+          "line: number",
+          "message: string",
+          "original?: string | undefined",
+          "replacement?: string | undefined"
+        ],
+        "name": "ParseValidationWarning"
+      },
+      {
+        "kind": "type",
+        "name": "ParseWarningCode",
+        "signature": [
+          "\"FRONTMATTER_RECOVERED\" | \"FRONTMATTER_COMMENT_VALUE\""
+        ]
       },
       {
         "kind": "interface",
@@ -4838,14 +4956,30 @@
           "errors?: ParseValidationError[] | undefined",
           "frontmatter: Record<string, unknown>",
           "inferredSubtype?: { type: string; name: string; } | undefined",
+          "recovery?: FrontmatterRecovery | undefined",
           "slug: string",
           "tags: string[]",
           "timeline: string",
           "title: string",
           "type: string",
-          "typeExplicit?: boolean | undefined"
+          "typeExplicit?: boolean | undefined",
+          "warnings?: ParseValidationWarning[] | undefined"
         ],
         "name": "ParsedMarkdown"
+      },
+      {
+        "kind": "variable",
+        "name": "RECOVERY_VERSION",
+        "signature": [
+          "1"
+        ]
+      },
+      {
+        "kind": "type",
+        "name": "RecoveryKind",
+        "signature": [
+          "\"quote\" | \"fold\" | \"dup\" | \"unclosed\""
+        ]
       },
       {
         "kind": "interface",
@@ -4856,9 +4990,23 @@
       },
       {
         "kind": "function",
+        "name": "classifyImportHold",
+        "signature": [
+          "(parsed: ParsedMarkdown, ctx?: { byteLength?: number; maxBytes?: number; codeFile?: boolean; expectedSlug?: string | null; slugExempt?: (declared: string) => boolean; slugConflictMessage?: (found: string, expected: string) => string; }) => ContentHold | null"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "coerceFrontmatterString",
         "signature": [
           "(v: unknown) => string"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "contentSizeHold",
+        "signature": [
+          "(byteLength: number, maxBytes: number, codeFile?: boolean) => ContentHold | null"
         ]
       },
       {
@@ -4877,6 +5025,13 @@
       },
       {
         "kind": "function",
+        "name": "frontmatterHoldMessageWithoutKeys",
+        "signature": [
+          "(message: string) => string"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "inferTypeAndSubtypeFromPack",
         "signature": [
           "(filePath: string | undefined, pack: { page_types: ReadonlyArray<{ name: string; path_prefixes: ReadonlyArray<string>; subtypes?: ReadonlyArray<{ name: string; when: { path_pattern?: string; frontmatter_field?: string; frontmatter_value?: unknown; }; }>; }>; }, frontmatter?: Record<string, unknown>) => { type: PageType; subtype?: string; }"
@@ -4891,6 +5046,13 @@
       },
       {
         "kind": "function",
+        "name": "isFrontmatterHoldMessage",
+        "signature": [
+          "(message: string | null | undefined) => boolean"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "isRelativeFileUri",
         "signature": [
           "(sourceUri: string | null | undefined) => boolean"
@@ -4901,6 +5063,13 @@
         "name": "parseMarkdown",
         "signature": [
           "(content: string, filePath?: string, opts?: ParseOpts) => ParsedMarkdown"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "recoverFrontmatter",
+        "signature": [
+          "(block: string, lineOffset?: number) => FrontmatterRecovery"
         ]
       },
       {
@@ -5456,7 +5625,7 @@
       {
         "kind": "class",
         "members": [
-          "canonical?: \"unknown\" | \"projection_pending\" | \"timeout\" | \"writer_lock_unavailable\" | \"writer_pool_capacity\" | \"owner_unavailable\" | \"recovery_required\" | \"queue_capacity\" | \"revision_required\" | \"revision_conflict\" | \"idempotency_conflict\" | \"source_changed\" | \"write_pending\" | \"storage_error\" | \"cancelled\" | \"permission_denied\" | \"scope_denied\" | \"invalid_params\" | \"not_found\" | \"page_not_found\" | \"page_identity_changed\" | \"write_claim_lost\" | \"request_too_large\" | \"response_too_large\" | \"writer_registration_required\" | \"writer_identity_invalid\" | \"writer_not_initialized\" | \"writer_coordinator_required\" | \"fact_already_expired\" | \"source_writeback_required\" | \"unsupported_mutation_protocol\" | \"writer_upgrade_required\" | \"writer_not_quiesced\" | \"skill_bundle_required\" | \"take_row_collision\" | \"invalid_source_uri\" | \"writer_admin_locked\" | \"connector_account_changed\" | \"connector_intent_outdated\" | \"checkpoint_validation_timeout\" | \"invalid_connector_text\" | \"connector_holds_exhausted\" | \"connector_fence_below_timeline\" | \"embedding_failed\" | \"bucket_not_found\" | \"database_error\" | \"unknown_transport\" | \"rate_limited\" | \"extraction_failed\" | \"fact_not_found\" | \"provenance_required\" | \"unavailable\" | \"budget_unsatisfiable\" | \"embedding_budget_below_worst_case\" | \"access_command_failed\" | \"access_denied_test_user\" | \"access_env_missing\" | \"acknowledgment_unavailable\" | \"admin_policy_enforced\" | \"ambiguous_id\" | \"ambiguous_skill\" | \"api_not_enabled\" | \"approval_required\" | \"autopilot_job_owned_by_other_brain\" | \"benchmark_duplicate_task_id\" | \"benchmark_empty\" | \"benchmark_exists\" | \"benchmark_judge_llm_no_rubric\" | \"benchmark_judge_qrels_no_expected\" | \"benchmark_judge_rule_no_checks\" | \"benchmark_judge_unknown_kind\" | \"benchmark_malformed\" | \"benchmark_missing_judge\" | \"benchmark_missing_task\" | \"benchmark_missing_task_id\" | \"benchmark_not_found\" | \"benchmark_rule_check_bad_arg\" | \"benchmark_rule_check_malformed\" | \"benchmark_rule_check_unknown_op\" | \"bootstrap_empty\" | \"bootstrap_pending_review\" | \"bridge_ownership_conflict\" | \"catalog_unavailable\" | \"chronicle_skipped\" | \"no_pricing\" | \"checkpoint_missing\" | \"claim_already_used\" | \"client_json_unreadable\" | \"client_json_wrong_type\" | \"client_shape_invalid\" | \"code_callees_requires_symbol\" | \"code_callers_requires_symbol\" | \"code_def_requires_symbol\" | \"code_refs_requires_symbol\" | \"code_reused\" | \"colon_slug_windows_write_through\" | \"command_failed\" | \"config_error\" | \"confirmation_required\" | \"conflicting_source_scope\" | \"consent_timeout\" | \"cost_cap_exceeded\" | \"cost_preview_requires_yes\" | \"cycle_failed\" | \"d_sel_too_small\" | \"demo_graph_failed\" | \"demo_import_failed\" | \"demo_verification_failed\" | \"derived_cap_exhausted\" | \"destination_not_ready\" | \"dirty_tree\" | \"effect_not_failed\" | \"embedding_auth_failed\" | \"embedding_configuration\" | \"embedding_disabled\" | \"embedding_model_mismatch\" | \"embedding_plane_split\" | \"embedding_storage_unavailable\" | \"embedding_unavailable\" | \"embedding_unconfigured\" | \"embedding_width_mismatch\" | \"export_limit\" | \"extractor_identity_mismatch\" | \"facts_absorb_write_refused\" | \"facts_payload_expired\" | \"fetch_failed\" | \"full_resync_required\" | \"gate_failed\" | \"git_index_locked\" | \"git_index_stale\" | \"git_push_unavailable\" | \"git_target_unsafe\" | \"git_unavailable\" | \"graph_incomplete\" | \"held_out_overlaps_benchmark\" | \"held_out_required_for_bundled\" | \"independent_principal_required\" | \"insufficient_scope\" | \"internal\" | \"internal_error\" | \"interrupted\" | \"invalid_client\" | \"invalid_grant_clock_skew\" | \"invalid_grant_revoked\" | \"invalid_grant_testing_expiry\" | \"invalid_request\" | \"invalid_source\" | \"invalid_source_pin\" | \"invalid_token\" | \"invalid_write_wait\" | \"legacy_job_selection_invalid\" | \"legacy_jobs_active\" | \"local_conflict\" | \"lock_busy\" | \"managed_pull_skipped\" | \"method_not_allowed\" | \"migration_failed\" | \"migrations_pending\" | \"migrations_running\" | \"missing_source_scope\" | \"missing_source_value\" | \"models_strict_violation\" | \"no_refresh_token\" | \"no_routing_eval\" | \"no_skill_md\" | \"no_worker\" | \"no_worker_surface\" | \"not_a_git_repo\" | \"not_connected\" | \"no_brain\" | \"overlapping_path\" | \"parse_error\" | \"pasted_wrong_url\" | \"payload_too_large\" | \"pending_writes\" | \"pglite_busy\" | \"plan_output_failed\" | \"plan_stale\" | \"port_in_use\" | \"preview_changed\" | \"profile_incompatible\" | \"projection_owner_resident\" | \"publication_pending\" | \"redirect_uri_mismatch\" | \"refresh_dirty\" | \"refresh_diverged\" | \"refresh_drain_timeout\" | \"refresh_no_upstream\" | \"refresh_not_managed\" | \"refresh_not_owner\" | \"refresh_source_changed\" | \"relay_disabled\" | \"relay_session_expired\" | \"relay_unreachable\" | \"request_already_submitted\" | \"requirements_changed\" | \"requires_local_engine\" | \"resume_spec_mismatch\" | \"revision_unavailable\" | \"scope_missing\" | \"serve_port_in_use\" | \"serve_status_only\" | \"shared_skills_unavailable\" | \"shared_skills_unsupported\" | \"skill_asset_not_found\" | \"skill_candidate_invalid\" | \"skill_not_found\" | \"skill_retention_capacity\" | \"source_binding_required\" | \"source_id_taken\" | \"source_not_ready\" | \"source_profile_no_backfill\" | \"source_referenced\" | \"source_root_conflict\" | \"split_bad_ratio\" | \"split_unparseable\" | \"state_mismatch\" | \"sync_not_applicable\" | \"sync_in_progress\" | \"target_escape\" | \"topology_change_required\" | \"trusted_local_only\" | \"unexpected_file_bytes\" | \"unexpected_staging_bytes\" | \"unknown_command\" | \"unknown_flag\" | \"unknown_method\" | \"unknown_source\" | \"unknown_tool\" | \"unmanaged_path\" | \"unsupported_export_data\" | \"upstream\" | \"verification_failed\" | \"withdrawal_capacity\" | \"withdrawal_provenance\" | \"writer_admin_intent_required\" | \"writer_admin_state_changed\" | \"writer_busy\" | \"writer_identity_publish_failed\" | \"writer_manifest_mismatch\" | \"writer_manifest_unsafe\" | \"writer_regrant_required\" | \"writer_transfer_conflict\" | \"writer_transfer_required\" | \"wrong_account_consented\" | undefined",
+          "canonical?: \"unknown\" | \"projection_pending\" | \"timeout\" | \"writer_lock_unavailable\" | \"writer_pool_capacity\" | \"owner_unavailable\" | \"recovery_required\" | \"queue_capacity\" | \"revision_required\" | \"revision_conflict\" | \"idempotency_conflict\" | \"source_changed\" | \"write_pending\" | \"storage_error\" | \"cancelled\" | \"permission_denied\" | \"scope_denied\" | \"invalid_params\" | \"not_found\" | \"page_not_found\" | \"page_identity_changed\" | \"write_claim_lost\" | \"request_too_large\" | \"response_too_large\" | \"writer_registration_required\" | \"writer_identity_invalid\" | \"writer_not_initialized\" | \"writer_coordinator_required\" | \"fact_already_expired\" | \"source_writeback_required\" | \"unsupported_mutation_protocol\" | \"writer_upgrade_required\" | \"writer_not_quiesced\" | \"skill_bundle_required\" | \"take_row_collision\" | \"invalid_source_uri\" | \"writer_admin_locked\" | \"connector_account_changed\" | \"connector_intent_outdated\" | \"checkpoint_validation_timeout\" | \"invalid_connector_text\" | \"connector_holds_exhausted\" | \"connector_fence_below_timeline\" | \"embedding_failed\" | \"bucket_not_found\" | \"database_error\" | \"unknown_transport\" | \"rate_limited\" | \"extraction_failed\" | \"fact_not_found\" | \"provenance_required\" | \"unavailable\" | \"budget_unsatisfiable\" | \"embedding_budget_below_worst_case\" | \"access_command_failed\" | \"access_denied_test_user\" | \"access_env_missing\" | \"acknowledgment_unavailable\" | \"admin_policy_enforced\" | \"ambiguous_id\" | \"ambiguous_skill\" | \"api_not_enabled\" | \"approval_required\" | \"autopilot_job_owned_by_other_brain\" | \"benchmark_duplicate_task_id\" | \"benchmark_empty\" | \"benchmark_exists\" | \"benchmark_judge_llm_no_rubric\" | \"benchmark_judge_qrels_no_expected\" | \"benchmark_judge_rule_no_checks\" | \"benchmark_judge_unknown_kind\" | \"benchmark_malformed\" | \"benchmark_missing_judge\" | \"benchmark_missing_task\" | \"benchmark_missing_task_id\" | \"benchmark_not_found\" | \"benchmark_rule_check_bad_arg\" | \"benchmark_rule_check_malformed\" | \"benchmark_rule_check_unknown_op\" | \"bootstrap_empty\" | \"bootstrap_pending_review\" | \"bridge_ownership_conflict\" | \"catalog_unavailable\" | \"changed_since_preview\" | \"chronicle_skipped\" | \"no_pricing\" | \"checkpoint_missing\" | \"claim_already_used\" | \"client_json_unreadable\" | \"client_json_wrong_type\" | \"client_shape_invalid\" | \"code_callees_requires_symbol\" | \"code_callers_requires_symbol\" | \"code_def_requires_symbol\" | \"code_refs_requires_symbol\" | \"code_reused\" | \"colon_slug_windows_write_through\" | \"command_failed\" | \"config_error\" | \"confirmation_required\" | \"conflicting_source_scope\" | \"consent_timeout\" | \"content_rejected\" | \"cost_cap_exceeded\" | \"cost_preview_requires_yes\" | \"cycle_failed\" | \"d_sel_too_small\" | \"demo_graph_failed\" | \"demo_import_failed\" | \"demo_verification_failed\" | \"derived_cap_exhausted\" | \"destination_not_ready\" | \"dirty_tree\" | \"effect_not_failed\" | \"embedding_auth_failed\" | \"embedding_configuration\" | \"embedding_disabled\" | \"embedding_model_mismatch\" | \"embedding_plane_split\" | \"embedding_storage_unavailable\" | \"embedding_unavailable\" | \"embedding_unconfigured\" | \"embedding_width_mismatch\" | \"export_limit\" | \"extractor_identity_mismatch\" | \"facts_absorb_write_refused\" | \"facts_payload_expired\" | \"fetch_failed\" | \"file_too_large\" | \"frontmatter_slug_conflict\" | \"full_resync_required\" | \"gate_failed\" | \"git_index_locked\" | \"git_index_stale\" | \"git_push_unavailable\" | \"git_target_unsafe\" | \"git_unavailable\" | \"graph_incomplete\" | \"held_out_overlaps_benchmark\" | \"held_out_required_for_bundled\" | \"independent_principal_required\" | \"insufficient_scope\" | \"internal\" | \"internal_error\" | \"interrupted\" | \"invalid_client\" | \"invalid_frontmatter\" | \"invalid_grant_clock_skew\" | \"invalid_grant_revoked\" | \"invalid_grant_testing_expiry\" | \"invalid_request\" | \"invalid_source\" | \"invalid_source_pin\" | \"invalid_token\" | \"invalid_write_wait\" | \"legacy_job_selection_invalid\" | \"legacy_jobs_active\" | \"local_conflict\" | \"lock_busy\" | \"managed_pull_skipped\" | \"method_not_allowed\" | \"migration_failed\" | \"migrations_pending\" | \"migrations_running\" | \"missing_source_scope\" | \"missing_source_value\" | \"models_strict_violation\" | \"no_refresh_token\" | \"no_routing_eval\" | \"no_skill_md\" | \"no_worker\" | \"no_worker_surface\" | \"not_a_git_repo\" | \"not_connected\" | \"no_brain\" | \"overlapping_path\" | \"parse_error\" | \"parser_regression\" | \"pasted_wrong_url\" | \"payload_too_large\" | \"pending_writes\" | \"pglite_busy\" | \"plan_output_failed\" | \"plan_stale\" | \"port_in_use\" | \"preview_changed\" | \"profile_incompatible\" | \"projection_owner_resident\" | \"publication_pending\" | \"redirect_uri_mismatch\" | \"refresh_dirty\" | \"refresh_diverged\" | \"refresh_drain_timeout\" | \"refresh_no_upstream\" | \"refresh_not_managed\" | \"refresh_not_owner\" | \"refresh_source_changed\" | \"relay_disabled\" | \"relay_session_expired\" | \"relay_unreachable\" | \"rename_held\" | \"request_already_submitted\" | \"requirements_changed\" | \"requires_local_engine\" | \"resume_spec_mismatch\" | \"revision_unavailable\" | \"scope_missing\" | \"serve_port_in_use\" | \"serve_status_only\" | \"shared_skills_unavailable\" | \"shared_skills_unsupported\" | \"skill_asset_not_found\" | \"skill_candidate_invalid\" | \"skill_not_found\" | \"skill_retention_capacity\" | \"source_binding_required\" | \"source_id_taken\" | \"source_not_ready\" | \"source_profile_no_backfill\" | \"source_referenced\" | \"source_root_conflict\" | \"split_bad_ratio\" | \"split_unparseable\" | \"state_mismatch\" | \"sync_not_applicable\" | \"sync_in_progress\" | \"sync_parser_regression\" | \"target_escape\" | \"topology_change_required\" | \"trusted_local_only\" | \"unexpected_file_bytes\" | \"unexpected_staging_bytes\" | \"unknown_command\" | \"unknown_flag\" | \"unknown_method\" | \"unknown_source\" | \"unknown_tool\" | \"unmanaged_path\" | \"unsupported_export_data\" | \"upstream\" | \"verification_failed\" | \"withdrawal_capacity\" | \"withdrawal_provenance\" | \"writer_admin_intent_required\" | \"writer_admin_state_changed\" | \"writer_busy\" | \"writer_identity_publish_failed\" | \"writer_manifest_mismatch\" | \"writer_manifest_unsafe\" | \"writer_regrant_required\" | \"writer_transfer_conflict\" | \"writer_transfer_required\" | \"wrong_account_consented\" | undefined",
           "canonicalCode: string",
           "cause?: unknown",
           "code: ErrorCode",
@@ -8065,7 +8234,7 @@
           "slug: string",
           "source_id?: string | undefined",
           "source_subject?: string | undefined",
-          "stale: boolean",
+          "stale: boolean | { held_since: string; last_indexed_revision: string | null; }",
           "status?: string | undefined",
           "supersede_penalty?: number | undefined",
           "superseded?: boolean | undefined",

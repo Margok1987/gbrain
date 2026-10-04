@@ -12,7 +12,7 @@ import { startHeartbeat } from '../../../core/progress.ts';
 import { checkUnverifiedExtractions } from './extraction-sync.ts';
 import type { Check } from '../../doctor.ts';
 import { connectedEngine, type DoctorContext, type DoctorEntry } from '../context.ts';
-import { checkError } from '../check-fix.ts';
+import { agentFix, checkError } from '../check-fix.ts';
 
 async function runContentSanity(ctx: DoctorContext): Promise<Check[]> {
   const { args, progress } = ctx;
@@ -318,11 +318,8 @@ async function runFrontmatter(ctx: DoctorContext): Promise<Check[]> {
   //  - Configurable via GBRAIN_DOCTOR_FM_TIMEOUT_MS (default 30000ms).
   progress.heartbeat('frontmatter_integrity');
   const fmHb = startHeartbeat(progress, 'scanning frontmatter…');
-  const fmTimeoutMs = (() => {
-    const raw = process.env.GBRAIN_DOCTOR_FM_TIMEOUT_MS;
-    const n = raw ? parseInt(raw, 10) : NaN;
-    return Number.isFinite(n) && n > 0 ? n : 30000;
-  })();
+  const { frontmatterScanTimeoutMs, frontmatterRepairableFromReport } = await import('./frontmatter-repairable.ts');
+  const fmTimeoutMs = frontmatterScanTimeoutMs();
   try {
     const { scanBrainSources } = await import('../../../core/brain-writer.ts');
     const fmDeadline = Date.now() + fmTimeoutMs;
@@ -392,9 +389,12 @@ async function runFrontmatter(ctx: DoctorContext): Promise<Check[]> {
           .join(', ');
         sourceMessages.push(`${src.source_id}: ${src.total} (${codes})`);
       }
+      const repairHint = 'Fix: gbrain repair frontmatter --source <id> previews the line fix for every file it can repair (and names the manual fix for the rest, '
+        + 'such as a missing opening ---); on an unmanaged checkout gbrain frontmatter validate <source-path> --fix applies the same safe fixes';
+      const sourcesWithIssues = report.per_source.filter(src => src.total > 0).map(src => src.source_id);
       const fixHint = report.partial
-        ? `Raise GBRAIN_DOCTOR_FM_TIMEOUT_MS or run \`gbrain frontmatter validate <source>\` directly. Fix issues: \`gbrain frontmatter validate <source> --fix\``
-        : `Fix: gbrain frontmatter validate <source-path> --fix`;
+        ? `Raise GBRAIN_DOCTOR_FM_TIMEOUT_MS or run \`gbrain frontmatter validate <source-path>\` directly. ${repairHint}`
+        : repairHint;
       checks.push({
         name: 'frontmatter_integrity',
         status: 'warn',
@@ -402,8 +402,12 @@ async function runFrontmatter(ctx: DoctorContext): Promise<Check[]> {
           `${report.total} frontmatter issue(s)` +
           (report.partial ? ` (PARTIAL SCAN — timeout after ${fmTimeoutMs / 1000}s)` : '') +
           `. ${sourceMessages.join('; ')}. ${fixHint}`,
+        ...(sourcesWithIssues.length === 1 ? { fix: agentFix(['gbrain', 'repair', 'frontmatter', '--source', sourcesWithIssues[0]!],
+          'Previews the line fix for each file the repair can fix and names the manual fix for the rest; it writes nothing.', 'frontmatter_integrity',
+          { docs: 'docs/guides/repair.md#frontmatter' }) } : {}),
       });
     }
+    checks.push(frontmatterRepairableFromReport(report, fmTimeoutMs));
   } catch (e) {
     // Codex outside-voice D4: the abort path returns cleanly via partial
     // state — this catch is purely for unexpected errors (FS permission,
@@ -419,6 +423,6 @@ async function runFrontmatter(ctx: DoctorContext): Promise<Check[]> {
 
 export const frontmatterEntry: DoctorEntry = {
   name: 'frontmatter_integrity',
-  emits: ['frontmatter_integrity'],
+  emits: ['frontmatter_integrity', 'frontmatter_repairable'],
   run: runFrontmatter,
 };

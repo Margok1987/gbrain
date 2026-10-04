@@ -227,6 +227,14 @@ export function syncWatchdogPlan(args: string[], res: HardDeadlineResolution): {
 }
 
 /**
+ * #5984: the shell-quoted `gbrain sync` command that resumes this run with the
+ * same brain, source and cursor-defining options (`args` are the sync argv).
+ */
+export function syncResumeCommand(args: string[], brain: string | null = null): string {
+  return ['gbrain', ...(brain ? ['--brain', brain] : []), 'sync', ...args].map(a => /^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
+}
+
+/**
  * The stdout notice the sync watchdog prints when it stops a run, so the agent
  * sees why the sync ended and the exact command that resumes it (a SIGTERMed
  * process prints no summary of its own). One JSON object under `--json`.
@@ -234,7 +242,7 @@ export function syncWatchdogPlan(args: string[], res: HardDeadlineResolution): {
 export function syncDeadlineStopNotice(args: string[], res: HardDeadlineResolution): string {
   const deadlineSec = Math.round(res.deadlineMs / 1000);
   const windowSec = res.progressWindowMs ? Math.round(res.progressWindowMs / 1000) : null;
-  const resume = ['gbrain', 'sync', ...args].map(a => /^[\w@%+=:,./-]+$/.test(a) ? a : `'${a.replace(/'/g, `'\\''`)}'`).join(' ');
+  const resume = syncResumeCommand(args);
   const cause = windowSec
     ? `the ${deadlineSec}s sync deadline (${res.reason}) passed and the run made no progress for ${windowSec}s`
     : `the ${deadlineSec}s sync deadline (${res.reason}) passed`;

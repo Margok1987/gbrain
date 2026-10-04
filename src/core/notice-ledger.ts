@@ -21,7 +21,7 @@ const MAX_KEYS = 10_000;
 const TTL_MS = 24 * 60 * 60 * 1000;
 export const COACHING_BUDGET_PER_SESSION = 2;
 /** Notices that describe THIS call's result (never deduped): the diagnosis must ride every affected call. */
-export const PER_CALL_NOTICE_CODES: ReadonlySet<string> = new Set(['empty_retrieval', 'unknown_param', 'listing_truncated', 'source_binding_narrowed', 'local_transcripts']);
+export const PER_CALL_NOTICE_CODES: ReadonlySet<string> = new Set(['empty_retrieval', 'unknown_param', 'listing_truncated', 'source_binding_narrowed', 'local_transcripts', 'held_files']);
 
 export interface NoticeAudience {
   transport: Transport;

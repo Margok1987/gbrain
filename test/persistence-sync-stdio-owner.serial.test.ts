@@ -140,7 +140,7 @@ test('resident-owner failure JSON retains safe scoped diagnostics and the frozen
   expect(inspectLockHolder(databasePath).pid).toBe(owner!.pid);
 },90000);
 
-test('resident-owner pending timeout exits nonzero and resumes the same durable request after lock release',async()=>{
+test('resident-owner pending timeout is resumable (exit 0, #5984) and resumes the same durable request after lock release',async()=>{
   const path=join(root,'a.md');
   const content='A resident source observation waiting for the held worktree lock.\n';
   writeFileSync(path,content);
@@ -150,9 +150,9 @@ test('resident-owner pending timeout exits nonzero and resumes the same durable 
   const args=['sync','--source','workspace','--full','--working-tree','--no-pull','--no-embed','--exclude','excluded.md','--exclude','example.ts','--json','--no-hard-deadline'];
   try {
     const pending=await cli([...args,'--timeout','1']);
-    expect(pending.code).toBe(1);
+    expect(pending.code).toBe(0);
     const body=JSON.parse(pending.out);
-    expect(body).toMatchObject({sync_status:'partial',reason:'timeout',added:0,modified:0,
+    expect(body).toMatchObject({sync_status:'partial',reason:'timeout',added:0,modified:0,outcome:'resumable',next:{safe_to_loop:true},
       managed_write:{source_id:'workspace',slug:'a',path:'a.md',write_error:'write_pending'}});
     id=body.managed_write.write_request.request_id;
     expect(body.managed_write.write_request.state).not.toBe('committed');

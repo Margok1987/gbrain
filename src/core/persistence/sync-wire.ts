@@ -5,7 +5,7 @@ import { opError } from '../ops/contract.ts';
 export const SYNC_BOOLEAN_FLAGS = {
   '--full':'full','--dry-run':'dryRun','--no-pull':'noPull','--no-embed':'noEmbed','--no-extract':'noExtract',
   '--no-schema-pack':'noSchemaPack','--retry-failed':'retryFailed','--skip-failed':'skipFailed',
-  '--include-gitignored':'includeGitignored','--working-tree':'workingTree','--reset-checkpoint':'resetCheckpoint',
+  '--include-gitignored':'includeGitignored','--working-tree':'workingTree','--reset-checkpoint':'resetCheckpoint','--no-bulk':'noBulk',
 } as const;
 export const SYNC_VALUE_FLAGS = { '--source':'sourceId','--repo':'repoPath','--src-subpath':'srcSubpath','--strategy':'strategy',
   '--exclude':'exclude','--include-hidden':'includeHidden' } as const;

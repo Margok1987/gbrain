@@ -29,7 +29,7 @@ export const CHECKPOINT_VALIDATION_TIMEOUT_MESSAGE = 'The sync checkpoint valida
 export const REQUEST_INDEXES_REPAIR_COMMAND = 'gbrain repair request-indexes --apply';
 
 const SYNC_PAGE_KINDS = "r.intent->>'kind' IN ('managed_sync_import','managed_sync_delete')";
-export const INCOMPLETE_SYNC_RECEIPT_SQL = `(SELECT r.request_id::text AS request_id FROM persistence_requests r
+const incompleteSyncReceiptSql = (superseded: boolean) => `(SELECT r.request_id::text AS request_id FROM persistence_requests r
     WHERE r.worktree_id=$1::uuid AND r.recovery IS NOT NULL LIMIT 1)
   UNION ALL (SELECT r.request_id::text FROM persistence_requests r
     WHERE r.worktree_id=$1::uuid AND r.intent->>'runId'=$2 AND r.state<>'committed' AND ${SYNC_PAGE_KINDS}
@@ -38,13 +38,19 @@ export const INCOMPLETE_SYNC_RECEIPT_SQL = `(SELECT r.request_id::text AS reques
     WHERE r.worktree_id=$1::uuid AND r.intent->>'runId'=$2 AND r.state<>'committed' AND ${SYNC_PAGE_KINDS}
       AND NOT EXISTS (SELECT 1 FROM persistence_requests committed WHERE committed.source_id=r.source_id
         AND committed.intent->>'runId'=$2 AND committed.intent->>'index'=r.intent->>'index'
-        AND committed.state='committed' AND committed.intent ? 'runId') LIMIT 1)
+        AND committed.state='committed' AND committed.intent ? 'runId')${superseded ? ' AND NOT (r.request_id::text=ANY($3::text[]))' : ''} LIMIT 1)
   LIMIT 1`;
+export const INCOMPLETE_SYNC_RECEIPT_SQL = incompleteSyncReceiptSql(false);
 
-/** The request id of a receipt that blocks the run's checkpoint, or null. */
-export async function findIncompleteSyncReceipt(tx: Pick<BrainEngine, 'executeRaw'>, worktreeId: string, runId: string): Promise<string | null> {
+/**
+ * The request id of a receipt that blocks the run's checkpoint, or null.
+ * `superseded` names failed content-refusal requests the run converted in
+ * place (#5988): their entry was held, so they no longer block the checkpoint.
+ */
+export async function findIncompleteSyncReceipt(tx: Pick<BrainEngine, 'executeRaw'>, worktreeId: string, runId: string, superseded: string[] = []): Promise<string | null> {
   try {
-    const [row] = await tx.executeRaw<{ request_id: string }>(INCOMPLETE_SYNC_RECEIPT_SQL, [worktreeId, runId]);
+    const [row] = await tx.executeRaw<{ request_id: string }>(superseded.length ? incompleteSyncReceiptSql(true) : INCOMPLETE_SYNC_RECEIPT_SQL,
+      superseded.length ? [worktreeId, runId, superseded] : [worktreeId, runId]);
     return row?.request_id ?? null;
   } catch (error) {
     const failure = error as { code?: string; message?: string };

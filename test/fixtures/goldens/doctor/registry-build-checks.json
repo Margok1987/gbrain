@@ -134,6 +134,10 @@
         "name": "sync_failures"
       },
       {
+        "category": "brain",
+        "name": "managed_sync_backlog"
+      },
+      {
         "category": "meta",
         "name": "slug_fallback_audit"
       },
@@ -379,6 +383,14 @@
       },
       {
         "category": "brain",
+        "name": "git_held_files"
+      },
+      {
+        "category": "ops",
+        "name": "frontmatter_hook"
+      },
+      {
+        "category": "brain",
         "name": "orphan_persistence_bindings"
       },
       {
@@ -484,6 +496,10 @@
       {
         "category": "brain",
         "name": "frontmatter_integrity"
+      },
+      {
+        "category": "brain",
+        "name": "frontmatter_repairable"
       },
       {
         "category": "meta",

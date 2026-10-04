@@ -52,6 +52,15 @@ export async function withCoordinatedWrite<T>(engine: BrainEngine, sourceIds: st
       finally { context.active = false; }
     }));
 }
+/**
+ * #5984 bulk: inside one coordinated write that publishes several requests,
+ * names the next request as the actor of the rows it writes. One statement; the
+ * enclosing coordinated write restores the outer values when it ends.
+ */
+export async function setMemberAttribution(engine: Pick<BrainEngine, 'executeRaw'>, attribution: WriteAttribution): Promise<void> {
+  await engine.executeRaw(`SELECT ${ATTRIBUTION_SETTINGS.map((name, index) => `set_config('${name}',$${index + 1},true)`).join(',')}`,
+    [attribution.requestId ?? '', attribution.principal.kind, attribution.principal.id]);
+}
 /** Attribution without coordinator capability, for unmanaged legacy transactions. */
 export function withWriteAttribution<T>(engine: Pick<BrainEngine, 'executeRaw'>, attribution: WriteAttribution, fn: () => Promise<T>): Promise<T> {
   return withTransactionSettings(engine, ATTRIBUTION_SETTINGS, outer => attributionValues(outer, attribution), fn);

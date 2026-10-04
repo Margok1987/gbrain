@@ -1,8 +1,13 @@
 import type { SqlEngine, WriteRequest } from './model.ts';
 import { opError, OperationError } from '../ops/contract.ts';
 
+const declared = new WeakSet<object>();
+/** Transaction-local; #5984: a transaction engine declares it once (a savepoint is its own engine object). */
 export async function declarePersistenceProtocol(tx: SqlEngine): Promise<void> {
+  const inTransaction = (tx as { _pageTransaction?: boolean })._pageTransaction === true;
+  if (inTransaction && declared.has(tx)) return;
   await tx.executeRaw("SELECT set_config('gbrain.persistence_protocol','2',true)");
+  if (inTransaction) declared.add(tx);
 }
 
 export const PERSISTENCE_PROTOCOL_PREDICATE = "set_config('gbrain.persistence_protocol','2',true)='2'";

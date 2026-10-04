@@ -1,18 +1,23 @@
 import { isEmbedSkipped } from '../embed-skip.ts';
 import { isQuarantined } from '../quarantine.ts';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import type { BrainEngine } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
 import type { Page, PageVersion } from '../types.ts';
 import { importFromContent, type ParsedPage } from '../import-file.ts';
-import { parseMarkdown, resolveParsedSubtype, serializePageToMarkdown, resolveSourceLocalFilePath, type ParseOpts } from '../markdown.ts';
+import { frontmatterHoldMessageWithoutKeys, parseMarkdown, resolveParsedSubtype, serializePageToMarkdown, resolveSourceLocalFilePath, type ParseOpts } from '../markdown.ts';
 import { OperationError, opError } from '../ops/contract.ts';
 import { readFix } from '../ops/op-fix.ts';
-import type { Action } from '../agent-output.ts';
+import { shellQuote, type Action } from '../agent-output.ts';
 import type { RegistryCode } from '../error-registry.ts';
-import { pageIdentityError, yamlLocator } from './page-identity.ts';
+import { pageIdentityError } from './page-identity.ts';
+import { contentRefusalError } from '../import-screen.ts';
+import { ContentSanityBlockError } from '../content-sanity.ts';
 import { assertPageRevision, type PageSnapshot } from '../page-state/types.ts';
+import { gitHoldFix, readGitHold } from './sync-holds.ts';
+import { hostOperatorFix } from './held-reads.ts';
+import { heldFileMessage } from './verb-errors.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { recordedPathFromFileUri, scannerSlugRootMode, scannerSourcePath } from '../write-through.ts';
 import { engineMutationPrecondition, parseMutationPrecondition } from './preconditions.ts';
@@ -105,7 +110,7 @@ export function publishesDatabaseOnly(root: string, slug: string, snapshot: Page
   return isSourceDbOnlySlug(root, slug, 'refuse') || isNeverFiledDerivedPage(slug, snapshot.page);
 }
 export async function prepareFileTarget(engine: BrainEngine, row: Pick<WriteRequest, 'source_id' | 'worktree_id' | 'slug'>, snapshot: PageSnapshot | null,
-  content: string | null, hostId?: string, options: { allowMissing?: boolean; capture?: { path: string; hash: string }; activePack?: ParseOpts['activePack'] } = {}): Promise<PreparedMutation['file']> {
+  content: string | null, hostId?: string, options: { allowMissing?: boolean; capture?: { path: string; hash: string }; activePack?: ParseOpts['activePack']; remote?: boolean } = {}): Promise<PreparedMutation['file']> {
   if (!row.worktree_id) return undefined;
   // #5409: a read-only mirror's checkout belongs to its Git remote; nothing is written or removed there.
   if (await sourceMirrorReadOnly(engine, row.source_id)) return undefined;
@@ -158,6 +163,8 @@ export async function prepareFileTarget(engine: BrainEngine, row: Pick<WriteRequ
     // Withdrawal overlays intentionally precede physical mirroring. The ledger
     // is applied by the import preparation and cannot be undone by this check.
     if (digest(actual) !== digest(expected)) {
+      const held = await heldFileRefusal(engine, row, root, path, 'drift', options.remote === true);
+      if (held) throw held;
       const error = new OperationError('source_changed', 'The canonical file contains an uncoordinated local edit.',
         `On the brain host, run gbrain sources reconcile ${row.source_id} ${row.slug} --brain <brain id, host by default> --preview, review and apply the resolved preview, then retry this write with a new request_id. Neither copy was overwritten.`);
       error.detail = 'file_database_drift';
@@ -165,9 +172,40 @@ export async function prepareFileTarget(engine: BrainEngine, row: Pick<WriteRequ
     }
   } else if (before && !snapshot && content !== null && sha256(before) !== sha256(content)
     && !(options.capture && sha256(before) === options.capture.hash)) {
-    throw new OperationError('source_changed', 'An unindexed file already occupies the canonical page path.', 'Import the file before replacing it.');
+    throw await heldFileRefusal(engine, row, root, path, 'occupied', options.remote === true)
+      ?? new OperationError('source_changed', 'An unindexed file already occupies the canonical page path.', 'Import the file before replacing it.');
   }
   return { path, root, content, expectedBeforeHash: before ? sha256(before) : null };
+}
+
+/**
+ * #5988: a drift or occupied-path refusal whose file sync holds names the hold
+ * instead of reconciliation: the page stays read-only for put_page until the
+ * file is repaired. Two point reads, only when the refusal already fires.
+ */
+async function heldFileRefusal(engine: BrainEngine, row: Pick<WriteRequest, 'source_id' | 'slug'>, root: string, path: string,
+  kind: 'drift' | 'occupied', remote: boolean): Promise<OperationError | null> {
+  const [source] = await engine.executeRaw<{ incarnation: string }>('SELECT incarnation::text AS incarnation FROM sources WHERE id=$1', [row.source_id]);
+  const hold = source ? await readGitHold(engine, row.source_id, source.incarnation, relative(root, path).split(sep).join('/')) : null;
+  if (!hold) return null;
+  const effect = kind === 'drift' ? `page ${row.slug} keeps its last good revision and` : `page ${row.slug} does not exist yet and its path`;
+  if (remote) {
+    // Remote callers get the code and the host operator's command, never the held path or key.
+    const error = opError('source_changed', heldFileMessage(kind, hold.code),
+      `Sync holds this page's canonical file in source ${row.source_id} (${hold.code}${hold.meta.reason ? `, ${hold.meta.reason}` : ''}) because gbrain cannot import it, `
+      + `so ${effect} is read-only for put_page until the brain host operator repairs the file; retrying this write refuses the same way. Relay the fix to the user, then submit the intended write with a new request_id. Neither copy was overwritten.`,
+      { fix: hostOperatorFix([row.source_id], `The canonical file of page ${row.slug} is held (${hold.code}): only the brain host operator can inspect and repair it.`) });
+    if (kind === 'drift') error.detail = 'file_database_drift';
+    return error;
+  }
+  const fix = gitHoldFix(hold);
+  const where = [hold.meta.line !== undefined ? `line ${hold.meta.line}` : '', hold.meta.key ? `key "${hold.meta.key}"` : ''].filter(Boolean).join(', ');
+  const error = opError('source_changed', heldFileMessage(kind, hold.code),
+    `Sync holds ${hold.path} in source ${row.source_id} (${hold.code}${hold.meta.reason ? `, ${hold.meta.reason}` : ''}${where ? ` at ${where}` : ''}) because gbrain cannot import it, `
+    + `so ${effect} is read-only for put_page until the file is repaired; retrying this write refuses the same way. `
+    + `Repair the file first (${shellQuote(fix.argv ?? [])}: ${fix.why}), then submit the intended write with a new request_id. Neither copy was overwritten.`, { fix });
+  if (kind === 'drift') error.detail = 'file_database_drift';
+  return error;
 }
 
 /**
@@ -220,7 +258,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     // Tombstones still own their recorded artifact. Purge always attempts its
     // removal before the guarded hard-delete and receipt commit; failure rolls
     // back to the prior row, and replay survives the eventual absence of that row.
-    const file = await prepareFileTarget(engine, row, snapshot, null, undefined, { allowMissing: purge || options.allowMissingFile, activePack });
+    const file = await prepareFileTarget(engine, row, snapshot, null, undefined, { allowMissing: purge || options.allowMissingFile, activePack, remote: row.authority.remote });
     return { observedRevision, noop, file, ...await pageDatabaseOnlyPublication(engine, row, file), apply: async tx => {
       if (purge) {
         await tx.deletePage(row.slug, source);
@@ -283,7 +321,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     resolveParsedSubtype(incoming, snapshot.page);
     const tags = versionTags ?? [...new Set([...snapshot.tags,...incoming.tags])].sort();
     if (digest(canonical(snapshot.page,snapshot.tags)) === digest(canonical(incoming,tags))) {
-      const file=await prepareFileTarget(engine,row,snapshot,targetDeleted ? null : serializePageToMarkdown(snapshot.page,snapshot.tags),undefined,{ activePack });
+      const file=await prepareFileTarget(engine,row,snapshot,targetDeleted ? null : serializePageToMarkdown(snapshot.page,snapshot.tags),undefined,{ activePack, remote: row.authority.remote });
       return {observedRevision,noop:true,file,...await pageDatabaseOnlyPublication(engine,row,file),
         apply:async()=>({...pageNoopAdvisories(row),status:'skipped',slug:row.slug,source_id:row.source_id,noop:true,chunks:0,chunk_skip_reason:'write_skipped',
           ...(row.operation==='capture'?{channel:'capture',content_hash:p.capture_hash}:{})})};
@@ -300,17 +338,20 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     ingested_via: typeof p.ingested_via === 'string' ? p.ingested_via : null,
     prepareFrontmatter: page => { provenance = putProvenance(row, snapshot, page); },
     prepare: async value => { prepared = value; return value.result; },
+  }).catch(error => {
+    if (!(error instanceof ContentSanityBlockError)) throw error;
+    throw contentRefusalError({ code: 'content_rejected', message: error.message },
+      'The operator set content_sanity.junk_disposition to reject, so this content refuses on every retry. Remove the matched junk and submit the corrected content with a new request_id.');
   });
   signal?.throwIfAborted();
   if (!prepared) {
-    const oversized = result.error?.startsWith('Content too large') === true;
-    const yaml = !oversized && /yaml/i.test(result.error ?? '');
-    throw opError(oversized ? 'request_too_large' : 'invalid_params', oversized ? result.error!
-      : yaml ? `Invalid YAML frontmatter${yamlLocator(result.error)}. Quote scalar values or fix the frontmatter block.`
-      : 'The content was rejected before publication.',
-      oversized ? 'Split the content into smaller pages, then submit each with its own request_id.'
-      : yaml ? 'Quote frontmatter values that contain ": " or start with a special character, then submit the corrected content with a new request_id.'
-      : 'Check the content and frontmatter, then submit the corrected content with a new request_id.');
+    // A remote caller's refusal names the line, never a key: keys can be private, and the receipt keeps the message.
+    const refusal = result.refusal && row.authority.remote && result.refusal.code === 'invalid_frontmatter'
+      ? { ...result.refusal, key: undefined, message: frontmatterHoldMessageWithoutKeys(result.refusal.message) } : result.refusal;
+    if (refusal?.code === 'file_too_large') throw contentRefusalError(refusal, 'Split the content into smaller pages, then submit each with its own request_id.', { legacy_error: 'request_too_large' });
+    if (refusal) throw contentRefusalError(refusal, `Correct ${refusal.line !== undefined ? `frontmatter line ${refusal.line}${refusal.key ? ` (key "${refusal.key}")` : ''}` : 'the frontmatter'}: one line per key with its whole value quoted, then submit the corrected content with a new request_id.`,
+      { legacy_error: 'invalid_params' });
+    throw opError('invalid_params', 'The content was rejected before publication.', 'Check the content and frontmatter, then submit the corrected content with a new request_id.');
   }
   const ready = prepared;
   if (ready.observedRevision !== observedRevision) throw pageRefusal('revision_conflict', 'The page changed during import preparation.', row,
@@ -345,7 +386,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
     ? await prepareAutomaticLinks(engine,row.slug,ready.parsedPage,row.source_id) : undefined;
   const capture = row.operation === 'capture' && typeof p.capture_path === 'string' && typeof p.capture_file_hash === 'string'
     ? { path: p.capture_path, hash: p.capture_file_hash } : undefined;
-  const file = await prepareFileTarget(engine, row, snapshot, targetDeleted ? null : rendered, undefined, { capture, allowMissing: options.allowMissingFile, activePack });
+  const file = await prepareFileTarget(engine, row, snapshot, targetDeleted ? null : rendered, undefined, { capture, allowMissing: options.allowMissingFile, activePack, remote: row.authority.remote });
   const mintMode = file && !snapshot?.page.source_path ? await scannerSlugRootMode(engine, row.source_id, file.root) : undefined;
   const sourcePath = file && mintMode ? scannerSourcePath(file.root, file.path, mintMode) : undefined;
   // An inferred mode is pinned with the first origin it mints, so later pages cannot flip the inference (#5610).

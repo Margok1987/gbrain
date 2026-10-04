@@ -648,6 +648,19 @@ export class ManagedConnectorSync {
       pending = outstanding();
     }
   }
+  /**
+   * #5984: a withdrawal mirror still rewriting this page's file would change the bytes this write freezes as its
+   * expected before-image. Claims already wait for the mirror; admission waits too (within the run's wait budget).
+   */
+  private async awaitPageMirror(slug: string): Promise<void> {
+    if (!this.binding) return;
+    const pending = async () => (await this.engine.executeRaw(`SELECT 1 FROM persistence_effects WHERE worktree_id=$1::uuid AND kind='withdrawal-mirror'
+      AND state IN ('queued','running') AND (NOT (data ? 'targets') OR data->'targets' @> jsonb_build_array(jsonb_build_object('slug',$2::text))) LIMIT 1`,
+    [this.binding!.worktree_id, slug])).length > 0;
+    if (!await pending()) return;
+    startPersistenceConsumer(this.engine, loadConfig() ?? { engine: this.engine.kind }).wake();
+    while (this.remainingWait() > 0 && await pending()) await new Promise(resolve => setTimeout(resolve, 50));
+  }
   /** Keeps outstanding writes below the principal's outstanding and intent-byte limits; stops the sweep when it cannot. */
   private async makeRoom(): Promise<void> {
     const full = () => this.pendingRows.size >= this.outstandingCap ||
@@ -763,6 +776,7 @@ export class ManagedConnectorSync {
   private async submit(kind: ConnectorIntentKind, slug: string, sourcePath: string | null, extra: Partial<ConnectorIntent>):
     Promise<{ row: WriteRequest | null; pending: boolean; created: boolean }> {
     await this.awaitPagePending(slug);
+    await this.awaitPageMirror(slug);
     await this.recover(slug);
     const snapshot = await this.engine.readPageSnapshot(slug, { sourceId: this.sourceId, includeDeleted: true });
     if (kind === 'connector_v2_google_receipts') {

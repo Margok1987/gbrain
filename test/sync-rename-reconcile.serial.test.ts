@@ -2285,6 +2285,8 @@ describe('#3583 review: GATE13 — chunker_version is acknowledged only by a com
     // Invalid YAML frontmatter, NOT a NUL byte: #3998 NUL-sanitizes page
     // bodies at write time, so a NUL now ingests cleanly instead of failing.
     writeFileSync(join(repo, 'people/alpha.md'), '---\ntitle: [unclosed\n---\ngarbage\n');
+    // #5988: content refusals are held by default; sync.holds=fail keeps the fail-closed gate this test exercises.
+    await engine.setConfig('sync.holds', 'fail');
     const blocked = await performSync(engine, { repoPath: repo, ...SYNC_OPTS });
     expect(blocked.status).toBe('blocked_by_failures');
     const staleVersion = await engine.executeRaw<{ chunker_version: string | null }>(
@@ -2303,6 +2305,7 @@ describe('#3583 review: GATE13 — chunker_version is acknowledged only by a com
     );
     expect(ackedVersion[0]?.chunker_version).toBe(String(CHUNKER_VERSION));
     expect(await engine.getPage('people/alpha')).not.toBeNull();
+    await engine.setConfig('sync.holds', 'hold');
   });
 });
 
@@ -2527,6 +2530,8 @@ describe('rename destination import: an errored skip must not checkpoint the ren
     expect(execSync('git diff --name-status -M HEAD~1 HEAD', { cwd: repo }).toString())
       .toMatch(/^R\d+\tpeople\/alpha\.md\tpeople\/beta\.md\n$/);
 
+    // #5988: content refusals are held by default; sync.holds=fail keeps the fail-closed gate this test exercises.
+    await engine.setConfig('sync.holds', 'fail');
     const first = await performSync(engine, { repoPath: repo, ...SYNC_OPTS });
     expect(first.status).toBe('blocked_by_failures');
     // The cheap DB-level rename (updateSlug) runs unconditionally before
@@ -2554,6 +2559,7 @@ describe('rename destination import: an errored skip must not checkpoint the ren
     const third = await performSync(engine, { repoPath: repo, ...SYNC_OPTS });
     expect(third.status).toBe('synced');
     expect((await engine.getPage('people/beta'))?.compiled_truth).toBe('Alpha is a person, fixed.');
+    await engine.setConfig('sync.holds', 'hold');
   });
 });
 

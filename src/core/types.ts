@@ -809,7 +809,8 @@ export interface SearchResult {
   chunk_id: number;
   chunk_index: number;
   score: number;
-  stale: boolean;
+  /** #5988: `{ held_since, last_indexed_revision }` when sync holds the page's newer file (stampHeldHits). */
+  stale: boolean | { held_since: string; last_indexed_revision: string | null };
   /**
    * v0.42 (issue #1699) content-quality gate agent-warning channel. Set
    * when the result's page carries a `frontmatter.content_flag` marker

@@ -780,6 +780,9 @@ CREATE TABLE IF NOT EXISTS op_checkpoints (
 );
 CREATE INDEX IF NOT EXISTS op_checkpoints_updated_at_idx
   ON op_checkpoints (updated_at);
+-- #5988: read paths find the Git hold of a page by its id (migration v200).
+CREATE INDEX IF NOT EXISTS op_checkpoints_sync_hold_page_idx
+  ON op_checkpoints ((completed_keys->0->>'page_id')) WHERE op = 'sync-hold';
 
 -- #1794: append-only delta storage. One row per completed path; sync's
 -- appendCompleted INSERTs only the delta instead of rewriting the whole

@@ -87,15 +87,11 @@ export async function assertLifetimeIdHeadroom(engine: SqlEngine, principal: Pri
     if (used + needed > limit) throw await cumulativeCapacityError(engine, `${scope} permanent request IDs`, key, `${scope}LifetimeIds`, used, limit);
   }
 }
+/** Creates and locks the counter rows in key order: two statements for any number of keys (#5984 round-trip diet). */
 export async function lockCounters(tx: SqlEngine, keys: string[]): Promise<Counter[]> {
   const sorted = [...new Set(keys)].sort();
-  for (const key of sorted) await tx.executeRaw('INSERT INTO persistence_counters(key) VALUES ($1) ON CONFLICT DO NOTHING', [key]);
-  const result: Counter[] = [];
-  for (const key of sorted) {
-    const [row] = await tx.executeRaw<Counter>('SELECT * FROM persistence_counters WHERE key=$1 FOR UPDATE', [key]);
-    result.push(row);
-  }
-  return result;
+  await tx.executeRaw('INSERT INTO persistence_counters(key) SELECT k FROM unnest($1::text[]) WITH ORDINALITY AS u(k,n) ORDER BY n ON CONFLICT DO NOTHING', [sorted]);
+  return tx.executeRaw<Counter>('SELECT * FROM persistence_counters WHERE key=ANY($1::text[]) ORDER BY key COLLATE "C" FOR UPDATE', [sorted]);
 }
 export async function getWriteRequest(engine: SqlEngine, principal: Principal, requestId: string): Promise<WriteRequest | null> {
   const [row] = await engine.executeRaw<WriteRequest>(
@@ -112,6 +108,13 @@ export async function assertPageRequestIdentity(engine: SqlEngine, principal: Pr
 }
 export async function getWriteRequestById(engine: SqlEngine, id: string, signal?: AbortSignal): Promise<WriteRequest | null> {
   const [row] = await engine.executeRaw<WriteRequest>('SELECT * FROM persistence_requests WHERE id=$1::uuid', [id], { signal });
+  return row ?? null;
+}
+/** #5984: the columns a waiter needs while a request is unfinished; the full row is read once it is terminal. */
+export type WriteRequestProgress = Pick<WriteRequest, 'state' | 'error_code' | 'error_message' | 'completed_at' | 'updated_at' | 'blocked_reason' | 'outcome'>;
+export const WRITE_PROGRESS_SQL = 'SELECT state,error_code,error_message,completed_at,updated_at,blocked_reason,outcome FROM persistence_requests WHERE id=$1::uuid';
+export async function getWriteRequestProgress(engine: SqlEngine, id: string, signal?: AbortSignal): Promise<WriteRequestProgress | null> {
+  const [row] = await engine.executeRaw<WriteRequestProgress>(WRITE_PROGRESS_SQL, [id], { signal });
   return row ?? null;
 }
 export function intentDigest(a: Pick<WriteAdmission, 'operation' | 'sourceId' | 'slug' | 'callerIntent'>): string {
@@ -202,6 +205,124 @@ async function prepareAdmission(engine: BrainEngine, input: WriteAdmission, over
     [counters.map(c => c.key), bytes, terminalBytes]);
     return row;
   } };
+}
+
+/**
+ * #5984 bulk sync: admits consecutive managed-sync page requests of one cursor
+ * in one transaction. Each page keeps its own request row, request ID, digest
+ * and receipt; the shared checks (worktree fence, binding, source, counters)
+ * run once and the rows are inserted in order, so their sequences keep the
+ * manifest order. Replays return the prior rows, as single admission does.
+ */
+export async function admitWriteGroupInTransaction(tx: BrainEngine, inputs: WriteAdmission[], overrides?: Partial<JournalLimits>): Promise<WriteRequest[]> {
+  const first = inputs[0];
+  if (!first) return [];
+  if (inputs.some(input => input.sourceId !== first.sourceId || input.sourceIncarnation !== first.sourceIncarnation || input.worktreeId !== first.worktreeId
+    || String(input.topologyGeneration) !== String(first.topologyGeneration) || input.principal.kind !== first.principal.kind || input.principal.id !== first.principal.id
+    || input.operation !== first.operation || (input.targetKind ?? 'page') !== 'page' || (input.protocolVersion ?? 1) !== 1 || digest(input.authority) !== digest(first.authority))) {
+    throw new TypeError('A group admission requires one source, worktree, principal, operation and authority.');
+  }
+  const limits = await readJournalLimits(tx, overrides);
+  const stamp = writerStamp();
+  const items = inputs.map(input => ({ input, requestId: requireUuid(input.requestId ?? randomUUID()), fingerprint: intentDigest(input),
+    bytes: jsonBytes(input.intent) + jsonBytes(input.authority), terminalBytes: input.terminalReservation ?? Math.max(16_384, jsonBytes(input.authority) + 8192) }));
+  await declarePersistenceProtocol(tx);
+  assertMutationProtocol({ target_kind: 'page', protocol_version: 1 });
+  if (first.worktreeId) {
+    await tx.executeRaw('SELECT id FROM persistence_worktrees WHERE id=$1::uuid FOR SHARE', [first.worktreeId]);
+    await assertWorktreeNotRefreshing(tx, first);
+    const binding = await tx.executeRaw(`SELECT source_id FROM persistence_source_bindings WHERE source_id=$1
+      AND source_incarnation=$2::uuid AND worktree_id=$3::uuid AND topology_generation=$4`,
+    [first.sourceId, first.sourceIncarnation, first.worktreeId, first.topologyGeneration]);
+    if (!binding.length) throw opError('source_changed', 'The source binding changed during admission.',
+      `Source ${first.sourceId}'s worktree binding changed (a claim, transfer or lifecycle change) while this write was being admitted, so nothing was accepted. Check the owner with the command in fix, then submit the write again; reusing the same request_id is safe because nothing was recorded.`,
+      { fix: ownerStatusFix(first.sourceId) });
+  }
+  const [source] = await tx.executeRaw<{ incarnation: string; archived: boolean }>('SELECT incarnation,archived FROM sources WHERE id=$1 FOR SHARE', [first.sourceId]);
+  if (!source || source.archived || source.incarnation !== first.sourceIncarnation) {
+    throw new OperationError('source_changed', 'The write source is missing, archived, or was replaced.', 'Resolve the source again and submit a new request.');
+  }
+  for (const { input } of items) await authorizeWrite(tx, input.authority, input.operation, input.slug, true);
+  const counters = await lockCounters(tx, ['brain', principalKey(first.principal)]);
+  const ids = items.map(item => item.requestId);
+  if (first.principal.kind === 'local_cli') {
+    const [topology] = await tx.executeRaw<{ request_id: string }>('SELECT request_id FROM persistence_topology_changes WHERE principal_id=$1::uuid AND request_id=ANY($2::uuid[]) LIMIT 1', [first.principal.id, ids]);
+    if (topology) throw lifecycleIdConflict(topology.request_id);
+  }
+  const priors = new Map((await tx.executeRaw<WriteRequest>('SELECT * FROM persistence_requests WHERE principal_kind=$1 AND principal_id=$2 AND request_id=ANY($3::uuid[])',
+    [first.principal.kind, first.principal.id, ids])).map(row => [row.request_id, row]));
+  for (const item of items) {
+    const prior = priors.get(item.requestId);
+    if (!prior) continue;
+    if ((prior.target_kind ?? 'page') !== 'page' || (prior.protocol_version ?? 1) !== 1) throw opError('idempotency_conflict', 'This request_id belongs to a different mutation target or protocol.',
+      `Request ID ${item.requestId} was already accepted for a ${prior.target_kind ?? 'page'} write (protocol ${prior.protocol_version ?? 1}), so this page write was not admitted. Read the original request${prior.principal_kind === 'local_cli' ? ' with the command in fix' : ' with get_write_request'} if you meant to replay it; otherwise submit this write with a new request_id.`,
+      prior.principal_kind === 'local_cli' ? { fix: requestInspectFix(prior) } : {});
+    assertReplayIntent(prior, item.fingerprint);
+  }
+  const fresh = items.filter(item => !priors.has(item.requestId));
+  if (fresh.length) {
+    const bytes = fresh.reduce((sum, item) => sum + item.bytes, 0), terminalBytes = fresh.reduce((sum, item) => sum + item.terminalBytes, 0);
+    for (const row of counters) {
+      const brain = row.key === 'brain', scope = brain ? 'brain' : 'principal';
+      if (Number(row.outstanding_count) + fresh.length > (brain ? limits.brainOutstanding : limits.principalOutstanding)) throw capacityError(`${scope} outstanding requests`);
+      if (Number(row.intent_bytes) + bytes > (brain ? limits.brainIntentBytes : limits.principalIntentBytes)) throw capacityError(`${scope} intent bytes`);
+      if (Number(row.lifetime_ids) + fresh.length > limits[`${scope}LifetimeIds`]) throw await cumulativeCapacityError(tx, `${scope} permanent request IDs`,
+        row.key, `${scope}LifetimeIds`, Number(row.lifetime_ids), limits[`${scope}LifetimeIds`]);
+      if (Number(row.terminal_bytes) + terminalBytes > limits[`${scope}TerminalBytes`]) throw await cumulativeCapacityError(tx, `${scope} reserved receipt bytes`,
+        row.key, `${scope}TerminalBytes`, Number(row.terminal_bytes), limits[`${scope}TerminalBytes`]);
+    }
+    const rows = await tx.executeRaw<WriteRequest>(`INSERT INTO persistence_requests
+      (principal_kind,principal_id,request_id,operation,source_id,source_incarnation,page_id,slug,
+       worktree_id,topology_generation,digest,intent,authority,intent_bytes,terminal_reservation,target_kind,protocol_version,
+       admitter_version,admitter_host_id)
+      SELECT $1,$2,(e->>'request_id')::uuid,$3,$4,$5::uuid,(e->>'page_id')::integer,e->>'slug',$6::uuid,$7,e->>'digest',e->'intent',$8::text::jsonb,
+        (e->>'intent_bytes')::bigint,(e->>'terminal_reservation')::bigint,'page',1,$9,$10::uuid
+      FROM jsonb_array_elements($11::text::jsonb) WITH ORDINALITY AS t(e,n) ORDER BY n
+      RETURNING *`, [first.principal.kind, first.principal.id, first.operation, first.sourceId, first.sourceIncarnation, first.worktreeId ?? null,
+      first.topologyGeneration ?? null, JSON.stringify(first.authority), stamp.version, stamp.hostId,
+      JSON.stringify(fresh.map(item => ({ request_id: item.requestId, page_id: item.input.pageId ?? null, slug: item.input.slug, digest: item.fingerprint,
+        intent: item.input.intent, intent_bytes: item.bytes, terminal_reservation: item.terminalBytes })))]);
+    for (const row of rows) priors.set(row.request_id, row);
+    await tx.executeRaw(`UPDATE persistence_counters SET outstanding_count=outstanding_count+$4,
+      intent_bytes=intent_bytes+$2,lifetime_ids=lifetime_ids+$4,terminal_bytes=terminal_bytes+$3 WHERE key=ANY($1::text[])`,
+    [counters.map(c => c.key), bytes, terminalBytes, fresh.length]);
+  }
+  return items.map(item => priors.get(item.requestId)!);
+}
+
+/**
+ * #5984 bulk sync: after claiming a group's head, claims the queued members of
+ * the same group that directly follow it on its worktree, in sequence order,
+ * stopping at the first row that is not a queued member of the group. A member
+ * is never claimed past an unfinished non-member, so the FIFO order holds.
+ */
+export async function claimGroupFollowers(engine: BrainEngine, head: WriteRequest, group: string, max: number, leaseMs = 30_000): Promise<WriteRequest[]> {
+  if (!head.worktree_id || max <= 0) return [];
+  return engine.transactionDirect(async tx => {
+    await declarePersistenceProtocol(tx);
+    const next = await tx.executeRaw<{ id: string; state: string; grp: string | null; recovering: boolean }>(`SELECT id,state,intent->>'group' AS grp,recovery IS NOT NULL AS recovering
+      FROM persistence_requests WHERE worktree_id=$1::uuid AND sequence>$2 AND (state IN ('queued','running','recovering') OR recovery IS NOT NULL)
+      ORDER BY sequence LIMIT $3 FOR UPDATE`, [head.worktree_id, head.sequence, max]);
+    const members: string[] = [];
+    for (const row of next) {
+      if (row.grp !== group || row.state !== 'queued' || row.recovering) break;
+      members.push(row.id);
+    }
+    if (!members.length) return [];
+    const tokens = members.map(() => randomUUID());
+    return tx.executeRaw<WriteRequest>(`UPDATE persistence_requests r SET state='running',execution_token=t.token,
+      claim_expires_at=now()+($3::double precision*interval '1 millisecond'),updated_at=now(),blocked_reason=NULL
+      FROM unnest($1::uuid[],$2::uuid[]) AS t(id,token) WHERE r.id=t.id AND r.state='queued' RETURNING r.*`, [members, tokens, leaseMs])
+      .then(rows => rows.sort((a, b) => Number(BigInt(a.sequence) - BigInt(b.sequence))));
+  });
+}
+
+/** Renews every claim of a group in one statement; returns the ids still held. */
+export async function renewGroupClaims(engine: SqlEngine, rows: WriteRequest[], leaseMs = 30_000, signal?: AbortSignal): Promise<Set<string>> {
+  const held = await engine.executeRaw<{ id: string }>(`UPDATE persistence_requests r SET claim_expires_at=now()+($3::double precision*interval '1 millisecond'),updated_at=now()
+    FROM unnest($1::uuid[],$2::uuid[]) AS t(id,token) WHERE r.id=t.id AND r.execution_token=t.token AND r.state='running' AND ${PERSISTENCE_PROTOCOL_PREDICATE} RETURNING r.id`,
+  [rows.map(row => row.id), rows.map(row => row.execution_token), leaseMs], { signal });
+  return new Set(held.map(row => row.id));
 }
 
 /**
@@ -320,14 +441,18 @@ export async function prepareRecovery(engine: BrainEngine, row: WriteRequest, re
 
 /** In the SAME transaction as page publication. Counters are always before request locks. */
 export async function completeWrite(tx: SqlEngine, row: WriteRequest, state: 'committed' | 'conflict' | 'failed' | 'cancelled',
-  outcome: Record<string, unknown>, error?: { code: string; message: string; detail?: unknown }): Promise<WriteRequest> {
+  outcome: Record<string, unknown>, error?: { code: string; message: string; detail?: unknown },
+  /** #5984: the caller's transaction already declared the protocol, set synchronous_commit, locked these counters and this row FOR UPDATE. */
+  locked?: WriteRequest): Promise<WriteRequest> {
   // Every acknowledged terminal state survives a crash, including cancellation
   // and pre-publication failures that do not enter the file coordinator.
-  await tx.executeRaw("SELECT set_config('synchronous_commit','on',true)");
-  await declarePersistenceProtocol(tx);
-  const keys = ['brain', principalKey(requestPrincipal(row)), ...(row.worktree_id ? [`worktree:${row.worktree_id}`] : [])];
-  await lockCounters(tx, keys);
-  const [current] = await tx.executeRaw<WriteRequest>('SELECT * FROM persistence_requests WHERE id=$1::uuid FOR UPDATE', [row.id]);
+  let current = locked;
+  if (!current) {
+    await tx.executeRaw("SELECT set_config('synchronous_commit','on',true)");
+    await declarePersistenceProtocol(tx);
+    await lockCounters(tx, ['brain', principalKey(requestPrincipal(row)), ...(row.worktree_id ? [`worktree:${row.worktree_id}`] : [])]);
+    [current] = await tx.executeRaw<WriteRequest>('SELECT * FROM persistence_requests WHERE id=$1::uuid FOR UPDATE', [row.id]);
+  }
   if (!current) throw opError('not_found', 'Write request not found.',
     `The journal row of request ${row.request_id} in source ${row.source_id} disappeared before its completion was recorded, so no outcome was saved. Inspect the source's requests with the command in fix before submitting anything again.`,
     { fix: ownerStatusFix(row.source_id) });

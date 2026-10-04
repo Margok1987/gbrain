@@ -1595,6 +1595,10 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'sync.cost_gate_min_usd',
   'sync.federated_v2',
   'sync.include_working_tree',
+  // #5984: managed Postgres sync publishes pages in bulk groups (on by default; each page keeps its own request).
+  'sync.bulk',
+  'sync.bulk_size',
+  'sync.bulk_max_txn_ms',
   // Persisted indexing scope (comma/newline-separated glob list; trailing '/'
   // normalizes to a '/**' subtree glob). Read best-effort at the top of
   // performSyncInner and UNIONED with any per-call --exclude so internal
@@ -1605,6 +1609,14 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // #4901: the dot-directory WAIVER's persisted twin (unioned with the per-call
   // include-hidden flag, which bulk sync refuses); registered so `config set` accepts it.
   'sync.include_hidden',
+  // #5988: Git sync holds (read by readSyncHoldPolicy). `sync.holds=fail`
+  // restores fail-closed blocking; the rest tune detail, escalation and the
+  // parser-regression stop. Registered so the documented `config set` works.
+  'sync.holds',
+  'sync.hold_cap',
+  'sync.hold_escalate_count',
+  'sync.hold_escalate_pct',
+  'sync.parser_regression',
   // #2179: clamp window for DCR-requested per-client token TTLs. Read by
   // `gbrain serve --http` at startup; unset min defaults to 300s, unset max
   // defaults fail-closed to max(--token-ttl, min).

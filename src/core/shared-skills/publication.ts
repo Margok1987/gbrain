@@ -21,6 +21,7 @@ import { localHostId } from '../persistence/identity.ts';
 import { withCoordinatedWrite } from '../persistence/context.ts';
 import { requestAttribution } from '../persistence/attribution.ts';
 import { normalizeSkillFiles, skillMetadata, skillName, skillPath } from './manifest.ts';
+import { forgetSharedPacks } from './knowledge-guard.ts';
 import { assertSkillCapability, assertStoredSkillCapability, publicationEnabled, readSharedSkillPolicy, setSharedSkillPolicy } from './policy.ts';
 import { SHARED_SKILL_LIMITS, type SharedSkillFile, type SharedSkillPolicy, type SharedSkillPutInput, type SkillMetadata, type StoredSkillFile, type StoredSkillRevision } from './model.ts';
 import { assertSharedSkillRetentionCapacity, pruneSharedSkillRevisionsInTransaction, sharedSkillRetentionCapacity, sharedSkillRetentionStatus } from './retention.ts';
@@ -513,6 +514,7 @@ export async function prepareSharedSkillMutation(engine: BrainEngine, row: Write
         VALUES($1,$2::uuid,$3,$4::uuid,$5::text::jsonb,$6) ON CONFLICT(source_id,source_incarnation)
         DO UPDATE SET revision=excluded.revision,manifest=excluded.manifest,manifest_hash=excluded.manifest_hash`,
       [row.source_id, row.source_incarnation, intent.pack_id, packRevision, JSON.stringify(manifest), sha256(manifestContent)]);
+      forgetSharedPacks(tx);
       const primary = revisions.find(r => r.name === intent.name)!;
       const retained = !row.authority.remote ? await sharedSkillRetentionStatus(tx, row.source_id, row.source_incarnation) : undefined;
       return { status: primary.deleted ? 'deleted' : 'published', source_id: row.source_id, source_incarnation: row.source_incarnation,

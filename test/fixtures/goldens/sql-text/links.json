@@ -284,56 +284,29 @@
           {
             "lane": "tx",
             "params": [
-              "string",
-              "string"
+              "array<string>",
+              "array<string>"
             ],
-            "sql": "INSERT INTO page_write_guards(source_incarnation,slug) VALUES ($1::uuid,$2) ON CONFLICT DO NOTHING",
-            "textSha256": "fa56fa770a66caa8ae77b19c2c3ae9caac336d8e8281bc16f09d36a7fcdd74fd"
+            "sql": "INSERT INTO page_write_guards(source_incarnation,slug) SELECT i,s FROM unnest($1::uuid[],$2::text[]) WITH ORDINALITY AS k(i,s,n) ORDER BY n ON CONFLICT DO NOTHING",
+            "textSha256": "db6394eda2abba2a8ba0e233234bb764b79859d5462be942b725e581e8249151"
           },
           {
             "lane": "tx",
             "params": [
-              "string",
-              "string"
+              "array<string>",
+              "array<string>"
             ],
-            "sql": "SELECT slug FROM page_write_guards WHERE source_incarnation=$1::uuid AND slug=$2 FOR UPDATE",
-            "textSha256": "3d08e10394edab70fb78946e378dd11528213526b214a8516d8cf3825e87ac19"
+            "sql": "SELECT g.slug FROM unnest($1::uuid[],$2::text[]) WITH ORDINALITY AS k(i,s,n) JOIN page_write_guards g ON g.source_incarnation=k.i AND g.slug=k.s ORDER BY k.n FOR UPDATE OF g",
+            "textSha256": "69ee3b628ca6ff5d3e9e33077b9b22cb99da711d1bce84a4a566944b81d83d8e"
           },
           {
             "lane": "tx",
             "params": [
-              "string",
-              "string"
+              "array<string>",
+              "array<string>"
             ],
-            "sql": "SELECT id FROM pages WHERE source_id=$1 AND slug=$2 FOR UPDATE",
-            "textSha256": "6c2eb61492fe7470a32169e89b9f04d471f3311d55ff790ad08f4736af483a2c"
-          },
-          {
-            "lane": "tx",
-            "params": [
-              "string",
-              "string"
-            ],
-            "sql": "INSERT INTO page_write_guards(source_incarnation,slug) VALUES ($1::uuid,$2) ON CONFLICT DO NOTHING",
-            "textSha256": "fa56fa770a66caa8ae77b19c2c3ae9caac336d8e8281bc16f09d36a7fcdd74fd"
-          },
-          {
-            "lane": "tx",
-            "params": [
-              "string",
-              "string"
-            ],
-            "sql": "SELECT slug FROM page_write_guards WHERE source_incarnation=$1::uuid AND slug=$2 FOR UPDATE",
-            "textSha256": "3d08e10394edab70fb78946e378dd11528213526b214a8516d8cf3825e87ac19"
-          },
-          {
-            "lane": "tx",
-            "params": [
-              "string",
-              "string"
-            ],
-            "sql": "SELECT id FROM pages WHERE source_id=$1 AND slug=$2 FOR UPDATE",
-            "textSha256": "6c2eb61492fe7470a32169e89b9f04d471f3311d55ff790ad08f4736af483a2c"
+            "sql": "SELECT p.id FROM unnest($1::text[],$2::text[]) WITH ORDINALITY AS k(src,s,n) JOIN pages p ON p.source_id=k.src AND p.slug=k.s ORDER BY k.n FOR UPDATE OF p",
+            "textSha256": "d2598c8eb0d051b3f8d25208513a7494b6db488c95574a3781e6db376d945b56"
           },
           {
             "lane": "tx",

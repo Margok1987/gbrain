@@ -10,6 +10,169 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.48.0] - 2026-10-04
+
+**A managed Postgres brain now catches up a big sync backlog in one `gbrain sync` run, about 4.6 times faster, and the run tells your agent exactly what happened and what to do next (#5984).**
+
+On a brain with managed writes and a database across the internet, catching up thousands of changed files used to crawl: each `gbrain sync` saved one page, then quit, so people looped it in a shell, and a 9,400-file backlog projected to about two days. Now one run keeps going until the backlog is done. It prints progress and an ETA, skips work that changes nothing, and saves pages in groups while every page keeps its own write receipt. On a test rig with 57 ms to the database, the same 10,000-file backlog drops from about 49 hours to about 11, and the run ends with one clear verdict: done, safe to rerun, or blocked with the fix.
+
+### How to use it
+
+```bash
+gbrain sync --source <id> --no-pull --json
+```
+
+The JSON ends with `outcome` (`synced`, `resumable` or `blocked`) and, unless it is done, `next: { command, safe_to_loop, eta_seconds, why }`. `gbrain doctor` and `gbrain sources status` show a managed backlog's remaining pages and ETA from any process. Bulk groups are on by default on Postgres; turn them off with `--no-bulk`, `GBRAIN_SYNC_BULK=0` or `gbrain config set sync.bulk false`.
+
+### The numbers that matter
+
+| 500-file backlog, 57 ms to the database | Before | Now |
+| --- | --- | --- |
+| Pages per minute | 3.4 (shell loop) | 13 to 16 (one run) |
+| 10,000-file backlog | about 49 h | about 11 h |
+| `sync --all`, two sources | 0 pages in 15 min | 16 pages/min |
+| A foreground write during catch-up (p95) | 29.6 s, 15 failed catch-up runs | 15.7 s (15.0 s idle), no failures |
+| Same backlog next to the database | 350 pages/min | 775 pages/min |
+
+### Things to watch
+
+- A managed sync that stops at its deadline with a write still pending now exits 0 as `resumable` instead of 1. Rerun the same command; accepted writes keep their request IDs.
+- Managed sources under `sync --all` drain one at a time.
+- 150 pages/min at 57 ms is not reached. Each page's database write is still a chain of about 40 dependent statements; reaching it needs pages to publish in parallel, which is a separate design.
+
+## To take advantage of v0.60.48.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Nothing else to migrate.** There is no schema change; the new behavior applies to the next `gbrain sync`.
+3. **Verify the outcome:**
+   ```bash
+   gbrain sync --source <id> --no-pull --json
+   gbrain sources status
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+- **Drain** (`src/core/persistence/sync-drain.ts`): `runDrain` re-enters the single-pass managed sync until the cursor is done, the caller's signal or `--timeout` stops it, a strict run deadline is about 15 s away (`registerRunDeadline`, armed by the sync watchdog), a writer head needs intervention, or the awaited write and its worktree head make no progress for 30 s and 3 passes. It retries only `worktree_refreshing`, admission contention, `database_contention`, connection errors and statement timeouts. Every page notes forward progress, so the progress-aware watchdog never stops a progressing run. A drain waits up to 30 s per page instead of re-entering. The CLI single-source, `--all`, `--watch` and the PGLite owner delegate use it; `SyncResult.drain` carries `outcome`, `stop_reason`, `written`, `waived`, `remaining`, `rate_pages_per_min`, `eta_seconds`, `stall` and `bulk`; `--json` adds `outcome` and `next` (`syncResumeCommand` keeps brain, source and cursor options).
+- **Stop reasons** are catalogued in `docs/guides/write-refusals.md#managed-sync-drain-stops`: `deadline`, `drain_stalled`, `database_contention`, writer-blocked (`recovery_required`, `owner_unavailable`, unexpected bytes) and `blocked_by_failures`.
+- **Backlog estimate**: the managed cursor stamps a drain window (`progress`); `readManagedSyncBacklog` feeds the new `managed_sync_backlog` doctor check and `sources status` (`managed_backlog` in `--json`).
+- **Waivers** (`src/core/persistence/sync-waivers.ts`): a delete of a page already soft-deleted at the frozen revision, with its file gone, advances without a request, under the page guard and cursor lock and only when no unfinished request touches the page. Unchanged imports moved here. Both report as `waived: { imports, deletes }`; `GBRAIN_SYNC_WAIVE_NOOP=0` turns them off.
+- **Waits** (`awaitWrite`): the publishing process hands the finished row to its waiters without a read; other waits poll a narrow select with backoff and classify the end as `terminal`, `pending`, `blocked` (with `gbrain sources writer status <source> --json`) or `read_failed`.
+- **Bulk publication** (`sync-group.ts`, `group-publish.ts`, `admitWriteGroupInTransaction`, `claimGroupFollowers`): groups of up to `sync.bulk_size` (16) consecutive page imports and deletes, sized to `sync.bulk_max_txn_ms` (15 s); one admission transaction, one publication transaction with per-page authorization, validation, attribution (`setMemberAttribution`), effects and receipts; counters locked after the pages are applied; no group forms while a foreground write is queued. A failure rolls the group back, pages publish singly, and later pages are cancelled. A file the #5988 content screen holds ends the group before it and is held through the single path, without a request.
+- **Round trips**: parameterized `executeRaw` and page snapshots use prepared statements wherever the connection allows them (PgBouncer transaction pooling unchanged; `GBRAIN_PREPARE=false` still forces unprepared). `lockCounters` and multi-key `lockPageKeys` are set-based; Postgres transactions track held page guards like PGLite; publication completes its locked request without relocking; recovery cleanup runs only after a recovery record; the protocol declaration, shared skillpack roots and source-wide sync validation are read once per transaction.
+- **Connectors** wait for a pending withdrawal mirror of a page before freezing its file's before-image, so a re-render no longer conflicts with a just-committed fact withdrawal.
+- `--no-pull` help now says it is required on managed brains; `sync --help` documents the drain, `--timeout` and `--no-bulk`.
+
+### For contributors
+
+- `scripts/bench/managed-sync-catchup.ts` (opt-in, Docker + toxiproxy) reproduces the issue at any RTT; `GBRAIN_SQL_TRACE=<file>` records every database round trip at the socket. Method, baseline and results are in `docs/eval/managed-sync-catchup.md`.
+- Goldens updated for prepared raw statements and set-based guards (`test/fixtures/goldens/sql-text`, `postgres-engine-gauge`, `exports`, `doctor`).
+
+## [0.60.47.0] - 2026-10-04
+
+**One broken note can no longer stop your brain from syncing. gbrain sets that file aside, keeps importing everything else, and tells your agent exactly how to fix it.**
+
+Notes that a script or an agent writes straight into your brain's Git repo sometimes come out with broken frontmatter: a tweet that runs onto a second line under `title:`, the same key twice, an unquoted `author: Site (citing Wire) (original: https://...)`. Until now one such file stopped the whole sync. Every run after that replayed the same failure, new notes stopped arriving, and the only way out was hand surgery on the sync ledger. With a few hundred generator-written files, you fixed them one sync at a time.
+
+Now the sync **holds** that one file and moves on. Everything else imports. The held file shows up in the sync output, in `gbrain sources status`, in `gbrain doctor`, and at read time: a page whose newer file is held is flagged when your agent reads or searches it, so it knows the answer may be out of date. Files gbrain can read exactly after quoting one value simply import. A brain that is blocked today unblocks itself on its next sync. And one previewed command fixes the backlog on disk, asking before anything that needs a judgment call.
+
+| You have... | Before | Now |
+| --- | --- | --- |
+| One file with broken frontmatter in a source | sync blocked, every run, until you fixed it | that file is held; the rest syncs; the checkpoint moves on |
+| `author: acme-example (citing fund-a) (original: https://...)` | refused as invalid YAML | imports; gbrain tells you which generator writes it |
+| A source already blocked when you upgrade | `--retry-failed` and a file fix, one file per run | the next sync (scheduled or manual) converts the block into a hold |
+| 200 broken files | 200 edits by hand | one preview, per-file diffs, one hash-bound apply |
+| Your agent searching a page whose file is held | a confident answer from stale text | the hit is marked `stale`, and `get_page` says the file is held |
+
+## To take advantage of v0.60.47.0
+
+`gbrain upgrade` should do this automatically.
+
+1. **Finish the upgrade if it did not:**
+   ```bash
+   gbrain apply-migrations --yes --no-autopilot-install
+   ```
+2. **Unblock a source.** The next scheduled or manual sync recovers a blocked source automatically; to do it now run `gbrain sync --source <id> --no-pull`. `gbrain post-upgrade` names every blocked source. Your agent reads `skills/migrations/v0.60.47.0.md` for the full steps.
+3. **Fix the backlog** (the agent asks you before applying):
+   ```bash
+   gbrain sources status <id>                    # what is held and why
+   gbrain repair frontmatter --source <id>       # preview: safe quoting only, writes nothing
+   gbrain repair frontmatter --source <id> --include-ambiguous --diff   # the interpretations, per file
+   ```
+   Walkthrough with real output: [held files](docs/guides/repair.md#held-files).
+4. **Refresh an old pre-commit hook** if `gbrain doctor` reports `frontmatter_hook`: `gbrain frontmatter install-hook --force`.
+5. **Verify:**
+   ```bash
+   gbrain doctor --only git_held_files,frontmatter_repairable,frontmatter_hook --json
+   ```
+6. **If any step fails,** file an issue at https://github.com/garrytan/gbrain/issues with the output of `gbrain doctor` and `~/.gbrain/upgrade-errors.jsonl` if it exists.
+
+### Things to watch
+
+| Change | What to do |
+| --- | --- |
+| `gbrain frontmatter validate --fix` re-validates and exits 1 when errors remain (it used to exit 0) | scripts treat exit 1 after `--fix` as "something still needs a hand edit" |
+| A file whose `visibility`, `derived_from` or another access or provenance key was swallowed into another value, rewritten by quoting, or left inside an unclosed fence is now held (`ambiguous_protected_key`) instead of imported with a guessed value | show the user the line; they choose the value |
+| Content refusals no longer block a sync | `gbrain config set sync.holds fail` restores fail-closed blocking |
+| A page whose newer file is held refuses `put_page` until the file is repaired | repair the file; do not retry the write |
+| `gbrain frontmatter validate` and the pre-commit hook stay strict: YAML gbrain imports by quoting still fails them | generators keep getting a hard signal; fix them to quote values |
+
+### Itemized changes
+
+#### Held files instead of blocked syncs
+
+- Managed and legacy sync screen each file before admitting it. A deterministic content refusal holds the file: `invalid_frontmatter` (reasons `yaml_parse`, `needs_interpretation`, `ambiguous_identity_key`, `ambiguous_protected_key`), `frontmatter_slug_conflict`, `file_too_large`, `content_rejected`, plus `rename_held` and (opt-in) `parser_regression`. The hold write and the checkpoint step past the file commit together.
+- Sync results carry `held`, `held_count`, `holds_outstanding`, `holds_escalated`, `holds_fix` and `recovered_frontmatter`; every hold names its `code`, `reason`, `key`, `line`, `fix` and `docs`, never a frontmatter value. Text output prints one line per new hold and the outstanding total, including `sync --all` on green sources. `sync --dry-run` lists `would_hold` and `screen_skipped`.
+- A hold clears when the file changes, is deleted, or a newer gbrain can read it. Renamed-to-broken files keep the old page and its id until the new file imports. `gbrain sources retry-held <id>` schedules a re-screen of a Git source; `gbrain sync --retry-held` is refused with that pointer.
+- More than `sync.hold_escalate_count` (50) holds in a source, or more than `sync.hold_escalate_pct` (5%) of at least 40 screened imports, escalates the result and doctor. `sync.hold_cap` (500) bounds detail, never storage. If a newer gbrain would hold bytes an older one imported, sync stops with `sync_parser_regression` (a gbrain bug; `sync.parser_regression=hold` keeps syncing).
+- Company-brain profile sources never hold; their approved manifest keeps blocking.
+
+#### Blocked brains recover by themselves
+
+- A managed cursor stopped on a failed content refusal, including receipts older releases stored, converts in place on the next plain sync with its saved options: held if still broken, imported if already fixed (`converted_from_failed`, shown in `gbrain sources status`).
+
+#### Frontmatter gbrain can read, it imports
+
+- One frontmatter reader recovers the "unquoted `: ` in a value" family by quoting it, without changing the parse of any file that imported before. Interpretations (folded lines, duplicate keys, an unclosed `[`) are never imported automatically. `title: #1 thing` (read by YAML as an empty comment) is detected and reported.
+
+#### `gbrain repair frontmatter`
+
+- Explicit-only, preview-bound repair of held and recoverable files: safe quoting by default, interpretations with `--include-ambiguous`, `--only`/`--skip` per file, `--diff`/`--json` for every per-file diff, `--apply --expect <hash> --yes` writes exactly the previewed bytes. Managed sources publish each file as one coordinated write (bytes, import and hold clear together); legacy sources back up first. It also finds pages an older import stored wrong.
+- `gbrain frontmatter validate --fix` gains the safe quoting fix and re-validates; `--stdin --path <p>`, `--staged` and `--importable` are new.
+
+#### Read-time signals
+
+- `get_page` returns `file_held` (path for local callers only). Search and query hits on such pages carry `stale`, and retrieval responses carry a `held_files` coverage notice per source. Remote callers get counts and flags, never paths, plus the words to relay to the brain host operator.
+
+#### Doctor and upgrade
+
+- New doctor findings `git_held_files` and `frontmatter_repairable`; `doctor --remediation-plan --json` now reports classified `findings`, and both are `explicit_kind_required` with `gbrain repair frontmatter --source <id>`. A deadline-cut scan reports `pending`. `frontmatter_hook` flags pre-commit hooks older than this release. `frontmatter_integrity` points at `gbrain repair frontmatter`.
+- `gbrain post-upgrade` names blocked sources with the unblock command and the repair preview.
+
+#### Prevention
+
+- gbrain's own frontmatter writers serialize every value safely. `put_page`, `capture` and `gbrain import` share the sync screen: frontmatter gbrain reads by quoting is accepted, anything sync would hold refuses with the same code. A remote caller's refusal names the line but not the key, since key names can be private. The pre-commit hook validates staged content in one `gbrain frontmatter validate --staged` process and prints the fix and restage step.
+- New `sync.holds`, `sync.hold_cap`, `sync.hold_escalate_count`, `sync.hold_escalate_pct` and `sync.parser_regression` config keys.
+
+#### Docs
+
+- [Held files walkthrough](docs/guides/repair.md#held-files) (checked by a test that runs its commands), [content refusal codes](docs/guides/write-refusals.md#held-files-and-content-refusals), the live-sync content-failure section, troubleshooting, `AGENTS.md`, and the `frontmatter-guard` skill (write through `put_page`/`capture` or a YAML serializer; `validate --stdin` before writing; when to ask the user).
+
+#### For contributors
+
+- `TODOS.md`: degraded import for held files (P2).
+
 ## [0.60.46.0] - 2026-10-04
 
 **When gbrain hits a problem, it now tells the AI agent running it exactly what to do next, who has to do it, and whether to stop and ask you first.**

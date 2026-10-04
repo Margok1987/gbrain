@@ -115,6 +115,17 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   database unreachable or `GBRAIN_DB_ACCESS`: `gbrain db-repair`
   ([`docs/ENGINES.md`](./docs/ENGINES.md#engine-detection-and-access-repair)); health
   checks: [`docs/GBRAIN_VERIFY.md`](./docs/GBRAIN_VERIFY.md).
+- **Sync held a file** (`Held <path>: invalid_frontmatter …`, doctor
+  `git_held_files`, `get_page.file_held`, `stale` search hits): the sync
+  succeeded and only that file waits. Read it with `gbrain sources status <id>`,
+  preview the fix with `gbrain repair frontmatter --source <id>` (writes
+  nothing), and ask the user before any `--apply`, especially
+  `--include-ambiguous` interpretations; never retry a `put_page` refused on a
+  held page. A source a broken file blocked before upgrading recovers on its
+  next sync (`gbrain sync --source <id> --no-pull` does it now). Write brain
+  files through `put_page`/`capture` or a YAML serializer and check generated
+  content with `gbrain frontmatter validate --stdin --path <p>`. Walkthrough:
+  [held files](docs/guides/repair.md#held-files).
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes --no-autopilot-install` (manual migration orchestration without service installation).

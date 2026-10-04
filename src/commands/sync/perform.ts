@@ -57,7 +57,9 @@ export async function performSync(engine: BrainEngine, opts: SyncOpts): Promise<
   }
   if (opts.signal?.aborted) return finish(await interruptedBeforeWork());
   if (managed) {
-    const result = await (await import('../../core/persistence/sync-run.ts')).performManagedSync(engine, opts);
+    const result = opts.drain
+      ? await (await import('../../core/persistence/sync-drain.ts')).drainManagedSync(engine, opts, true)
+      : await (await import('../../core/persistence/sync-run.ts')).performManagedSync(engine, opts);
     if (!opts.dryRun) await recordUpstreamObservation(engine, opts.sourceId ?? 'default', opts.repoPath);
     return result;
   }

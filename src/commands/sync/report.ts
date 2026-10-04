@@ -173,6 +173,11 @@ export function printSyncResult(result: SyncResult, sink: NodeJS.WriteStream = p
         write(`  Check the warnings above (expired or revoked credentials print there), fix the cause, then re-run 'gbrain sync --source <id>'.`);
         break;
       }
+      // #5984: a managed cursor knows its manifest size; the drain summary prints the next step.
+      if (result.managedCursor) {
+        write(`Sync PARTIAL at ${result.fromCommit?.slice(0, 8) ?? '<initial>'}: ${result.managedCursor.index} of ${result.managedCursor.total} manifest entries processed, reason=${result.reason ?? 'timeout'} (last_commit unchanged; safe to retry).`);
+        break;
+      }
       // v0.41.13.0 (T7 / D-V3-5): --timeout fired before the bookmark write
       // so last_commit is UNCHANGED. The next sync re-walks the same diff
       // and content_hash short-circuits already-imported files at ~10ms each.

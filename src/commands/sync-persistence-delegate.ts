@@ -16,6 +16,8 @@ import type { SyncResult } from './sync.ts';
 import { buildSingleSyncJsonEnvelope } from '../core/sync-embed-backfill.ts';
 import { printManagedSyncDiagnostic } from './sync-diagnostics.ts';
 import { parseDurationSeconds } from '../core/sync-concurrency.ts';
+import { runDrain, drainJsonFields, formatDrainSummary, syncOutcome } from '../core/persistence/sync-drain.ts';
+import { syncResumeCommand } from '../core/sync-reconcile.ts';
 
 export async function parsePersistenceSyncArgs(args:string[],cwd=process.cwd()) {
   const options:Record<string,unknown>={};
@@ -48,30 +50,35 @@ export async function maybeDelegateSyncToPersistence(hostConfig:GBrainConfig|nul
   try {
     const params=await parsePersistenceSyncArgs(args);
     const deadline=params.timeoutSeconds>0?performance.now()+params.timeoutSeconds*1000:Infinity;
-    let result:SyncResult&{source_id?:string};
+    const stop=new AbortController();
+    const timer=Number.isFinite(deadline)?setTimeout(()=>stop.abort(),deadline-performance.now()):undefined;
     console.error('[sync] Delegating to the registered PGLite owner.');
-    for(;;){
-      const remaining=deadline-performance.now();
-      const delegated=await maybeDelegateLocalAdministration('writer_sync',params as unknown as Record<string,unknown>,config,
-        {timeoutMs:Math.min(86_400_000,Math.max(30_000,remaining+30_000))});
-      if(!delegated.handled)throw new OperationError('owner_unavailable','The observed PGLite owner stopped before sync admission.','Retry the same sync options to resume its durable cursor.');
-      result=delegated.result as SyncResult;
-      if(result.status!=='partial'||!['writer_yield','writer_pending'].includes(result.reason??''))break;
-      if(performance.now()>=deadline){result={...result,reason:'timeout'};break;}
-      await new Promise(resolve=>setTimeout(resolve,result.reason==='writer_pending'?250:0));
-    }
+    // #5984: the owner returns one bounded slice per call; the shared drain owns re-entry and the stop rules.
+    let result:SyncResult&{source_id?:string};
+    try {
+      result=await runDrain({signal:stop.signal,announce:true,pass:async()=>{
+        const delegated=await maybeDelegateLocalAdministration('writer_sync',{...params,timeoutSeconds:Number.isFinite(deadline)?Math.max(1,Math.ceil((deadline-performance.now())/1000)):params.timeoutSeconds} as unknown as Record<string,unknown>,config,
+          {timeoutMs:Math.min(86_400_000,Math.max(30_000,deadline-performance.now()+30_000))});
+        if(!delegated.handled)throw new OperationError('owner_unavailable','The observed PGLite owner stopped before sync admission.','Retry the same sync options to resume its durable cursor.');
+        return delegated.result as SyncResult;
+      }});
+    } finally { if(timer)clearTimeout(timer); }
+    const sourceId=result.source_id??params.options.sourceId??'default';
+    const resume=syncResumeCommand(args,getCliOptions().brain);
     if(args.includes('--json')) {
-      await writeStdoutFinal(JSON.stringify({ ...buildSingleSyncJsonEnvelope(result.source_id??params.options.sourceId??'default',result),
-        ...(result.managedWrite ? { managed_write: result.managedWrite } : {}) })+'\n');
+      await writeStdoutFinal(JSON.stringify({ ...buildSingleSyncJsonEnvelope(sourceId,result),
+        ...(result.managedWrite ? { managed_write: result.managedWrite } : {}), ...drainJsonFields(result,resume,sourceId) })+'\n');
       printManagedSyncDiagnostic(result, process.stderr);
+      for(const line of formatDrainSummary(result,resume,sourceId))process.stderr.write(line+'\n');
     }
     else {
       (await import('./sync.ts')).printSyncResult(result);
+      for(const line of formatDrainSummary(result,resume,sourceId))process.stdout.write(line+'\n');
       if(!params.options.dryRun&&!params.options.noEmbed&&result.added+result.modified>0) {
         console.error('[sync] embeds deferred — the owner drains them using its configured provider and keys.');
       }
     }
-    if(result.managedWrite||result.status==='blocked_by_failures'||result.reason==='pull_failed'||(await import('./sync/report.ts')).isFailedPartial(result))setCliExitVerdict(1);
+    if(syncOutcome(result)==='blocked')setCliExitVerdict(1);
     return true;
   }catch(error){
     if(error instanceof PersistenceIpcTransportError&&error.sent)error=new OperationError('write_pending','The sync acknowledgment was lost; accepted page requests retain their IDs.','Repeat the same sync options to resume the durable cursor.');

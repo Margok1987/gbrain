@@ -123,6 +123,19 @@ export async function finishUnpublishedFailure(engine: BrainEngine, row: WriteRe
   return engine.transaction(tx => completeWrite(tx, row, conflictCode(failure.code) ? 'conflict' : 'failed', {}, failure));
 }
 
+/** The receipt fields every committed publication carries: revision, persistence mode and write-through. */
+export function decoratePublicationOutcome(row: WriteRequest, prepared: PreparedMutation, outcome: Record<string, unknown>,
+  final: { revision: string } | null, fileCount: number, skill: boolean): void {
+  if (final) outcome.revision = final.revision;
+  outcome.persistence = { mode: fileCount ? 'filesystem' : 'database', ...(fileCount ? { file_written: !prepared.noop } : {}), ...(skill ? { git_state: 'not_requested' } : {}) };
+  outcome.write_through = fileCount ? { written: !prepared.noop } : { written: false, skipped: prepared.databaseOnlyReason ?? row.authority.databaseOnlyReason ?? 'no_repo_configured' };
+  if (prepared.databaseOnlyReason === 'mirror_read_only') outcome.storage = 'database_only';
+  if ((row.operation === 'put_page' || row.operation === 'edit_page') && row.authority.remote && row.authority.databaseOnlyReason === 'no_repo_configured') outcome.write_through = withNoRepoWriteThroughWarning(outcome.write_through as { written: boolean; skipped?: string }, row.source_id, row.operation);
+  if ((outcome.write_through as { skipped?: string }).skipped === 'unbound_source') {
+    outcome.write_through = { ...outcome.write_through as object, warning: unboundWriteWarning(row.operation, row.source_id, row.authority.databaseOnlyReason === 'unbound_source') };
+  }
+}
+
 /**
  * prepare outside locks → durable recovery → file → DB+receipt commit.
  * The root lock spans all file effects; the DB guards span authorization and
@@ -283,22 +296,15 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
       if (!skill) await classifyUnboundPage(tx, row);
       if (prepared.databaseOnlyReason === 'mirror_read_only') await classifyMirrorPage(tx, row);
       const final = skill ? null : await tx.readPageSnapshot(row.slug, { sourceId: row.source_id, includeDeleted: true });
-      if (final) outcome.revision = final.revision;
-      outcome.persistence = { mode: files.length ? 'filesystem' : 'database', ...(files.length ? { file_written: !prepared.noop } : {}), ...(skill ? { git_state: 'not_requested' } : {}) };
-      outcome.write_through = files.length ? { written: !prepared.noop } : { written: false, skipped: prepared.databaseOnlyReason ?? row.authority.databaseOnlyReason ?? 'no_repo_configured' };
-      if (prepared.databaseOnlyReason === 'mirror_read_only') outcome.storage = 'database_only';
-      if ((row.operation === 'put_page' || row.operation === 'edit_page') && row.authority.remote && row.authority.databaseOnlyReason === 'no_repo_configured') outcome.write_through = withNoRepoWriteThroughWarning(outcome.write_through as { written: boolean; skipped?: string }, row.source_id, row.operation);
-      if ((outcome.write_through as { skipped?: string }).skipped === 'unbound_source') {
-        outcome.write_through = { ...outcome.write_through as object, warning: unboundWriteWarning(row.operation, row.source_id, row.authority.databaseOnlyReason === 'unbound_source') };
-      }
+      decoratePublicationOutcome(row, prepared, outcome, final, files.length, skill);
       await queuePublicationEffects(tx, row, final, outcome, prepared);
       await hooks.boundary?.('before_commit', row);
-      const committed = await completeWrite(tx, current, 'committed', outcome);
+      const committed = await completeWrite(tx, current, 'committed', outcome, undefined, current);
       transactionBodyCompleted = true;
       return committed;
     });
     await hooks.boundary?.('after_commit', done);
-    await clearResolvedRecovery(engine, row.id);
+    if (recovery) await clearResolvedRecovery(engine, row.id);
     return done;
   } catch (error) {
     if (recovery) {

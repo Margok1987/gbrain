@@ -8,8 +8,8 @@ can load, and Google source files other local users can read. `gbrain repair`
 fixes those and the other kinds listed in
 [What each kind fixes](#what-each-kind-fixes). Every run is a preview unless
 you pass `--apply`.
-Seven explicit-only kinds, `google-file-modes`, `stale-atoms`, `extractor-facts`,
-`captured-facts`, `loop-facts`, `orphan-children` and `failed-writes`, run only when you name them (see [Explicit-only repair kinds](#explicit-only-repair-kinds)).
+Eight explicit-only kinds, `google-file-modes`, `stale-atoms`, `extractor-facts`,
+`captured-facts`, `loop-facts`, `orphan-children`, `failed-writes` and `frontmatter`, run only when you name them (see [Explicit-only repair kinds](#explicit-only-repair-kinds)).
 `gbrain doctor --remediation-plan` lists the same kinds as repair steps, and
 `gbrain doctor --remediate --yes --include-repairs --expect <plan_hash>` runs them under a budget
 (see [Run repairs through doctor](#run-repairs-through-doctor)).
@@ -100,8 +100,11 @@ gives each a fresh row number); it never deletes or rewrites a page.
 | `--limit <n>` | Repair at most `n` items per kind in this run (a positive integer; with `--all`, up to `n` for each kind). Rerun the same command to continue. |
 | `--no-embed` | `safe-chunks` and `contextual-mode`: skip the embedding provider. Run `gbrain embed --stale` later. `timeline` and `visibility` pages are re-embedded by their publication either way. |
 | `--all` | Run every automatic kind in order. Explicit-only kinds are listed with their preview command, never run. |
-| `--expect <hash>` | Explicit-only kinds: apply exactly the set the preview printed under this hash. Required with `--apply` for `stale-atoms`, `extractor-facts`, `captured-facts`, `loop-facts` and `failed-writes`. |
-| `--include-ambiguous` | `extractor-facts` and `captured-facts` only: widen the hashed set to `ambiguous` facts. Pass it to both the preview and the apply. See [Extractor facts](#extractor-facts) and [Captured facts](#captured-facts). |
+| `--expect <hash>` | Explicit-only kinds: apply exactly the set the preview printed under this hash. Required with `--apply` for `stale-atoms`, `extractor-facts`, `captured-facts`, `loop-facts`, `failed-writes` and `frontmatter`. |
+| `--include-ambiguous` | `extractor-facts` and `captured-facts`: widen the hashed set to `ambiguous` facts. `frontmatter`: add interpretive file changes. Pass it to both the preview and the apply. See [Extractor facts](#extractor-facts), [Captured facts](#captured-facts) and [Frontmatter](#frontmatter). |
+| `--only <path>`, `--skip <path>` | `frontmatter` only: select source-relative files (repeatable). The hash covers the selection, so pass the same flags to the apply. |
+| `--diff` | `frontmatter` only: print every per-file diff instead of one sample per class (`--json` always carries all of them). |
+| `--yes` | `frontmatter --apply` only: the user agreed to the previewed file changes (destructive consent). Without it a terminal asks, and a run without a terminal exits 3 with the consent payload. |
 | `--json` | Print `{ scope, mode, results[], paid_kinds }`, one result per kind with `paid`, `affected`, `sample`, `residuals`, `cost`, `capacity`, `resumed_from`, `applied`, `skipped`, `complete`, `stopped` and `apply_command`, plus `explicit_kinds[]` when the run skipped explicit-only kinds. |
 
 The command exits 1 when a run stops early (capacity, a pending write, or a
@@ -566,6 +569,225 @@ request). Attribution names the local owner's writer for that lane. A replay the
 brain refuses reports `refused` with the code. The failed receipts stay as
 history.
 
+<a id="held-files"></a>
+### Held files
+
+A file gbrain cannot import without guessing does not stop a sync. Sync holds it, imports the rest of the source, advances the checkpoint and
+keeps reporting the file until it changes, is deleted, or a newer gbrain can
+read it. A held new file has no page yet; a page whose newer file is held keeps
+its last good revision, search marks it `stale`, `get_page` carries
+`file_held`, and `put_page` refuses it until the file is repaired, so an agent
+must not retry a refused write. Hold codes and their fixes are in
+[write refusal reasons](write-refusals.md#invalid_frontmatter).
+
+**Say to your agent:** *"Sync says some files in my notes source are held.
+Show me what is wrong with each one and what gbrain would change, then fix the
+safe ones."* or *"After the upgrade my notes source was blocked by one broken
+file. Get it syncing again."*
+
+The session below is real output (volatile ids, hashes and times shown as
+`<id>`, `<hash>`, `<time>`; `test/held-files-walkthrough.serial.test.ts` runs
+these commands and checks every line shown). Before the upgrade, a generator
+committed three notes to the `notes` source: `notes/standup.md` with a title
+that continues on an unquoted line, a new `notes/digest.md` with `title:`
+twice, and a new `notes/roundup.md` with an unquoted `: ` in `author:`. A
+gbrain older than v0.60.47.0 blocks the source on the first file it refuses.
+
+1. After upgrading, `gbrain post-upgrade` names the blocked source and the
+   command that unblocks it now. Doing nothing also works: the next scheduled
+   or manual sync recovers the source by itself.
+
+   ```console
+   $ gbrain post-upgrade
+   frontmatter_holds: 1 source(s) are blocked by a file gbrain could not import (notes). The next scheduled or manual sync recovers a blocked source automatically; to do it now run gbrain sync --source notes --no-pull.
+   ```
+
+2. The sync converts the blocked request in place: both broken files are held,
+   the readable one imports (after quoting `author`, which gbrain reports so the
+   generator can be fixed), and the checkpoint advances.
+
+   ```console
+   $ gbrain sync --source notes --no-pull
+   +1 added, ~0 modified, -0 soft-deleted (recoverable 72h), R0 renamed
+   Held notes/digest.md: invalid_frontmatter (needs_interpretation) at line 4, key "title"; its page is missing until the file imports. Next: gbrain repair frontmatter --source notes --include-ambiguous (docs/guides/write-refusals.md#invalid_frontmatter-needs_interpretation)
+   Held notes/standup.md: invalid_frontmatter (needs_interpretation) at line 2, key "title"; its page keeps its last good revision and is read-only for put_page until the file is repaired. Next: gbrain repair frontmatter --source notes --include-ambiguous (docs/guides/write-refusals.md#invalid_frontmatter-needs_interpretation)
+   2 file(s) held this run, 2 held in source notes; they do not block sync. Inspect them with 'gbrain sources status notes'; the repair preview proposes each fix and writes nothing. Preview the repair: gbrain repair frontmatter --source notes
+   Converted 1 failed request(s) of the blocked cursor in place: <id>.
+   1 file(s) under notes/ imported only after quoting unquoted frontmatter values: whatever writes them emits YAML other tools refuse. Fix the generator to quote values (or write through put_page); the preview shows the on-disk quoting fix. Preview: gbrain repair frontmatter --source notes
+   ```
+
+3. `gbrain sources status <id>` lists every hold with its code, line, key and
+   next command (`--json` adds the structured `git_holds` shown in step 6).
+
+   ```console
+   $ gbrain sources status notes
+   notes: 2 held file(s): not imported, and they do not block sync. A page whose newer file is held keeps its last good revision and is read-only for put_page until the file is repaired.
+   Held notes/digest.md: invalid_frontmatter (needs_interpretation) at line 4, key "title"; its page is missing until the file imports. Next: gbrain repair frontmatter --source notes --include-ambiguous (docs/guides/write-refusals.md#invalid_frontmatter-needs_interpretation) Held since <time>.
+   Most holds re-screen on the next sync by themselves (the file changed or was deleted, or a newer gbrain can read it): gbrain sync --source notes --no-pull
+   ```
+
+4. Preview, pass 1 (safe changes only). Nothing is written. The safe class
+   only quotes values exactly as gbrain already reads them; the two held files
+   need an interpretation, so they are listed as not selected and the preview
+   names the `--include-ambiguous` pass.
+
+   ```console
+   $ gbrain repair frontmatter --source notes
+   safe: notes:notes/roundup.md (Quoted the value of "author" at line 3 (value unchanged))
+   interpretive_pending: notes:notes/digest.md (Kept the later "title" (line 4) and dropped the earlier one (line 2))
+   interpretive_pending: notes:notes/standup.md (Folded the unquoted lines after "title" (line 2) into its value)
+   classes: safe=1, interpretive=0, interpretive (needs --include-ambiguous)=2, needs_review=0
+   -author: acme-example (citing fund-a) (original: https://example.com/post/1)
+   +author: "acme-example (citing fund-a) (original: https://example.com/post/1)"
+   next: gbrain repair frontmatter --source notes --apply --expect <hash> --yes (asks the user first: destructive)
+   next: gbrain repair frontmatter --source notes --include-ambiguous
+   ```
+
+5. Preview, pass 2, with the interpretations. Show the user each diff. Here the
+   user approves the folded standup title and wants to look at the digest
+   later, so the preview skips it; `--only` and `--skip` are bound into the
+   hash. After the user agrees, apply exactly that preview.
+
+   ```console
+   $ gbrain repair frontmatter --source notes --include-ambiguous --skip notes/digest.md
+   classes: safe=1, interpretive=1, interpretive (needs --include-ambiguous)=0, needs_review=0
+   -title: Standup with acme-example
+   -the team agreed to ship on Friday
+   +title: "Standup with acme-example\nthe team agreed to ship on Friday"
+   next: gbrain repair frontmatter --source notes --skip notes/digest.md --include-ambiguous --apply --expect <hash> --yes (asks the user first: destructive)
+   $ gbrain repair frontmatter --source notes --include-ambiguous --skip notes/digest.md --apply --expect <hash> --yes
+   applied 2, skipped 0, complete
+   repaired: notes:notes/roundup path=notes/roundup.md, written=true, imported=skipped, hold_cleared=false, committed=queued
+   repaired: notes:notes/standup path=notes/standup.md, written=true, imported=updated, hold_cleared=true, committed=queued
+   ```
+
+   `imported=skipped` means the page already held those values (quoting
+   changed nothing gbrain reads). `committed=queued` means the Git target effect
+   records the change; a checkout without gbrain's Git durability hook keeps the
+   repaired files uncommitted, so commit them the way you commit any edit. The
+   next sync never re-holds a repaired file that is published but not yet
+   committed.
+
+6. Commit, sync, and read the remaining hold as JSON.
+
+   ```console
+   $ git -C ~/brain/notes commit -qam "Repair frontmatter"
+   $ gbrain sync --source notes --no-pull
+   0 file(s) held this run, 1 held in source notes; they do not block sync. Inspect them with 'gbrain sources status notes'; the repair preview proposes each fix and writes nothing. Preview the repair: gbrain repair frontmatter --source notes
+   $ gbrain sources status notes --json
+   "git_holds": {
+   "count": 1,
+   "path": "notes/digest.md",
+   "code": "invalid_frontmatter",
+   "reason": "needs_interpretation",
+   "key": "title",
+   "line": 4,
+   "message": "Invalid YAML frontmatter: key \"title\" at line 4 appears more than once. Reading it would mean guessing, so it was not imported. Keep one line per key with its whole value quoted on that line, then import it again.",
+   "stale": false,
+   "held_since": "<time>",
+   "actor": "agent",
+   "docs": "docs/guides/write-refusals.md#invalid_frontmatter-needs_interpretation"
+   "outcome": "held",
+   ```
+
+   Every hold carries `code`, `reason`, `key`, `line`, a location-only
+   `message` (never a frontmatter value), `stale` (a page exists and keeps its
+   older revision), `fix` (the exact argv) and `docs`. `recent_conversions`
+   records the blocked request the upgrade converted.
+
+7. Later the user approves the digest interpretation (keep the later title).
+   The apply creates its page and clears the last hold; the next sync is clean.
+
+   ```console
+   $ gbrain repair frontmatter --source notes --include-ambiguous --only notes/digest.md
+   interpretive: notes:notes/digest.md (Kept the later "title" (line 4) and dropped the earlier one (line 2))
+   $ gbrain repair frontmatter --source notes --include-ambiguous --only notes/digest.md --apply --expect <hash> --yes
+   repaired: notes:notes/digest path=notes/digest.md, written=true, imported=created, hold_cleared=true, committed=queued
+   $ git -C ~/brain/notes commit -qam "Keep the later digest title"
+   $ gbrain sync --source notes --no-pull
+   +0 added, ~0 modified, -0 soft-deleted (recoverable 72h), R0 renamed
+   $ gbrain doctor --only git_held_files,frontmatter_repairable
+   [OK] git_held_files: No Git source files are held.
+   [OK] frontmatter_repairable: No file has frontmatter gbrain repair frontmatter would fix.
+   ```
+
+Doctor reports the same state: `git_held_files` (warn per source with counts,
+the first paths and the commands; `fail` above `sync.hold_escalate_count`,
+default 50) and `frontmatter_repairable` (files the repair can fix, including
+ones that import only after quoting). Both are explicit-only findings:
+`gbrain doctor --remediation-plan --json` lists them as `explicit_kind_required`
+with `gbrain repair frontmatter --source <id>`, and `--remediate` never runs the
+repair. `frontmatter_hook` warns when an installed pre-commit hook is older
+than the running gbrain's hook; refresh it with `gbrain frontmatter install-hook --force`.
+
+Settings, all read by every sync:
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `sync.holds` | `hold` | `fail` makes sync fail closed: a content refusal blocks the sync. |
+| `sync.hold_cap` | `500` | How many holds a sync result lists in detail; storage is never capped and valid files always import. |
+| `sync.hold_escalate_count` / `sync.hold_escalate_pct` | `50` / `5` | A source holding more files, or a run holding more than that share of at least 40 screened imports, reports `holds_escalated` and doctor `git_held_files` fails. |
+| `sync.parser_regression` | `stop` | `hold` holds a file whose exact bytes imported under an earlier gbrain (`parser_regression`) instead of stopping the run with `sync_parser_regression`. |
+
+To prevent new broken files, write brain files through `put_page`/`capture`
+or a YAML serializer, check generated content with
+`gbrain frontmatter validate --stdin --path <source-relative path>` before
+writing it, and install the staged-content pre-commit hook with
+`gbrain frontmatter install-hook` (the user's decision: it writes into their
+repository). See the `frontmatter-guard` skill.
+
+<a id="frontmatter"></a>
+### Frontmatter
+
+A file whose YAML frontmatter gbrain cannot read without guessing is held by
+sync instead of blocking it, and some files import only after gbrain
+quotes an unquoted value. `gbrain repair frontmatter` fixes those files on
+disk and imports them. It also finds pages an older import stored wrong: a
+body that begins with its own frontmatter block, or a title derived from the
+slug although the file names one. It is explicit-only and preview-bound.
+
+**Say to your agent:** *"Some files in my notes source are held. Show me what
+gbrain would change in each one, then fix the safe ones."* The agent runs
+`gbrain repair frontmatter --source <id>` and, after you agree, the printed
+apply command.
+
+```bash
+gbrain repair frontmatter --source <id>                          # pass 1: safe changes, one sample diff per class
+gbrain repair frontmatter --source <id> --apply --expect <hash> --yes
+gbrain repair frontmatter --source <id> --include-ambiguous --diff   # pass 2: every interpretation, per file
+gbrain repair frontmatter --source <id> --include-ambiguous --only notes/a.md --apply --expect <hash> --yes
+```
+
+Each file gets one minimal line change in one class:
+
+| Class | Changes | Default |
+| --- | --- | --- |
+| `safe` | Quote a value exactly as gbrain already reads it, strip NUL bytes, swap the outer quotes of a nested quoted value. Every parsed value stays the same. | Included. |
+| `interpretive` | Fold unquoted continuation lines into the value above, keep the later of a duplicated key, quote an unclosed `[`/`{` or a `#`-leading title, insert a missing closing `---`, remove a `slug:` line that names another page, re-import a page from its file, re-bind a held rename to the old page's current revision. | Only with `--include-ambiguous`. |
+| `needs_review` | No rule fixes it (mis-indented YAML, a protected key such as `visibility`, an import that would keep page data the file does not carry, a file over 5 MB). | Never written. The preview names the exact manual fix. |
+
+Two passes: when interpretive candidates exist, the safe preview's
+`next_actions` carry both the safe apply and the `--include-ambiguous` preview.
+Review each interpretation in the full diff, then approve all of them or only
+some with `--only`/`--skip`; a file left out stays held and unchanged.
+
+Every change must leave a file that parses strictly and earns no hold. The
+hash binds the selected files, their exact before and after bytes, and the
+page each import would store (bound to the page revision). The apply derives
+each change again from the file as it is: a file, proposal or page that
+changed since the preview reports `changed_since_preview` and is not written.
+The apply refuses while an unfinished managed sync still names a selected file
+(`sync_in_progress`; finish it with `gbrain sync --source <id> --no-pull`).
+
+On a managed brain each file is one coordinated write (`managed_file_repair`):
+the exact approved bytes, the import, and the hold clear commit together, and
+the file is committed through the Git effect like any page write. On a legacy
+brain the apply backs each file up under `~/.gbrain/backups/frontmatter/`,
+writes it, imports it, clears its hold and prints the `git add`/`git commit`
+step. Per-file outcomes report `written`, `imported`, `hold_cleared` and
+`committed`. Repair stays explicit-only: `gbrain repair --all` and
+`gbrain doctor --remediate` never run it.
+
 ## Resume
 
 Runs are resumable. After each page commits, the position is saved under the
@@ -742,6 +964,7 @@ walk me through it before changing anything."*
 
 | Symptom or error text | Preview | Apply | Verify | Who acts | Consent |
 | --- | --- | --- | --- | --- | --- |
+| Sync `BLOCKED` on one file (`Invalid YAML frontmatter`, a frontmatter slug conflict, `Content too large`); after upgrading, sync prints `Held <path>: …`; doctor `git_held_files` or `frontmatter_repairable` warns; the upgrade banner prints `frontmatter_holds:` | `gbrain sources status <source>`, then `gbrain repair frontmatter --source <source>` (add `--include-ambiguous` for interpretations) | nothing to unblock: the next sync converts the blocked request in place (`gbrain sync --source <source> --no-pull` does it now); for the backlog, the printed `gbrain repair frontmatter … --apply --expect <hash> --yes` ([held files](#held-files)) | `gbrain doctor --only git_held_files,frontmatter_repairable --json` (both ok) | brain host; the repair apply after the user agrees | `destructive` (repair apply rewrites the previewed lines) |
 | Tag, timeline or take writes fail with `writer_coordinator_required` or `storage_error: Publication failed (P0001)` on a managed brain; sync ends `PARTIAL` at a tagged page | `gbrain doctor --json` (`schema_version` is 197 or later) | the original `gbrain sync --source <source> … --no-pull --retry-failed --json`, then `gbrain extract --stale --source-id <source>` and `gbrain extract timeline --source db --source-id <source>`, then `gbrain facts relink --source <source> --dry-run` (paid tier only after the user agrees), then `gbrain repair failed-writes --source <source>` and, after the user agrees, its printed `--apply --expect <hash>` | `gbrain sources status` shows the new `last_commit`; a second `gbrain extract timeline --source db` run adds no rows; a second `gbrain repair failed-writes` preview lists nothing to replay | brain host; the replay apply after the user agrees | paid (relink tier), destructive (replay apply) |
 | Sync `BLOCKED` with `checkpoint_validation_timeout` | `gbrain doctor` (`persistence_request_indexes`) | `gbrain repair request-indexes --apply` when an index is missing or INVALID, then the printed `gbrain sync --source <source> --no-pull --retry-failed …` | `gbrain doctor --only persistence_request_indexes --json` reports `ok`; `gbrain sources status` shows the new `last_commit` | brain host | none |
 | Doctor `persistence_request_indexes` warns | `gbrain repair request-indexes` | `gbrain repair request-indexes --apply` | `gbrain doctor --only persistence_request_indexes --json` | brain host | none |

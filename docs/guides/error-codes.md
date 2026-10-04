@@ -289,6 +289,14 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 |---|---|---|---|---|---|---|
 | Shared skill storage is not ready on this brain. | A temporary condition (a lock, a pending write, a rate limit); the same request can succeed later. | Wait briefly, then retry the same request (writes: reuse the same request_id). | agent | `repeat the read that failed` | 1 | yes |
 
+### changed_since_preview
+
+<a id="changed_since_preview"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The file changed after its repair was previewed, so nothing was written. | A repair writes exactly the bytes the operator approved; it binds approval to the previewed file hash and refuses when the file moved on. | Preview the repair again, review the new proposal, and approve its new hash. | agent | `repeat the read that failed` | 1 | no |
+
 ### checkpoint_missing
 
 <a id="checkpoint_missing"></a>
@@ -482,6 +490,14 @@ More: [docs/guides/write-refusals.md#colon_slug_windows_write_through](../../doc
 | Google connect credential error: consent timeout. | The step needs the user's decision before it runs. | Stop and ask the user; re-run only with the authorization the message names. | user | `repeat the read that failed` | 1 | no |
 
 More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-connect.md#troubleshooting)
+
+### content_rejected
+
+<a id="content_rejected"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The content-sanity gate rejected the content because the operator set `content_sanity.junk_disposition` to `reject`. | A junk-pattern or operator-literal hit is refused instead of quarantined under that setting, so the page was not written. The same content refuses on every retry. | Remove the matched junk from the file, or switch `content_sanity.junk_disposition` back to `quarantine` (a user decision), then import it again. | agent | `repeat the read that failed` | 1 | no |
 
 ### cost_cap_exceeded
 
@@ -737,6 +753,22 @@ More: [docs/guides/write-refusals.md#facts_absorb_write_refused](../../docs/guid
 
 More: [docs/guides/write-refusals.md#fetch_failed](../../docs/guides/write-refusals.md#fetch_failed)
 
+### file_too_large
+
+<a id="file_too_large"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The file is over the import size limit (5 MB for Markdown and code, 10 MiB for any sync read), so it was not imported. | Size limits bound parsing, chunking and embedding cost. The same bytes refuse on every retry. | Split the file into smaller files, or leave it out of the source (sync.exclude), then sync or import again. | agent | `repeat the read that failed` | 1 | no |
+
+### frontmatter_slug_conflict
+
+<a id="frontmatter_slug_conflict"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The file's frontmatter `slug:` names a different page than its path does. | The path decides a file's page; a conflicting declared slug would overwrite or fork another page, so the file is refused until one of them changes. | Remove the `slug:` line or make it match the path, then commit and sync again. | agent | `repeat the read that failed` | 1 | no |
+
 ### full_resync_required
 
 <a id="full_resync_required"></a>
@@ -882,6 +914,16 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
 | Invalid connector text. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
+
+### invalid_frontmatter
+
+<a id="invalid_frontmatter"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The file's YAML frontmatter cannot be read without guessing, so it was not imported. | gbrain imports frontmatter it can read exactly (quoting an unquoted value at most). Guessing could store a wrong title, merge a duplicate, or read a protected key such as `visibility` as a broader value. | Fix the named line in the file (one line per key, the whole value quoted), then commit and sync or import again. | agent | `repeat the read that failed` | 1 | no |
+
+Reasons: `yaml_parse`, `needs_interpretation`, `ambiguous_identity_key`, `ambiguous_protected_key`.
 
 ### invalid_grant_clock_skew
 
@@ -1199,6 +1241,14 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 |---|---|---|---|---|---|---|
 | The request body is not valid JSON. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
 
+### parser_regression
+
+<a id="parser_regression"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A file whose exact bytes imported before is now refused by gbrain's frontmatter reader. | The same bytes imported under an earlier gbrain version, so only gbrain changed; with `sync.parser_regression=hold` such a file is held and the rest of the sync continues. | Report it as a gbrain bug with the gbrain version, the file and the code; upgrade or pin the last good version, then sync again with --retry-failed. | host_admin | `gbrain doctor --json` | 1 | no |
+
 ### pasted_wrong_url
 
 <a id="pasted_wrong_url"></a>
@@ -1454,6 +1504,16 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 | Google connect credential error: relay unreachable. | A temporary condition (a lock, a pending write, a rate limit); the same request can succeed later. | Wait briefly, then retry the same request (writes: reuse the same request_id). | agent | `repeat the read that failed` | 1 | yes |
 
 More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-connect.md#troubleshooting)
+
+### rename_held
+
+<a id="rename_held"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A renamed file is held because the page it was renamed from changed after the rename was recorded. | Moving the page now could carry the newer edit to the wrong file, so the rename waits for an explicit re-bind. | Preview the frontmatter repair with --include-ambiguous to re-bind the rename to the current page, and approve it. | agent | `repeat the read that failed` | 1 | no |
+
+Reasons: `rename_source_changed`.
 
 ### request_already_submitted
 
@@ -1736,6 +1796,14 @@ More: [docs/guides/write-refusals.md#sync_in_progress](../../docs/guides/write-r
 | Sync does not apply to this source: its directory is not a Git checkout. | Sync imports changes between Git commits. A gbrain-owned content directory (created by init) holds files gbrain manages itself and is not a Git repository, so there is nothing to sync; gbrain never initializes Git on its own. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
 
 Reasons: `content_directory`.
+
+### sync_parser_regression
+
+<a id="sync_parser_regression"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| Sync stopped because gbrain would hold a file whose exact bytes imported before; this is a gbrain bug. | The upgrade invariant says a newer reader never refuses bytes an older one imported, so the run stops without advancing rather than hide a regression. | Report it with the gbrain version, the file and the code; upgrade or pin the last good version, then run gbrain sync --source <id> --no-pull --retry-failed. | host_admin | `gbrain doctor --json` | 1 | no |
 
 ### take_row_collision
 

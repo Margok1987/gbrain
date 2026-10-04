@@ -196,7 +196,7 @@ describe('durable mutation journal', () => {
         const observed = new Proxy(engine, { get(target, property) {
           if (property === 'transaction') return (run: (tx: BrainEngine) => Promise<unknown>) => target.transaction(tx => run(new Proxy(tx, { get(t, p) {
             if (p === 'executeRaw') return (sql: string, params?: unknown[], opts?: { signal?: AbortSignal }) => {
-              if (sql.startsWith('INSERT INTO persistence_counters') && params?.[0] === 'brain') {
+              if (sql.startsWith('INSERT INTO persistence_counters') && (params?.[0] === 'brain' || (Array.isArray(params?.[0]) && params[0].includes('brain')))) {
                 attempts.add(input.requestId!);
                 if (attempts.size === inputs.length) attempted();
               }

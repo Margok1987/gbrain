@@ -513,7 +513,9 @@ check('an exact recorded origin retains its existing slug on every native platfo
   writeFileSync(join(f.root, 'notes/recorded.md'), canonical.replace('slug: notes/example', 'slug: notes/impostor'));
   execFileSync('git', ['-C', f.root, 'add', '-A']);
   execFileSync('git', ['-C', f.root, 'commit', '-qm', 'Attempt a different canonical identity']);
-  expect(await performManagedSync(engine, { ...f.opts, full: false })).toMatchObject({ status: 'blocked_by_failures', managedWrite: { write_error: 'invalid_params' } });
+  // #5988: the conflicting identity is held, never imported, instead of blocking the sync.
+  const held = await performManagedSync(engine, { ...f.opts, full: false });
+  expect(held.held?.map(item => [item.path, item.code])).toEqual([['notes/recorded.md', 'frontmatter_slug_conflict']]);
   expect(await engine.readPageSnapshot(f.slug, { sourceId: f.id })).toEqual(f.snapshot);
   expect(await engine.getPage('notes/impostor', { sourceId: f.id })).toBeNull();
 });

@@ -1207,10 +1207,12 @@ async function runFederate(engine: BrainEngine, args: string[], value: boolean):
 
 // ── v0.40 sources status (D12) ──────────────────────────────
 async function runStatus(engine: BrainEngine, args: string[]): Promise<void> {
-  const json = args.includes('--json');
+  const json = args.includes('--json'), only = args.find(arg => !arg.startsWith('-'));
   const { loadAllSources } = await import('../core/sources-load.ts');
   const { computeAllSourceMetrics } = await import('../core/source-health.ts');
-  const sources = await loadAllSources(engine, { includeArchived: false });
+  const statusView = await import('../core/persistence/connector-status.ts');
+  const sources = (await loadAllSources(engine, { includeArchived: false })).filter(source => !only || source.id === only);
+  if (only && !sources.length) throw statusView.statusSourceNotFound(only);
   if (sources.length === 0) {
     if (json) {
       console.log(JSON.stringify({ schema_version: 1, sources: [] }, null, 2));
@@ -1240,7 +1242,10 @@ async function runStatus(engine: BrainEngine, args: string[]): Promise<void> {
     }),
   );
 
-  const connectors = await (await import('../core/persistence/connector-status.ts')).readConnectorSourceStatuses(engine);
+  const connectors = await statusView.readConnectorSourceStatuses(engine, sources.map(source => source.id));
+  const gitHolds = await statusView.readGitHoldStatuses(engine, sources.map(source => source.id));
+  const drainMod = await import('../core/persistence/sync-drain.ts');
+  const backlog = new Map((await drainMod.readManagedSyncBacklog(engine).catch(() => [])).map(b => [b.source_id, b]));
   if (json) {
     const enriched = metrics.map((m) => ({
       ...m,
@@ -1248,6 +1253,8 @@ async function runStatus(engine: BrainEngine, args: string[]): Promise<void> {
       sync_holder: syncRunning.get(m.source_id) ?? null,
       ...(ingestion.get(m.source_id) ? { ingestion: ingestion.get(m.source_id) } : {}),
       ...(connectors.get(m.source_id) ? { connector: connectors.get(m.source_id) } : {}),
+      ...(backlog.get(m.source_id) ? { managed_backlog: backlog.get(m.source_id) } : {}),
+      ...(gitHolds.get(m.source_id) ? { git_holds: gitHolds.get(m.source_id) } : {}),
     }));
     console.log(JSON.stringify({ schema_version: 1, sources: enriched }, null, 2));
     return;
@@ -1285,8 +1292,9 @@ async function runStatus(engine: BrainEngine, args: string[]): Promise<void> {
     console.log(`  ${m.source_id.padEnd(20)}  ${lag.padEnd(8)}  ${embed.padEnd(7)}  ${backfill.padEnd(9)}  ${fails.padEnd(6)}  ${queue.padEnd(6)}  ${pages.padStart(8)}  ${sync}`);
   }
   console.log('');
-  const { connectorStatusLines } = await import('../core/persistence/connector-status.ts');
-  for (const [sourceId, status] of connectors) for (const line of connectorStatusLines(sourceId, status)) console.log(line);
+  for (const [sourceId, status] of connectors) for (const line of statusView.connectorStatusLines(sourceId, status)) console.log(line);
+  for (const [sourceId, status] of gitHolds) for (const line of statusView.gitHoldStatusLines(sourceId, status)) console.log(line);
+  for (const b of backlog.values()) console.log(`  ${drainMod.formatManagedSyncBacklog(b)}`);
   for (const m of metrics) {
     const warns: string[] = [];
     if (!m.local_path) warns.push('no local_path');
@@ -1930,9 +1938,12 @@ Subcommands:
                                     when the source has data (pages/chunks/embeddings).
   archive <id>                      Soft-delete: hide from search, preserve data for ${SOFT_DELETE_TTL_HOURS}h.
   restore <id> [--no-federate]      Un-archive a soft-deleted source.
-  status [--json]                   v0.40.3.0 — read-only per-source dashboard:
+  status [<id>] [--json]            v0.40.3.0 — read-only per-source dashboard:
                                     last sync, staleness, page count,
-                                    embedding coverage, unacked failures.
+                                    embedding coverage, unacked failures, held files
+                                    (each Git hold with its code, line, key and
+                                    next command; recent blocked-cursor conversions).
+                                    <id> filters to that source.
                                     --json emits {schema_version:1, ...} on
                                     stdout for monitoring pipelines.
   archived [--json]                 List soft-deleted sources and their expiry.
@@ -1974,7 +1985,9 @@ Subcommands:
                                     doesn't exist. See gbrain doctor's
                                     default_source_local_path check.
   retry-held <id> [--dry-run] [--json]
-                                    Re-attempt a Google or GitHub source's held items on its next sync.
+                                    Re-attempt a connector source's held items, or re-screen a Git source's held files, on its next sync.
+                                    Runs nothing now. Most Git holds re-screen by themselves (file changed or
+                                    deleted, newer gbrain); fix the files with gbrain repair frontmatter --source <id>.
   set-path <id> --clear             Clear a connector source's (google, github)
                                     stale local_path; takes no path.
   webhook <set|show|rotate|clear> <id> [options]

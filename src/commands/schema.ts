@@ -57,6 +57,7 @@ import { gbrainPath, loadConfig, configPath, toEngineConfig, isThinClient, type 
 import { opError } from '../core/ops/contract.ts';
 import { readDbSchemaPack } from '../core/schema-pack/best-effort.ts';
 import { sanitizeTypeForDisplay } from '../core/schema-pack/type-usage.ts';
+import { yamlScalar } from '../core/frontmatter-inference.ts';
 
 export async function runSchema(args: string[]): Promise<void> {
   const sub = args[0];
@@ -605,7 +606,7 @@ async function runInitCmd(args: string[]): Promise<void> {
   };
   const yaml = `# Stub pack — extends gbrain-base by default. Add your own page_types below.
 api_version: ${stub.api_version}
-name: ${stub.name}
+name: ${yamlScalar(stub.name)}
 version: ${stub.version}
 gbrain_min_version: ${stub.gbrain_min_version}
 extends: gbrain-base

@@ -60,6 +60,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'captured_facts_active',
   'connector_checkpoints',
   'connector_held_items',
+  'git_held_files',
   'credential_projection_pending',
   'derived_visibility',
   'extractor_facts_expired',
@@ -109,6 +110,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'facts_extraction_health',
   'facts_health',
   'frontmatter_integrity',
+  'frontmatter_repairable',
   'malformed_path_pages',
   'memory_writeback',
   'grade_confidence_drift',
@@ -142,6 +144,8 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'stale_mentions',
   'stub_guard_24h',
   'sync_failures',
+  // #5984: unfinished managed sync cursors, their remaining entries and indexing ETA.
+  'managed_sync_backlog',
   'sync_freshness',
   'takes_count',
   'takes_weight_grid',
@@ -188,6 +192,7 @@ export const SKILL_CHECK_NAMES: ReadonlySet<string> = new Set([
 export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   // Agent operator wave: is an agent harness wired to this brain (registration read; --only adds the smoke test).
   'harness_wiring',
+  'frontmatter_hook',
   // F4b: PGLite row-delta planner statistics / Postgres autovacuum ANALYZE lag on the hot tables.
   'planner_stats_stale',
   'alternative_providers',

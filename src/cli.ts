@@ -2421,6 +2421,7 @@ async function prepareConnectedDispatch(command: string, args: string[]): Promis
         const { syncWatchdogPlan } = await import('./core/sync-reconcile.ts');
         const plan = syncWatchdogPlan(args, res);
         syncWatchdog = installProcessWatchdog(plan.watchdog);
+        (await import('./core/forward-progress.ts')).registerRunDeadline({ atMs: Date.now() + res.deadlineMs, strict: !res.progressWindowMs });
         process.stderr.write(plan.armedLine);
       }
     } catch (e) {

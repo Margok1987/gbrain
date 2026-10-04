@@ -9,7 +9,7 @@ import { applyInference } from '../frontmatter-inference.ts';
 import { getCompanyBrainProfile } from '../company-brain/profile.ts';
 import { hasMalformedPathSegment, isCodeFilePath, slugifyCodePath, slugifyPath } from '../sync.ts';
 import { OperationError, opError } from '../ops/contract.ts';
-import { yamlLocator } from './page-identity.ts';
+import { contentRefusalError, screenImportContent, type ContentRefusal } from '../import-screen.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { assertPageRevision } from '../page-state/types.ts';
 import { sealPageTextProjection } from '../page-state/projections.ts';
@@ -52,6 +52,16 @@ export function readImportBytes(path: string): Buffer {
   return readFileSync(path);
 }
 
+/** #5988: the typed import refusal; the wire `error` stays `invalid_params` as before. */
+function managedImportRefusal(refusal: ContentRefusal, sourcePath: string): OperationError {
+  const suggestion = refusal.code === 'frontmatter_slug_conflict'
+    ? `In ${sourcePath}, remove the frontmatter slug or set it to the path-derived slug (the path decides the slug), or move the file to the path that matches its slug, then import again.`
+    : refusal.code === 'file_too_large' ? `${sourcePath} is over the import size limit and was not imported. Split it into smaller files or leave it out of the import.`
+    : refusal.code === 'content_rejected' ? `Remove the matched junk from ${sourcePath}, then import it again.`
+    : `Fix line ${refusal.line ?? '?'} of ${sourcePath}${refusal.key ? ` (key "${refusal.key}")` : ''}: one line per key with its whole value quoted. Run gbrain frontmatter validate on the file to see every problem, then import it again.`;
+  return contentRefusalError(refusal, suggestion, { legacy_error: 'invalid_params' });
+}
+
 export function managedImportContent(sourcePath: string, bytes: Buffer, activePack?: ImportPack): { slug: string; content: string } {
   if (isAbsolute(sourcePath) || sourcePath.split(/[\\/]/).some(part => part === '..') || hasMalformedPathSegment(sourcePath)) {
     throw opError('invalid_params', 'The import path must be a well-formed source-relative path.',
@@ -66,19 +76,12 @@ export function managedImportContent(sourcePath: string, bytes: Buffer, activePa
   if (isCodeFilePath(sourcePath)) return { slug: slugifyCodePath(sourcePath), content };
   if (!/\.mdx?$/i.test(sourcePath)) throw opError('invalid_params', 'Managed import supports Markdown, code and supported image files.',
     `${sourcePath} is not a Markdown (.md, .mdx), code or supported image file, so it was not imported. Convert it to Markdown or leave it out.`);
-  const original = parseMarkdown(content, sourcePath, { validate: true });
-  const invalid = original.errors?.find(error => error.code === 'YAML_PARSE');
-  if (invalid) {
-    throw opError('invalid_params', `Invalid YAML frontmatter${yamlLocator(invalid.message)} in ${sourcePath}.`,
-      `Quote frontmatter values that contain ": " or start with a special character in ${sourcePath}, then run the import again.`);
-  }
+  const screen = screenImportContent({ content, path: sourcePath, byteLength: bytes.length, expectedSlug: slugifyPath(sourcePath),
+    slugConflictMessage: (found, expected) => `Frontmatter slug "${found}" does not match path-derived slug "${expected}".` });
+  if (screen.status === 'refused') throw managedImportRefusal(screen.refusal, sourcePath);
   content = applyInference(sourcePath, content).content;
-  const parsed = parseMarkdown(content, sourcePath, { validate: true, ...(activePack ? { activePack } : {}) });
+  const parsed = parseMarkdown(content, sourcePath, { ...(activePack ? { activePack } : {}) });
   const expected = slugifyPath(sourcePath);
-  if (expected && parsed.slug !== expected && slugifyPath(parsed.slug) !== expected) {
-    throw opError('invalid_params', `Frontmatter slug "${parsed.slug}" does not match path-derived slug "${expected}".`,
-      `In ${sourcePath}, set the frontmatter slug to "${expected}" or remove it (the path decides the slug), or move the file to the path that matches "${parsed.slug}", then import again.`);
-  }
   const slug = parsed.slug || expected;
   if (!slug) throw opError('invalid_params', 'The filename produces no usable slug; add a slug in frontmatter.',
     `Rename ${sourcePath} to a name with letters or digits, or add a slug: line to its frontmatter, then import again.`);

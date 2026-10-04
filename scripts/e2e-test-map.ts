@@ -24,6 +24,8 @@ const MIGRATION_WAVE_TESTS = [
 ];
 
 export const E2E_TEST_MAP: Record<string, string[]> = {
+  // #5984: the env-gated wire-level SQL trace for the managed-sync catch-up bench.
+  "src/core/sql-trace.ts": ["test/e2e/sql-trace-postgres.test.ts"],
   // Fix wave 8, Lane G: reindex auto-concurrency sizing (#5181).
   "src/commands/reindex.ts": ["test/e2e/reindex-auto-workers-5181.test.ts"],
   // Fix wave 8, Lane G: deferred ANN build after the embedding re-embed (#5088).

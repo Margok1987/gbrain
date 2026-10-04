@@ -276,6 +276,8 @@ export const timelineHistoryEntry: DoctorEntry = {
     'persistence_request_indexes',
     'persistence_request_growth',
     'connector_held_items',
+    'git_held_files',
+    'frontmatter_hook',
     'orphan_persistence_bindings',
     'unbound_source',
     'writer_version',

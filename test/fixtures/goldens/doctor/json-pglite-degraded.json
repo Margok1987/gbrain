@@ -507,7 +507,7 @@
         },
         {
           "category": "meta",
-          "message": "Version 199 (latest: 199)",
+          "message": "Version 200 (latest: 200)",
           "name": "schema_version",
           "status": "ok"
         },
@@ -728,6 +728,30 @@
           },
           "message": "No connector items are held.",
           "name": "connector_held_items",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "docs": "docs/guides/repair.md#held-files",
+            "escalate_count": 50,
+            "held": 0,
+            "source_ids": [],
+            "sources": []
+          },
+          "message": "No Git source files are held.",
+          "name": "git_held_files",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
+          "details": {
+            "count": 0,
+            "docs": "docs/guides/repair.md#held-files",
+            "hooks": []
+          },
+          "message": "No outdated gbrain frontmatter pre-commit hook is installed.",
+          "name": "frontmatter_hook",
           "status": "ok"
         },
         {
@@ -977,6 +1001,20 @@
           "category": "brain",
           "message": "1 source(s) clean — no frontmatter issues",
           "name": "frontmatter_integrity",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "details": {
+            "docs": "docs/guides/repair.md#frontmatter",
+            "partial": false,
+            "repairable": 0,
+            "source_ids": [],
+            "sources": [],
+            "unscanned": []
+          },
+          "message": "No file has frontmatter gbrain repair frontmatter would fix.",
+          "name": "frontmatter_repairable",
           "status": "ok"
         },
         {

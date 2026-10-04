@@ -13,7 +13,7 @@
  *   - safety and provenance markers whenever present: injection_suspected,
  *     injection_p, unverified, content_flag, status, superseded, superseded_by,
  *     message_id, thread_id, source_subject; modality when not text; stale
- *     only when true;
+ *     only when set (true, or the held-file object from #5988);
  *   - `delivered: { truncated: true }` whenever evidence delivery truncated.
  * `fields: "full"`, the `mcp.result_rows: full` host config and gbrain's own
  * thin client get every field; trusted local callers always do.
@@ -42,7 +42,7 @@ export function leanRow(row: Record<string, unknown>): Record<string, unknown> {
   for (const [key, value] of Object.entries(row)) {
     if (value === undefined || (value === null && key !== 'effective_date')) continue;
     if (KEPT_FIELDS.has(key)) out[key] = value;
-    else if (key === 'stale' && value === true) out[key] = true;
+    else if (key === 'stale' && (value === true || (typeof value === 'object' && value !== null))) out[key] = value;
     else if (key === 'modality' && value !== 'text') out[key] = value;
     else if (key === 'delivered' && (value as { truncated?: unknown }).truncated === true) out[key] = { truncated: true };
   }

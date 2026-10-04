@@ -471,7 +471,8 @@ describe('gbrain reindex --markdown (v0.32.7)', () => {
   test('source-file import errors are surfaced, counted, and fail the CLI', async () => {
     const repo = mkdtempSync(join(tmpdir(), 'gbrain-reindex-'));
     try {
-      writeFileSync(join(repo, 'bad.md'), '---\ntype: note\ntitle: Re: invalid yaml\n---\nbody\n');
+      // #5988: `title: Re: ...` now imports by quoting; a mis-indented list cannot be read.
+      writeFileSync(join(repo, 'bad.md'), '---\ntype: note\ntags:\n  - a\n - b\n---\nbody\n');
       await seedLegacyPage('bad', 'old body', 'bad.md');
 
       const { result, stderr } = await captureOutput(() =>

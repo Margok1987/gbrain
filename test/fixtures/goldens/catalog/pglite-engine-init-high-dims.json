@@ -853,6 +853,7 @@
       "oauth_tokens_pkey": "CREATE UNIQUE INDEX oauth_tokens_pkey ON public.oauth_tokens USING btree (token_hash)",
       "op_checkpoint_paths_pkey": "CREATE UNIQUE INDEX op_checkpoint_paths_pkey ON public.op_checkpoint_paths USING btree (op, fingerprint, path)",
       "op_checkpoints_pkey": "CREATE UNIQUE INDEX op_checkpoints_pkey ON public.op_checkpoints USING btree (op, fingerprint)",
+      "op_checkpoints_sync_hold_page_idx": "CREATE INDEX op_checkpoints_sync_hold_page_idx ON public.op_checkpoints USING btree ((((completed_keys -> 0) ->> 'page_id'::text))) WHERE (op = 'sync-hold'::text)",
       "op_checkpoints_updated_at_idx": "CREATE INDEX op_checkpoints_updated_at_idx ON public.op_checkpoints USING btree (updated_at)",
       "open_loops_counterparty_idx": "CREATE INDEX open_loops_counterparty_idx ON public.open_loops USING btree (source_id, counterparty_slug) WHERE (status = 'open'::text)",
       "open_loops_dedup": "CREATE UNIQUE INDEX open_loops_dedup ON public.open_loops USING btree (source_id, dedup_key)",

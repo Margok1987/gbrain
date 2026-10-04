@@ -18,7 +18,9 @@ import { performManagedSync } from '../src/core/persistence/sync-run.ts';
 import { discoverManagedSync } from '../src/core/persistence/sync-discovery.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
-import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
+import { disposePersistenceConsumer, registerMutationPreparer } from '../src/core/persistence/service.ts';
+import { UNFINISHED_PAGE_REQUEST_SQL, noopWaiversEnabled } from '../src/core/persistence/sync-waivers.ts';
+import { waitFor } from './helpers/wait-for.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { prepareRemoteJob, withSubmissionAuthority } from '../src/core/minions/submission-authority.ts';
 import type { OperationContext } from '../src/core/ops/contract.ts';
@@ -490,8 +492,10 @@ test('managed sync still rejects conflicting explicit slugs on extension-bearing
     for (const engine of engines) {
       const f = await fixture(engine, { 'notes/example.md.md':
         '---\ntype: note\ntitle: Example\nslug: notes/other\n---\nA conflicting identity must not be imported.\n' });
-      expect(await performManagedSync(engine, { sourceId: f.id, noPull: true, noEmbed: true, noExtract: true }))
-        .toMatchObject({ status: 'blocked_by_failures', failedFiles: 1 });
+      // #5988: the conflicting file is held (never imported) instead of blocking the sync.
+      const synced = await performManagedSync(engine, { sourceId: f.id, noPull: true, noEmbed: true, noExtract: true });
+      expect(synced).toMatchObject({ status: 'first_sync', held_count: 1 });
+      expect(synced.held?.[0]).toMatchObject({ path: 'notes/example.md.md', code: 'frontmatter_slug_conflict' });
       expect(await engine.getPage('notes/example.md', { sourceId: f.id })).toBeNull();
       expect(await engine.getPage('notes/other', { sourceId: f.id })).toBeNull();
     }
@@ -575,3 +579,154 @@ test('managed sync leaves reserved skillpack paths to the skill publisher instea
       expect(await engine.executeRaw("SELECT 1 FROM persistence_requests WHERE source_id=$1 AND state<>'committed'", [f.id])).toEqual([]);
     }
   }), 120_000);
+
+// #5984 (CEO-A12/A32/A34, ENG-A7, DX-A7/A15): a manifest delete of a page that is
+// already soft-deleted at its frozen revision advances without an admission.
+const WAIVER_OPTS = { noPull: true, noEmbed: true, noExtract: true };
+async function deletedFixture(engine: BrainEngine, files: Record<string, string>, softDeleted: string[]) {
+  const f = await fixture(engine, files);
+  expect((await performManagedSync(engine, { sourceId: f.id, ...WAIVER_OPTS })).status).toBe('first_sync');
+  for (const slug of softDeleted) await engine.transaction(tx => withCoordinatedWrite(tx, [f.id], () => tx.softDeletePage(slug, { sourceId: f.id }), TEST_WRITE_ATTRIBUTION));
+  for (const path of Object.keys(files)) rmSync(join(f.root, path));
+  commit(f.root, 'remove every file');
+  return f;
+}
+const runRequests = (engine: BrainEngine, sourceId: string, runId: string) => engine.executeRaw<{ kind: string; slug: string; state: string }>(
+  "SELECT intent->>'kind' AS kind,slug,state FROM persistence_requests WHERE source_id=$1 AND intent->>'runId'=$2 ORDER BY sequence", [sourceId, runId]);
+const deleteRequests = (engine: BrainEngine, sourceId: string) => engine.executeRaw<{ slug: string; state: string }>(
+  "SELECT slug,state FROM persistence_requests WHERE source_id=$1 AND intent->>'kind'='managed_sync_delete' ORDER BY sequence", [sourceId]);
+/** Runs `hook` when the screen re-reads `slug` (the second snapshot read: the first is the freeze). */
+function onScreen(engine: BrainEngine, slug: string, hook: () => Promise<void>): BrainEngine {
+  let reads = 0;
+  return new Proxy(engine, { get(target, key) {
+    if (key === 'readPageSnapshot') return async (read: string, opts: Parameters<BrainEngine['readPageSnapshot']>[1]) => {
+      if (read === slug && ++reads === 2) await hook();
+      return target.readPageSnapshot(read, opts);
+    };
+    const value = Reflect.get(target, key);
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+}
+const note = (body: string) => `---\ntitle: Example\n---\n${body}\n`;
+
+test('a mostly-waived manifest reports waived deletes, not deleted pages, and admits only the live delete', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  for (const engine of engines) {
+    const f = await deletedFixture(engine, { 'a.md': note('First'), 'b.md': note('Second'), 'c.md': note('Third'), 'd.md': note('Fourth') }, ['a', 'b', 'c']);
+    const result = await performManagedSync(engine, { sourceId: f.id, ...WAIVER_OPTS });
+    expect(result).toMatchObject({ status: 'synced', deleted: 1, waived: { imports: 0, deletes: 3 }, filesImported: 4 });
+    expect(result.legacySkips).toBeUndefined();
+    expect((await runRequests(engine, f.id, result.runId!)).map(row => [row.kind, row.slug, row.state]))
+      .toEqual([['managed_sync_delete', 'd', 'committed'], ['managed_sync_checkpoint', '__managed_sync_checkpoint__', 'committed']]);
+    expect(await engine.getPage('d', { sourceId: f.id })).toBeNull();
+    expect((await engine.executeRaw<{ last_commit: string }>('SELECT last_commit FROM sources WHERE id=$1', [f.id]))[0].last_commit).toBe(git(f.root, 'rev-parse', 'HEAD'));
+  }
+}), 120_000);
+
+test('GBRAIN_SYNC_WAIVE_NOOP=0 admits every no-op entry', async () => withEnv({ GBRAIN_HOME: home, GBRAIN_SYNC_WAIVE_NOOP: '0' }, async () => {
+  expect(noopWaiversEnabled()).toBe(false);
+  expect(noopWaiversEnabled({})).toBe(true);
+  for (const engine of engines) {
+    const f = await deletedFixture(engine, { 'a.md': note('First'), 'b.md': note('Second') }, ['a', 'b']);
+    const result = await performManagedSync(engine, { sourceId: f.id, ...WAIVER_OPTS });
+    expect(result).toMatchObject({ status: 'synced', deleted: 0, waived: { imports: 0, deletes: 0 } });
+    expect((await runRequests(engine, f.id, result.runId!)).map(row => row.kind)).toEqual(['managed_sync_delete', 'managed_sync_delete', 'managed_sync_checkpoint']);
+  }
+}), 120_000);
+
+test('a restore between freeze and screen is admitted, not waived', async () => withEnv({ GBRAIN_HOME: home, GBRAIN_SYNC_FAILURES_DIR: home }, async () => {
+  for (const engine of engines) {
+    const f = await deletedFixture(engine, { 'a.md': note('Restored concurrently') }, ['a']);
+    const proxy = onScreen(engine, 'a', () => engine.transaction(tx => withCoordinatedWrite(tx, [f.id], async () => { await tx.restorePage('a', { sourceId: f.id }); }, TEST_WRITE_ATTRIBUTION)));
+    try {
+      const result = await performManagedSync(proxy, { sourceId: f.id, ...WAIVER_OPTS });
+      expect(result.waived).toEqual({ imports: 0, deletes: 0 });
+      expect(await deleteRequests(engine, f.id)).toHaveLength(1);
+      expect(await engine.getPage('a', { sourceId: f.id })).not.toBeNull();
+    } finally { await disposePersistenceConsumer(proxy); rmSync(syncFailuresPath(), { force: true }); }
+  }
+}), 120_000);
+
+test.each(['restore', 'rename', 'database-only'] as const)('an unfinished %s request for the page is never overtaken by a waiver', async kind => withEnv({ GBRAIN_HOME: home }, async () => {
+  let hold = Promise.withResolvers<void>();
+  registerMutationPreparer('test_waiver_hold', async () => { await hold.promise; return { observedRevision: null, noop: true, apply: async () => ({ status: 'complete' }) }; });
+  try {
+    for (const engine of engines) {
+      hold = Promise.withResolvers<void>();
+      const f = await deletedFixture(engine, { 'a.md': note('Pending foreground work') }, ['a']);
+      const binding = (await getWorktreeBinding(engine, f.id))!;
+      const authority = await managedSyncAuthority(engine, f.id, binding.source_incarnation, f.root);
+      const page = (await engine.readPageSnapshot('a', { sourceId: f.id, includeDeleted: true }))!.page;
+      const intent = kind === 'rename' ? { renameFrom: { slug: 'a', pageId: page.id } } : { restore: true };
+      const foreground = await admitWrite(engine, { operation: 'test_waiver_hold', sourceId: f.id, sourceIncarnation: binding.source_incarnation,
+        slug: kind === 'rename' ? 'a-renamed' : 'a', pageId: kind === 'rename' ? null : page.id,
+        worktreeId: kind === 'database-only' ? null : binding.worktree_id, topologyGeneration: kind === 'database-only' ? null : binding.topology_generation,
+        principal: authority.writer.principal, authority: authority.writer, callerIntent: intent, intent });
+      expect(await engine.executeRaw(UNFINISHED_PAGE_REQUEST_SQL, [binding.worktree_id, binding.source_incarnation, f.id, 'a', page.id, String(page.id)])).toHaveLength(1);
+      const abort = new AbortController();
+      const admitted = waitFor(async () => (await deleteRequests(engine, f.id)).length > 0, { timeoutMs: 30_000 }).then(() => abort.abort());
+      const result = await performManagedSync(engine, { sourceId: f.id, ...WAIVER_OPTS, signal: abort.signal });
+      await admitted;
+      expect(result.waived ?? { imports: 0, deletes: 0 }).toEqual({ imports: 0, deletes: 0 });
+      expect(await deleteRequests(engine, f.id)).toHaveLength(1);
+      if (kind !== 'database-only') expect(result).toMatchObject({ status: 'partial', reason: 'timeout', writeWait: { status: 'pending' } });
+      hold.resolve();
+      await waitFor(async () => ['committed', 'conflict', 'failed'].includes((await engine.executeRaw<{ state: string }>('SELECT state FROM persistence_requests WHERE id=$1::uuid', [foreground.id]))[0].state), { timeoutMs: 30_000 });
+      let finished = result;
+      for (let i = 0; i < 5 && finished.status === 'partial'; i++) finished = await performManagedSync(engine, { sourceId: f.id, ...WAIVER_OPTS });
+      expect(finished).toMatchObject({ status: 'synced', waived: { imports: 0, deletes: 0 } });
+      await disposePersistenceConsumer(engine);
+    }
+  } finally { hold.resolve(); }
+}), 120_000);
+
+test('revoked sync authority refuses before any waiver or cursor advance', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  for (const engine of engines) {
+    const f = await deletedFixture(engine, { 'a.md': note('Deleted before the grant is revoked') }, ['a']);
+    const clientId = `sync-client-${randomUUID()}`;
+    await engine.executeRaw(`INSERT INTO oauth_clients(client_id,client_name,client_secret_hash,scope,source_id,allowed_operations)
+      VALUES($1,'example-client','test-only','admin',$2,ARRAY['submit_job'])`, [clientId, f.id]);
+    const ctx = { engine, remote: true, sourceId: f.id, auth: { clientId, principal: { kind: 'oauth_client', id: clientId }, scopes: ['admin'], sourceId: f.id, allowedOperations: ['submit_job'] } } as OperationContext;
+    const accepted = await prepareRemoteJob(ctx, 'sync', { noPull: true });
+    const before = (await engine.readPageSnapshot('a', { sourceId: f.id, includeDeleted: true }))!.revision;
+    const proxy = onScreen(engine, 'a', async () => { await engine.executeRaw("UPDATE oauth_clients SET scope='read' WHERE client_id=$1", [clientId]); });
+    try {
+      await expect(withSubmissionAuthority(accepted.authority, () => performManagedSync(proxy, accepted.data))).rejects.toMatchObject({ code: 'permission_denied' });
+      expect(await deleteRequests(engine, f.id)).toHaveLength(0);
+      const [cursor] = await engine.executeRaw<{ completed_keys: [{ index: number; pending?: { slug: string }; counts: { waived?: unknown } }] }>(
+        "SELECT completed_keys FROM op_checkpoints WHERE op='managed-sync' AND completed_keys->0->>'sourceId'=$1 AND completed_keys->0->'authority'->'writer'->>'remote'='true'", [f.id]);
+      expect(cursor.completed_keys[0]).toMatchObject({ index: 0, pending: { slug: 'a' } });
+      expect(cursor.completed_keys[0].counts.waived).toBeUndefined();
+      expect((await engine.readPageSnapshot('a', { sourceId: f.id, includeDeleted: true }))!.revision).toBe(before);
+    } finally { await disposePersistenceConsumer(proxy); }
+  }
+}), 120_000);
+
+test('a waiver that loses the cursor to another drain adopts the winner without double counting', async () => withEnv({ GBRAIN_HOME: home }, async () => {
+  for (const engine of engines) {
+    const f = await deletedFixture(engine, { 'a.md': note('First'), 'b.md': note('Second') }, ['a', 'b']);
+    let winner: Awaited<ReturnType<typeof performManagedSync>> | undefined;
+    const proxy = onScreen(engine, 'a', async () => { winner = await performManagedSync(engine, { sourceId: f.id, ...WAIVER_OPTS }); });
+    try {
+      const loser = await performManagedSync(proxy, { sourceId: f.id, ...WAIVER_OPTS });
+      expect(winner).toMatchObject({ status: 'synced', waived: { imports: 0, deletes: 2 } });
+      expect(loser).toMatchObject({ status: 'synced', runId: winner!.runId, waived: { imports: 0, deletes: 2 }, deleted: 0 });
+      expect((await runRequests(engine, f.id, winner!.runId!)).map(row => row.kind)).toEqual(['managed_sync_checkpoint']);
+    } finally { await disposePersistenceConsumer(proxy); await disposePersistenceConsumer(engine); }
+  }
+}), 120_000);
+
+test('the waiver lookup for unfinished page requests is served by the request indexes', async () => {
+  for (const engine of engines) {
+    const plan = await engine.transaction(async tx => {
+      await tx.executeRaw('SET LOCAL enable_seqscan=off');
+      return tx.executeRaw<Record<string, string>>(`EXPLAIN ${UNFINISHED_PAGE_REQUEST_SQL}`,
+        [randomUUID(), randomUUID(), 'example-source', 'notes/example', 1, '1']);
+    });
+    const text = plan.map(row => Object.values(row)[0]).join('\n');
+    // Every branch (worktree pending, worktree recovery, database-only pending) is an index scan; the planner may
+    // serve the database-only branch from either partial pending index.
+    expect(text.match(/(Index Scan|Index Only Scan|Bitmap Index Scan) (using|on) persistence_requests_(pending|recovery|database_pending)\b/g)?.length).toBeGreaterThanOrEqual(3);
+    expect(text).toContain('persistence_requests_recovery');
+    expect(text).not.toContain('Seq Scan');
+  }
+}, 60_000);

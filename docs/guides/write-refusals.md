@@ -41,7 +41,7 @@ of making a duplicate.
 | `ambiguous_source_path` | `page_identity_changed` | A source registered at a Git subfolder `<sub>` has a page whose stored path `<sub>/<file>` could mean either `<file>` in the source directory (the older Git-root spelling) or `<sub>/<file>` inside a folder of the source that repeats its name, and both files exist. Sync refuses instead of guessing. See [sources in a Git subfolder](multi-source-brains.md#sources-in-a-git-subfolder). | Rename or move one of the two files, commit, then `gbrain sync --source <source> --no-pull --retry-failed`. |
 | `physical_root_device_changed` | `recovery_required` | The checkout's filesystem device number changed while everything else matches, which macOS can do after a reboot. When the owner token, brain, worktree, root, inode and a non-zero birth time all match and the caller can verify database ownership, the write path re-stamps ownership by itself and the write proceeds. This refusal means the automatic re-stamp could not be verified; the suggestion says why. | Do a deliberate self-transfer: `gbrain sources writer status <source>` (note `admin_state`), then `gbrain sources writer transfer prepare <source> --self-transfer --admin-intent writer_transfer_prepare --expected-state <admin_state>`, then `gbrain sources writer transfer accept <source> --path <root> --expected-epoch <epoch> --manifest <digest from prepare> --self-transfer --admin-intent writer_transfer_accept --expected-state <fresh admin_state>`. Retry the original write with the **same** request ID. Never delete ownership marker files. |
 | <a id="embedding_budget_below_worst_case"></a>`embedding_budget_below_worst_case` | `embedding_budget_below_worst_case` | `gbrain migrate embeddings` (or the local `migrate_embeddings` operation) was given a `--max-cost-usd` cap below the migration's worst-case authorization: every planned provider request at its maximum input size, plus any debits a resumed run already holds. The run stopped before any provider request, re-chunk or vector invalidation, so nothing changed. The message and JSON carry `cap_usd`, `worst_case_usd`, `debited_usd` and `required_cap_usd`. | Re-run with the value the `suggestion` names, for example `gbrain migrate embeddings --to <provider:model> --dim <N> --max-cost-usd <required_cap_usd> --yes` (operation: `max_cost_usd`). Preview first with `--dry-run`, which prints the worst-case authorization beside the estimate. Requests settle to reported usage, so actual spend is usually far below the cap. See [embedding migration](embedding-migration.md). |
-| frontmatter slug conflict | `invalid_params` | `gbrain sync` found a file whose frontmatter `slug:` names a different page than its path. The message names the file, the frontmatter slug and the slug its path expects. Nothing was written. | Remove the `slug:` line or make it match the path, commit, then run `gbrain sync --source <source> --retry-failed`. |
+| frontmatter slug conflict | `frontmatter_slug_conflict` (`invalid_params` before #5988) | A file's frontmatter `slug:` names a different page than its path. On a write nothing is written; during sync the file is held and the rest of the source imports. | Remove the `slug:` line or make it match the path, commit, then sync. See [`frontmatter_slug_conflict`](#frontmatter_slug_conflict). |
 | `cursor_processing_options_conflict` | `invalid_params` | An unfinished sync's processing options (`--no-embed`, `--no-extract`, `--no-schema-pack`) conflict with this run, or the cursor predates saved options and has none. When options are saved, a run that omits those flags, including autopilot and `sync` jobs, adopts them. | When the message prints a resume command (`gbrain sync --source <source> --no-pull` plus the saved flags), run it or drop the conflicting flag. When it reports no saved options, resolve pending requests first, then rediscover with `gbrain sync --source <source> --no-pull --retry-failed` and the processing flags you want. |
 | `take_row_collision` | `take_row_collision` | A save adds a takes-table row whose row number already belongs to a different take that exists only in the database. The save stops instead of overwriting that take. | Renumber the new takes row, or add the existing take to the page's takes table, then save with the current `expected_revision` and a **new** request ID (the content changed). |
 | `invalid_source_uri` | `invalid_source_uri` | The brain has shared skillpacks, and the page's stored `source_uri` is a `file:` URI that cannot be turned into a local path, so gbrain cannot prove the write stays outside a skillpack. Shared-skill protection stays on. | The source owner inspects the page's stored `source_uri` on the brain host and replaces it with an absolute file URI or clears it; there is no dedicated command yet. Retry with a **new** request ID. |
@@ -111,6 +111,53 @@ when lifetime request IDs or receipt bytes reach 80% of a limit, with the
 `gbrain config set` value to use; outstanding-request, queued-byte and
 recovery-byte limits can refuse writes without that warning.
 
+<a id="held-files-and-content-refusals"></a>
+## Held files and content refusals
+
+Some content refuses deterministically: the same bytes refuse on every retry.
+On a write (`put_page`, `capture`, `gbrain import`) the call fails with the code
+below and nothing is written. During `gbrain sync` the file is **held**
+instead (#5988): the rest of the source imports, the checkpoint advances, and
+the hold is reported by the sync result (`held`, `held_count`,
+`holds_outstanding`), `gbrain sources status <source>`, doctor
+`git_held_files`, `get_page` (`file_held`) and search (`stale` hits and the
+`held_files` notice). A held new file has no page; a page whose newer file is
+held keeps its last good revision and is read-only for `put_page` until the
+file is repaired, so do not retry a refused write. A hold clears by itself
+when the file changes, is deleted, or a newer gbrain can read it.
+
+Every hold carries `code`, `reason`, `key`, `line`, a location-only `message`
+(never a frontmatter value), `fix` (the exact command) and `docs` (the anchor
+below). Walkthrough: [held files](repair.md#held-files).
+
+**Say to your agent:** *"Sync held some of my notes. Tell me what is wrong
+with each file and fix the ones that need no guessing."*
+
+| Code (`reason`) | What it means | Recovery |
+| --- | --- | --- |
+| <a id="invalid_frontmatter"></a>`invalid_frontmatter` | The file's YAML frontmatter cannot be read without guessing. gbrain imports frontmatter it can read exactly, quoting at most an unquoted value (`author: a (b) (original: https://…)` imports and is reported under `recovered_frontmatter`). Producer checks stay strict: `gbrain frontmatter validate` and the pre-commit hook still fail on it. | Preview the fix: `gbrain repair frontmatter --source <source>`; it writes nothing until `--apply --expect <hash> --yes`. On a write, correct the named line and submit with a new request ID. |
+| <a id="invalid_frontmatter-yaml_parse"></a>`invalid_frontmatter` (`yaml_parse`) | YAML no rule reads safely: a mis-indented list or mapping entry, a key line with no colon. | The preview lists it as `needs_review` with the exact line to fix by hand: one line per key, the whole value quoted. Commit and sync. |
+| <a id="invalid_frontmatter-needs_interpretation"></a>`invalid_frontmatter` (`needs_interpretation`) | Reading it means choosing an interpretation: unquoted continuation lines after a value, a duplicated key, an unclosed `[` or `{`. gbrain never imports a guess. | `gbrain repair frontmatter --source <source> --include-ambiguous` shows the exact interpretation per file. Show the user each diff; apply only what they approve (`--only <path>` / `--skip <path>` select files). |
+| <a id="invalid_frontmatter-ambiguous_identity_key"></a>`invalid_frontmatter` (`ambiguous_identity_key`) | `slug`, `type`, `id` or `source_id` appears twice, or its line was swallowed into another value, so gbrain cannot tell which page the file is. | Edit the file by hand: keep exactly one line for the key. The user decides which value is right. |
+| <a id="invalid_frontmatter-ambiguous_protected_key"></a>`invalid_frontmatter` (`ambiguous_protected_key`) | A key that decides access or provenance (`visibility`, `derived_from`, …) is malformed, duplicated, swallowed into another value, rewritten by quoting, or inside an unclosed fence. gbrain never reads such a key as a broader value. | Edit the file by hand: write the key on one line with one quoted value. Ask the user which visibility is intended; never guess it. |
+| <a id="frontmatter_slug_conflict"></a>`frontmatter_slug_conflict` | The file's frontmatter `slug:` names a different page than its path does (earlier releases reported this as `invalid_params`). The path decides the slug. | Remove the `slug:` line or make it match the path, or move the file to the path its slug names; `gbrain repair frontmatter --source <source> --include-ambiguous` proposes removing the line. Commit and sync. |
+| <a id="file_too_large"></a>`file_too_large` | Over the import size limit (5 MB for Markdown and code, 10 MiB for any sync read). The limit is fixed. | Split the file into smaller files and commit, or leave it out of the source: read `gbrain config get sync.exclude`, then `gbrain config set sync.exclude '<current list>,<path>'`. The next `gbrain sync --source <source> --no-pull` clears the hold. |
+| <a id="content_rejected"></a>`content_rejected` | The content-sanity gate matched junk and the operator set `content_sanity.junk_disposition` to `reject`, so the file is never imported and always visible. | Remove the matched junk from the file, or ask the user whether `junk_disposition` should go back to `quarantine`; that setting is the user's decision. |
+| <a id="rename_held"></a><a id="rename_held-rename_source_changed"></a>`rename_held` (`rename_source_changed`) | A renamed file's hold cleared, but the page it was renamed from changed after the rename was recorded, so the page did not move. | `gbrain repair frontmatter --source <source> --include-ambiguous` proposes re-binding the rename to the old page's current revision; apply after the user agrees. Or restore the old file name. |
+| <a id="parser_regression"></a>`parser_regression` | With `sync.parser_regression=hold`, a file whose exact bytes imported under an earlier gbrain is now refused. This is a gbrain bug. | Report it with the gbrain version, the file and the code; upgrade or pin the last good version. After a fixed gbrain is installed, `gbrain sources retry-held <source>` and then `gbrain sync --source <source> --no-pull` re-screen it. |
+| <a id="sync_parser_regression"></a>`sync_parser_regression` | Sync stopped without advancing because it would hold a file whose exact bytes imported before (default `sync.parser_regression=stop`). This is a gbrain bug, not a content problem. | Report it with the gbrain version, the file and the code; upgrade or pin the last good version, then `gbrain sync --source <source> --no-pull --retry-failed`. To keep syncing meanwhile, `gbrain config set sync.parser_regression hold` (ask the user). |
+| <a id="changed_since_preview"></a>`changed_since_preview` | A `gbrain repair frontmatter --apply` found a file, its proposed change or its page different from what the preview showed, so that file was not written. | Preview again, show the user the new diff and approve its new hash. |
+
+A source blocked by one of these refusals before this release recovers on its
+next sync (scheduled or manual) with no ledger surgery: the blocked request is
+converted in place and reported as `converted_from_failed`. To do it now run
+`gbrain sync --source <source> --no-pull`. `gbrain config set sync.holds fail`
+restores fail-closed blocking for teams that want it. Escalation:
+more than `sync.hold_escalate_count` (default 50) holds in a source, or more
+than `sync.hold_escalate_pct` (default 5%) of a run's screened imports (at
+least 40), sets `holds_escalated` and makes doctor `git_held_files` fail: a
+generator or an upgrade is likely writing or reading files wrong.
+
 ## Worktree refresh refusals
 
 `gbrain sources refresh <source>` is the one supported way to move a managed
@@ -132,7 +179,7 @@ this anchor (`--json` puts them in one object on stdout); the command exits 1.
 | <a id="fetch_failed"></a>`fetch_failed` | `fetch_failed` | `git fetch` failed or did not finish within `sources.refresh_fetch_timeout_ms` (default 120000; `GBRAIN_REFRESH_FETCH_TIMEOUT_MS`; `--fetch-timeout-ms` wins over both). Nothing changed and no refresh record was written. | Retry. For a slow remote, raise the bound with `--fetch-timeout-ms <ms>` or `gbrain config set sources.refresh_fetch_timeout_ms <ms>`. Credentials are the user's: ask them to fix authentication rather than changing the remote. |
 | <a id="refresh_diverged"></a>`refresh_diverged` | `refresh_diverged` | The checkout has commits its upstream lacks, so a fast-forward is impossible. Nothing changed. | Reconcile the histories and push from a clone that is not managed, then retry. `gbrain sources reclone <source>` replaces the checkout; ask the user first, because local commits are dropped. |
 | <a id="refresh_dirty"></a>`refresh_dirty` | `refresh_dirty` | Uncommitted or untracked files overlap the incoming upstream changes (the first 20 are named), or `git merge --ff-only` refused for the same reason. HEAD did not move. Uncommitted files outside the incoming changes do not refuse; they are kept and listed as `preserved_uncommitted`. | Commit or discard the named paths, then retry. Check `gbrain sources writer status <source> --json` first: a pending Git effect may be about to commit a gbrain-published file. |
-| <a id="sync_in_progress"></a>`sync_in_progress` | `sync_in_progress` | A managed sync of one of the checkout's sources has an unfinished cursor. Moving the checkout now would strand it, and the refresh never waits on a sync. | Run the printed `gbrain sync --source <source> --no-pull ...` resume command (it keeps the cursor's options), then retry. |
+| <a id="sync_in_progress"></a>`sync_in_progress` | `sync_in_progress` | A managed sync of one of the checkout's sources has an unfinished cursor. Moving the checkout now would strand it, and the refresh never waits on a sync. `gbrain repair frontmatter --apply` refuses the same way while an unfinished cursor still names a selected file. | Run the printed `gbrain sync --source <source> --no-pull ...` resume command (it keeps the cursor's options), then retry (for a repair, preview again and approve the new hash). |
 | <a id="refresh_in_progress"></a>`refresh_in_progress` | `refresh_in_progress` | Another refresh of the same checkout is active, or a command that changes which sources share the checkout (`sources add`, `remove`, `archive`, `restore`, `reclone`) ran while one was active. | `gbrain sources refresh <source> --resume`, then retry the source command with the same request ID. |
 | <a id="refresh_drain_timeout"></a>`refresh_drain_timeout` | `refresh_drain_timeout` | Queued writes or Git effects on the checkout did not finish within `--wait-drain` (default 60 s; `sources.refresh_drain_wait_ms`; `GBRAIN_REFRESH_DRAIN_WAIT_MS`). The counts are in the message. The fence was lifted and HEAD did not move. | Retry, or wait longer with `--wait-drain <seconds>`. Inspect what is queued with `gbrain sources writer status <source> --json`. |
 | <a id="refresh_source_changed"></a>`refresh_source_changed` | `refresh_source_changed` | HEAD moved (an outside commit or checkout), or the checkout's ownership or set of sources changed, between the precheck and the merge. Nothing was merged and the fence was lifted. | Retry `gbrain sources refresh <source>`. |
@@ -146,6 +193,26 @@ that already reached the verified upstream commit moves on to syncing.
 `gbrain sources refresh <source> --resume` runs the remaining syncs. Doctor
 reports `worktree_refresh_stuck` for a refresh active longer than 15 minutes,
 with the resume command.
+
+## Managed sync drain stops
+
+`gbrain sync` on a managed brain keeps going until the source's cursor is done
+(see [catching up a large backlog](live-sync.md#catching-up-a-large-backlog-on-managed-postgres)).
+When it stops early, the run ends in one outcome: `resumable` (exit 0, safe to
+rerun the same command) or `blocked` (exit 1, needs a fix first). `--json`
+carries `outcome`, `drain.stop_reason` and `next: { command, safe_to_loop,
+retry_after_ms, eta_seconds, rate_pages_per_min, why, docs }`. Run
+`next.command`; loop on it only when `next.safe_to_loop` is true.
+
+**Say to your agent:** *"Catch up my managed brain's sync backlog and tell me how long it will take."*
+
+| Stop reason | Code | Outcome | What it means | Recovery |
+| --- | --- | --- | --- | --- |
+| <a id="drain-stopped-at-its-deadline"></a>`deadline` | `writer_pending` | `resumable` | `--timeout`, `--hard-deadline`, Ctrl-C or the run deadline stopped the drain. Accepted page writes keep their request IDs and the cursor is intact. | Rerun `next.command` (the same options). It resumes where the last run stopped. |
+| <a id="drain-stalled"></a>`drain_stalled` | `drain_stalled` | `blocked` | The awaited page write and the oldest unfinished write on its checkout did not change for 30 s across several passes, and nothing on this host can claim it. `drain.stall` names the request, its state, `blocked_reason` and whether this host owns the checkout. | `gbrain sources writer status <source>`. When this host is not the owner, make sure the owner (`gbrain serve`) is running. Then rerun `next.command`. |
+| <a id="drain-database-contention"></a>`database_contention` | `database_contention` | `blocked` (or an error) | Three consecutive passes hit database contention, a statement timeout or a dropped connection, or reading the awaited write's state failed (an authentication or permission failure stops at once). The drain retries transient failures with backoff before giving up. Accepted writes keep their request IDs. | Fix database access (`gbrain engine status --probe`), then rerun `next.command`. |
+| <a id="drain-writer-blocked"></a>`recovery_required`, `owner_unavailable`, `unexpected_file_bytes`, `unexpected_staging_bytes` | `recovery_required` | `blocked` | The checkout's writer needs intervention before more pages can publish: interrupted publication recovery, no live owner, or unexpected bytes in the file or staging area. | `gbrain sources writer status <source>` and the fix it prints. Unexpected bytes are the user's edits; ask before discarding them. Then rerun `next.command`. |
+| <a id="drain-blocked-by-a-failed-page"></a>`blocked_by_failures` | `blocked_by_failures` | `blocked` | A page write failed terminally. `managed_write` and `failures` name the page and cause. Rerunning without a fix returns the same failure. | Fix the cause, then run `next.command` (it adds `--retry-failed`). Ask the user before skipping content. |
 
 ## Unbound sources on Postgres
 

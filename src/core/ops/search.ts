@@ -35,6 +35,7 @@ import { probeProjectionReadiness } from '../search/projection-readiness.ts';
 import { resolveBoostMap, resolveHardExcludes } from '../search/source-boost.ts';
 import { pageReadFilter } from '../search/read-policy-sql.ts';
 import { QUERY_DESCRIPTION, SEARCH_DESCRIPTION } from '../operations-descriptions.ts';
+import { heldFilesNotice, stampHeldHits } from '../persistence/held-reads.ts';
 import { opError } from './contract.ts';
 import type { Operation, OperationContext } from './contract.ts';
 import { invalidParam, paramUse } from './op-fix.ts';
@@ -395,6 +396,10 @@ async function matchingSavedFacts(ctx: OperationContext, scope: SourceScope, que
  * a result for a remote caller whose scope still holds unsealed pages gets
  * `safe_index_pending` appended, whether it came back empty or partial. The
  * withholding itself is unchanged.
+ *
+ * #5988: hits whose page's newer file is held get `stale` (the rows are the
+ * call's own copies, stamped in place), and a scope with held files gets
+ * `held_files` per source plus the `held_files` degraded notice.
  */
 async function buildRetrievalResponseMeta(
   ctx: OperationContext,
@@ -421,6 +426,9 @@ async function buildRetrievalResponseMeta(
   });
   const aliases = (opts.declarations ?? new DeclarationMemo()).scan(results as DeclarationRow[], queryText);
   const savedFacts = await matchingSavedFacts(ctx, scope, queryText, aliases);
+  const heldFiles = await stampHeldHits(ctx.engine, results as SearchResult[], scope, ctx).catch(() => []);
+  const heldNotice = heldFilesNotice(heldFiles, ctx.remote !== false);
+  if (heldNotice) ctx.emitNotice?.(heldNotice);
   const degraded = [...(m?.degraded ?? [])];
   if (safeIndexPending) degraded.push({ stage: 'safe_index_pending' });
   if (readiness.status !== 'ready') {
@@ -444,6 +452,7 @@ async function buildRetrievalResponseMeta(
     ...(opts.typeFilterNotice ? { type_filter_notice: opts.typeFilterNotice } : {}),
     ...(savedFacts.length ? { saved_facts: savedFacts } : {}),
     ...(aliases.length ? { other_names: aliases } : {}),
+    ...(heldFiles.length ? { held_files: heldFiles } : {}),
     ...(hint || readiness.hint ? { hint: [hint, readiness.hint].filter(Boolean).join(' ') } : {}),
   };
 }

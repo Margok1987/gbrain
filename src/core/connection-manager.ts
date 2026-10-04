@@ -37,6 +37,7 @@
  */
 
 import postgres from '#postgres'
+import { traceSqlOptions } from './sql-trace.ts';
 import { resolvePrepare, resolveSessionTimeouts, resolvePoolSize, resolveMaxLifetimeSeconds, endPoolBounded } from './db.ts';
 import { redactPgUrl } from './url-redact.ts';
 import { logConnectionEvent } from './connection-audit.ts';
@@ -356,7 +357,7 @@ export class ConnectionManager {
     if (Object.keys(timeouts).length > 0) opts.connection = timeouts;
     const prepare = resolvePrepare(this.opts.url);
     if (typeof prepare === 'boolean') opts.prepare = prepare;
-    this._readPool = postgres(this.opts.url, opts);
+    this._readPool = postgres(this.opts.url, traceSqlOptions(opts, 'read'));
     logConnectionEvent({ pool: 'read', op: 'init' });
     return this._readPool;
   }
@@ -513,7 +514,7 @@ export class ConnectionManager {
     const t0 = Date.now();
     let pool: Sql | null = null;
     try {
-      pool = postgres(this._directUrl, opts);
+      pool = postgres(this._directUrl, traceSqlOptions(opts, 'direct'));
       // Probe to validate connectivity early.
       await pool`SELECT 1`;
       logConnectionEvent({

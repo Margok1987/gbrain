@@ -53,6 +53,8 @@ beforeAll(async () => {
     const lite = new PGLiteEngine(); await lite.connect({}); await lite.initSchema(); engines.push(lite);
   }
   if (backends.includes('postgres')) { const pg = await isolatedPersistencePostgres(process.env.DATABASE_URL!); engines.push(pg.engine); closePostgres = pg.close; }
+  // #5988: these fixtures force failed receipts with unreadable YAML, which sync now holds by default; sync.holds=fail keeps them fail-closed.
+  for (const engine of engines) await engine.setConfig('sync.holds', 'fail');
 }, 120_000);
 
 test('withdrawal-conflicted sync resumes only through explicit guarded rediscovery and cannot restore the fact', async () => withEnv(env, async () => {
@@ -310,6 +312,7 @@ test('local single and all-source CLI JSON carry durable diagnostics and fail th
 test.skipIf(!backends.includes('pglite'))('a new process reads the same failed receipt from a persisted PGLite brain', async () => withEnv(env, async () => {
   const database = join(home, 'restart-db');
   const engine = new PGLiteEngine(); await engine.connect({ database_path: database }); await engine.initSchema();
+  await engine.setConfig('sync.holds', 'fail');
   let expected: Awaited<ReturnType<typeof performManagedSync>>, sourceId: string;
   try {
     const f = await fixture(engine, { 'bad.md': '---\ntitle: [broken\n---\nRestart failure fixture.\n' });

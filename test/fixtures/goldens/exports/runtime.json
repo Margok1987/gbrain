@@ -610,6 +610,7 @@
         "importImageFile",
         "isImageFilePath",
         "pLimit",
+        "slugConflictHoldMessage",
         "withImportTransaction"
       ],
       "./ingestion": [
@@ -654,13 +655,23 @@
         "unwrapWikilink"
       ],
       "./markdown": [
+        "HOLD_CODES",
+        "IDENTITY_FRONTMATTER_KEYS",
+        "INVALID_FRONTMATTER_REASONS",
+        "PROTECTED_FRONTMATTER_KEYS",
+        "RECOVERY_VERSION",
+        "classifyImportHold",
         "coerceFrontmatterString",
+        "contentSizeHold",
         "findTimelineSplitIndex",
         "frontmatterBodyOffset",
+        "frontmatterHoldMessageWithoutKeys",
         "inferTypeAndSubtypeFromPack",
         "inferTypeFromPack",
+        "isFrontmatterHoldMessage",
         "isRelativeFileUri",
         "parseMarkdown",
+        "recoverFrontmatter",
         "resolvePageFilePath",
         "resolveParsedSubtype",
         "resolveSourceLocalFilePath",

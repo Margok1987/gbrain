@@ -150,7 +150,8 @@ test('managed import refuses cross-source input, symlink targets, skills, malfor
     symlinkSync(other.root, join(f.root, 'escape'));
     await expect(importManagedFile(engine, file, 'escape/note.md', opts)).rejects.toThrow('escapes');
     await expect(importManagedFile(engine, file, 'skills/unsafe.md', opts)).rejects.toThrow('skill');
-    writeFileSync(file, '---\ntitle: invalid: yaml\n---\nBody\n');
+    // #5988: `title: invalid: yaml` now imports by quoting; a mis-indented list cannot be read.
+    writeFileSync(file, '---\ntags:\n  - a\n - b\n---\nBody\n');
     await expect(importManagedFile(engine, file, 'note.md', opts)).rejects.toThrow('Invalid YAML');
     await expect(importManagedFile(engine, file, 'image.png', opts)).rejects.toThrow('GBRAIN_EMBEDDING_MULTIMODAL=true');
     expect(await engine.getPage('note', { sourceId: f.sourceId })).toBeNull();

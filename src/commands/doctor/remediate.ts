@@ -28,7 +28,7 @@ import { clearHealthMemo } from '../../core/health-memo.ts';
 import type { RemediationPlan, RemediationResult } from '../../core/remediation/types.ts';
 import type { RepairPlanStep } from '../../core/remediation/repairs.ts';
 import { repairPreviewCommand, repairSpec, type ExplicitRepairNotice } from '../../core/repair/registry.ts';
-import { runWaveChecks, waveRepairKind, type WaveFinding } from './wave-checks.ts';
+import { findingSource, runWaveChecks, waveRepairKind, type WaveFinding } from './wave-checks.ts';
 import { derivedCapExhaustedError, type CapSource } from '../../core/consent.ts';
 import { previewRemediationPlan, remediateConsent, remediateFlags, remediationPlanHash, type RemediateFlags } from './remediate-consent.ts';
 import { cliRenderContext, renderAction, renderNotice, type Action, type Notice } from '../../core/agent-output.ts';
@@ -167,7 +167,9 @@ export async function pendingMigrationsNotice(engine: BrainEngine): Promise<Noti
 /**
  * CLI wrapper around computeRemediationPlan. Read-only — never enqueues,
  * never mutates, never migrates (the engine is probe-only). JSON adds a
- * `command` per job step, the repair steps, the combined command and a
+ * `command` per job step, the repair steps, the combined command, the wave
+ * check `findings` classified as a run would leave them (an explicit-only
+ * kind's finding is `explicit_kind_required` with its preview command) and a
  * `notices` array (pending migrations) to the library's stable envelope.
  */
 export async function runRemediationPlan(engine: BrainEngine, args: string[]): Promise<void> {
@@ -178,12 +180,14 @@ export async function runRemediationPlan(engine: BrainEngine, args: string[]): P
   const migrations = await pendingMigrationsNotice(engine);
   const plan = await computeRemediationPlan(engine, { targetScore, repairs: { noEmbed } });
   const planHash = plan.repair_steps?.length ? await remediationPlanHash(engine, args, plan) : undefined;
+  const waves = await runWaveChecks(engine);
+  const findings = classifyWaveFindings(waves, waves, { repairs: [], repairs_skipped: plan.repair_steps ?? [] });
   if (args.includes('--json')) {
     const ctx = cliRenderContext();
     const steps = await Promise.all(plan.plan.map(async step => ({ ...step, command: jobStepCommand(step), fix: renderAction(await jobStepFix(step), ctx) })));
     const repairSteps = plan.repair_steps?.map(step => ({ ...step, fix: renderAction(repairStepFix(step), ctx) }));
     await writeJsonDocument(JSON.stringify({ ...plan, plan: steps, ...(repairSteps ? { repair_steps: repairSteps } : {}),
-      combined_command: combinedRemediateCommand(plan, plan.target_unreachable ? plan.max_reachable_score : targetScore, { noEmbed, planHash }), ...(planHash ? { plan_hash: planHash } : {}),
+      combined_command: combinedRemediateCommand(plan, plan.target_unreachable ? plan.max_reachable_score : targetScore, { noEmbed, planHash }), ...(planHash ? { plan_hash: planHash } : {}), findings,
       ...(migrations ? { notices: [renderNotice(migrations, cliRenderContext())] } : {}) }, null, 2));
     return;
   }
@@ -194,6 +198,11 @@ export async function runRemediationPlan(engine: BrainEngine, args: string[]): P
   }
   const paidJobs = new Set((await Promise.all(plan.plan.map(async step => (await jobStepFix(step)).consent.length ? step.step : null))).filter((n): n is number => n !== null));
   for (const line of renderRemediationPlanLines(plan, targetScore, { noEmbed, planHash, paidSteps: paidJobs })) console.log(line);
+  const named = findings.filter(f => f.class === 'explicit_kind_required');
+  if (named.length) {
+    console.log('\nFindings an explicit-only repair clears (preview each on this host, then ask the user before applying):');
+    for (const finding of named) console.log(`  ${finding.check_id}: ${finding.command}`);
+  }
 }
 
 interface RemediationPlanShape {
@@ -281,8 +290,10 @@ export interface RemediationFinding {
  * Classify every wave check that reported a finding before or after the run.
  * A repairable finding the run did not clear is `pending` (the step stopped,
  * was refused by the budget, or items remain) or `consent_required` (the step
- * was skipped for lack of --include-repairs). A check that could not run is
- * `pending`: its state is unknown, never assumed clean.
+ * was skipped for lack of --include-repairs). A check that could not run, or
+ * whose scan stopped at its deadline (`details.partial`), is `pending`: its
+ * state is unknown or incomplete, never assumed clean. An explicit-only kind's
+ * preview names `--source <id>` when the finding names one source.
  */
 export function classifyWaveFindings(before: WaveFinding[], after: WaveFinding[], result: Pick<RemediationResult, 'repairs' | 'repairs_skipped'>): RemediationFinding[] {
   const findings: RemediationFinding[] = [];
@@ -295,13 +306,18 @@ export function classifyWaveFindings(before: WaveFinding[], after: WaveFinding[]
     }
     const base = { check_id: now.spec.id, message: now.check.message };
     if (now.state === 'unknown') { findings.push({ ...base, class: 'pending', instruction: 'The check could not run; rerun gbrain doctor on the brain host.' }); continue; }
+    if (now.check.details?.partial === true) {
+      findings.push({ ...base, class: 'pending', ...(kind ? { repair_kind: kind } : {}),
+        instruction: `The scan stopped at its deadline, so the finding is incomplete; raise GBRAIN_DOCTOR_FM_TIMEOUT_MS and rerun gbrain doctor --only ${now.spec.id} on the brain host.` });
+      continue;
+    }
     if (now.spec.resolution === 'operator') { findings.push({ ...base, class: 'operator_required', instruction: now.spec.instruction }); continue; }
     if (now.spec.resolution === 'unsupported') { findings.push({ ...base, class: 'unsupported', instruction: now.spec.instruction }); continue; }
     // A repairable finding the repair can only report blocked needs the operator first.
     const blocked = now.check.details?.operator_instruction;
     if (typeof blocked === 'string') { findings.push({ ...base, class: 'operator_required', instruction: blocked, ...(kind ? { repair_kind: kind } : {}) }); continue; }
     if (kind && repairSpec(kind).explicit_only) {
-      findings.push({ ...base, class: 'explicit_kind_required', repair_kind: kind, command: repairPreviewCommand(kind) });
+      findings.push({ ...base, class: 'explicit_kind_required', repair_kind: kind, command: repairPreviewCommand(kind, { source: findingSource(now) }) });
       continue;
     }
     const skipped = result.repairs_skipped?.find(step => step.kind === kind);

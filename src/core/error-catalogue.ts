@@ -59,6 +59,12 @@ export const ERROR_CATALOGUE = {
   refresh_source_changed: { code: 'refresh_source_changed', docs: 'docs/guides/write-refusals.md#refresh_source_changed' },
   refresh_recovery_required: { code: 'refresh_recovery_required', docs: 'docs/guides/write-refusals.md#refresh_recovery_required' },
   worktree_refreshing: { code: 'worktree_refreshing', docs: 'docs/guides/write-refusals.md#worktree_refreshing' },
+  // #5984 managed sync drain stop reasons (src/core/persistence/sync-drain.ts).
+  sync_drain_deadline: { code: 'writer_pending', docs: 'docs/guides/write-refusals.md#drain-stopped-at-its-deadline' },
+  sync_drain_stalled: { code: 'drain_stalled', docs: 'docs/guides/write-refusals.md#drain-stalled' },
+  sync_drain_database_contention: { code: 'database_contention', docs: 'docs/guides/write-refusals.md#drain-database-contention' },
+  sync_drain_writer_blocked: { code: 'recovery_required', docs: 'docs/guides/write-refusals.md#drain-writer-blocked' },
+  sync_drain_blocked_by_failures: { code: 'blocked_by_failures', docs: 'docs/guides/write-refusals.md#drain-blocked-by-a-failed-page' },
 } as const satisfies Record<string, CatalogueEntry>;
 
 export type CatalogueName = keyof typeof ERROR_CATALOGUE;
