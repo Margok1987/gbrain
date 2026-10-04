@@ -12,6 +12,7 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { extractionDateGroundingEntry, hubDegreeShapeEntry } from '../src/commands/doctor/checks/ranking-extraction.ts';
 import { categorizeCheck } from '../src/core/doctor-categories.ts';
 import type { DoctorContext } from '../src/commands/doctor/context.ts';
+import type { Check } from '../src/commands/doctor.ts';
 
 let engine: PGLiteEngine;
 const ctx = () => ({ engine, args: [], progress: { heartbeat() {} } }) as unknown as DoctorContext;
@@ -32,7 +33,7 @@ afterAll(async () => { if (engine) await engine.disconnect(); });
 
 describe('hub_degree_shape', () => {
   test('off: reports the shape and that dampening is off', async () => {
-    const [check] = await hubDegreeShapeEntry.run(ctx());
+    const [check] = (await hubDegreeShapeEntry.run(ctx())) as Check[];
     expect(check.status).toBe('ok');
     expect(check.message).toContain('max 12');
     expect(check.message).toContain('hub dampening is off');
@@ -41,7 +42,7 @@ describe('hub_degree_shape', () => {
 
   test('on: counts pages above the half degree, recommends nothing', async () => {
     await engine.setConfig('search.hub_dampening', '5');
-    const [check] = await hubDegreeShapeEntry.run(ctx());
+    const [check] = (await hubDegreeShapeEntry.run(ctx())) as Check[];
     expect(check.message).toContain('half degree 5: 1 page(s)');
     expect(check.message).not.toMatch(/set .*hub_dampening/);
     await engine.setConfig('search.hub_dampening', 'off');
@@ -50,10 +51,10 @@ describe('hub_degree_shape', () => {
 
 describe('extraction_date_grounding', () => {
   test('reports off by default and lists consumers when on', async () => {
-    const [off] = await extractionDateGroundingEntry.run(ctx());
+    const [off] = (await extractionDateGroundingEntry.run(ctx())) as Check[];
     expect(off.message).toContain('is off');
     await engine.setConfig('extraction.date_grounding', 'true');
-    const [on] = await extractionDateGroundingEntry.run(ctx());
+    const [on] = (await extractionDateGroundingEntry.run(ctx())) as Check[];
     expect(on.message).toContain('propose_takes');
     expect(categorizeCheck('extraction_date_grounding')).toBe(categorizeCheck('graph_coverage'));
     await engine.setConfig('extraction.date_grounding', 'false');

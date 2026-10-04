@@ -884,8 +884,7 @@ async function runPhaseSynthesizeInner(
         config.originalsPrefix,
         config.mode,
         summaryDate,
-        config.attributionRules,
-        config.dateGrounding,
+        config.attributionRules, config.dateGrounding,
       ));
       // One check for the whole chunk set: a transcript never half-submits.
       const callsPerChild = config.mode === 'agentic' ? config.maxTurns : 1;

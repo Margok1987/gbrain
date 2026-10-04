@@ -551,6 +551,11 @@ function explainRetryArgs(p: Record<string, unknown>): Record<string, unknown> {
   return rest;
 }
 
+/** Adds the explain_target diagnosis to the retrieval meta when one was requested. */
+function withExplainTarget(meta: Record<string, unknown>, diagnosis: ExplainTargetDiagnosis | undefined): Record<string, unknown> {
+  return diagnosis ? { ...meta, explain_target: diagnosis } : meta;
+}
+
 /** explain_target, after the search: diagnose, refine an unretrieved target with the probe, and emit the fix as a notice. */
 function finishExplainTarget(
   ctx: OperationContext, p: Record<string, unknown>, prep: { trace?: TargetTrace; early?: ExplainTargetDiagnosis } | null,
@@ -720,12 +725,8 @@ const search: Operation = {
     bumpLastRetrievedAt(ctx.engine, results.map((r) => r.page_id));
     maybeCaptureSearch(ctx, queryText, results, latency_ms, true, capturedMeta);
     // #3800: cap AFTER capture/meta so eval + cache see the real payload.
-    const explainTarget = finishExplainTarget(ctx, p, explainPrep, results, 'search');
     return evidenceOutput(ctx, p, results, plan, { ...scope, excludePrivate }, capturedMeta, snippetCap,
-      async rows => ({
-        ...(await buildRetrievalResponseMeta(ctx, scope, queryText, rows, capturedMeta, { conceptHint: true, types, typeFilterNotice: typeFilter.notice, declarations })),
-        ...(explainTarget ? { explain_target: explainTarget } : {}),
-      }));
+      async rows => withExplainTarget(await buildRetrievalResponseMeta(ctx, scope, queryText, rows, capturedMeta, { conceptHint: true, types, typeFilterNotice: typeFilter.notice, declarations }), finishExplainTarget(ctx, p, explainPrep, results, 'search')));
   },
   scope: 'read', mutating: false,
   cliHints: { name: 'search', positional: ['query'] },
@@ -960,7 +961,7 @@ const query: Operation = {
       autocut: typeof p.autocut === 'boolean' ? (p.autocut as boolean) : undefined,
       // v0.43 — relational recall override. Omitted = smart default (mode bundle).
       relationalRetrieval: typeof p.relational === 'boolean' ? (p.relational as boolean) : undefined,
-      ...(explainPrep?.trace ? { explainTarget: explainPrep.trace } : {}),
+      explainTarget: explainPrep?.trace,
     });
     const declarations = new DeclarationMemo();
     results = await withDeclaredNameFanOut(results, queryText, declarations, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {
@@ -1125,13 +1126,8 @@ const query: Operation = {
     // #1663: the CRAG grade rides the same retrieval meta channel.
     // #3800: cap AFTER capture/meta/CRAG so every internal consumer graded
     // and recorded the real payload; only the returned envelope is snipped.
-    const explainTarget = finishExplainTarget(ctx, p, explainPrep, results, 'query');
     return evidenceOutput(ctx, p, results, plan, { ...querySourceScope, excludePrivate, detail }, capturedMeta, snippetCap,
-      async rows => ({
-        ...(await buildRetrievalResponseMeta(ctx, querySourceScope, queryText, rows, capturedMeta, { types, typeFilterNotice: typeFilter.notice, declarations })),
-        crag,
-        ...(explainTarget ? { explain_target: explainTarget } : {}),
-      }));
+      async rows => withExplainTarget({ ...(await buildRetrievalResponseMeta(ctx, querySourceScope, queryText, rows, capturedMeta, { types, typeFilterNotice: typeFilter.notice, declarations })), crag }, finishExplainTarget(ctx, p, explainPrep, results, 'query')));
   },
   scope: 'read', mutating: false,
   cliHints: { name: 'query', positional: ['query'] },

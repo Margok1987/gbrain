@@ -435,6 +435,14 @@
       },
       {
         "category": "brain",
+        "name": "hub_degree_shape"
+      },
+      {
+        "category": "brain",
+        "name": "extraction_date_grounding"
+      },
+      {
+        "category": "brain",
         "name": "integrity"
       },
       {

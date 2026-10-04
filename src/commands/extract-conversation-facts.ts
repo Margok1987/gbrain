@@ -506,6 +506,16 @@ export function splitIntoSegments(
  * timestamp the parser derived from effective_date (which may be an event
  * date). Otherwise the page's observation date, or null (unknown).
  */
+/**
+ * A conversation fact's valid_from: a validated event date the extractor
+ * stated (date-grounding variant) wins; else the segment start, except the
+ * epoch fallback (no trustworthy date → the insert's now() default).
+ */
+function segmentValidFrom(extracted: Date | undefined, startIso: string | undefined): { valid_from?: Date } {
+  if (extracted) return { valid_from: extracted };
+  return startIso && !startIso.startsWith('1970-') ? { valid_from: new Date(startIso) } : {};
+}
+
 export function segmentObservationDate(page: Pick<Page, 'slug' | 'frontmatter' | 'effective_date'>, startIso: string | undefined): ObservationDate | null {
   const day = startIso?.slice(0, 10);
   const context = deriveDateContext({ page: page as Page });
@@ -1189,13 +1199,7 @@ async function processPage(
         // Preserve the conversation's valid time instead of defaulting every
         // extracted fact to extraction time. Epoch-anchored parses have no
         // trustworthy date, so they retain the existing now() fallback.
-        // A validated event date the extractor stated (date-grounding variant)
-        // wins over the segment start.
-        ...(fact.valid_from
-          ? { valid_from: fact.valid_from }
-          : seg.startIso && !seg.startIso.startsWith('1970-')
-            ? { valid_from: new Date(seg.startIso) }
-            : {}),
+        ...segmentValidFrom(fact.valid_from, seg.startIso),
         context:
           fact.context ?? `from ${page.slug} segment ${seg.startIso}..${seg.endIso}`,
       }));
