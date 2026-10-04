@@ -58,6 +58,8 @@
 // sourceId arg — atoms always wrote to 'default' regardless of source,
 // which made the NOT EXISTS guard ineffective on federated brains.
 
+import { observationDateLine, observationDateRule } from '../ai/date-grounding.ts';
+import { getExtractorVariant } from '../facts/extract.ts';
 import type { BrainEngine, LinkBatchInput } from '../engine.ts';
 import { stripReasoningBlocks } from '../llm-json.ts';
 import type { PhaseResult } from '../cycle.ts';
@@ -887,6 +889,7 @@ export async function runPhaseExtractAtoms(
   // "Keep safe defaults" comment) still leaves extractModel on this default,
   // matching the pre-refactor fail-soft behavior exactly.
   let extractModel = resolveTierDefault('utility');
+  const dateGrounding = (await getExtractorVariant(engine)).dateGrounding === true;
   let budgetCap = DEFAULT_BUDGET_USD;
   let explicitBudget = false; // operator SET cycle.extract_atoms.budget_usd
   // #4529/#4540: the per-item input/output caps were hardcoded (slice(0, 50_000) +
@@ -1095,6 +1098,9 @@ export async function runPhaseExtractAtoms(
     }
 
     const originLabel = item.kind === 'transcript' ? item.filePath : item.slug;
+    // extraction.date_grounding: the source's own date (file name or dated
+    // slug) is the observation date; undated sources say unknown.
+    const observedOn = sourceDate(originLabel, '');
     // #4706: bind the cut ONCE. This is the exact text the model receives,
     // and quote provenance is verified against THIS rather than the full
     // item, so a quote can only verify against text the model actually saw.
@@ -1112,11 +1118,12 @@ export async function runPhaseExtractAtoms(
       }
       const result = await chat({
         model: extractModel,
-        system: EXTRACT_PROMPT,
+        system: dateGrounding ? `${EXTRACT_PROMPT}\n\n${observationDateRule()}` : EXTRACT_PROMPT,
         messages: [
           {
             role: 'user',
-            content: transcriptMessage(originLabel, promptContent),
+            content: (dateGrounding ? `${observationDateLine(observedOn ? { date: observedOn, source: 'filename' } : null)}\n` : '') +
+              transcriptMessage(originLabel, promptContent),
           },
         ],
         maxTokens: maxOutputTokens, responseSchema: ATOMS_RESPONSE_SCHEMA,

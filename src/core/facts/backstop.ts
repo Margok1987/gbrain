@@ -37,6 +37,7 @@
  * commit 13 wires it.
  */
 
+import { observationDateFrom, resolveObservationDate, type ObservationDate } from '../ai/date-grounding.ts';
 import type { BrainEngine, FactInsertStatus, NewFact } from '../engine.ts';
 import type { ResolutionSource } from '../entities/resolve.ts';
 import { isFactsBackstopEligible } from './eligibility.ts';
@@ -157,6 +158,16 @@ export type FactsBackstopResult =
       /** Set when the LLM extraction step failed non-transport-fatally (see runPipelineWithBody). */
       skipped_reason?: import('./extract.ts').ExtractFailureReason;
     };
+
+/** One pipeline run's input: the turn text plus its page provenance and observation date. */
+interface PipelineInput {
+  turnText: string;
+  isDreamGenerated: boolean;
+  ref?: string;
+  pageSlug?: string;
+  /** When the text was written or said; null/undefined = unknown. */
+  observationDate?: ObservationDate | null;
+}
 
 interface ParsedPageInput {
   slug: string;
@@ -518,6 +529,7 @@ async function runPipeline(
       // #4819: page provenance for DB-only rows. The turn-path entry
       // (runFactsPipeline) has no page, so it leaves this unset.
       pageSlug: parsedPage.slug,
+      observationDate: resolveObservationDate({ slug: parsedPage.slug, frontmatter: parsedPage.frontmatter }),
     },
     ctx,
     abortSignal,
@@ -552,7 +564,7 @@ async function runPipeline(
  * fallback regardless of local_path.
  */
 async function runPipelineWithBody(
-  input: { turnText: string; isDreamGenerated: boolean; ref?: string; pageSlug?: string },
+  input: PipelineInput,
   ctx: FactsBackstopCtx,
   abortSignal?: AbortSignal,
 ): Promise<{ inserted: number; duplicate: number; superseded: number; fact_ids: number[]; entity_slugs: string[]; skipped_reason?: import('./extract.ts').ExtractFailureReason }> {
@@ -575,10 +587,14 @@ async function runPipelineWithBody(
 
 /** The actual pipeline body — always runs inside a BudgetTracker scope (#4210). */
 async function runPipelineBodyInner(
-  input: { turnText: string; isDreamGenerated: boolean; ref?: string; pageSlug?: string },
+  input: PipelineInput,
   ctx: FactsBackstopCtx,
   abortSignal?: AbortSignal,
 ): Promise<{ inserted: number; duplicate: number; superseded: number; fact_ids: number[]; entity_slugs: string[]; skipped_reason?: import('./extract.ts').ExtractFailureReason }> {
+  // Observation time (date-grounding.ts): a dated page's facts default to the
+  // page's own date, never the sync/run time. Precedence stays extractor-stated
+  // event date > caller validFrom > observation date > now (resolveValidFrom).
+  if (!ctx.validFrom && input.observationDate) ctx = { ...ctx, validFrom: new Date(`${input.observationDate.date}T00:00:00.000Z`) };
   const { extractFactsFromTurnWithOutcome, FactsExtractionError } = await import('./extract.ts');
   const { resolveEntitySlugWithSource } = await import('../entities/resolve.ts');
   const { cosineSimilarity } = await import('./classify.ts');
@@ -621,6 +637,7 @@ async function runPipelineBodyInner(
     abortSignal,
     model: ctx.model,
     notabilityAdmission,
+    observationDate: input.observationDate ?? observationDateFrom(ctx.validFrom ?? null),
     ...(managed ? { embedding: managed.embedding ?? null } : {}),
   });
   const outcome = managed ? await withAIInvocationPreflight(async call => {
