@@ -544,7 +544,7 @@ const recall: Operation = {
         // pre-v1 consumers — legacy fields are frozen byte-equal). `provenance`
         // is the protocol name for the stored source attribution.
         fact_id: String(r.id),
-        provenance: r.source,
+        provenance: r.source, ...(r.attributed_to ? { attributed_to: r.attributed_to } : {}),
       })),
       total: packedFacts.length,
       ...(ambiguousEntity ? { ambiguous_entity: { candidates: ambiguousEntity, suggestion: AMBIGUOUS_ENTITY_SUGGESTION } } : {}),

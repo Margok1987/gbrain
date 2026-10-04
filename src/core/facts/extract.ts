@@ -29,7 +29,7 @@ import type { ChatResult } from '../ai/gateway.ts';
 import { INJECTION_PATTERNS } from '../think/sanitize.ts';
 import { resolveModel } from '../model-config.ts';
 import { normalizeModelId } from '../model-id.ts';
-import type { BrainEngine, NewFact, FactKind } from '../engine.ts';
+import type { BrainEngine, NewFact, FactKind, FactAttribution } from '../engine.ts';
 import { normalizeMetricLabel } from './extract-from-fence.ts';
 import { isNullLikeEntity } from './write-single.ts';
 import { isAIInvocationPolicyError } from '../ai/invocation-guard.ts';
@@ -389,6 +389,8 @@ const ATTRIBUTION_BLOCK = [
   'The user accepting it is a separate fact only when the user explicitly accepts it ("User accepted the',
   'assistant\'s suggestion to …"); rejected or corrected suggestions produce no user fact. A named third',
   'party\'s claim keeps the speaker\'s name in the fact text.',
+  '- Add "attributed_to" to every fact object: "user" when the user asserted it, "assistant" when the assistant',
+  '  did, "other" for a named third party, null when the speaker is unclear.',
 ].join('\n');
 
 /** @internal Exported for the prompt-shape test. Both variants off → the historical prompt, byte-identical. */
@@ -442,16 +444,24 @@ const FACTS_EXTRACTION_SCHEMA: Record<string, unknown> = {
 };
 const FACTS_RESPONSE_SCHEMA = { name: 'facts_extraction', schema: FACTS_EXTRACTION_SCHEMA };
 
-/** The grounded variant's schema: every fact also carries a nullable valid_from. */
-const FACTS_GROUNDED_RESPONSE_SCHEMA = (() => {
+/**
+ * The variant's response schema: grounding adds a nullable `valid_from`,
+ * attribution a nullable `attributed_to`; both off → the historical schema.
+ */
+function factsResponseSchema(variant: ExtractorVariant): typeof FACTS_RESPONSE_SCHEMA {
+  if (!variant.dateGrounding && !variant.attribution) return FACTS_RESPONSE_SCHEMA;
   const items = (FACTS_EXTRACTION_SCHEMA.properties as { facts: { items: Record<string, unknown> } }).facts.items;
-  const groundedItems = {
-    ...items,
-    properties: { ...(items.properties as Record<string, unknown>), valid_from: { type: ['string', 'null'] } },
-    required: [...(items.required as string[]), 'valid_from'],
+  const extra: Record<string, unknown> = {
+    ...(variant.dateGrounding ? { valid_from: { type: ['string', 'null'] } } : {}),
+    ...(variant.attribution ? { attributed_to: { type: ['string', 'null'], enum: ['user', 'assistant', 'other', null] } } : {}),
   };
-  return { name: 'facts_extraction', schema: { ...FACTS_EXTRACTION_SCHEMA, properties: { facts: { type: 'array', items: groundedItems } } } };
-})();
+  const variantItems = {
+    ...items,
+    properties: { ...(items.properties as Record<string, unknown>), ...extra },
+    required: [...(items.required as string[]), ...Object.keys(extra)],
+  };
+  return { name: 'facts_extraction', schema: { ...FACTS_EXTRACTION_SCHEMA, properties: { facts: { type: 'array', items: variantItems } } } };
+}
 
 export type ExtractFailureReason =
   | 'chat_unavailable'
@@ -584,7 +594,7 @@ export async function extractFactsFromTurnWithOutcome(
   const extractorSystem = promptAppendix
     ? `${buildExtractorSystem(admitsLow, variant)}\n\n${promptAppendix}`
     : buildExtractorSystem(admitsLow, variant);
-  const responseSchema = variant.dateGrounding ? FACTS_GROUNDED_RESPONSE_SCHEMA : FACTS_RESPONSE_SCHEMA;
+  const responseSchema = factsResponseSchema(variant);
   const dateLine = variant.dateGrounding ? `${observationDateLine(input.observationDate ?? null)}\n` : '';
   const userContent = `${dateLine}<turn>\n${cleaned}\n</turn>\n\nExtract up to ${cap} facts.${
     input.entityHints && input.entityHints.length
@@ -787,6 +797,7 @@ export async function extractFactsFromTurnWithOutcome(
       ...(variant.dateGrounding && parseExtractedEventDate(candidate.valid_from)
         ? { valid_from: parseExtractedEventDate(candidate.valid_from)! }
         : {}),
+      ...(variant.attribution && candidate.attributed_to ? { attributed_to: candidate.attributed_to } : {}),
     });
   }
 
@@ -839,7 +850,8 @@ interface RawExtracted {
   unit?: string | null;
   period?: string | null;
   /** Date-grounding variant: the event date the extractor stated (raw string; validated on use). */
-  valid_from?: string | null;
+  valid_from?: string | null;  /** Attribution variant: who asserted the claim; anything outside the three speakers parses as null. */
+  attributed_to?: FactAttribution | null;
 }
 
 /**
@@ -925,6 +937,7 @@ function tryArrayShapeDetailed(s: string): ParsedExtractorShape | null {
         unit:   typeof o.unit === 'string' ? o.unit : null,
         period: typeof o.period === 'string' ? o.period : null,
         valid_from: typeof o.valid_from === 'string' ? o.valid_from : null,
+        attributed_to: o.attributed_to === 'user' || o.attributed_to === 'assistant' || o.attributed_to === 'other' ? o.attributed_to : null,
       });
     }
     return { facts: out, invalidCandidates };

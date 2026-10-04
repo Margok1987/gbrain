@@ -14,7 +14,7 @@
  * `LegacyUnscopedRead`.
  */
 import type {
-  FactRow, FactKind, FactVisibility, FactInsertStatus,
+  FactRow, FactKind, FactVisibility, FactInsertStatus, FactAttribution,
   NewFact, FactListOpts, FactsHealth,
 } from '../engine.ts';
 import { MAX_SEARCH_LIMIT, clampSearchLimit } from '../engine.ts';
@@ -91,12 +91,12 @@ export async function insertFact(
             source_id, entity_slug, fact, kind, visibility, notability, context,
             valid_from, valid_until, source, source_session, confidence,
             embedding, embedded_at, embedding_model, embedded_text_hash,
-            claim_metric, claim_value, claim_unit, claim_period
+            claim_metric, claim_value, claim_unit, claim_period, attributed_to
           ) VALUES (
             ${ctx.source_id}, ${entitySlug}, ${input.fact}, ${kind}, ${visibility}, ${notability}, ${context},
             ${validFrom}, ${validUntil}, ${input.source}, ${sourceSession}, ${confidence},
             ${embedLit === null ? null : trustedSql(vectorLiteralSql(embedLit, castSuffix))}, ${embeddedAt}, ${embedding ? input.embedding_model ?? null : null}, ${embedding && input.embedding_model ? sqlFragment`md5(${input.fact})` : null},
-            ${claimMetric}, ${claimValue}, ${claimUnit}, ${claimPeriod}
+            ${claimMetric}, ${claimValue}, ${claimUnit}, ${claimPeriod}, ${input.attributed_to ?? null}
           ) RETURNING id
         `)).rows;
         const id = Number(ins[0].id);
@@ -119,12 +119,12 @@ export async function insertFact(
           source_id, entity_slug, fact, kind, visibility, notability, context,
           valid_from, valid_until, source, source_session, confidence,
           embedding, embedded_at, embedding_model, embedded_text_hash,
-          claim_metric, claim_value, claim_unit, claim_period
+          claim_metric, claim_value, claim_unit, claim_period, attributed_to
         ) VALUES (
           ${ctx.source_id}, ${entitySlug}, ${input.fact}, ${kind}, ${visibility}, ${notability}, ${context},
           ${validFrom}, ${validUntil}, ${input.source}, ${sourceSession}, ${confidence},
           ${embedLit === null ? null : trustedSql(vectorLiteralSql(embedLit, castSuffix))}, ${embeddedAt}, ${embedding ? input.embedding_model ?? null : null}, ${embedding && input.embedding_model ? sqlFragment`md5(${input.fact})` : null},
-          ${claimMetric}, ${claimValue}, ${claimUnit}, ${claimPeriod}
+          ${claimMetric}, ${claimValue}, ${claimUnit}, ${claimPeriod}, ${input.attributed_to ?? null}
         ) RETURNING id
       `)).rows;
       return Number(ins[0].id);
@@ -236,14 +236,14 @@ export async function insertFacts(
             embedding, embedded_at, embedding_model, embedded_text_hash,
             row_num, source_markdown_slug,
             claim_metric, claim_value, claim_unit, claim_period,
-            event_type
+            event_type, attributed_to
           ) VALUES (
             ${ctx.source_id}, ${entitySlug}, ${input.fact}, ${kind}, ${visibility}, ${notability}, ${context},
             ${validFrom}, ${validUntil}, ${expiredAt}, ${input.source}, ${sourceSession}, ${confidence},
             ${embedLit === null ? null : trustedSql(vectorLiteralSql(embedLit, castSuffix))}, ${embeddedAt}, ${embedding ? input.embedding_model ?? null : null}, ${embedding && input.embedding_model ? sqlFragment`md5(${input.fact})` : null},
             ${input.row_num}, ${input.source_markdown_slug},
             ${claimMetric}, ${claimValue}, ${claimUnit}, ${claimPeriod},
-            ${eventType}
+            ${eventType}, ${input.attributed_to ?? null}
           )
           ON CONFLICT (source_id, source_markdown_slug, row_num)
           WHERE row_num IS NOT NULL
@@ -480,9 +480,12 @@ export async function findCandidateDuplicates(
     source_id: string,
     entitySlug: string,
     factText: string,
-    opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null },
+    opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; attributedTo?: FactAttribution | null },
   ): Promise<FactRow[]> {
     const k = Math.min(Math.max(opts?.k ?? 5, 1), 20);
+    const speaker = opts?.attributedTo
+      ? sqlFragment`AND (attributed_to IS NULL OR attributed_to = ${opts.attributedTo})`
+      : sqlFragment``;
     // Validity-lapsed rows are not dedup candidates: a re-stated fact after
     // its valid_until lapses re-inserts fresh (WP5 read-time TTL honesty).
     if (opts?.embedding) {
@@ -498,6 +501,7 @@ export async function findCandidateDuplicates(
           AND embedding_model=${opts.embeddingModel} AND embedded_text_hash=md5(fact)
           AND vector_dims(embedding)=${opts.embedding.length}
           AND source != ALL(${AUDIT_ROW_SOURCES}::text[])
+          ${speaker}
         ORDER BY embedding <=> ${trustedSql(vectorLiteralSql(lit, '::vector'))}
         LIMIT ${k}
       `)).rows;
@@ -509,6 +513,7 @@ export async function findCandidateDuplicates(
         AND entity_slug = ${entitySlug}
         AND expired_at IS NULL
         AND (valid_until IS NULL OR valid_until > now())
+        ${speaker}
       ORDER BY created_at DESC, id DESC
       LIMIT ${k}
     `)).rows;
@@ -657,6 +662,7 @@ interface FactRowSqlShape {
   embedded_at: Date | null;
   created_at: Date;
   fact_fingerprint?: string | null;
+  attributed_to?: FactAttribution | null;
 }
 
 /**
@@ -709,6 +715,7 @@ function rowToFact(raw: FactRowSqlShape): FactRow {
     embedded_at: row.embedded_at,
     created_at: row.created_at,
     ...(row.fact_fingerprint ? { fact_fingerprint: row.fact_fingerprint } : {}),
+    ...(row.attributed_to ? { attributed_to: row.attributed_to } : {}),
   };
 }
 

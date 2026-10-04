@@ -536,7 +536,16 @@ export interface FactRow {
   created_at: Date;
   /** Set only when the list call asked for `fingerprint` (#5888 hot-memory collapse). */
   fact_fingerprint?: string;
+  /** Who asserted the claim (migration v201); null when attribution is unavailable. */
+  attributed_to?: FactAttribution | null;
 }
+
+/**
+ * Who asserted a saved fact: the user, the assistant (a recommendation, answer
+ * or plan it gave), or a named third party. Never whether the claim is true or
+ * was accepted. NULL means attribution is unavailable.
+ */
+export type FactAttribution = 'user' | 'assistant' | 'other';
 
 /** Input for insertFact. source_id supplied via the ctx arg. */
 export interface NewFact {
@@ -582,6 +591,8 @@ export interface NewFact {
    * set this — leaving it undefined preserves pre-v0.40 behavior.
    */
   event_type?: string | null;
+  /** Speaker attribution (migration v201). Undefined/null → NULL (unavailable). */
+  attributed_to?: FactAttribution | null;
 }
 
 /** Options shared by list-facts methods. */
@@ -2230,13 +2241,15 @@ export interface BrainEngine {
    * Find candidate duplicates for a new fact within a source+entity bucket.
    * Entity-prefilter is mandatory (bounds the contradiction-classifier blast
    * radius). Hard cap k=5 by default. Embedding-cosine when both sides have
-   * embeddings; recency fallback otherwise.
+   * embeddings; recency fallback otherwise. `attributedTo` (the new fact's
+   * speaker) drops rows a different known speaker asserted before the k cap;
+   * NULL rows stay candidates.
    */
   findCandidateDuplicates(
     source_id: string,
     entitySlug: string,
     factText: string,
-    opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null },
+    opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; attributedTo?: FactAttribution | null },
   ): Promise<FactRow[]>;
 
   /**
