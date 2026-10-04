@@ -671,6 +671,7 @@
           "detail_resolved: \"low\" | \"medium\" | \"high\" | null",
           "embedding_column?: string | undefined",
           "expansion_applied: boolean",
+          "hub_dampening?: HubDampeningMeta | undefined",
           "intent?: \"entity\" | \"temporal\" | \"event\" | \"concept\" | \"general\" | undefined",
           "keyword_arm_confidence?: KeywordArmConfidenceDecision | undefined",
           "metadata_boost_gate?: MetadataBoostGateDecision | undefined",
@@ -1225,6 +1226,16 @@
       {
         "kind": "interface",
         "members": [
+          "arms: RrfArmVote[]",
+          "compiled_truth_boost: number",
+          "normalized: number",
+          "raw: number"
+        ],
+        "name": "RrfAttribution"
+      },
+      {
+        "kind": "interface",
+        "members": [
           "days?: number | undefined",
           "excludePrivate?: boolean | undefined",
           "limit?: number | undefined",
@@ -1307,7 +1318,10 @@
           "alias_hit?: boolean | undefined",
           "alias_resolved_boost?: number | undefined",
           "backlink_boost?: number | undefined",
+          "backlink_count?: number | undefined",
+          "backlink_hub_weight?: number | undefined",
           "base_score?: number | undefined",
+          "blend_norm_rrf?: number | undefined",
           "chronicle_boost?: number | undefined",
           "chunk_id: number",
           "chunk_index: number",
@@ -1327,6 +1341,7 @@
           "graph_adjacency_hits?: number | undefined",
           "graph_cross_source_boost?: number | undefined",
           "graph_cross_source_hits?: number | undefined",
+          "graph_hub_weight?: number | undefined",
           "graph_session_demoted?: boolean | undefined",
           "graph_session_prefix?: string | undefined",
           "injection_p?: number | undefined",
@@ -1345,8 +1360,10 @@
           "rerank_score?: number | undefined",
           "rerank_score_kind?: \"rubric\" | undefined",
           "reranker_delta?: number | undefined",
+          "rrf?: RrfAttribution | undefined",
           "salience_boost?: number | undefined",
           "score: number",
+          "score_details?: ScoreDetails | undefined",
           "session_demote_factor?: number | undefined",
           "slug: string",
           "source_id?: string | undefined",
@@ -6768,8 +6785,10 @@
           "expandFn?: ((query: string) => Promise<string[]>) | undefined",
           "expansion?: boolean | undefined",
           "expansionVariantBudget?: number | null | undefined",
+          "explainTarget?: TargetTrace | undefined",
           "floorRatio?: number | undefined",
           "graph_signals?: boolean | undefined",
+          "hubDampening?: string | number | undefined",
           "include_slug_prefixes?: string[] | undefined",
           "intentWeighting?: boolean | undefined",
           "keywordArmConfidenceFloor?: number | null | undefined",
@@ -6838,7 +6857,9 @@
           "fallback?: RecencyDecayConfig | undefined",
           "floorRatio?: number | undefined",
           "graphSignalsEnabled?: boolean | undefined",
+          "hubDampening?: HubDampening | undefined",
           "onGraphMeta?: ((meta: GraphSignalsMeta) => void) | undefined",
+          "onHubDampening?: ((meta: HubDampeningMeta) => void) | undefined",
           "onScoreDistribution?: ((dist: ScoreDistribution) => void) | undefined",
           "query?: string | undefined",
           "recency: \"on\" | \"off\" | \"strong\"",
@@ -6899,7 +6920,7 @@
         "kind": "function",
         "name": "applyBacklinkBoost",
         "signature": [
-          "(results: SearchResult[], counts: Map<number, number>, floorThreshold?: number) => void"
+          "(results: SearchResult[], counts: Map<number, number>, floorThreshold?: number, halfDegree?: HubDampening) => void"
         ]
       },
       {
@@ -7793,6 +7814,7 @@
           "detail_resolved: \"low\" | \"medium\" | \"high\" | null",
           "embedding_column?: string | undefined",
           "expansion_applied: boolean",
+          "hub_dampening?: HubDampeningMeta | undefined",
           "intent?: \"entity\" | \"temporal\" | \"event\" | \"concept\" | \"general\" | undefined",
           "keyword_arm_confidence?: KeywordArmConfidenceDecision | undefined",
           "metadata_boost_gate?: MetadataBoostGateDecision | undefined",
@@ -8132,6 +8154,16 @@
       {
         "kind": "interface",
         "members": [
+          "arms: RrfArmVote[]",
+          "compiled_truth_boost: number",
+          "normalized: number",
+          "raw: number"
+        ],
+        "name": "RrfAttribution"
+      },
+      {
+        "kind": "interface",
+        "members": [
           "days?: number | undefined",
           "excludePrivate?: boolean | undefined",
           "limit?: number | undefined",
@@ -8214,7 +8246,10 @@
           "alias_hit?: boolean | undefined",
           "alias_resolved_boost?: number | undefined",
           "backlink_boost?: number | undefined",
+          "backlink_count?: number | undefined",
+          "backlink_hub_weight?: number | undefined",
           "base_score?: number | undefined",
+          "blend_norm_rrf?: number | undefined",
           "chronicle_boost?: number | undefined",
           "chunk_id: number",
           "chunk_index: number",
@@ -8234,6 +8269,7 @@
           "graph_adjacency_hits?: number | undefined",
           "graph_cross_source_boost?: number | undefined",
           "graph_cross_source_hits?: number | undefined",
+          "graph_hub_weight?: number | undefined",
           "graph_session_demoted?: boolean | undefined",
           "graph_session_prefix?: string | undefined",
           "injection_p?: number | undefined",
@@ -8252,8 +8288,10 @@
           "rerank_score?: number | undefined",
           "rerank_score_kind?: \"rubric\" | undefined",
           "reranker_delta?: number | undefined",
+          "rrf?: RrfAttribution | undefined",
           "salience_boost?: number | undefined",
           "score: number",
+          "score_details?: ScoreDetails | undefined",
           "session_demote_factor?: number | undefined",
           "slug: string",
           "source_id?: string | undefined",

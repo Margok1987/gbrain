@@ -673,7 +673,7 @@
       "stdout": [
         "Usage: gbrain query <query> [options]",
         "",
-        "Ranked hybrid search with multi-query expansion, for concept / synonym / landscape questions: expansion recovers synonym-phrased matches. Still top-K; return_unit returns whole sections or conversations. Lists: list_pages. Exact tokens: `search` is cheaper (no expansion LLM call). Personal questions: get_recent_salience, find_anomalies; raw transcripts: `gbrain transcripts recent` on the brain host. Do NOT assume 'crazy' means impressive (often difficult or emotionally charged). Needs an embedding key, else keyword-only; expansion needs a chat-model key. fields: \"full\" adds diagnostics.",
+        "Ranked hybrid search with multi-query expansion, for concept / synonym / landscape questions: expansion recovers synonym-phrased matches. Still top-K; return_unit returns whole sections or conversations. Lists: list_pages. Exact tokens: `search` is cheaper (no expansion LLM call). Personal questions: get_recent_salience, find_anomalies; raw transcripts: `gbrain transcripts recent` on the brain host. Do NOT assume 'crazy' means impressive (often difficult or emotionally charged). Needs an embedding key, else keyword-only; expansion needs a chat-model key. fields: \"full\" adds diagnostics; explain: true explains each row's rank; explain_target names why an expected page is missing.",
         "",
         "Options:",
         "  <query>                    Question or topic (required unless image).",
@@ -703,7 +703,10 @@
         "  --embedding-column         Registered embedding column.",
         "  --adaptive-return          true when one specific answer is wanted (fewer rows; never returns empty); omit for breadth.",
         "  --autocut                  Default on (never returns empty); false gives full top-K for breadth. Cuts at the score cliff, unlike adaptive_return.",
-        "  --relational               Relationship-graph arm (default on)."
+        "  --relational               Relationship-graph arm (default on).",
+        "  --explain                  true: each row gets score_details (which retrieval arms found it, at what rank, and every ranking factor). Use when a result looks wrong.",
+        "  --explain-target           Slug of a page you expected but did not get; the response meta explain_target says which stage lost it and what to do next.",
+        "  --explain-target-source    Source id of explain_target when the slug exists in several sources."
       ]
     },
     {
