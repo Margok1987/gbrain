@@ -49,7 +49,7 @@ export async function searchWithoutEmbeddings(
     const noEmbedLists: FusionListEntry[] = [{ list: keywordResults, k: fk, arm: 'keyword' }];
     if (titleResults.length > 0) noEmbedLists.push({ list: titleResults, k: fk, arm: 'title' });
     if (relationalList.length > 0) noEmbedLists.push({ list: relationalList, k: fk, arm: 'relational' });
-    noEmbedResults = rrfFusionWeighted(noEmbedLists, ctBoost);
+    noEmbedResults = rrfFusionWeighted(noEmbedLists, ctBoost, opts?.explain === true || trace !== undefined);
   }
   if (noEmbedResults.length > 0) {
     await runPostFusionStages(engine, noEmbedResults, { ...postFusionOpts, onHubDampening: (m) => { hubDampening = m; } });
@@ -166,7 +166,7 @@ export async function searchVectorFallback(
     const fallbackLists: FusionListEntry[] = [{ list: keywordResults, k: fk, arm: 'keyword' }];
     if (titleResults.length > 0) fallbackLists.push({ list: titleResults, k: fk, arm: 'title' });
     if (relationalList.length > 0) fallbackLists.push({ list: relationalList, k: fk, arm: 'relational' });
-    fallbackResults = rrfFusionWeighted(fallbackLists, ctBoost);
+    fallbackResults = rrfFusionWeighted(fallbackLists, ctBoost, opts?.explain === true || trace !== undefined);
   }
   if (fallbackResults.length > 0) {
     await runPostFusionStages(engine, fallbackResults, { ...postFusionOpts, onHubDampening: (m) => { hubDampening = m; } });

@@ -141,7 +141,8 @@ export async function fuseArms(
   // arms BEFORE fusion so the compiled-truth authority boost skips them.
   await stampUnverifiedExtractions(engine, allLists.flatMap((l) => l.list), opts);
 
-  let fused = rrfFusionWeighted(allLists, ctBoost);
+  const attribute = opts?.explain === true || trace !== undefined;
+  let fused = rrfFusionWeighted(allLists, ctBoost, attribute);
 
   // Cosine re-scoring before dedup so semantically better chunks survive.
   // v0.36 (D9): hydrate from the active embedding column so rescore happens
@@ -153,6 +154,7 @@ export async function fuseArms(
     fused = await cosineReScore(
       engine, fused, queryEmbedding, unifiedDone ? 'embedding_multimodal' : resolvedCol.name,
       imageQueryEmbedding && !unifiedDone ? { queryEmbedding: imageQueryEmbedding, column: 'embedding_image' } : undefined,
+      attribute,
     );
   }
 

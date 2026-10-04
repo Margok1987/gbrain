@@ -52,7 +52,8 @@ describe('RRF arm attribution', () => {
 
   test('rrfFusionWeighted stamps raw / normalized / compiled-truth factor without changing order', () => {
     const lists = [{ list: [row('notes/a', 1), row('notes/b', 2)], k: 60, arm: 'vector' }, { list: [row('notes/b', 2)], k: 60, arm: 'keyword' }];
-    const fused = rrfFusionWeighted(lists, false);
+    const fused = rrfFusionWeighted(lists, false, true);
+    expect(rrfFusionWeighted(lists, false).every(r => r.rrf === undefined)).toBe(true);
     expect(fused.map(r => r.slug)).toEqual(['notes/b', 'notes/a']);
     const b = fused[0];
     expect(b.rrf!.raw).toBeCloseTo(1 / 61 + 1 / 60, 12);
@@ -128,7 +129,7 @@ describe('diagnoseProbe', () => {
     expect(diagnoseProbe({ slug: 's' }, [], { requireSafeChunks: false, retry })!.code).toBe('target_not_found_or_not_visible');
     const amb = diagnoseProbe({ slug: 's' }, [ok, { ...ok, source_id: 'team' }], { requireSafeChunks: false, retry })!;
     expect(amb.code).toBe('target_ambiguous');
-    expect(amb.fix?.mcp?.arguments).toMatchObject({ query: 'q', explain_target: 's', explain_target_source: 'default' });
+    expect(amb.fix?.mcp?.arguments).toMatchObject({ query: 'q', explain_target: 'default:s' });
     expect(diagnoseProbe({ slug: 's' }, [{ ...ok, chunks: 0 }], { requireSafeChunks: false, retry })!.code).toBe('target_not_indexed');
     expect(diagnoseProbe({ slug: 's' }, [{ ...ok, current: false }], { requireSafeChunks: false, retry })!.code).toBe('target_projection_stale');
     expect(diagnoseProbe({ slug: 's' }, [{ ...ok, chunker_version: 1 }], { requireSafeChunks: true, retry })!.code).toBe('target_safe_chunks_uncertified');

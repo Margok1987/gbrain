@@ -1013,7 +1013,8 @@ export function resolveQueryImage(
 }
 
 export function parseOpArgs(op: Operation, args: string[]): Record<string, unknown> {
-  const params: Record<string, unknown> = {};
+  // `gbrain search --explain`: the CLI-local formatter flag also asks the op for score attribution.
+  const params: Record<string, unknown> = op.name === 'search' && args.includes('--explain') ? { explain: true } : {};
   const positional = op.cliHints?.positional || [];
   let posIdx = 0;
 
@@ -1327,7 +1328,8 @@ export function findUnknownOpFlag(op: Operation, args: string[]): string | null 
       if (m[2] === undefined && isBooleanLiteral(args[i + 1])) i++;
       continue;
     }
-    if ((rawKey === 'explain' || rawKey === 'help') && m[2] === undefined) continue;
+    // Bare-only even where an op also declares `explain` (search/query): the `=` form is refused, never parsed as a value.
+    if (rawKey === 'explain' || rawKey === 'help') { if (m[2] === undefined) continue; return `--${rawKey}`; }
     if (rawKey === 'source' || rawKey === 'dry-run') {
       // Non-boolean-style CLI-locals consume the next token as their value
       // in parseOpArgs (source does; dry-run is boolean-read) — mirror the
