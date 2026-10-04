@@ -15,6 +15,7 @@ import type { ResolveSearchModeInput, ResolvedSearchKnobs } from '../mode.ts';
 import { normalizeExpansionVariantBudget } from '../fusion-lists.ts';
 import { normalizeKeywordArmConfidenceFloor } from '../arm-confidence.ts';
 import { normalizeMetadataBoostGate } from '../metadata-boost-gate.ts';
+import { normalizeHubDampening } from '../hub-dampening.ts';
 import { normalizeRelationalRerankPin } from '../relational-rerank-pin.ts';
 import { parseRelationalQuery } from '../relational-intent.ts';
 import { pushDegraded } from './degraded.ts';
@@ -128,6 +129,8 @@ export async function resolveHybridRequest(
       keyword_arm_confidence_floor: normalizeKeywordArmConfidenceFloor(opts?.keywordArmConfidenceFloor),
       // Ranker wave (Phase E3) — metadata boost gate per-call thread-through (eval A/B).
       metadata_boost_gate: normalizeMetadataBoostGate(opts?.metadataBoostGate),
+      // Hub dampening per-call thread-through (eval A/B); same normalizer in both resolutions.
+      hub_dampening: normalizeHubDampening(opts?.hubDampening),
     },
   });
 

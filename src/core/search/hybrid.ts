@@ -39,6 +39,7 @@ import {
   type FusionListEntry,
 } from './fusion-lists.ts';
 import { type MetadataBoostGate } from './metadata-boost-gate.ts';
+import { type HubDampening, type HubDampeningMeta, hubWeight } from './hub-dampening.ts';
 import { enforceTokenBudget } from './token-budget.ts';
 import {
   semanticResultCacheAvailable,
@@ -274,18 +275,25 @@ export function applyBacklinkBoost(
   results: SearchResult[],
   counts: Map<number, number>,
   floorThreshold?: number,
+  halfDegree?: HubDampening,
 ): void {
   for (const r of results) {
     if (!Number.isFinite(r.score)) continue;
     if (floorThreshold !== undefined && r.score < floorThreshold) continue;
     const count = counts.get(r.page_id) ?? 0;
     if (count > 0) {
-      const factor = 1.0 + BACKLINK_BOOST_COEF * Math.log(1 + count);
+      // Hub dampening (hub-dampening.ts): the log-popularity lift shrinks for
+      // pages whose inbound degree is far above the half degree H. `off` /
+      // undefined → weight 1, byte-identical to the undampened factor.
+      const weight = hubWeight(count, halfDegree);
+      const factor = 1.0 + BACKLINK_BOOST_COEF * Math.log(1 + count) * weight;
       r.score *= factor;
       // v0.40.4 attribution stamp (D12=A) — formatter reads this for
       // --explain output. Stays undefined when count == 0 so the
       // formatter can render "no boosts applied" honestly.
       r.backlink_boost = factor;
+      r.backlink_count = count;
+      if (weight < 1) r.backlink_hub_weight = weight;
     }
   }
 }
@@ -528,6 +536,14 @@ export interface PostFusionOpts extends PageReadPolicy {
    * downrank (correctness) still run. Undefined / false → every stage as before.
    */
   skipMetadataBoosts?: boolean;
+  /**
+   * Hub dampening (hub-dampening.ts): the half degree H, or `off`. Scales the
+   * backlink boost and the graph-signal boosts by the result's caller-visible
+   * inbound degree. Resolved from ModeBundle.hub_dampening.
+   */
+  hubDampening?: HubDampening;
+  /** Observability sink for the hub-dampening decision (always called when the metadata stages run). */
+  onHubDampening?: (meta: HubDampeningMeta) => void;
 }
 
 export async function runPostFusionStages(
@@ -557,14 +573,23 @@ export async function runPostFusionStages(
   // Phase E3 — metadata-axis stages gated as ONE block (see PostFusionOpts).
   const metadata = opts.skipMetadataBoosts !== true;
 
+  // Hub dampening — one caller-scoped degree map shared by the backlink and
+  // graph-signal stages (readBacklinkCounts authorizes targets, contributors
+  // and edge origins, so hidden links never move visible rankings).
+  const hubDampening: HubDampening = opts.hubDampening ?? 'off';
+  const hubMeta: HubDampeningMeta = { half_degree: hubDampening, backlink_dampened: 0, graph_dampened: 0, errored: false };
+  let degrees: Map<number, number> | undefined;
+
   // Backlink stage (existing behavior, preserved).
   if (metadata && opts.applyBacklinks) {
     try {
       const pageIds = Array.from(new Set(results.map(r => r.page_id)));
-      const counts = await engine.getBacklinkCounts(pageIds, policy);
-      applyBacklinkBoost(results, counts, floorThreshold);
+      degrees = await engine.getBacklinkCounts(pageIds, policy);
+      applyBacklinkBoost(results, degrees, floorThreshold, hubDampening);
+      hubMeta.backlink_dampened = results.filter(r => r.backlink_hub_weight !== undefined).length;
     } catch {
       // Non-fatal; preserves the existing pre-v0.29.1 contract.
+      if (hubDampening !== 'off') hubMeta.errored = true;
     }
   }
 
@@ -636,16 +661,29 @@ export async function runPostFusionStages(
   if (metadata && opts.graphSignalsEnabled) {
     try {
       const { applyGraphSignals } = await import('./graph-signals.ts');
+      // Dampening needs degrees; when the backlink stage did not fetch them,
+      // fetch once here. A failed read fails open (undampened boosts).
+      if (hubDampening !== 'off' && degrees === undefined) {
+        try {
+          degrees = await engine.getBacklinkCounts(Array.from(new Set(results.map(r => r.page_id))), policy);
+        } catch {
+          hubMeta.errored = true;
+        }
+      }
       await applyGraphSignals(results, engine, {
         ...policy,
         enabled: true,
         floorThreshold,
         onMeta: opts.onGraphMeta,
         onScoreDistribution: opts.onScoreDistribution,
+        ...(hubDampening !== 'off' && degrees ? { hubHalfDegree: hubDampening, degrees, onHubDampened: (n: number) => { hubMeta.graph_dampened = n; } } : {}),
       });
     } catch {
       // Non-fatal; preserves the per-stage contract.
     }
+  }
+  if (metadata) {
+    try { opts.onHubDampening?.(hubMeta); } catch { /* meta must never break search */ }
   }
 
   // v0.42 (T19, plan D6) — alias_resolved stage (5th post-fusion stage).
@@ -900,6 +938,14 @@ export interface HybridSearchOpts extends SearchOpts {
    * resolver (knobs hash `mbg=`); eval A/B runs drive it here.
    */
   metadataBoostGate?: MetadataBoostGate;
+  /**
+   * Per-call override for `search.hub_dampening` (hub-dampening.ts): `off` or
+   * the half degree H. `undefined` → config/bundle; anything else is unset via
+   * the ONE contract `normalizeHubDampening`. Threaded through
+   * resolveSearchMode in BOTH the inner search and the cache resolver (knobs
+   * hash `hd=`); eval A/B runs drive it here.
+   */
+  hubDampening?: HubDampening | string;
   /** Override default RRF K constant (default: 60). Lower values boost top-ranked results more. */
   rrfK?: number;
   /** Override dedup pipeline parameters. */
@@ -1115,7 +1161,7 @@ export async function hybridSearch(
     return searchVectorFallback(req, lexical, relationalList, postFusionOpts);
   }
 
-  const { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate } = await fuseArms(req, {
+  const { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate, hubDampening } = await fuseArms(req, {
     vectorArms, keywordResults: lexical.keywordResults, titleResults: lexical.titleResults, relationalList,
     effectiveModality, queryEmbedding, imageQueryEmbedding, unifiedDone, postFusionOpts,
   });
@@ -1142,7 +1188,7 @@ export async function hybridSearch(
   });
   return finalizeHybridResults(req, returnPool, {
     relaxedDropped, adaptiveDecision, autocutDecision, relationalSlotDecision,
-    relationalRerankPin, keywordArmConfidence, metadataBoostGate,
+    relationalRerankPin, keywordArmConfidence, metadataBoostGate, hubDampening,
   });
 }
 

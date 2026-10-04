@@ -92,6 +92,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       keyword_arm_confidence_floor: null,
       // ranker wave (Phase E3) — metadata boost gate `lexical` in every bundle since the Cat 13 held-out receipt (`always` = pre-wave pipeline).
       metadata_boost_gate: 'lexical',
+      hub_dampening: 'off',
     });
   });
 
@@ -135,6 +136,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       keyword_arm_confidence_floor: null,
       // ranker wave (Phase E3) — metadata boost gate `lexical` in every bundle since the Cat 13 held-out receipt (`always` = pre-wave pipeline).
       metadata_boost_gate: 'lexical',
+      hub_dampening: 'off',
     });
   });
 
@@ -176,6 +178,7 @@ describe('SEARCH_MODES + MODE_BUNDLES canonical shape', () => {
       keyword_arm_confidence_floor: null,
       // ranker wave (Phase E3) — metadata boost gate `lexical` in every bundle since the Cat 13 held-out receipt (`always` = pre-wave pipeline).
       metadata_boost_gate: 'lexical',
+      hub_dampening: 'off',
     });
   });
 
