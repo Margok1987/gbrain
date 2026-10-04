@@ -64,8 +64,8 @@ not proof the user has no notes). Full contract, including the scope-failure
 
 `search` and `query` return their rows as compact JSON in the first content
 block. Remote callers get **lean rows** by default: the fields an agent acts
-on, without the ranking diagnostics that made each row several times longer
-than its evidence text.
+on, without the ranking diagnostics that would make each row several times
+longer than its evidence text.
 
 A lean row keeps `id` (the `fetch` key), `slug`, `title`, `type`,
 `chunk_text`, `score`, `effective_date`, `source_id`, `chunk_id` (with
@@ -98,8 +98,8 @@ graph signals, the full `delivered` object):
 | Client | Rows by default | How to get full rows |
 | --- | --- | --- |
 | Any MCP client (stdio or HTTP) | lean | `fields: "full"` per call, or the host sets `gbrain config set mcp.result_rows full` |
-| gbrain thin CLI, this release or later | full (it sends `X-Gbrain-Client`) | nothing to do |
-| gbrain thin CLI, older release | lean | upgrade the CLI, or the host sets `mcp.result_rows full` |
+| gbrain thin CLI, v0.60.44.0 or later | full (it sends `X-Gbrain-Client`) | nothing to do |
+| gbrain thin CLI, older than v0.60.44.0 | lean | upgrade the CLI, or the host sets `mcp.result_rows full` |
 | Trusted local CLI (`gbrain search`, `gbrain call`) | full | nothing to do |
 
 The host setting is read per request over OAuth HTTP and at start-up for

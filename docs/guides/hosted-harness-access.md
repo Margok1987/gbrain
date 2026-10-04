@@ -289,7 +289,7 @@ identity. This connection has no local database backup or `bin/gbrain-setup`
 helper; complete backups belong on the brain host. If the handoff was lost,
 recover it through the host's delivery procedure first.
 
-Before this security migration, stop old servers and workers and take a protected backup. Start only runtimes that enforce the migrated grants. If rollout fails, disable the affected entry points and restore a compatible runtime while preserving memory and the tightened grants; do not run an older authorization implementation against the migrated database. Local installations can be released independently of hosted delegation.
+Before applying the grant migration, stop old servers and workers and take a protected backup. Start only runtimes that enforce the migrated grants. If rollout fails, disable the affected entry points and restore a compatible runtime while preserving memory and the tightened grants; do not run an older authorization implementation against the migrated database. Local installations can be released independently of hosted delegation.
 
 Remove a managed configuration with the same private handoff and `gbrain connect
 ... --remove`, or remove the native OAuth connection through its harness

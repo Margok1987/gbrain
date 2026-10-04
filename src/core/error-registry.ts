@@ -35,7 +35,7 @@ export interface CodeEntry {
   fix?: Action;
   effects?: readonly Effect[];
   actor?: Actor;
-  /** The code this one replaced (documented in error-codes.md "Renamed in this release"). */
+  /** The code this one replaced (documented in error-codes.md "Legacy `error` values"). */
   renamed_from?: string;
   /** Frozen v1 `error` wire value some sites keep for this canonical code. */
   legacy_error?: string;

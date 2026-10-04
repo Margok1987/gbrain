@@ -41,17 +41,15 @@ follows is `BOOTSTRAP_FOR_AGENTS.md` at the repo root, fetched at the
 
 **What session start shows:** the SessionStart hook prints your
 allowlisted MEMORY.md sections, push status and hook health, plus a warm
-context pack. It never shows another session's activity. Releases before
-v0.60.28.0 printed a `Last session activity` line from the newest session
-buffer on the machine, whichever agent or session wrote it (#5558). That line
-and the stop-hook buffer behind it are gone, and there is deliberately no
-opt-in to bring them back. Buffers an older release left in
+context pack. It never shows another session's activity, and no setting
+turns that on. Session buffers that releases before v0.60.28.0 left in
 `~/.gbrain/transcripts/live/` are deleted by the stop hook once they are 7
-days old; you can delete them now. If you set `GBRAIN_HOOKS=0` as a
-workaround, remove it from the environment the harness starts from (shell
-profile or service) after upgrading the `gbrain` the harness runs, then
-restart the harness: `GBRAIN_HOOKS=0` also turns off capture, session
-persistence and crash recovery.
+days old; you can also delete them by hand. If you set `GBRAIN_HOOKS=0` to
+hide the `Last session activity` line those releases printed, remove it from
+the environment the harness starts from (shell profile or service) after
+upgrading the `gbrain` the harness runs, then restart the harness:
+`GBRAIN_HOOKS=0` also turns off capture, session persistence and crash
+recovery.
 
 **What does NOT run:** anything while the harness is closed. Session-triggered
 schedules fire at turn/session boundaries only. True 24/7 operation is what a

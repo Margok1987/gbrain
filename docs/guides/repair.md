@@ -74,9 +74,9 @@ any other option the table below does not list, including `--max-usd`: a
 refused run changes nothing. To cap paid embedding work, run the repairs
 through `gbrain doctor --remediate --yes --include-repairs --expect <plan_hash> --max-usd <n>`
 (`<plan_hash>` comes from `gbrain doctor --remediation-plan --json`). `--all`
-runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `orphan-bindings`, then `embedding-effects`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `orphan-bindings`, then `embedding-effects`, then `attribution-backfill`, then `planner-stats`, and stops at the
 first kind that stops.
-The explicit-only kinds (`google-file-modes`, `stale-atoms`, `extractor-facts`) never run under
+The explicit-only kinds never run under
 `--all`; it lists each with its preview command and still exits 0 when they
 are the only findings left. `gbrain repair` with no kind does the same for a
 preview. With `--json` the list is `explicit_kinds[]` (`kind`, `code:
@@ -117,14 +117,13 @@ should also check `results[].complete`.
 | `request-indexes` | `persistence_request_indexes` | Creates a missing managed sync request index, or drops an INVALID one (left by an interrupted concurrent build) and rebuilds it, on a brain whose schema version is already current. Postgres builds each index `CONCURRENTLY`, one at a time, so writes continue; PGLite builds inline. It changes no user data, takes no journal admission and runs brain-wide (`--source` does not narrow it). See [managed sync request indexes](#request-indexes). | `building`: an index another session is still building; it is never dropped. |
 | `connector-fences` | none (a `connector_fence_below_timeline` refusal names it) | Moves a facts or takes fence that sits below the timeline sentinel of a Google or GitHub page into the page body through a revision-bound `put_page`, so the connector's next re-render carries the fence instead of refusing. Then re-attempt the held item with `gbrain sources retry-held <source>`. | `kept_ambiguous_pages`: pages whose fences are duplicated, unbalanced or unparseable. Move the fence by hand: read the page, place the fence above the `<!-- timeline -->` line, and save it with the current `expected_revision`. |
 | `connector-checkpoints` | `connector_checkpoints` | Deletes managed connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days. They accumulate after a content setting such as `g_history_days` changes, or when a connector host older than v0.60.11.0 runs during an upgrade. Cleanup only: it never copies or re-keys a checkpoint, takes no journal admission and runs brain-wide (`--source` does not narrow it). | Rows a queued or running connector write, or a connector's recorded pending set, still references. |
-| `orphan-bindings` | `orphan_persistence_bindings` | Deletes persistence source bindings whose source was removed, or that belong to an earlier incarnation of a source re-added under the same id. Releases before this one left the binding behind on `gbrain sources remove` and `gbrain sources purge`, so the re-added source read as claimed and every `gbrain sync --source <id>` failed with `writer_coordinator_required`. Bookkeeping only: no journal admission, no page or file changes, and it runs brain-wide (`--source` does not narrow it). See [orphan bindings](#orphan-bindings). | A binding that a queued, running or recovering write request of the same source incarnation still references. |
+| `orphan-bindings` | `orphan_persistence_bindings` | Deletes persistence source bindings whose source was removed, or that belong to an earlier incarnation of a source re-added under the same id. `gbrain sources remove` and `gbrain sources purge` delete the binding; one an older gbrain left behind makes the re-added source read as claimed, so every `gbrain sync --source <id>` fails with `writer_coordinator_required`. Bookkeeping only: no journal admission, no page or file changes, and it runs brain-wide (`--source` does not narrow it). See [orphan bindings](#orphan-bindings). | A binding that a queued, running or recovering write request of the same source incarnation still references. |
 | `embedding-effects` | `stale_embedding_effects` | Settles stale queued and failed embedding effects of committed writes, which block receipt compaction and activation: `reconciled` when current vectors pass the effect verifier, `superseded` when the page was deleted or a newer revision owns its own effect, `retry_queued` for the owner (paid; a used-up retry allowance gets one new bounded cycle per explicit apply). See [stale queued embedding effects](#stale-queued-embedding-effects). | `blocked` effects, counted by reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). |
 | `attribution-backfill` | none | Fills write attribution (who wrote it) on pages, page versions and facts written before attribution was recorded, only where exactly one committed request in the write journal proves the writer: the page write whose recorded result is the row's revision, or the `remember` that inserted the fact. Fills NULLs only, in committed batches of 1,000 that resume after an interruption; no content, revision, page file or request ID changes. See [write attribution](../mcp/ADMIN.md#write-attribution). | `unrecorded_pages`, `unrecorded_page_versions`, `unrecorded_facts`: rows the journal cannot prove. They stay `unrecorded`; nothing is inferred. |
 | `safe-chunks` | `safe_index_pending` (also `contextual_retrieval_coverage`, `details.unsealed_pages`) | Rebuilds the chunks of markdown and code pages indexed before the safe-chunk fence, which remote and MCP search withhold. It rebuilds projections only: no page write, no new page version and no request ID. Vectors whose embedding input did not change are kept; the rest are embedded unless you pass `--no-embed` or no embedding model is configured. | `code_without_source_path`: code pages with no recorded file to re-chunk. `unsupported_page_kind`: other page kinds, such as images. Their importer re-seals them. |
 | `orphan-children` | `child_table_orphans` (also a `storage_corrupt` error) | Explicit-only. Deletes rows of page child tables (chunks, versions, tags, takes, raw data, timeline, links) whose page row no longer exists, and clears dangling `links.origin_page_id` and `files.page_id` references, each in one statement that rechecks the orphan condition. See [orphan children](#orphan-children). | `torn_pages`: page rows whose stored body cannot be read (torn TOAST). The preview names them; the repair never changes them. |
-| `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync or a connector source before this release), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. `embed_skip`: pages marked to skip embedding keep their stored vectors and are not stamped. |
-gbrain repair google-file-modes --apply             # explicit-only: runs only when named
-gbrain repair --all --apply                    # every automatic kind in order
+| `planner-stats` | `planner_stats_stale` | Runs `ANALYZE` on the hot tables (pages, links, facts, takes, content_chunks, timeline_entries) whose planner statistics are stale, so search and graph reads stop planning as slow nested loops. PGLite also resets each table's pending row count; Postgres runs each `ANALYZE` with a 60 s statement timeout and a 2 s lock timeout. No journal admission, no user data changes, brain-wide. | none |
+| `contextual-mode` | `contextual_retrieval_coverage` (pages with no recorded mode) | Stamps the contextual retrieval mode on markdown pages imported without one (for example by a large `--no-embed` sync, or by a connector source on an older gbrain), exactly as a fresh import of the page would: the page, source and brain settings decide, and the per-chunk synopsis tier lands at the free title tier. It rebuilds projections only: no page write, no new page version and no request ID. A page whose stored vectors already match the stamped convention keeps them and queues no re-embedding; a page whose embedding input changes has only those vectors cleared and is re-embedded once, unless you pass `--no-embed`. | `unsealed_projection`: pages whose chunks lag their text; `gbrain embed --stale` or `safe-chunks` seals them first, and the next run stamps them. `embed_skip`: pages marked to skip embedding keep their stored vectors and are not stamped. |
 
 Timeline rows that an earlier version of a page produced and its current text
 no longer has are removals, not history, so `timeline` neither counts nor
@@ -141,9 +140,9 @@ bullet in a save that passes the current `expected_revision` deletes its entry.
 
 Managed Google and GitHub connector checkpoints are keyed on the parsed
 connector settings minus credential-delivery fields, so the per-cycle
-`last_source_cycle_at` stamp no longer makes every run start over. The
-v0.60.11.0 migration copies each connector source's newest committed
-checkpoint to the new key. A source whose newest checkpoint receipt was
+`last_source_cycle_at` stamp does not make a run start over. On an upgrade
+across v0.60.11.0, the migration copies each connector source's newest
+committed checkpoint to the current key. A source whose newest checkpoint receipt was
 compacted re-walks its window once; unchanged pages are not admitted again.
 
 **Say to your agent:** *"Did my Gmail connector stop re-importing everything
@@ -192,16 +191,15 @@ Git-backed source and while the account differs
 ### Managed sync request indexes
 
 A managed sync checkpoint checks that every page receipt of its run
-committed. On a large `persistence_requests` table that check used to scan the
-whole table and hit the coordinator's 5-second statement timeout, so the
-checkpoint never committed and was retried ahead of every other write to the
-source (#5762). Two indexes now serve it, `persistence_requests_sync_run_open`
-and `persistence_requests_sync_run_committed`. On Postgres, migration 179
+committed. Two indexes serve that check, `persistence_requests_sync_run_open`
+and `persistence_requests_sync_run_committed`, so it stays inside the
+coordinator's 5-second statement timeout on a large `persistence_requests`
+table. On Postgres, migration 179
 builds them `CONCURRENTLY` after the upgrade; while it runs it prints
 `building <index> on ~N rows; this can take minutes; it is safe to leave
-running`. A timeout that still happens fails the checkpoint with
+running`. If the check still times out, the checkpoint fails with
 [`checkpoint_validation_timeout`](write-refusals.md#checkpoint-validation-timeout)
-instead of retrying forever.
+and is not retried ahead of other writes.
 
 **Say to your agent:** *"My sync says checkpoint_validation_timeout. What do I run?"*
 
@@ -230,10 +228,10 @@ nothing is evicted.
 
 After an upgrade that re-queues text projections (for example the 0.51
 protocol activation), search and code results stay incomplete until every
-queued Markdown and code page is rebuilt (#5401). Doctor
+queued Markdown and code page is rebuilt. Doctor
 `text_projection_readiness` warns while any visible page is pending.
 
-The upgraded resident owner (`gbrain serve` or autopilot) drains the queue on
+The resident owner (`gbrain serve` or autopilot) drains the queue on
 its own: each pass rebuilds up to 100 pages and starts no new page after
 250 ms, and takes 2 pages while writes are waiting. A page whose rebuild fails
 is retried after 30 seconds.
@@ -264,7 +262,7 @@ Verify: `gbrain doctor` shows `text_projection_readiness` ok.
 ### Provider key source
 
 An exported provider key (for example `OPENAI_API_KEY`) wins over the matching
-config key (`openai_api_key` in `~/.gbrain/config.json`) (#5137). When both are
+config key (`openai_api_key` in `~/.gbrain/config.json`). When both are
 set and differ, every gbrain command except `gbrain hook` prints one warning
 per process naming the variable, the config key and which one is in effect.
 No key or part of one is ever printed.
@@ -306,9 +304,9 @@ the item's error code names, then re-attempt. See
 **Say to your agent:** *"I removed a source and added it back, and now sync
 says it needs a coordinator. Fix it."*
 
-Removing a source now also removes that source's persistence binding, and the
-claim check only counts a binding of the source's current incarnation. A
-binding left behind by an older release is reported by doctor's
+Removing a source also removes that source's persistence binding, and the
+claim check counts only a binding of the source's current incarnation. A
+binding left behind by an older gbrain is reported by doctor's
 `orphan_persistence_bindings` check. Preview, then apply after you agree:
 
 ```bash
@@ -357,8 +355,9 @@ is written. A run that has neither says `scan incomplete` and is a lower bound;
 
 ### Stale atoms
 
-`gbrain repair stale-atoms` (explicit-only, #5770) retires atoms that drifted
-before managed re-extraction learned to retire them. It lists live atoms bound
+`gbrain repair stale-atoms` (explicit-only) retires atoms that drifted from
+their source page and that managed re-extraction never retired (atoms left
+by an older gbrain). It lists live atoms bound
 to a source page (`source_slug`) in two classes:
 
 - `origin_gone`: the source page is missing or deleted;
@@ -392,10 +391,10 @@ threshold.
 
 ### Extractor facts
 
-Before v0.60.11.0, every managed write to a conversation page without a
-Facts fence expired all of that page's conversation-extractor facts
-(`expired_at` set, `row_num` cleared), and recall stopped returning them.
-`gbrain repair extractor-facts` (#5731) restores them. It is explicit-only and
+A managed write by a gbrain older than v0.60.11.0 to a conversation page
+without a Facts fence expires all of that page's conversation-extractor facts
+(`expired_at` set, `row_num` cleared), so recall stops returning them.
+`gbrain repair extractor-facts` restores them. It is explicit-only and
 preview-bound.
 
 ```bash
@@ -435,18 +434,17 @@ re-extraction (the old rows are gone), and facts on unmanaged brains without
 `--include-ambiguous`. On PGLite the same-transaction rule holds only to the
 millisecond (PGLite's clock resolution).
 
-The preview warns, naming the host, when a consumer older than this release
+The preview warns, naming the host, when a consumer older than v0.60.11.0
 published writes after `writer_version_cutoff`: an old consumer expires
 restored facts again. Upgrade and restart it first.
 
 <a id="captured-facts"></a>
 ### Captured facts
 
-Before v0.60.30.0, automatic capture (the writeback hook, the compaction
-harvest and the corpus sweep) extracted facts from gbrain's own claude-cli
-model sessions and from text you pasted into a conversation. New capture skips
-both, but the facts already stored stay active, so recall and hot memory keep
-returning them. `gbrain repair captured-facts` expires them. It is
+Automatic capture (the writeback hook, the compaction harvest and the corpus
+sweep) skips gbrain's own claude-cli model sessions and text you paste into a
+conversation. Facts a gbrain older than v0.60.30.0 captured from them stay
+active, so recall and hot memory keep returning them. `gbrain repair captured-facts` expires them. It is
 explicit-only and preview-bound, and it runs on the brain host (it reads the
 Claude Code session directory and the session corpus there).
 
@@ -486,10 +484,11 @@ maintenance request per page on a managed brain). Nothing is withdrawn, so
 ### Loop facts
 
 Closing a commitment loop (`gbrain loops done`, `gbrain loops drop`, or the
-`loops_close` tool) retires its commitment fact. A loop closed while that
-retirement could not commit (for example on a managed brain, where the write
-was refused but the close still reported `fact_expired: true`) left the fact
-active, so entity cards and recall keep the finished promise. `gbrain repair
+`loops_close` tool) retires its commitment fact.
+A loop closed by a gbrain older than v0.60.32.0 while that retirement could
+not commit (for example on a managed brain, where the write was refused but
+the close still reported `fact_expired: true`) leaves the fact active, so
+entity cards and recall keep the finished promise. `gbrain repair
 loop-facts` retires those facts. It is explicit-only and preview-bound.
 
 **Say to your agent:** *"Doctor says some closed loops still have an active
@@ -514,9 +513,9 @@ withdrawal is recorded, so the same promise made again is stored normally.
 <a id="failed-writes"></a>
 ### Failed writes
 
-Before v0.60.38.0, on a managed brain whose `tags`, `timeline_entries` or
-`takes` table had a `source_id` column gbrain does not create, the managed
-writer guard refused writes it should have allowed (#5983). Each refused write
+On a managed brain whose `tags`, `timeline_entries` or `takes` table has a
+`source_id` column gbrain does not create, the managed writer guard of a
+gbrain older than v0.60.38.0 refuses writes it should allow. Each refused write
 keeps a failed receipt with its full intent until receipt compaction
 (`persistence.receipt_retention_days`, 30 days by default). `gbrain repair
 failed-writes` submits those writes again. It is explicit-only and
@@ -713,10 +712,12 @@ Exit status: `0` when no automatically repairable finding remains and no step
 failed, even if operator-required, explicit-only or unsupported findings
 remain (they are listed); `1` when a repairable finding remains, a step failed, or the budget
 ran out; `2` when the score target is unreachable and there was no repair step
-to run, or a resume was refused. `healthy` is true only when every wave check
-is clean; `repairs_completed` counts the repair steps that finished.
+to run, or a resume was refused. `healthy` is true only when every recovery
+check is clean after the run; `repairs_completed` counts the repair steps that finished.
 
-## Recover after upgrading to this release
+## Recover after an upgrade
+
+<a id="recover-after-upgrading-to-this-release"></a>
 
 **Say to your agent:** *"We just upgraded gbrain. Check what needs repair and
 walk me through it before changing anything."*
@@ -739,18 +740,18 @@ walk me through it before changing anything."*
 
 <a id="repair-upgrade-symptoms"></a>
 
-| Symptom or error text | Issue | Preview | Apply | Verify | Who acts | Consent |
-| --- | --- | --- | --- | --- | --- | --- |
-| Tag, timeline or take writes fail with `writer_coordinator_required` or `storage_error: Publication failed (P0001)` on a managed brain; sync ends `PARTIAL` at a tagged page | #5983 | `gbrain doctor --json` (`schema_version` is 197 or later) | the original `gbrain sync --source <source> … --no-pull --retry-failed --json`, then `gbrain extract --stale --source-id <source>` and `gbrain extract timeline --source db --source-id <source>`, then `gbrain facts relink --source <source> --dry-run` (paid tier only after the user agrees), then `gbrain repair failed-writes --source <source>` and, after the user agrees, its printed `--apply --expect <hash>` | `gbrain sources status` shows the new `last_commit`; a second `gbrain extract timeline --source db` run adds no rows; a second `gbrain repair failed-writes` preview lists nothing to replay | brain host; the replay apply after the user agrees | paid (relink tier), destructive (replay apply) |
-| Sync `BLOCKED` with `checkpoint_validation_timeout` | #5762 | `gbrain doctor` (`persistence_request_indexes`) | `gbrain repair request-indexes --apply` when an index is missing or INVALID, then the printed `gbrain sync --source <source> --no-pull --retry-failed …` | `gbrain doctor --only persistence_request_indexes --json` reports `ok`; `gbrain sources status` shows the new `last_commit` | brain host | none |
-| Doctor `persistence_request_indexes` warns | #5762 | `gbrain repair request-indexes` | `gbrain repair request-indexes --apply` | `gbrain doctor --only persistence_request_indexes --json` | brain host | none |
-| Doctor `persistence_request_growth` warns | #5751, #5762 | `gbrain doctor --json` | the printed `gbrain config set persistence.limits.<limit> <value>` | `gbrain doctor --only persistence_request_growth --json` | brain host | none |
-| Working-tree sync prints `legacy file(s) skipped … no contextual retrieval mode` | #5751 | `gbrain repair contextual-mode` | `gbrain repair contextual-mode --apply` | the next `gbrain sync --working-tree` no longer prints the line | brain host, after the user agrees | none |
-| Working-tree sync prints `legacy file(s) skipped … not valid UTF-8` | #5751 | `find <checkout> -name '*.md' ! -exec iconv -f UTF-8 -t UTF-8 -o /dev/null {} \; -print` | re-save each listed file as UTF-8 | the next `gbrain sync --working-tree` no longer prints the line | user (re-saves the files) | none |
-| Doctor `google_file_modes` warns, or the upgrade printed `[google] Google source <id> keeps its files in <dir>, outside ~/.gbrain` | #5080 | `gbrain repair google-file-modes --source <id>` | `gbrain repair google-file-modes --source <id> --apply` | `gbrain doctor --only google_file_modes --json` (`google_file_modes` ok) | brain host, after the user agrees | none |
-| Recall or hot memory returns facts from gbrain's own claude-cli sessions or from pasted text; doctor `captured_facts_active` warns; the upgrade banner prints `captured_facts_active: N (explicit_kind_required; …)` | #5812, #5820 | `gbrain repair captured-facts` (add `--include-ambiguous` to include paste candidates) | `gbrain repair captured-facts --apply --expect <hash>` with the hash that preview printed | `gbrain doctor --only captured_facts_active --json` (`captured_facts_active` ok) | brain host, after the user agrees | `destructive` (quarantines facts) |
-| A finished promise still shows on entity cards and in recall after its loop was closed; doctor `loop_facts_drift` warns; the upgrade banner prints `loop_facts_drift: N (explicit_kind_required; …)` | #5869 | `gbrain repair loop-facts` | `gbrain repair loop-facts --apply --expect <hash>` | `gbrain doctor --only loop_facts_drift --json` (`loop_facts_drift` ok) | brain host, after the user agrees | `destructive` (retires facts) |
-| `gbrain upgrade` refuses with `requires Bun >=<floor>` (exit 78), or doctor `self_upgrade_health` says `Auto-upgrade to <target> held` | #5855 | `bun --version` | `bun upgrade`, then `gbrain upgrade` ([Bun floor](upgrades-auto-update.md#bun-floor)) | `gbrain --version` shows the target; `gbrain doctor --only self_upgrade_health --json` (`self_upgrade_health` ok) | user | `persistent_install` |
+| Symptom or error text | Preview | Apply | Verify | Who acts | Consent |
+| --- | --- | --- | --- | --- | --- |
+| Tag, timeline or take writes fail with `writer_coordinator_required` or `storage_error: Publication failed (P0001)` on a managed brain; sync ends `PARTIAL` at a tagged page | `gbrain doctor --json` (`schema_version` is 197 or later) | the original `gbrain sync --source <source> … --no-pull --retry-failed --json`, then `gbrain extract --stale --source-id <source>` and `gbrain extract timeline --source db --source-id <source>`, then `gbrain facts relink --source <source> --dry-run` (paid tier only after the user agrees), then `gbrain repair failed-writes --source <source>` and, after the user agrees, its printed `--apply --expect <hash>` | `gbrain sources status` shows the new `last_commit`; a second `gbrain extract timeline --source db` run adds no rows; a second `gbrain repair failed-writes` preview lists nothing to replay | brain host; the replay apply after the user agrees | paid (relink tier), destructive (replay apply) |
+| Sync `BLOCKED` with `checkpoint_validation_timeout` | `gbrain doctor` (`persistence_request_indexes`) | `gbrain repair request-indexes --apply` when an index is missing or INVALID, then the printed `gbrain sync --source <source> --no-pull --retry-failed …` | `gbrain doctor --only persistence_request_indexes --json` reports `ok`; `gbrain sources status` shows the new `last_commit` | brain host | none |
+| Doctor `persistence_request_indexes` warns | `gbrain repair request-indexes` | `gbrain repair request-indexes --apply` | `gbrain doctor --only persistence_request_indexes --json` | brain host | none |
+| Doctor `persistence_request_growth` warns | `gbrain doctor --json` | the printed `gbrain config set persistence.limits.<limit> <value>` | `gbrain doctor --only persistence_request_growth --json` | brain host | none |
+| Working-tree sync prints `legacy file(s) skipped … no contextual retrieval mode` | `gbrain repair contextual-mode` | `gbrain repair contextual-mode --apply` | the next `gbrain sync --working-tree` no longer prints the line | brain host, after the user agrees | none |
+| Working-tree sync prints `legacy file(s) skipped … not valid UTF-8` | `find <checkout> -name '*.md' ! -exec iconv -f UTF-8 -t UTF-8 -o /dev/null {} \; -print` | re-save each listed file as UTF-8 | the next `gbrain sync --working-tree` no longer prints the line | user (re-saves the files) | none |
+| Doctor `google_file_modes` warns, or the upgrade printed `[google] Google source <id> keeps its files in <dir>, outside ~/.gbrain` | `gbrain repair google-file-modes --source <id>` | `gbrain repair google-file-modes --source <id> --apply` | `gbrain doctor --only google_file_modes --json` (`google_file_modes` ok) | brain host, after the user agrees | none |
+| Recall or hot memory returns facts from gbrain's own claude-cli sessions or from pasted text; doctor `captured_facts_active` warns; the upgrade banner prints `captured_facts_active: N (explicit_kind_required; …)` | `gbrain repair captured-facts` (add `--include-ambiguous` to include paste candidates) | `gbrain repair captured-facts --apply --expect <hash>` with the hash that preview printed | `gbrain doctor --only captured_facts_active --json` (`captured_facts_active` ok) | brain host, after the user agrees | `destructive` (quarantines facts) |
+| A finished promise still shows on entity cards and in recall after its loop was closed; doctor `loop_facts_drift` warns; the upgrade banner prints `loop_facts_drift: N (explicit_kind_required; …)` | `gbrain repair loop-facts` | `gbrain repair loop-facts --apply --expect <hash>` | `gbrain doctor --only loop_facts_drift --json` (`loop_facts_drift` ok) | brain host, after the user agrees | `destructive` (retires facts) |
+| `gbrain upgrade` refuses with `requires Bun >=<floor>` (exit 78), or doctor `self_upgrade_health` says `Auto-upgrade to <target> held` | `bun --version` | `bun upgrade`, then `gbrain upgrade` ([Bun floor](upgrades-auto-update.md#bun-floor)) | `gbrain --version` shows the target; `gbrain doctor --only self_upgrade_health --json` (`self_upgrade_health` ok) | user | `persistent_install` |
 
 **Say to your agent:** *"After the upgrade, preview the captured-facts and
 loop-facts repairs and tell me what each would expire before applying
@@ -766,7 +767,7 @@ A line that says `Unknown:` means the check could not run; it is not a clean
 result. Ask the brain host's operator to run the steps above.
 
 <a id="fix-wave-6"></a>
-### Upgrading to v0.60.30.0 (fix wave 6)
+### Upgrading to v0.60.30.0
 
 **Say to your agent:** *"We upgraded gbrain to v0.60.30.0. Preview the
 unlinked facts relink and the link re-derivation for each source, and tell me
@@ -778,25 +779,25 @@ worker so they run the new code, then work through what applies:
 
 <a id="repair-recall-symptoms"></a>
 
-| Symptom | Check or code | Issue | Preview | Apply | Verify | Who acts | Consent |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| "Who invested in X?" or "Who attended <meeting>?" finds nobody; meeting attendance edges point meeting -> person, or notes-only mentions are typed attended | none | N9-2, N9-3, N9-4, N12-7 | `gbrain extract links --source db --repair-attendance --source-id <id>` (attendance only, preview-bound) | `gbrain extract links --source db --include-frontmatter --source-id <id>` per source; body links also re-derive on the next `gbrain extract --stale` | `gbrain graph <person-slug>` shows person -> page `invested_in` / `attended` edges | brain host, after the user agrees | none |
-| Facts saved without an entity are missing from entity recall and skipped as `no_entity` by the conflict sweep | doctor `unlinked_facts` | #5836 | `gbrain facts relink --dry-run` | `gbrain facts relink` (model tier capped by `--max-usd`, default $1.00) | `gbrain doctor` (`unlinked_facts`); `gbrain decide status` | agent, after the user agrees | `paid` (capped by `--max-usd`) |
-| `remember` answers `warnings: ["NO_ENTITY"]` | none | #5836 | none | pass `entity`, or name exactly one existing person or company in the text; `gbrain config set facts.entity_inference off` turns inference off | the response carries `entity_inferred` or the chosen entity | agent | none |
-| A CLI write on PGLite pauses for up to 30 s, then fails lock-busy | lock busy | N5-2 | none | wait for the other CLI call, or stop the long-running non-serve holder (for example a jobs daemon) | re-run the write | agent | none |
-| The next `gbrain eval suspected-contradictions` estimates a full re-judge | none | N2-3 | the printed cost estimate | run it after you agree (judge prompt v3 invalidated the cache once) | the run reports judged pairs | agent, after the user agrees | `paid` |
-| Hybrid search on Postgres returns keyword-only results or hits the vector timeout | doctor `vector_plan` | #5824 | `gbrain doctor` | upgrade and restart; rollback for this release: `gbrain config set search.vector_legacy_guard true`, then restart serve and autopilot | `gbrain doctor` shows `vector_plan` ok | brain host | none |
-| Facts about you that came from pasted text or from gbrain's own claude-cli calls | doctor `self_capture` | #5812, #5820 | `gbrain recall` for the fact | `gbrain forget <fact id>`; doctor `self_capture` prints one-time quarantine commands for old self-capture files | `gbrain doctor` | agent, after the user agrees | `destructive` (forgets the fact) |
+| Symptom | Check or code | Preview | Apply | Verify | Who acts | Consent |
+| --- | --- | --- | --- | --- | --- | --- |
+| "Who invested in X?" or "Who attended <meeting>?" finds nobody; meeting attendance edges point meeting -> person, or notes-only mentions are typed attended | none | `gbrain extract links --source db --repair-attendance --source-id <id>` (attendance only, preview-bound) | `gbrain extract links --source db --include-frontmatter --source-id <id>` per source; body links also re-derive on the next `gbrain extract --stale` | `gbrain graph <person-slug>` shows person -> page `invested_in` / `attended` edges | brain host, after the user agrees | none |
+| Facts saved without an entity are missing from entity recall and skipped as `no_entity` by the conflict sweep | doctor `unlinked_facts` | `gbrain facts relink --dry-run` | `gbrain facts relink` (model tier capped by `--max-usd`, default $1.00) | `gbrain doctor` (`unlinked_facts`); `gbrain decide status` | agent, after the user agrees | `paid` (capped by `--max-usd`) |
+| `remember` answers `warnings: ["NO_ENTITY"]` | none | none | pass `entity`, or name exactly one existing person or company in the text; `gbrain config set facts.entity_inference off` turns inference off | the response carries `entity_inferred` or the chosen entity | agent | none |
+| A CLI write on PGLite pauses for up to 30 s, then fails lock-busy | lock busy | none | wait for the other CLI call, or stop the long-running non-serve holder (for example a jobs daemon) | re-run the write | agent | none |
+| The next `gbrain eval suspected-contradictions` estimates a full re-judge | none | the printed cost estimate | run it after you agree (judge prompt v3 invalidated the cache once) | the run reports judged pairs | agent, after the user agrees | `paid` |
+| Hybrid search on Postgres returns keyword-only results or hits the vector timeout | doctor `vector_plan` | `gbrain doctor` | upgrade and restart; to roll back: `gbrain config set search.vector_legacy_guard true`, then restart serve and autopilot | `gbrain doctor` shows `vector_plan` ok | brain host | none |
+| Facts about you that came from pasted text or from gbrain's own claude-cli calls | doctor `self_capture` | `gbrain recall` for the fact | `gbrain forget <fact id>`; doctor `self_capture` prints one-time quarantine commands for old self-capture files | `gbrain doctor` | agent, after the user agrees | `destructive` (forgets the fact) |
 
 <a id="fix-wave-5"></a>
-### Upgrading to v0.60.28.0 (fix wave 5)
+### Upgrading to v0.60.28.0
 
 **Say to your agent:** *"We upgraded gbrain to v0.60.28.0. Restart everything
 that runs it, then walk me through what doctor finds, in order, before
 changing anything."*
 
-Most wave 5 fixes take effect only in a process that runs the new binary, so
-restart first. `gbrain sources writer status --json` lists, in
+Most of these fixes take effect only in a process that runs v0.60.28.0 or
+later, so restart first. `gbrain sources writer status --json` lists, in
 `writer_versions[]`, the latest version each host and principal was seen
 writing with in the retained requests. That is history, not proof: an idle
 older `gbrain serve` never shows up there. Restart in this order:
@@ -833,38 +834,38 @@ Then recover what doctor names, in this order (skip a step whose check is ok):
 
 <a id="repair-runtime-symptoms"></a>
 
-| Symptom | Check or code | Issue | Preview | Apply | Verify | Who acts | Consent |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| synthesize fails every run; `POST /ingest` 409 (was 500); workers refuse to start with "legacy jobs have missing or unsupported authority" | `legacy_job_authority` / `permission_denied` ([legacy job authority](#legacy-job-authority)) | #5157, #5114 | stop `gbrain serve`, autopilot and workers; `gbrain jobs cancel <active id>`; `gbrain jobs authorize-legacy --select "status=waiting\|delayed\|waiting-children\|paused"` | `gbrain jobs authorize-legacy --select "<same filter>" --expect <hash> --yes`, then restart | `gbrain doctor` shows `legacy_job_authority` ok; `/ingest` returns 202 | brain host, after the user agrees | `paid` (authorizes legacy jobs) |
-| Search returns atoms quoting text a page no longer has, or atoms of deleted pages | doctor `atom_provenance_drift` | #5770 | `gbrain repair stale-atoms --source <id>` | `gbrain repair stale-atoms --source <id> --apply --expect <hash>` | `gbrain doctor` (`atom_provenance_drift` drops by the retired count) | brain host, after the user agrees | `destructive` (removes stale atoms) |
-| `sources add`, `claim`, `rebind`, `archive`, `remove`, clone, reclone or `sources writer transfer` on a repo with more than ~10k files fails with "The verified source manifest exceeds the 1 MiB administration metadata bound" | `request_too_large` | #5790 | none: upgrade and restart every writer host and resident `gbrain serve` | Re-run the failed command (with the same `--request-id` if you kept it) | `gbrain sources writer status --json` shows the source bound, and its `manifest_digest` is set | agent | none |
-| A stdio agent bound with `GBRAIN_SOURCE` (or `.gbrain-source`) gets `permission_denied` naming the binding when it passes `source_id` | `permission_denied` (hint starts "This connection is bound to source …") | #5081 | `gbrain sources list` (the source must show `federated`, not `isolated` or `unset`) | `gbrain sources federate <id>` on the brain host | Repeat the read with `source_id: "<id>"`; it returns only that source's rows. See [explicit reads from a bound agent connection](multi-source-brains.md#explicit-reads-from-a-bound-agent-connection) | brain host, after the user agrees | none |
-| A new session's start-up context showed another session's text (`Last session activity: …`) | none | #5558 | none | Upgrade the `gbrain` each harness runs its hooks with and restart the harness. If you set `GBRAIN_HOOKS=0` as a workaround, remove it from the environment the harness starts from (shell profile or service) and restart the harness again | A new session shows no `Last session activity` line, and `gbrain doctor` reports `bootstrap_hooks_heartbeat` again after a few turns (capture and session persistence are back) | user (upgrades and restarts the harness) | `persistent_install` |
-| `connect --harness codex\|claude-code\|opencode --install` stored the bearer token inline in the harness config without telling you | receipt `token_storage: "inline"` | #5775 | On the brain host: `gbrain mcp admin invalidate-tokens <client_id> --url <mcp_url> --admin-token-file <owner-admin-token-file> --json` (only if the config file was exposed) | `gbrain mcp admin invalidate-tokens <client_id> --yes --if-version <revision> --url <mcp_url> --admin-token-file <owner-admin-token-file> --json`, then `gbrain connect <mcp_url> --harness <harness> --credentials-file <handoff> --install --fresh-token`, then reload the harness | The new receipt prints `token_storage`, `config_path`, `renew_command` and `if_exposed`, and the harness answers a memory round trip | brain host, after the user agrees | `credentials` (invalidates tokens) |
-| A second brain's autopilot replaced the first one's job, logs interleave in `~/.gbrain/autopilot.log`, or `gbrain autopilot --status --json` shows `job.needs_reinstall: "legacy_shared_job"` (or `"wrapper_missing"` after moving a brain); install refuses with `autopilot_job_owned_by_other_brain` | `gbrain autopilot --status --json` (`job.*`) / `autopilot_job_owned_by_other_brain` | #5195 | `GBRAIN_HOME=<brain parent> gbrain autopilot --status --json` | `GBRAIN_HOME=<brain parent> gbrain autopilot --install` (every non-default brain first, then the default brain) | `GBRAIN_HOME=<brain parent> gbrain autopilot --status --json` shows `job.needs_reinstall: null` and the brain's own `launchd_label` / `systemd_unit`. See [several brains on one host](live-sync.md#several-brains-on-one-host) | brain host, after the user agrees | `persistent_install` |
-| `gbrain serve` started in a `.gbrain-mount` project: CLI writes fail `owner_unavailable` and MCP writes stay `queued` | `owner_unavailable` | #5237 | none | Upgrade and restart the resident `gbrain serve` (the harness that spawns it) | `gbrain sources writer status --probe --json` from the project answers | user (upgrades and restarts the harness) | `persistent_install` |
-| Backup coverage reports `remote evidence: unavailable` for a private remote that is pushed | doctor `backup_coverage` | #5794 | none | Upgrade, then `gbrain backup check` | `gbrain backup status --json` shows `verification.state: "verified"`; see [remote unavailable](../operations/backup-check.md#remote-unavailable) | agent, after the user agrees | `persistent_install` (upgrade) |
-| On Windows, a write or `gbrain sync` refuses a colon slug such as `calendar:abc` | [`colon_slug_windows_write_through`](write-refusals.md#colon_slug_windows_write_through) | #5032 | none | Use a slug without `:`, or write the page from a macOS or Linux host that owns the source | The write succeeds, or `gbrain sync` no longer lists the file | agent | none |
-| Search empty or incomplete after upgrading; doctor `text_projection_readiness` warns | `text_projection_readiness` | #5401 | `gbrain doctor` (pending count, also while a PGLite resident runs) | `gbrain projections drain` (Postgres, or PGLite with no resident); on PGLite with a resident, wait or stop, drain and restart per [projection owner resident](#projection-owner-resident) | `gbrain doctor` shows `text_projection_readiness` ok | brain host | none |
-| `Error [projection_owner_resident]` from `gbrain projections drain` (exit 2) | [`projection_owner_resident`](#projection-owner-resident) | #5401 | `gbrain doctor` | the printed stop, drain and restart commands | `gbrain doctor` | brain host | none |
-| `[gbrain] warning: OPENAI_API_KEY in this process's environment differs from openai_api_key …`; doctor `embedding_key_source` warns | `embedding_key_source` ([provider key source](#embedding-key-source)) | #5137 | `gbrain doctor` (`embedding_key_source`) | remove the variable and restart that process, or `gbrain config unset openai_api_key` | the warning no longer prints; `gbrain doctor` shows `embedding_key_source` ok | user (owns the key) | `credentials` |
-| `The OpenAI embedding provider rejected its key (HTTP 401)` | [`embedding_auth_failed`](write-refusals.md#embedding_auth_failed) | #5137 | `gbrain doctor` (`embedding_key_source`, `embedding_provider`) | the printed fix for the key source in effect, then `gbrain embed --stale` | `gbrain doctor` shows `embedding_provider` ok | user (owns the key) | `credentials`; `paid` for `embed --stale` |
-| Conversation facts missing from recall after managed writes | `extractor_facts_expired` | #5731 | `gbrain repair extractor-facts` | `gbrain repair extractor-facts --apply --expect <hash>` (ambiguous: add `--include-ambiguous` to both) | `gbrain doctor` | brain host, after the user agrees | `destructive` (rewrites expired facts) |
+| Symptom | Check or code | Preview | Apply | Verify | Who acts | Consent |
+| --- | --- | --- | --- | --- | --- | --- |
+| synthesize fails every run; `POST /ingest` returns 409 (500 on an older gbrain); workers refuse to start with "legacy jobs have missing or unsupported authority" | `legacy_job_authority` / `permission_denied` ([legacy job authority](#legacy-job-authority)) | stop `gbrain serve`, autopilot and workers; `gbrain jobs cancel <active id>`; `gbrain jobs authorize-legacy --select "status=waiting\|delayed\|waiting-children\|paused"` | `gbrain jobs authorize-legacy --select "<same filter>" --expect <hash> --yes`, then restart | `gbrain doctor` shows `legacy_job_authority` ok; `/ingest` returns 202 | brain host, after the user agrees | `paid` (authorizes legacy jobs) |
+| Search returns atoms quoting text a page no longer has, or atoms of deleted pages | doctor `atom_provenance_drift` | `gbrain repair stale-atoms --source <id>` | `gbrain repair stale-atoms --source <id> --apply --expect <hash>` | `gbrain doctor` (`atom_provenance_drift` drops by the retired count) | brain host, after the user agrees | `destructive` (removes stale atoms) |
+| `sources add`, `claim`, `rebind`, `archive`, `remove`, clone, reclone or `sources writer transfer` on a repo with more than ~10k files fails with "The verified source manifest exceeds the 1 MiB administration metadata bound" | `request_too_large` | none: upgrade and restart every writer host and resident `gbrain serve` | Re-run the failed command (with the same `--request-id` if you kept it) | `gbrain sources writer status --json` shows the source bound, and its `manifest_digest` is set | agent | none |
+| A stdio agent bound with `GBRAIN_SOURCE` (or `.gbrain-source`) gets `permission_denied` naming the binding when it passes `source_id` | `permission_denied` (hint starts "This connection is bound to source …") | `gbrain sources list` (the source must show `federated`, not `isolated` or `unset`) | `gbrain sources federate <id>` on the brain host | Repeat the read with `source_id: "<id>"`; it returns only that source's rows. See [explicit reads from a bound agent connection](multi-source-brains.md#explicit-reads-from-a-bound-agent-connection) | brain host, after the user agrees | none |
+| A new session's start-up context showed another session's text (`Last session activity: …`) | none | none | Upgrade the `gbrain` each harness runs its hooks with and restart the harness. If you set `GBRAIN_HOOKS=0` as a workaround, remove it from the environment the harness starts from (shell profile or service) and restart the harness again | A new session shows no `Last session activity` line, and `gbrain doctor` reports `bootstrap_hooks_heartbeat` again after a few turns (capture and session persistence are back) | user (upgrades and restarts the harness) | `persistent_install` |
+| `connect --harness codex\|claude-code\|opencode --install` stored the bearer token inline in the harness config without telling you | receipt `token_storage: "inline"` | On the brain host: `gbrain mcp admin invalidate-tokens <client_id> --url <mcp_url> --admin-token-file <owner-admin-token-file> --json` (only if the config file was exposed) | `gbrain mcp admin invalidate-tokens <client_id> --yes --if-version <revision> --url <mcp_url> --admin-token-file <owner-admin-token-file> --json`, then `gbrain connect <mcp_url> --harness <harness> --credentials-file <handoff> --install --fresh-token`, then reload the harness | The new receipt prints `token_storage`, `config_path`, `renew_command` and `if_exposed`, and the harness answers a memory round trip | brain host, after the user agrees | `credentials` (invalidates tokens) |
+| A second brain's autopilot replaced the first one's job, logs interleave in `~/.gbrain/autopilot.log`, or `gbrain autopilot --status --json` shows `job.needs_reinstall: "legacy_shared_job"` (or `"wrapper_missing"` after moving a brain); install refuses with `autopilot_job_owned_by_other_brain` | `gbrain autopilot --status --json` (`job.*`) / `autopilot_job_owned_by_other_brain` | `GBRAIN_HOME=<brain parent> gbrain autopilot --status --json` | `GBRAIN_HOME=<brain parent> gbrain autopilot --install` (every non-default brain first, then the default brain) | `GBRAIN_HOME=<brain parent> gbrain autopilot --status --json` shows `job.needs_reinstall: null` and the brain's own `launchd_label` / `systemd_unit`. See [several brains on one host](live-sync.md#several-brains-on-one-host) | brain host, after the user agrees | `persistent_install` |
+| `gbrain serve` started in a `.gbrain-mount` project: CLI writes fail `owner_unavailable` and MCP writes stay `queued` | `owner_unavailable` | none | Upgrade and restart the resident `gbrain serve` (the harness that spawns it) | `gbrain sources writer status --probe --json` from the project answers | user (upgrades and restarts the harness) | `persistent_install` |
+| Backup coverage reports `remote evidence: unavailable` for a private remote that is pushed | doctor `backup_coverage` | none | Upgrade, then `gbrain backup check` | `gbrain backup status --json` shows `verification.state: "verified"`; see [remote unavailable](../operations/backup-check.md#remote-unavailable) | agent, after the user agrees | `persistent_install` (upgrade) |
+| On Windows, a write or `gbrain sync` refuses a colon slug such as `calendar:abc` | [`colon_slug_windows_write_through`](write-refusals.md#colon_slug_windows_write_through) | none | Use a slug without `:`, or write the page from a macOS or Linux host that owns the source | The write succeeds, or `gbrain sync` no longer lists the file | agent | none |
+| Search empty or incomplete after upgrading; doctor `text_projection_readiness` warns | `text_projection_readiness` | `gbrain doctor` (pending count, also while a PGLite resident runs) | `gbrain projections drain` (Postgres, or PGLite with no resident); on PGLite with a resident, wait or stop, drain and restart per [projection owner resident](#projection-owner-resident) | `gbrain doctor` shows `text_projection_readiness` ok | brain host | none |
+| `Error [projection_owner_resident]` from `gbrain projections drain` (exit 2) | [`projection_owner_resident`](#projection-owner-resident) | `gbrain doctor` | the printed stop, drain and restart commands | `gbrain doctor` | brain host | none |
+| `[gbrain] warning: OPENAI_API_KEY in this process's environment differs from openai_api_key …`; doctor `embedding_key_source` warns | `embedding_key_source` ([provider key source](#embedding-key-source)) | `gbrain doctor` (`embedding_key_source`) | remove the variable and restart that process, or `gbrain config unset openai_api_key` | the warning no longer prints; `gbrain doctor` shows `embedding_key_source` ok | user (owns the key) | `credentials` |
+| `The OpenAI embedding provider rejected its key (HTTP 401)` | [`embedding_auth_failed`](write-refusals.md#embedding_auth_failed) | `gbrain doctor` (`embedding_key_source`, `embedding_provider`) | the printed fix for the key source in effect, then `gbrain embed --stale` | `gbrain doctor` shows `embedding_provider` ok | user (owns the key) | `credentials`; `paid` for `embed --stale` |
+| Conversation facts missing from recall after managed writes | `extractor_facts_expired` | `gbrain repair extractor-facts` | `gbrain repair extractor-facts --apply --expect <hash>` (ambiguous: add `--include-ambiguous` to both) | `gbrain doctor` | brain host, after the user agrees | `destructive` (rewrites expired facts) |
 
 
-### Symptoms from the lifecycle fixes in v0.60.20.0
+### Upgrading to v0.60.20.0
 
 <a id="repair-migration-symptoms"></a>
 
-| Symptom or error text | Issue | Preview | Apply | Verify | Who acts | Consent |
-| --- | --- | --- | --- | --- | --- | --- |
-| `gbrain upgrade` said the upgrade failed, or migrations ran twice | #5693 | `gbrain apply-migrations --list` | `gbrain apply-migrations --yes` | `gbrain doctor --only minions_migration --json` (`minions_migration` ok) | agent, after the user agrees | none |
-| `another apply-migrations is running (host …, pid …)` | #5693 | `gbrain doctor` | wait, then `gbrain apply-migrations --yes` | `gbrain apply-migrations --list` | agent | none |
-| doctor `orphan_persistence_bindings`; a re-added source fails with `writer_coordinator_required` | #5732 | `gbrain repair orphan-bindings` | `gbrain repair orphan-bindings --apply` | `gbrain doctor` | brain host, after the user agrees | none |
-| doctor `stale_embedding_effects`; `writer_not_quiesced` names an embedding effect | #5629, #5734 | `gbrain repair embedding-effects --source <id>` | `gbrain repair embedding-effects --source <id> --apply` | `gbrain doctor` (pending until the owner run commits a `retry_queued` effect) | brain host, after the user agrees | none |
-| autopilot never syncs a connector, or prints `has never synced` | #5673 | `gbrain sources status <id>` | `gbrain sync --source <id>` once | `gbrain sources status <id>` | agent | `egress` (fetches from the provider) |
-| a connector source keeps a stale `local_path` | #5673 | `gbrain sources list` | `gbrain sources set-path <id> --clear` | `gbrain sources list` | agent, after the user agrees | none |
-| classic writes refused after leaving managed mode, or `local_markers: pending` | #5628 | `gbrain sources writer deactivate --dry-run` | see the [deactivate runbook](../architecture/topologies.md#deactivate-runbook) | `gbrain sources writer status` on every host | brain host, after the user agrees | none |
+| Symptom or error text | Preview | Apply | Verify | Who acts | Consent |
+| --- | --- | --- | --- | --- | --- |
+| `gbrain upgrade` said the upgrade failed, or migrations ran twice | `gbrain apply-migrations --list` | `gbrain apply-migrations --yes` | `gbrain doctor --only minions_migration --json` (`minions_migration` ok) | agent, after the user agrees | none |
+| `another apply-migrations is running (host …, pid …)` | `gbrain doctor` | wait, then `gbrain apply-migrations --yes` | `gbrain apply-migrations --list` | agent | none |
+| doctor `orphan_persistence_bindings`; a re-added source fails with `writer_coordinator_required` | `gbrain repair orphan-bindings` | `gbrain repair orphan-bindings --apply` | `gbrain doctor` | brain host, after the user agrees | none |
+| doctor `stale_embedding_effects`; `writer_not_quiesced` names an embedding effect | `gbrain repair embedding-effects --source <id>` | `gbrain repair embedding-effects --source <id> --apply` | `gbrain doctor` (pending until the owner run commits a `retry_queued` effect) | brain host, after the user agrees | none |
+| autopilot never syncs a connector, or prints `has never synced` | `gbrain sources status <id>` | `gbrain sync --source <id>` once | `gbrain sources status <id>` | agent | `egress` (fetches from the provider) |
+| a connector source keeps a stale `local_path` | `gbrain sources list` | `gbrain sources set-path <id> --clear` | `gbrain sources list` | agent, after the user agrees | none |
+| classic writes refused after leaving managed mode, or `local_markers: pending` | `gbrain sources writer deactivate --dry-run` | see the [deactivate runbook](../architecture/topologies.md#deactivate-runbook) | `gbrain sources writer status` on every host | brain host, after the user agrees | none |
 
 `orphan-bindings` and `embedding-effects` also run under `gbrain repair --all`
 and `gbrain doctor --remediate --include-repairs`; `embedding-effects` is paid
@@ -877,7 +878,7 @@ work when it queues a retry. Retry commands: `gbrain sources writer retry-effect
 
 `gbrain doctor` reports `self_capture` when the dream session corpus
 (`dream.synthesize.session_corpus_dir`) still holds files captured from
-gbrain's own `claude-cli` sessions (#5413). Dream and the sweep already skip
+gbrain's own `claude-cli` sessions. Dream and the sweep skip
 the ones they can identify, but nothing removes them. The check never moves
 or deletes files. It lists what it classified (a harness transcript under a
 gbrain scratch project matches the file) and counts what it cannot decide (no
@@ -907,7 +908,7 @@ activation. Settle it."*
 
 `gbrain doctor` reports `stale_embedding_effects` when a committed write still
 has an embedding effect that is queued an hour later with no consumer claiming
-it (#5629), or that failed (#5734, for example after a provider outage). Either
+it, or that failed (for example after a provider outage). Either
 one keeps the write receipt from compacting and blocks activation with
 `writer_not_quiesced`. Preview, then apply after you agree, on the brain host:
 
@@ -933,7 +934,7 @@ covers the whole retry budget each grant authorizes. A resumed run replays the
 grant it already made instead of granting another cycle. A signature-mismatched
 vector is never reconciled; it is re-embedded.
 
-## Wave 5 refusal codes
+## Repair refusal codes
 
 Each heading below is the `docs` anchor a refusal carries.
 
@@ -975,7 +976,7 @@ applies to `gbrain jobs authorize-legacy --select`, `gbrain jobs cancel
 ### Legacy job authority
 
 `permission_denied` with this anchor means a queued job row has SQL NULL
-`submission_authority`, left by an upgrade across v0.50 (#5157, #5114).
+`submission_authority`, left by an upgrade across v0.50.
 
 - A resubmission over a **dead or cancelled** legacy key releases the key and
   queues a fresh job. No step needed.
@@ -1029,11 +1030,11 @@ message lists the valid statuses, and the hint is a complete example.
 
 `projection_owner_resident` (exit 2): `gbrain projections drain` did not run
 because a gbrain process (named with its pid) holds this PGLite brain. Nothing
-changed. The upgraded resident drains the queue itself; re-run `gbrain doctor`
+changed. The resident drains the queue itself; re-run `gbrain doctor`
 to watch the pending count in `text_projection_readiness` (doctor asks the
 resident over its local socket, so the count shows while the resident runs; a
-resident that does not answer may predate this release and should be restarted
-on the upgraded gbrain).
+resident that does not answer runs an older gbrain, so restart it on the
+current version).
 
 To drain faster, stop the owner, drain, then restart it. The restart runs
 whether or not the drain failed:
@@ -1056,5 +1057,5 @@ follows `GBRAIN_AUTOPILOT_LABEL` when set.
 
 - [Write refusal reasons](write-refusals.md) — what a refused write means and the recovery command
 - [Concurrent writes and durable receipts](concurrent-writes.md) — receipts, retries and capacity limits
-- [v0.60.5.0 upgrade steps](../../skills/migrations/v0.60.5.0.md) — the backup-first upgrade that introduced these repairs
+- [v0.60.5.0 upgrade steps](../../skills/migrations/v0.60.5.0.md) — backup-first upgrade steps for a brain older than v0.60.5.0
 - [Topologies: claim and activate runbook](../architecture/topologies.md#claim-and-activate-runbook) — quiescence checklist, the writer admin lock

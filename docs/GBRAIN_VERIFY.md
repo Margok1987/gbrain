@@ -170,8 +170,10 @@ gbrain stats
 gbrain embed --stale
 ```
 
-If `OPENAI_API_KEY` is not set, embeddings can't be generated. Keyword search
-still works without embeddings, but hybrid/semantic search won't.
+Without a key for the configured embedding provider (`VOYAGE_API_KEY` for the
+default `voyage:voyage-4`, `OPENAI_API_KEY` for OpenAI models), embeddings can't
+be generated. Keyword search still works without embeddings, but
+hybrid/semantic search won't.
 
 ### 4c. End-to-End Test
 
@@ -216,10 +218,12 @@ gbrain stats
 
 **Expected:** Embedded chunk count matches (or is close to) total chunk count.
 
-**If zero or very low:** `OPENAI_API_KEY` may be missing or invalid. Check:
+**If zero or very low:** the embedding provider key (`VOYAGE_API_KEY` for the
+default model, `OPENAI_API_KEY` for OpenAI models) may be missing or invalid.
+Check:
 
 ```bash
-echo $OPENAI_API_KEY | head -c 10
+echo $VOYAGE_API_KEY | head -c 10   # or $OPENAI_API_KEY
 ```
 
 If blank, set the key. Then:

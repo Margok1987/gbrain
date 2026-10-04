@@ -204,8 +204,8 @@ patiently — 6 attempts by default, exponential backoff with jitter capped at
 60s, honoring `Retry-After` when Google sends one — before finally giving up
 and reporting `rate_limited`. That budget is deliberately much larger than
 the 2-attempt budget used for other retryable failures (like a 401 needing a
-token refresh): giving up too early used to mean a thread that would have
-succeeded a few seconds later was instead skipped for the rest of the sync.
+token refresh), so a thread that would succeed a few seconds later is not
+skipped for the rest of the sync.
 
 Even when a thread's retry budget IS exhausted, a rate-limit failure is never
 counted toward a hold — unlike a genuine per-thread
@@ -380,13 +380,13 @@ This is deliberate: the pages are your private mail, calendar and contacts,
 and a page that quietly stays group-readable after a sync is the failure
 this rule prevents. There is no per-source setting for a looser mode yet.
 
-### Files written before v0.60.31.0
+### Files readable by other local users
 
-Older releases wrote these files with your umask, typically 0644 (readable by
-every local user), and an upgrade does not rewrite them. In the default
-directory that is harmless, because gbrain keeps `~/.gbrain` at 0700. In a
-custom `--dir` outside `~/.gbrain`, older pages stay readable by other local
-users until they are rewritten.
+gbrain releases before v0.60.31.0 wrote these files with your umask, typically
+0644 (readable by every local user), and an upgrade does not rewrite them. In
+the default directory that is harmless, because gbrain keeps `~/.gbrain` at
+0700. In a custom `--dir` outside `~/.gbrain`, those pages stay readable by
+other local users until they are rewritten.
 
 The upgrade prints a one-time notice for each Google source outside
 `~/.gbrain`, naming the directory, how many readable entries it found and
@@ -498,10 +498,11 @@ explicit MIME metadata fields; `body.data`, raw messages and snippets are never
 selected. The selection includes child-identity sentinels beyond depth 32 so a
 deeper MIME tree remains incomplete rather than appearing empty. Decoded metadata
 responses are capped at 2 MiB before JSON parsing; oversized responses fail without
-advancing repair. Ordinary sync's message-body requests are unchanged.
+advancing repair. Ordinary sync fetches message bodies; only historical repair
+uses this metadata-only request.
 
-Upgrading changes future ingestion, **not** every historical page. Ordinary
-incremental sync only revisits changed threads and its success does not establish
+Sync records receipts for threads it ingests; it does **not** revisit every
+historical page. Ordinary incremental sync only revisits changed threads and its success does not establish
 historical inspection. To repair already-imported pages without replaying bodies:
 
 ```sh

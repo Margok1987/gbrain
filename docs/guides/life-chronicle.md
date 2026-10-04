@@ -29,8 +29,8 @@ A page is extracted automatically when all of these hold:
   with `meetings/`, `conversations/`, `cal/` or `calendar/`.
 - Its body has at least 80 characters. Dream-generated pages, diary pages
   (`life/diary/`) and event pages themselves are never extracted.
-- It was written or changed after this release activated on the brain. History
-  is never swept automatically.
+- It was written or changed while automatic extraction was active on the brain
+  (v0.60.45.0 or later). History is never swept automatically.
 - Its own date (frontmatter `date`, `start` or an authored effective date) is
   within `chronicle.auto_recent_days` (default 30). Undated pages count as
   recent.
@@ -94,9 +94,9 @@ apart), pending pages and the command that runs them.
 
 ## After upgrading
 
-Automatic extraction turned on by default in this release. Until you answer,
-doctor shows `auto_chronicle_default_on` (info) and the advisor shows the same
-finding with `ask_user: true`. The agent relays the cost to you, then records
+Automatic extraction is on by default from v0.60.45.0. On a brain upgraded
+from an earlier release, doctor shows `auto_chronicle_default_on` (info) until
+you answer, and the advisor shows the same finding with `ask_user: true`. The agent relays the cost to you, then records
 your answer:
 
 ```bash
@@ -105,7 +105,7 @@ gbrain config set auto_chronicle false   # opt out
 ```
 
 A brain that already had `auto_chronicle true` sees the notice too, because
-that setting had no effect before this release.
+that setting had no effect before v0.60.45.0.
 
 ## History: backfill on request
 

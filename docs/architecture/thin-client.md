@@ -31,7 +31,8 @@ receives only what its client row allows (`grantScopes` caps every request to
 the row's `scope`), so a read-only row still yields a read-only token. The hint
 lists `write` because some authorization_code clients (claude.ai custom
 connectors) request exactly the hinted scope and never step up after an
-`insufficient_scope` tool error, which left writer rows permanently read-only.
+`insufficient_scope` tool error, so a narrower hint would keep their writer rows
+read-only.
 Discovery excludes `agent`, which DCR cannot grant, while explicit DCR requests
 for delegation remain rejected.
 
@@ -65,7 +66,7 @@ carries the routing-seam picture):
   non-TTY default). Exhaustive TS `never` switch on `RemoteMcpError.reason`
   for canned, actionable error messages. Renderer parity: the local-engine
   path runs `JSON.parse(JSON.stringify(result))` so renderers see the same
-  shape on both paths (kills the Date/bigint/Buffer drift class).
+  shape on both paths (no Date/bigint/Buffer drift between them).
   `applyThinClientSourceScope` maps `--source` / `GBRAIN_SOURCE` /
   `.gbrain-source` onto a declared `source_id` and returns the ambient binding
   it used; an empty array result from an op that declares `all_sources`
@@ -88,7 +89,7 @@ carries the routing-seam picture):
   rejected as on the shared thin route. `--source`/`--source-id`, environment and dotfile scope use the
   engine-free resolver; an explicit `default` is forwarded, not dropped.
   The host's declared `recall.source_id` narrows both arms through the existing
-  authorization resolver. Local omitted-policy CLI behavior is unchanged.
+  authorization resolver. On a local install, a call without a policy runs locally.
 - `src/core/cli-options.ts` — `parseGlobalFlags` supports `--timeout=Ns`
   (accepts `30s`, `2m`, `500ms`, plain ms). Default `null` = per-command
   default (30s for most ops, 180s for `think`). `parseTimeout(s)` exported

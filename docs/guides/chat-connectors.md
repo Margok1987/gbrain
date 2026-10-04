@@ -7,7 +7,7 @@ skill already documents: fetch replaces the manual download, and everything
 downstream (redaction, slugging, part-splitting, idempotency) is the exact
 `gbrain transcripts ingest` pipeline.
 
-Providers in v1: **ChatGPT** and **Claude** (both live). Perplexity has no live
+Live providers: **ChatGPT** and **Claude**. Perplexity has no live
 connector yet (no transcript adapter) — use the conversation-archive manual
 conversion for it.
 
@@ -47,9 +47,8 @@ nobody at the terminal (no TTY, `CI`, an agent process, or
 - It prints an `[AGENT]` block (`actor: user`, `next: tell_user_to_run`) with
   the provider's cookie checklist fenced in `[SHOW USER]` and the stdin command
   to run, saves nothing, and exits 1.
-- `--try-oauth` never starts the loopback sign-in headless (it used to wait up
-  to 10 minutes for a browser redirect); it says OAuth needs a person at a
-  browser and hands over the same cookie checklist. With a person at the
+- `--try-oauth` never starts the loopback sign-in headless; it says OAuth
+  needs a person at a browser and hands over the same cookie checklist. With a person at the
   terminal, `--no-browser` prints the sign-in URL instead of opening a browser.
 
 What the agent does: relay the `[SHOW USER]` text verbatim and ask the user to

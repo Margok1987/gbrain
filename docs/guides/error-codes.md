@@ -4,14 +4,14 @@
 Every gbrain error carries a stable `code`. Read `code` first and fall back to `error`
 (older servers send only `error`); then follow `fix.next` as described in
 [AGENT_OPERATOR_v1](../protocol/AGENT_OPERATOR_v1.md). Exit codes are in [exit codes](exit-codes.md).
-Offline, `gbrain errors <code>` prints the same row and `gbrain errors --changed` the renamed codes.
+Offline, `gbrain errors <code>` prints the same row and `gbrain errors --changed` the legacy pairs.
 
 **Say to your agent:** *"gbrain returned an error code I don't recognize. Look it up and tell me what to do."*
 
-## Renamed in this release
+## Legacy `error` values
 
-Under contract v1 an existing `error` value never changes. Where a surface historically sent a
-different value, it keeps sending it in `error` and adds the canonical value in `code`.
+Under contract v1 an `error` value never changes. Where a surface sends a legacy value in
+`error`, it also sends the canonical value in `code`:
 
 | `error` (frozen) | `code` (canonical) | Meaning |
 |---|---|---|

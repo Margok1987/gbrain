@@ -166,8 +166,7 @@ source is archived. Private pages stay hidden from remote agents exactly as in
 
 Graph output carries source ids: each `gbrain graph` node has `source_id`, and
 each edge returned to agents has `from_source_id` / `to_source_id`. The same slug
-in two sources is two nodes or two edges, so a walk may return more edges than
-before.
+in two sources is two nodes or two edges.
 
 When a local unqualified read finds nothing but the page has links in a source
 outside the read (a non-federated source), the CLI prints the per-source counts
@@ -331,7 +330,7 @@ stored file paths, called its **slug-root mode**:
 
 The mode is decided once, by the first real sync or the first coordinated page
 write (such as `put_page`) that records a new file path, and pinned in the
-source's configuration. A few older write paths, such as saved brainstorm
+source's configuration. A few write paths, such as saved brainstorm
 ideas, follow an existing pin but do not set one. Every later sync,
 write and reader obeys the pin, so an existing brain never has its slugs
 renamed. `gbrain sync --dry-run` works out the mode without pinning it. A
@@ -350,11 +349,10 @@ can refuse that file with a slug/origin mismatch; there, add new pages as
 files in the checkout and sync them. Pages that already have a stored path
 keep writing to that file.
 
-**Older stored paths.** Before v0.60.5.0, write-through recorded
-Git-root-style paths (`notes/people/alice-example.md`) for pages in
-`source-root` sources, which made the next sync fail. Sync now accepts that
-older form when the rest of the path names the same page, and rewrites it on
-the next import. No command is needed.
+**Older stored paths.** Releases before v0.60.5.0 recorded Git-root-style
+paths (`notes/people/alice-example.md`) for pages in `source-root` sources.
+Sync accepts that form when the rest of the path names the same page, and
+rewrites it on the next import. No command is needed.
 
 **`ambiguous_source_path`.** If both readings of an old stored path exist as
 files, for example `~/vault/notes/people/alice-example.md` and

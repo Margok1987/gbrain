@@ -239,7 +239,7 @@ Recorded ownership changes:
   reconciliation crash boundaries" step runs both files by name and uploads the
   crash manifests, unchanged. Both files are in `E2E_EXCLUSIONS`
   (`PERSISTENCE_VALIDATION_OWNED` in `scripts/e2e-matrix.ts`), so PR
-  `selected-e2e` no longer runs them a second time; `scripts/select-e2e.ts`
+  `selected-e2e` does not run them a second time; `scripts/select-e2e.ts`
   prints `excluded: <file> (owned by persistence-validation.yml)` on stderr when
   a mapped source changes. The nightly full-corpus E2E run and the local gates
   (`ci:local`, `ci:ubicloud`, their `:diff` forms) still run them. Run them
@@ -1100,7 +1100,7 @@ and the `Migration` type in `schema-migrations/types.ts`. Fixtures:
 (flags omitted, a flag string without `w`/`a`/`+`, or `O_RDONLY` without
 `O_WRONLY`/`O_RDWR`), file or directory, and on one whose flags it cannot
 read. Windows refuses fsync on a read-only handle and has no directory flush
-(EPERM), which wedged the managed write queue (#5595) and every skill-bundle
+(EPERM), which wedges the managed write queue (#5595) and every skill-bundle
 publication (#5475). Flushes of descriptors opened for writing pass. Each
 failure prints `FAIL [durable_flush_read_handle]: <file>:<line>`, the open it
 traced, a `Fix:` line and this anchor. Fix: fsync the descriptor you wrote

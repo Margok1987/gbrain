@@ -71,9 +71,8 @@ Generic background submission requires a durable authenticated principal.
 Stdio agents should use the local CLI or a dedicated authorized operation.
 Local application maintenance retains its existing job and budget restrictions.
 
-`gbrain remote ping` previously submitted an `autopilot-cycle` job and now
-receives the generic-job denial. Run the existing maintenance workflow on the
-brain host, or use dedicated authorized operations such as `sync_brain` and
+`gbrain remote ping` submits an `autopilot-cycle` job, which the host refuses
+with the generic-job denial. Run maintenance on the brain host, or use dedicated authorized operations such as `sync_brain` and
 `connector_sync`. `gbrain remote doctor` remains available with its required
 scope.
 

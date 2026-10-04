@@ -734,8 +734,8 @@ are in [CHATGPT.md](CHATGPT.md#troubleshooting).
 
 **A claude.ai connector can search but not save**
 The `/mcp` challenge hints `read write`, and each token is capped to the
-client's registered scope. A connector approved before v0.60.5.0 was
-approved with the old `read` hint and keeps a read-only grant. Remove and
+client's registered scope. A connector approved before v0.60.5.0 received a
+`read`-only hint and keeps a read-only grant. Remove and
 re-add the connector, and approve `write` on the consent screen. If the
 client is registered with `read` only, widen it first
 ([ADMIN.md](ADMIN.md#inspect-clients-and-edit-access)).

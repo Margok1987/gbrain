@@ -363,7 +363,7 @@ Who can read it:
   version only for the local CLI and `admin` holders. A `read` or `write` grant
   gets the same version rows without any attribution field.
 
-Rows written before this release start `unrecorded`. Fill the ones the write
+Rows written before v0.60.37.0 read `unrecorded`. Fill the ones the write
 journal proves exactly, after you agree; it is free and changes no content:
 
 ```bash
@@ -428,8 +428,8 @@ promise erasure of historical logs/backups. Revoking a client cannot undo an
 external operation already running. Removing a client configuration alone does
 not revoke server access.
 
-Previously accepted jobs continue under their existing grant checks after
-token invalidation. Revocation or deletion denies those jobs at their next
+Jobs accepted before token invalidation continue under their existing grant
+checks. Revocation or deletion denies those jobs at their next
 authority check; external work already admitted may complete. All three actions
 retain request history, audit records, spending reservations, and settlement.
 

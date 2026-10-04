@@ -554,7 +554,7 @@ of an MCP `isError` result, and HTTP error bodies.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `error` | string | Legacy wire value, frozen forever under v1. Equals `code` for codes new in v1. |
+| `error` | string | Legacy wire value, frozen forever under v1. Equals `code` except for the four legacy values listed under **Precedence** below. |
 | `code` | string | Canonical registry code ([error codes](../guides/error-codes.md)). |
 | `reason` | string? | Sub-cause where one code covers several (`embeddings_disabled`, `wired_running`, …). |
 | `message` | string | What happened, one sentence. |
@@ -572,8 +572,8 @@ Pre-existing keys keep their names and meaning: `detail`, `protocol_version`
 (memory verbs), `write_request` and `write_error` (write receipts).
 
 **Precedence.** Read `code`; fall back to `error` when `code` is absent (a
-server older than v1). Four surfaces historically sent a different `error`
-value and keep sending it; the canonical value rides `code`:
+server older than v1). Four surfaces send a legacy `error` value that differs
+from `code`; the canonical value rides `code`:
 
 | `error` (frozen) | `code` (canonical) |
 |---|---|
@@ -868,8 +868,8 @@ that work in this conversation.
 | 130 | interrupted | ask the user whether to re-run |
 
 `gbrain mcp expose` and `gbrain google` still exit 2 when they need
-confirmation (documented v1 legacy). Details and the "changed in this release"
-table: [exit codes](../guides/exit-codes.md).
+confirmation (documented v1 legacy). Details and the per-command exit table:
+[exit codes](../guides/exit-codes.md).
 
 **`--json` documents.** A command whose `--help` documents `--json` writes
 exactly one JSON document to stdout (or NDJSON lines for `eval export`,
@@ -972,12 +972,15 @@ Nested legacy errors keep their nesting and gain sibling `code` and `fix`.
 
 ## Behavior changes for scripts and agents
 
-What changed when contract v1 shipped, for scripts and agents that parsed the
-old behaviour. The release's CHANGELOG entry carries the same table.
+An upgrade reference for scripts and agents written against gbrain v0.60.45.0
+or earlier, before contract v1: each row names the old behavior, the v1
+behavior and what to change. The
+[v0.60.46.0 CHANGELOG entry](../../CHANGELOG.md#behavior-changes-for-scripts-and-agents)
+carries the same table.
 
 | Area | Before | Now | What to change |
 | --- | --- | --- | --- |
-| `gbrain embed --stale` time-budget stop | exit 3 | exit 11 (since v0.60.37.0) | treat 11 as "run `resume_command`"; 3 now only means `confirmation_required` |
+| `gbrain embed --stale` time-budget stop | exit 3 | exit 11 (v0.60.37.0 and later) | treat 11 as "run `resume_command`"; 3 means only `confirmation_required` |
 | `gbrain dream --drain` with backlog left | exit 3 | exit 11, `--json` carries `resume_command` | treat 11 as a resumable stop |
 | Other exit-3 sites (`agent run --follow` timeout, `providers test`, `sources harden`, `sources pull`, `sources remove/archive default`, `extract-conversation-facts`) | exit 3 | 124, 1 or 2 ([exit codes](../guides/exit-codes.md#changed-in-this-release)) | branch on the new codes |
 | `migrate embeddings`, `reindex-search-vector`, `reindex-code`, `dream retriage`, `sources connect`, `bootstrap harness` without authorization | exit 2 ("pass `--yes`") | exit 3 with the consent payload | stop, relay `user_message`, run `fix.command` only after the user agrees |
@@ -1023,7 +1026,7 @@ swaps in the full catalog. Harness support varies by version:
 | Harness | Behaviour |
 |---|---|
 | Claude Code | recent versions refresh the tool list on the notification; some versions and modes have been reported to keep the old list |
-| Codex | refreshes the tool list (since openai/codex#12449); its deferred tool search can stay stale |
+| Codex | versions that include openai/codex#12449 refresh the tool list; its deferred tool search can stay stale |
 | other MCP clients | not measured |
 
 If a tool the fix names is not in your tool list after a recovery, restart the

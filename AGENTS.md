@@ -33,8 +33,8 @@ start here.
    and confirm their choice before continuing. Cost spread between corners
    is 25x — silent acceptance is the wrong default. See
    [`./INSTALL_FOR_AGENTS.md`](./INSTALL_FOR_AGENTS.md) Step 3.5 for the
-   exact ask-the-user protocol. Same banner fires on `gbrain post-upgrade`
-   for existing users (search modes were added in v0.32.3).
+   exact ask-the-user protocol. The same banner fires on `gbrain post-upgrade`
+   for a brain created before v0.32.3, when search modes arrived.
 4. Read [`./INSTALL_FOR_AGENTS.md`](./INSTALL_FOR_AGENTS.md) for the full step-by-step
    flow (keyless memory, optional API capabilities, maintenance, verification).
 

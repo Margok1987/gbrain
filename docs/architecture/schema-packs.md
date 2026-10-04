@@ -138,15 +138,13 @@ this chain top-down. First match wins.
 | 6 | `~/.gbrain/config.json` `schema_pack` field | What `gbrain schema use` (and `gbrain init`, which sets `gbrain-base-v2`) writes. |
 | 7 | Default: `gbrain-base` | Always present. |
 
-Tier 7 stays `gbrain-base`, not `gbrain-base-v2`. A brain with no pack
-configured anywhere was created before `gbrain init` started writing
-`schema_pack`, and its pages carry the legacy 24-type taxonomy. Pointing the
-fallback at v2 would change type inference, alias closure and enrichment for
-those brains without running v2's `migration_from` retype rules, which
-`gbrain schema upgrade` applies as a reviewed step. The relationship
-behaviors that used to differ between the two (backwards frontmatter
-relations and attendance typed from any meeting link) are fixed in the
-extractor instead, so both packs store the same edges; see
+Tier 7 is `gbrain-base`, not `gbrain-base-v2`. Only a brain whose
+`gbrain init` never wrote `schema_pack` reaches tier 7, and its pages carry the
+legacy 24-type taxonomy. Pointing the fallback at v2 would change type
+inference, alias closure and enrichment for those brains without running v2's
+`migration_from` retype rules, which `gbrain schema upgrade` applies as a
+reviewed step. Relation direction and meeting attendance are decided in the
+extractor, so both packs store the same edges; see
 [Relation direction](#relation-direction).
 
 ## Relation direction
@@ -166,17 +164,18 @@ the in-code meeting prior. Meeting links then follow canonical attendance:
 only an explicit attendee list makes a person an attendee, stored person ->
 meeting (see [attendance evidence](../guides/attendance-evidence.md)). A pack
 that gives `attended` a phrase `regex` decides attendance itself and keeps its
-outgoing semantics. Brains extracted before this rule re-derive with
-`gbrain extract links --source db --include-frontmatter`.
+outgoing semantics. A brain whose links were extracted before v0.60.30.0
+re-derives them with `gbrain extract links --source db --include-frontmatter`.
 
 A link type's `inference.regex` runs before the in-code link matchers, so a
 pack regex decides the verb for a markdown link when it matches. A rule marked
 `ner_only: true` runs only for NER body mentions (`gbrain extract ner`). The
 bundled `gbrain-base` and `gbrain-base-v2` packs mark their `founded`,
 `works_at`, `invested_in` and `advises` sketch regexes this way, so a bare
-"started" or "joined" near a markdown link no longer labels it `founded` or
-`works_at`; the tuned in-code matchers decide those links. Brains extracted
-before this change re-derive with `gbrain extract links --source db`.
+"started" or "joined" near a markdown link does not label it `founded` or
+`works_at`; the tuned in-code matchers decide those links. A brain whose links
+were extracted before v0.60.36.0 re-derives them with
+`gbrain extract links --source db`.
 
 ## How the agent uses the active pack
 

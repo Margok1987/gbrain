@@ -59,7 +59,7 @@
 | `embed_staleness` | the stale-chunk count (the embed worker's own predicate) | the reason names the database error; re-run `gbrain doctor` once it is fixed |
 | `schema_pack_consistency`, `schema_pack_source_drift` | the pages or config query, or a source's active schema pack | `gbrain schema lint --with-db` runs the same classification locally; `gbrain schema active` debugs pack resolution |
 
-`bootstrap_push_health` and `gbrain bootstrap status` report only the push record of the workspace named by this machine's bootstrap receipt; another workspace's stale or failed push is listed as such (a warn naming that workspace), never as this workspace's state. `reranker_health` auth warnings are audit-log history (`details.live_probe_performed: false`), not a live check of the key. **Behavior change:** a doctor that used to read all green can now show these warns; each one is a check that did not run.
+`bootstrap_push_health` and `gbrain bootstrap status` report only the push record of the workspace named by this machine's bootstrap receipt; another workspace's stale or failed push is listed as such (a warn naming that workspace), never as this workspace's state. `reranker_health` auth warnings are audit-log history (`details.live_probe_performed: false`), not a live check of the key. These warns can appear while every other check reads green; each one names a check that did not run.
 
 **`brain_score` shows a low "timeline density (entity and event pages)"?** The 15-point timeline component grades only linkable pages whose type's active-pack primitive is `entity` or `temporal` (people, companies, meetings, emails, events…); reference documents such as notes, writing and guides have no events and are not graded, so do not stamp "page created" rows onto them. Types the pack does not declare are still graded. Raise the score by giving those entity and event pages real timeline entries (`gbrain extract timeline`).
 
@@ -211,10 +211,11 @@ agent runs `gbrain doctor` and reads the `vector_plan` check.
   embedding get fresh vectors.
 - warn, legacy guard: see below.
 
-**Legacy guard (one-release rollback).** If vector search got slower or
-returned different results right after the upgrade that moved the content
-freshness check out of the HNSW candidate scan (#5824), you can restore the
-previous statement while you report it:
+**Legacy guard (temporary rollback).** Vector search checks content freshness
+outside the HNSW candidate scan. `search.vector_legacy_guard` restores the older
+statement, which checked freshness inside the scan. Use it only when vector
+search is slower or returns different results than before your upgrade, and
+report the regression:
 
 1. The setting belongs to the process that runs searches on the brain host
    (`gbrain serve`, autopilot, job workers), never to a thin client.
@@ -228,7 +229,7 @@ previous statement while you report it:
 5. Remove it once the regression is fixed: `gbrain config set
    search.vector_legacy_guard false` (or unset the variable) and restart again.
 
-The guard is retired in the next release; that release prints a one-time notice
+The guard is temporary. The release that retires it prints a one-time notice
 when the inert setting is still present.
 
 ## Global maintenance timeouts
@@ -236,7 +237,7 @@ when the inert setting is still present.
 **Doctor warns `global_maintenance_timeouts`, or late maintenance phases
 (orphans, purge, the brain-wide embed) never seem to run?** On a large brain
 one `autopilot-global-maintenance` job may not fit every phase before its
-deadline (30 minutes by default). Each job now stops starting phases that its
+deadline (30 minutes by default). Each job stops starting phases that its
 deadline would cut off and the next job resumes at that phase, so one pass can
 span several jobs; the resume point is the config row
 `autopilot.global_maintenance.progress`. A phase that was running when a job
@@ -257,7 +258,7 @@ at the deadline).
 
 **Say to your agent:** *"Why aren't my meetings showing up as timeline events?"*
 
-Automatic event extraction works again and is on by default. See the
+Automatic event extraction is on by default. See the
 [Life Chronicle guide](life-chronicle.md) for what qualifies, the cost, the
 three-step check, and the skip codes. `gbrain doctor` reports it as the
 `auto_chronicle` check. To turn it off, run

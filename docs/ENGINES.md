@@ -390,7 +390,7 @@ src/schema.sql (canonical for every other table) ─┴─> src/schema.sql BEGIN
   chunk-index and FTS-language policies at runtime. An unknown statement kind, an unclassified
   `DO` block, or a rule that no longer matches fails the build.
 - **Guards**: `check:schema-fresh` regenerates the whole chain into a temp dir and names the source
-  to edit on drift; the E4 catalog goldens (`test/schema-catalog-golden.test.ts`,
+  to edit on drift; the catalog goldens (`test/schema-catalog-golden.test.ts`,
   `test/e2e/schema-catalog-golden.test.ts`) and `test/pglite-upgrade-replay.test.ts` pin the end
   state.
 
@@ -695,7 +695,7 @@ and assert `jsonb_typeof` — the assertion PGLite cannot make.
    `dialect-pglite.ts` and `dialect-postgres.ts`, expose it through a private
    `engineSql` getter over the current connection, and delegate every method
    of a migrated domain to `src/core/engine-sql/<domain>.ts` the way both
-   engines do. Declare its capabilities honestly. The E5 binding matrix
+   engines do. Declare its capabilities honestly. The binding matrix
    (`test/helpers/executor-binding-matrix.ts`) and the engine-sql contract
    tests tell you whether the adapter binds, counts, fails and cancels like the
    others. A non-SQL engine implements every method itself.

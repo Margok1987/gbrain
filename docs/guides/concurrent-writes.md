@@ -213,19 +213,19 @@ re-run the rules against the pinned file and database copies; any change means
 a fresh preview. Apply, backups and the retry of the blocked write work exactly
 as above.
 
-Atom scan/failure bookkeeping now lives outside canonical note metadata so
+Atom scan/failure bookkeeping lives outside canonical note metadata so
 processing progress does not create new disagreements. Managed atom extraction
 checks trusted local source-wide authority and, for filesystem writes, owner
 readiness before model work, then journals publication and completion. Retained
 accepted output replays without
-another model call. This does not restore every legacy maintenance writer; see
+another model call. Not every legacy maintenance writer runs on the managed path; see
 [supported managed work and explicit repair](../architecture/topologies.md#supported-managed-work-and-explicit-repair).
 
 ### Roll back safely
 
 Stop submitting new reconciliation requests first. Keep a compatible upgraded
 owner running until all accepted requests are terminal and recovery has drained;
-inspect the durable receipts before disabling the new command or reverting the
+inspect the durable receipts before disabling the reconcile command or reverting the
 binary. Never downgrade an active reconciliation queue to a version that does
 not understand its intents. Leave the additive processing-state table and private
 backups in place. Do not automatically restore an old preimage over later edits,
@@ -244,10 +244,10 @@ and do not disable guards or change ownership as part of rollback.
 | `cancelled` | Cancelled before publication began. |
 
 On Windows, publication flushes each staged file through the handle it was
-written with and skips the directory flush Windows does not provide. Older
-releases flushed through a read-only handle, which Windows refuses (`EPERM`), so
-a restoration could stay `recovering` and hold every later write on that source
-behind it. After upgrading, the owner retries it on its own; confirm with
+written with and skips the directory flush Windows does not provide. A
+restoration that an older gbrain left `recovering` (it flushed through a
+read-only handle, which Windows refuses with `EPERM`) holds every later write
+on that source behind it; the current owner retries it on its own. Confirm with
 `gbrain doctor --json` (`canonical_content_writes` reports `ok` once recovery
 has drained).
 
@@ -307,13 +307,13 @@ UUID, without fabricating a queued receipt or opening another PGLite engine.
 Legacy callers that omit a request ID and lose the entire acknowledgment cannot
 recover exact replay identity from the content alone.
 
-Local Unix listeners keep their existing socket addresses when they fit the
+Local Unix listeners use their standard socket address when it fits the
 portable 103-byte limit. Longer addresses use a deterministic private directory
 under `/private/tmp` on macOS or `/tmp` on Linux, independent of `HOME` and
 `TMPDIR`. Both CLI discovery and resident servers derive it without opening the
 database. The directory must belong to the current OS user with mode `0700`;
-clients require a socket with mode `0600`. Unsafe entries are refused. Existing
-credentials and hook-secret locations are unchanged. A native binding lock
+clients require a socket with mode `0600`. Unsafe entries are refused.
+Credentials and hook secrets stay in their own locations. A native binding lock
 serializes startup and remains held until the listener has actually closed.
 
 
@@ -332,8 +332,8 @@ retrying the whole transaction after a confirmed abort.
 
 ## Frozen memory verbs
 
-`remember` and `forget` accept optional `request_id`. Their frozen success enums
-and `protocol_version: 1` are unchanged. Accepted pending memory writes use the
+`remember` and `forget` accept optional `request_id` and keep their frozen
+success enums and `protocol_version: 1`. Accepted pending memory writes use the
 existing `unavailable` error with a populated suggestion and additive
 `write_request`/`write_error` metadata. A pending response never claims
 `status: "inserted"` or `expired: true`.
@@ -367,9 +367,9 @@ bytes, revisions, chunks and embedding signatures remain unchanged. Managed
 withdrawals retain a versioned target manifest for the mirror, Git and embedding
 workers; each worker checkpoints one affected page at a time.
 
-A withdrawal mirror or Git scan no longer parks on a page whose file is a
+A withdrawal mirror or Git scan does not park on a page whose file is a
 sync-skip metafile (`RESOLVER.md`, which carries the managed durability block
-by design) or whose file holds an uncoordinated local edit (#5396): the
+by design) or whose file holds an uncoordinated local edit: the
 withdrawal is recorded in the database, the page is listed in the effect's
 `data.skipped` with reason `metafile` or `file_database_drift`, and the
 request's Git and embedding effects proceed. Reconcile a `file_database_drift`
@@ -690,7 +690,7 @@ content digest and `file_count`, not a per-file map, so `sources add`, `claim`,
 `rebind`, `archive`, `remove`, clone, reclone and writer transfer work the same
 at 50,000 files as at 50. Rows written by older releases, which also carry a
 per-file map, stay valid and are compacted on their next rewrite. Every command
-still hashes each file once while holding the root's native lock and before it
+hashes each file once while holding the root's native lock and before it
 opens a database transaction; in human output it reports `files hashed of total`
 on stderr for worktrees above 5,000 files. Measured on a 4-vCPU cloud machine
 with a 50,000-file, 3.4 MB worktree: `sources add`, `claim` and transfer

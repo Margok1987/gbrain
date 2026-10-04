@@ -23,10 +23,15 @@ the exit code first, then reads the JSON document (`--json`) for the details:
 `class` and `retryable` live only in the JSON document; the exit code stays
 coarse so shell scripts can branch on it.
 
-Under contract v1, `gbrain mcp expose` and `gbrain google` still exit 2 when
-they need the user's confirmation (documented legacy; changing it is a v2 item).
+Under contract v1, `gbrain mcp expose` and `gbrain google` exit 2 when they
+need the user's confirmation (documented legacy; changing it is a v2 item).
 
 ## Changed in this release
+
+Contract v1 shipped in v0.60.46.0. A script written against v0.60.45.0 or
+earlier sees these exits differ; the "Before" column is the old exit. The
+[v0.60.46.0 CHANGELOG entry](../../CHANGELOG.md#behavior-changes-for-scripts-and-agents)
+has the full upgrade table.
 
 | Command | Before | Now | Why |
 |---|---|---|---|
@@ -38,10 +43,10 @@ they need the user's confirmation (documented legacy; changing it is a v2 item).
 | `gbrain sources pull` rebase conflict aborted | 3 | 1 | failure |
 | `gbrain sources remove default` / `gbrain sources archive default` | 3 | 2 | invalid input |
 | `gbrain extract-conversation-facts` pages skipped on a busy lock | 3 | 1 (retryable) | re-run to finish the skipped pages |
-| `gbrain call` invalid parameters | 1 | 2 | invalid input; stdout now carries the error envelope |
+| `gbrain call` invalid parameters | 1 | 2 | invalid input; stdout carries the error envelope |
 | `gbrain migrate embeddings`, `reindex-search-vector`, `reindex-code`, `dream retriage`, `sources connect`, `bootstrap harness` without authorization | 2 | 3 | a consent stop: the payload names the effects and the words to ask the user |
 | `gbrain pglite-repair`, `reinit-pglite`, `enrich`, `connect --install` without authorization | 1 | 3 | a consent stop, not a failure |
-| `gbrain book-mirror` paid fan-out without authorization | 0 | 3 | nothing ran; it used to report "cancelled" and exit 0 |
+| `gbrain book-mirror` paid fan-out without authorization | 0 | 3 | nothing ran |
 | `gbrain doctor --remediate` without a terminal and without `--yes` | 0 (it ran) | 3 | paid and destructive work waits for the user |
 | `gbrain autopilot --interval`, `serve --port`, `dream --phase`, `init --mcp-only` missing flags, `delta --since` with a bad value | 1 | 2 | invalid input |
 | `gbrain jobs submit` on PGLite without `--follow` or `--queue-only` | 0 (queued, no worker) | 1 (`no_worker`) | the job would wait for a worker that is not running |
