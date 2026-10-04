@@ -6762,6 +6762,7 @@
           "expandFn?: ((query: string) => Promise<string[]>) | undefined",
           "expansion?: boolean | undefined",
           "expansionVariantBudget?: number | null | undefined",
+          "explain?: boolean | undefined",
           "explainTarget?: TargetTrace | undefined",
           "floorRatio?: number | undefined",
           "graph_signals?: boolean | undefined",
@@ -6974,7 +6975,7 @@
         "kind": "function",
         "name": "cosineReScore",
         "signature": [
-          "(engine: BrainEngine, results: SearchResult[], queryEmbedding: Float32Array, column?: string, imageSpace?: { queryEmbedding: Float32Array; column: string; }) => Promise<SearchResult[]>"
+          "(engine: BrainEngine, results: SearchResult[], queryEmbedding: Float32Array, column?: string, imageSpace?: { queryEmbedding: Float32Array; column: string; }, attribute?: boolean) => Promise<SearchResult[]>"
         ]
       },
       {
@@ -7058,7 +7059,7 @@
         "kind": "function",
         "name": "rrfFusionWeighted",
         "signature": [
-          "(lists: FusionListEntry[], applyBoost?: boolean | number) => SearchResult[]"
+          "(lists: FusionListEntry[], applyBoost?: boolean | number, attribute?: boolean) => SearchResult[]"
         ]
       },
       {
