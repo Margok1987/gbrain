@@ -15,7 +15,9 @@
  *                     interpret text.
  *
  * WHY. "User went to Lisbon last week" is useless months later; the extractor
- * must write "last week (week of 2026-03-02)". Resolving against today's date
+ * must write "the week of 2026-03-02". Keeping the relative phrase beside the
+ * date ("two days ago (2026-03-02)") reads wrong once the fact is shown under
+ * its event date: a reader applies "two days ago" a second time. Resolving against today's date
  * (the run date) silently re-dates historical imports, so the rule names the
  * observation date and forbids "today". When the observation date is unknown
  * the phrase is kept as written — never a guessed date.
@@ -30,7 +32,7 @@
 import { computeEffectiveDate, parseDateLoose } from '../effective-date.ts';
 
 /** Prompt-text identity for the grounding rule (provenance; bump on rule edits). */
-export const DATE_GROUNDING_RULE_VERSION = 'date-grounding-v1';
+export const DATE_GROUNDING_RULE_VERSION = 'date-grounding-v2';
 
 /** Where an observation date came from. `caller` = supplied by the code path (turn timestamp, message date). */
 export type ObservationDateSource = 'caller' | 'filename' | 'date' | 'published' | 'created';
@@ -95,11 +97,13 @@ export function observationDateFrom(value: Date | string | null | undefined): Ob
 export function observationDateRule(): string {
   return [
     'Dates: the input states its observation date (when the text was written or said).',
-    'Resolve every relative time reference (yesterday, last week, next month, recently, in 18 months, by Friday)',
-    "against the observation date, never against today's date. Keep the original phrase and add the absolute",
-    "date or bound in parentheses: 'last week (week of 2026-03-02)', 'by Friday (by 2026-03-13)',",
-    "'recently (before 2026-03-10)'. Never turn an absolute date into a vague one. If the observation date is",
-    'unknown, keep relative phrases exactly as written and do not invent dates.',
+    'Rewrite every relative time reference (yesterday, last week, next month, recently, in 18 months, by Friday,',
+    'for about a month) as an absolute date or bound resolved against the observation date,',
+    "never against today's date, so the saved text means the same thing on any later day:",
+    "'flew to Lisbon last week' -> 'flew to Lisbon the week of 2026-03-02', 'due by Friday' -> 'due by 2026-03-13',",
+    "'has played for about a month' -> 'has played since about 2026-02-10', 'recently moved' -> 'moved before 2026-03-10'.",
+    'Do not leave the relative phrase beside its date. Never turn an absolute date into a vague one. If the observation',
+    'date is unknown, keep relative phrases exactly as written and do not invent dates.',
     'Never alter text you are asked to quote verbatim.',
   ].join('\n');
 }

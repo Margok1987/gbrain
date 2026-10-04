@@ -76,7 +76,7 @@ describe('extractor prompt variants', () => {
 describe('extractor-stated event dates', () => {
   test('a valid date becomes valid_from; malformed and far-future dates are dropped; grounding off ignores the field', async () => {
     const reply = { facts: [
-      { fact: 'User flew to Lisbon last week (week of 2026-03-02)', kind: 'event', notability: 'high', valid_from: '2026-03-04' },
+      { fact: 'User flew to Lisbon the week of 2026-03-02', kind: 'event', notability: 'high', valid_from: '2026-03-04' },
       { fact: 'User plans a trip', kind: 'event', notability: 'high', valid_from: 'next spring' },
       { fact: 'User will retire', kind: 'event', notability: 'high', valid_from: '2099-01-01' },
     ] };
