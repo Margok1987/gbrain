@@ -23,3 +23,8 @@ date, and the table above measures version 2.
 
 Re-extracting one conversation with the same build moved its temporal QA by up to 9 points between runs, so
 extraction variance is as large as the effect being measured. Dev spend was $26.06.
+
+The verdict above counted the extractor's audit rows (one `EXTRACTION_COMPLETE` marker per processed page)
+as saved facts. Without them, the pooled unresolved shares are 6.9% → 1.3% on LoCoMo and 6.8% → 2.3% on
+LongMemEval-S. The relative drops (−81% and −67%) and every conclusion stand. The held-out run uses the
+corrected harness.
