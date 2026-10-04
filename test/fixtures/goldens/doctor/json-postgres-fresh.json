@@ -979,6 +979,18 @@
         },
         {
           "category": "brain",
+          "message": "inbound links per page p50 0, p90 0, p99 0, max 0 over 0 pages; hub dampening is off (search.hub_dampening). To see whether hub pages crowd a query, run gbrain search \"<query>\" --explain and read each row's backlink inbound count and hub weight.",
+          "name": "hub_degree_shape",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "message": "extraction.date_grounding is off: extraction prompts keep relative dates (\"last week\") as written. Dated pages still store their facts at the page date.",
+          "name": "extraction_date_grounding",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
           "message": "Sampled 0 pages; no bare-tweet phrases or external links.",
           "name": "integrity",
           "status": "ok"
@@ -1655,7 +1667,7 @@
         },
         {
           "category": "brain",
-          "message": "No retrieval-affecting files changed in working tree.",
+          "message": "4 retrieval-affecting file(s) changed since HEAD: src/core/search/explain-target.ts, src/core/search/hybrid.ts, src/core/search/hybrid/keyword-only.ts, …. Re-run `gbrain eval run-all` after committing these changes.",
           "name": "eval_drift",
           "status": "ok"
         },

@@ -953,6 +953,8 @@ export interface HybridSearchOpts extends SearchOpts {
    * never changes ranking.
    */
   explainTarget?: import('./explain-target.ts').TargetTrace;
+  /** Stamp fusion attribution (`rrf`, `blend_norm_rrf`) for score_details; off keeps rows byte-identical. */
+  explain?: boolean;
   /** Override default RRF K constant (default: 60). Lower values boost top-ranked results more. */
   rrfK?: number;
   /** Override dedup pipeline parameters. */
@@ -1476,6 +1478,7 @@ export function filterResultsByCallerScope(
 export function rrfFusionWeighted(
   lists: FusionListEntry[],
   applyBoost: boolean | number = true,
+  attribute = false,
 ): SearchResult[] {
   const entries = accumulateRrf(lists);
   if (entries.length === 0) return [];
@@ -1502,10 +1505,11 @@ export function rrfFusionWeighted(
     .sort((a, b) => b.score - a.score || b.own - a.own)
     .map((e) => {
       const { result, score, keywordHit } = e;
-      const rrf = attribution.get(e) ?? { raw: e.score, normalized: e.score, compiled_truth_boost: 1, arms: e.arms };
+      // Stamped only for explain callers, so ordinary rows stay byte-identical.
+      const rrf = attribute ? { rrf: attribution.get(e) ?? { raw: e.score, normalized: e.score, compiled_truth_boost: 1, arms: e.arms } } : {};
       return keywordHit && result.keyword_hit !== true
-        ? { ...result, score, keyword_hit: true, rrf }
-        : { ...result, score, rrf };
+        ? { ...result, score, keyword_hit: true, ...rrf }
+        : { ...result, score, ...rrf };
     });
 }
 
@@ -1572,6 +1576,7 @@ export async function cosineReScore(
   queryEmbedding: Float32Array,
   column: string = 'embedding',
   imageSpace?: { queryEmbedding: Float32Array; column: string },
+  attribute = false,
 ): Promise<SearchResult[]> {
   // 'both' mode: image-arm rows live in the image space (image column,
   // multimodal query vector); everything else in the text space.
@@ -1629,7 +1634,7 @@ export async function cosineReScore(
 
     // v0.46.15: stamp the raw cosine — evidence + --explain read it (the
     // hydration map is already paid for; zero extra probes).
-    return { ...r, score: blended, cosine, blend_norm_rrf: normRrf };
+    return { ...r, score: blended, cosine, ...(attribute ? { blend_norm_rrf: normRrf } : {}) };
   }).sort((a, b) => b.score - a.score);
 }
 
