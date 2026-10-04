@@ -42,6 +42,7 @@ describe('prompt text', () => {
   test('the system rule is static and forbids resolving against today', () => {
     expect(observationDateRule()).toBe(observationDateRule());
     expect(observationDateRule()).toContain("never against today's date");
+    expect(observationDateRule()).toContain('Do not leave the relative phrase beside its date');
     expect(observationDateRule()).not.toMatch(/\d{4}-\d{2}-\d{2}T/);
   });
   test('the user line carries the date or says unknown', () => {
