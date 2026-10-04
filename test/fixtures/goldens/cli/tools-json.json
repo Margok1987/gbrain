@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 196835,
-    "stdoutSha256": "7c6a8f58d1ecf9152a0bef45fe6b85d84ea6bc81c4610fc65b2a65eeec68370a",
+    "stdoutBytes": 198463,
+    "stdoutSha256": "3ac478551bac573f82eff799d82ee1f72175885a814e4a0fba3e58a9bb8e2c5a",
     "toolNames": [
       "remember",
       "entity",
@@ -897,12 +897,15 @@
         "scope": "write"
       },
       {
-        "description": "Cheap hybrid search (vector + keyword), no LLM expansion, top 20: for exact tokens, names, field values. Results are NOT proof of coverage: concepts or landscape, use `query`; exhaustive lists, list_pages. return_unit returns whole sections or conversations. Personal questions: get_recent_salience; saved facts: recall. fields: \"full\" adds diagnostics.",
+        "description": "Cheap hybrid search (vector + keyword), no LLM expansion, top 20: for exact tokens, names, field values. Results are NOT proof of coverage: concepts or landscape, use `query`; exhaustive lists, list_pages. return_unit returns whole sections or conversations. Personal questions: get_recent_salience; saved facts: recall. fields: \"full\" adds diagnostics; explain: true explains each row's rank; explain_target names why an expected page is missing.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,
         "name": "search",
         "parameters": {
+          "explain": "boolean?",
+          "explain_target": "string?",
+          "explain_target_source": "string?",
           "fields": "string?",
           "limit": "number?",
           "mode": "string?",
@@ -920,6 +923,18 @@
         "required_scopes": [],
         "schema": {
           "properties": {
+            "explain": {
+              "description": "true: each row gets score_details (which retrieval arms found it, at what rank, and every ranking factor). Use when a result looks wrong.",
+              "type": "boolean"
+            },
+            "explain_target": {
+              "description": "Slug of a page you expected but did not get; the response meta explain_target says which stage lost it and what to do next.",
+              "type": "string"
+            },
+            "explain_target_source": {
+              "description": "Source id of explain_target when the slug exists in several sources.",
+              "type": "string"
+            },
             "fields": {
               "description": "lean (remote default) or full.",
               "enum": [
@@ -1005,7 +1020,7 @@
         "scope": "read"
       },
       {
-        "description": "Ranked hybrid search with multi-query expansion, for concept / synonym / landscape questions: expansion recovers synonym-phrased matches. Still top-K; return_unit returns whole sections or conversations. Lists: list_pages. Exact tokens: `search` is cheaper (no expansion LLM call). Personal questions: get_recent_salience, find_anomalies; raw transcripts: `gbrain transcripts recent` on the brain host. Do NOT assume 'crazy' means impressive (often difficult or emotionally charged). Needs an embedding key, else keyword-only; expansion needs a chat-model key. fields: \"full\" adds diagnostics.",
+        "description": "Ranked hybrid search with multi-query expansion, for concept / synonym / landscape questions: expansion recovers synonym-phrased matches. Still top-K; return_unit returns whole sections or conversations. Lists: list_pages. Exact tokens: `search` is cheaper (no expansion LLM call). Personal questions: get_recent_salience, find_anomalies; raw transcripts: `gbrain transcripts recent` on the brain host. Do NOT assume 'crazy' means impressive (often difficult or emotionally charged). Needs an embedding key, else keyword-only; expansion needs a chat-model key. fields: \"full\" adds diagnostics; explain: true explains each row's rank; explain_target names why an expected page is missing.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,
@@ -1017,6 +1032,9 @@
           "detail": "string?",
           "embedding_column": "string?",
           "expand": "boolean?",
+          "explain": "boolean?",
+          "explain_target": "string?",
+          "explain_target_source": "string?",
           "fields": "string?",
           "image": "string?",
           "image_mime": "string?",
@@ -1072,6 +1090,18 @@
             "expand": {
               "description": "Default true; false skips the expansion LLM call.",
               "type": "boolean"
+            },
+            "explain": {
+              "description": "true: each row gets score_details (which retrieval arms found it, at what rank, and every ranking factor). Use when a result looks wrong.",
+              "type": "boolean"
+            },
+            "explain_target": {
+              "description": "Slug of a page you expected but did not get; the response meta explain_target says which stage lost it and what to do next.",
+              "type": "string"
+            },
+            "explain_target_source": {
+              "description": "Source id of explain_target when the slug exists in several sources.",
+              "type": "string"
             },
             "fields": {
               "description": "lean (remote default) or full.",

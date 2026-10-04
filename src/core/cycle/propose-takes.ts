@@ -422,6 +422,12 @@ export const EXTRACTOR_FAILURE_HALT_STREAK = 5;
  * then, the production extractor returns whatever the stub LLM produces —
  * empirically often a sparse list or [].
  */
+/** Prompt flags read once per phase run: #5425 attribution rules and extraction.date_grounding. */
+async function takesPromptFlags(engine: BrainEngine): Promise<{ attributionRules: boolean; dateGrounding: boolean }> {
+  const attributionRules = String(await Promise.resolve(engine.getConfig?.('dream.propose_takes.attribution_rules')).catch(() => null) ?? '').trim() === 'true';
+  return { attributionRules, dateGrounding: (await getExtractorVariant(engine)).dateGrounding === true };
+}
+
 export async function defaultExtractor(
   input: Parameters<ProposeTakesExtractor>[0],
 ): Promise<ProposedTake[]> {
@@ -430,7 +436,7 @@ export async function defaultExtractor(
     : EXTRACT_TAKES_PROMPT)
     .replace('{EXISTING_TAKES_JSON}', JSON.stringify(input.existingTakes, null, 2))
     .replace('PAGE PROSE:\n', input.dateGrounding
-      ? `${observationDateRule()}\n${observationDateLine(input.observationDate ?? null)}\n\nPAGE PROSE:\n`
+      ? `${observationDateRule()}\n${observationDateLine(input.observationDate ?? resolveObservationDate({ slug: input.pagePath }))}\n\nPAGE PROSE:\n`
       : 'PAGE PROSE:\n')
     .replace('{PAGE_BODY}', input.pageBody);
 
@@ -715,8 +721,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
     }
 
     const extractor = opts.extractor ?? defaultExtractor;
-    const attributionRules = String(await Promise.resolve(engine.getConfig?.('dream.propose_takes.attribution_rules')).catch(() => null) ?? '').trim() === 'true';
-    const dateGrounding = (await getExtractorVariant(engine)).dateGrounding === true;
+    const { attributionRules, dateGrounding } = await takesPromptFlags(engine);
     const promptVersion = opts.promptVersion ?? `${PROPOSE_TAKES_PROMPT_VERSION}${attributionRules ? PROPOSE_TAKES_ATTRIBUTION_PROMPT_SUFFIX : ''}`;
     const pageLimit = opts.pageLimit ?? 100;
     const skipPagesWithFence = opts.skipPagesWithFence ?? false;
@@ -922,8 +927,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
           // #4494: configurable output caps (see resolution above).
           maxTokens: extractorMaxTokens,
           retryMaxTokens: extractorRetryMaxTokens,
-          attributionRules,
-          ...(dateGrounding ? { dateGrounding, observationDate: resolveObservationDate({ slug: page.slug }) } : {}),
+          attributionRules, dateGrounding,
         });
       } catch (err) {
         result.llm_calls_failed += 1;
