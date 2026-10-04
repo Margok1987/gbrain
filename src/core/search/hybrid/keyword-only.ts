@@ -9,6 +9,7 @@ import { type PostFusionOpts, RRF_K, rrfFusionWeighted, runPostFusionStages, sta
 import { type RelationalEvidenceSlotDecision, ensureRelationalEvidenceSlot } from '../relational-recall.ts';
 import type { SearchResult } from '../../types.ts';
 import type { HubDampeningMeta } from '../hub-dampening.ts';
+import type { FusionListEntry } from '../fusion-lists.ts';
 import { applyAliasHop } from '../alias-hop.ts';
 import { applyExactLookupTier } from '../exact-lookup.ts';
 import { dedupResults } from '../dedup.ts';
@@ -37,11 +38,17 @@ export async function searchWithoutEmbeddings(
   await stampUnverifiedExtractions(engine, [...keywordResults, ...titleResults, ...relationalList], opts);
   let noEmbedResults = keywordResults;
   let hubDampening: HubDampeningMeta | undefined;
+  const trace = opts?.explainTarget;
+  if (trace) {
+    trace.observe('arm:keyword', keywordResults);
+    trace.observe('arm:title', titleResults);
+    trace.observe('arm:relational', relationalList);
+  }
   if (relationalList.length > 0 || titleResults.length > 0) {
     const fk = opts?.rrfK ?? RRF_K;
-    const noEmbedLists = [{ list: keywordResults, k: fk }];
-    if (titleResults.length > 0) noEmbedLists.push({ list: titleResults, k: fk });
-    if (relationalList.length > 0) noEmbedLists.push({ list: relationalList, k: fk });
+    const noEmbedLists: FusionListEntry[] = [{ list: keywordResults, k: fk, arm: 'keyword' }];
+    if (titleResults.length > 0) noEmbedLists.push({ list: titleResults, k: fk, arm: 'title' });
+    if (relationalList.length > 0) noEmbedLists.push({ list: relationalList, k: fk, arm: 'relational' });
     noEmbedResults = rrfFusionWeighted(noEmbedLists, ctBoost);
   }
   if (noEmbedResults.length > 0) {
@@ -51,7 +58,10 @@ export async function searchWithoutEmbeddings(
   }
   // T3/T4 — alias hop + evidence stamp even without an embedding provider
   // (the named-thing fix is most valuable exactly when vector is unavailable).
-  const noEmbedPreExact = await applyAliasHop(engine, dedupResults(noEmbedResults), query, aliasHopOpts);
+  trace?.observe('fused', noEmbedResults);
+  const noEmbedDeduped = dedupResults(noEmbedResults);
+  trace?.observe('deduped', noEmbedDeduped);
+  const noEmbedPreExact = await applyAliasHop(engine, noEmbedDeduped, query, aliasHopOpts);
   // #1663 — structural exact-lookup tier (slug / exact-title identity).
   const noEmbedHopped = await applyExactLookupTier(engine, noEmbedPreExact, query, exactLookupOpts);
   stampEvidence(noEmbedHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
@@ -70,9 +80,12 @@ export async function searchWithoutEmbeddings(
     noEmbedPool = r.pool;
     noEmbedRelSlot = r.decision;
   }
+  trace?.observe('return_pool', noEmbedPool);
   const noEmbedSliced = noEmbedPool.slice(offset, offset + limit);
+  trace?.observe('limit_slice', noEmbedSliced);
   // v0.32.3 search-lite: budget enforcement on the no-embedding-provider path.
   const { results: noEmbedBudgeted, meta: noEmbedBudgetMeta } = enforceTokenBudget(noEmbedSliced, resolvedMode.tokenBudget);
+  trace?.observe('token_budget', noEmbedBudgeted);
   await stampContentFlags(engine, noEmbedBudgeted, opts);
   req.lastResultsCount = noEmbedBudgeted.length;
   req.lastRank1Score = noEmbedBudgeted[0] ? (noEmbedBudgeted[0].base_score ?? noEmbedBudgeted[0].score) : undefined;
@@ -142,11 +155,17 @@ export async function searchVectorFallback(
   await stampUnverifiedExtractions(engine, [...keywordResults, ...titleResults, ...relationalList], opts);
   let fallbackResults = keywordResults;
   let hubDampening: HubDampeningMeta | undefined;
+  const trace = opts?.explainTarget;
+  if (trace) {
+    trace.observe('arm:keyword', keywordResults);
+    trace.observe('arm:title', titleResults);
+    trace.observe('arm:relational', relationalList);
+  }
   if (relationalList.length > 0 || titleResults.length > 0) {
     const fk = opts?.rrfK ?? RRF_K;
-    const fallbackLists = [{ list: keywordResults, k: fk }];
-    if (titleResults.length > 0) fallbackLists.push({ list: titleResults, k: fk });
-    if (relationalList.length > 0) fallbackLists.push({ list: relationalList, k: fk });
+    const fallbackLists: FusionListEntry[] = [{ list: keywordResults, k: fk, arm: 'keyword' }];
+    if (titleResults.length > 0) fallbackLists.push({ list: titleResults, k: fk, arm: 'title' });
+    if (relationalList.length > 0) fallbackLists.push({ list: relationalList, k: fk, arm: 'relational' });
     fallbackResults = rrfFusionWeighted(fallbackLists, ctBoost);
   }
   if (fallbackResults.length > 0) {
@@ -154,15 +173,21 @@ export async function searchVectorFallback(
     await applyIdentityBoosts(req, fallbackResults);
     fallbackResults.sort((a, b) => b.score - a.score);
   }
-  const kwPreExact = await applyAliasHop(engine, dedupResults(fallbackResults), query, aliasHopOpts);
+  trace?.observe('fused', fallbackResults);
+  const kwDeduped = dedupResults(fallbackResults);
+  trace?.observe('deduped', kwDeduped);
+  const kwPreExact = await applyAliasHop(engine, kwDeduped, query, aliasHopOpts);
   // #1663 — structural exact-lookup tier (slug / exact-title identity).
   const kwHopped = await applyExactLookupTier(engine, kwPreExact, query, exactLookupOpts);
   stampEvidence(kwHopped, { cosineFloor: resolvedMode.evidence_cosine_floor });
   // System One S3 evidence gate (no-op when the slot is off), at the fused path's position.
   const kwGated = await applyEvidenceGate(req.decide, query, kwHopped);
+  trace?.observe('return_pool', kwGated);
   const kwSliced = kwGated.slice(offset, offset + limit);
+  trace?.observe('limit_slice', kwSliced);
   // v0.32.3 search-lite: budget enforcement on the keyword-fallback path too.
   const { results: kwBudgeted, meta: kwBudgetMeta } = enforceTokenBudget(kwSliced, resolvedMode.tokenBudget);
+  trace?.observe('token_budget', kwBudgeted);
   await stampContentFlags(engine, kwBudgeted, opts);
   req.lastResultsCount = kwBudgeted.length;
   req.lastRank1Score = kwBudgeted[0] ? (kwBudgeted[0].base_score ?? kwBudgeted[0].score) : undefined;
