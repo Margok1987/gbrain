@@ -1667,7 +1667,7 @@
         },
         {
           "category": "brain",
-          "message": "4 retrieval-affecting file(s) changed since HEAD: src/core/search/explain-target.ts, src/core/search/hybrid.ts, src/core/search/hybrid/keyword-only.ts, …. Re-run `gbrain eval run-all` after committing these changes.",
+          "message": "No retrieval-affecting files changed in working tree.",
           "name": "eval_drift",
           "status": "ok"
         },
