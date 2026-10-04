@@ -712,14 +712,14 @@ async function runPipelineBodyInner(
     // Dedup against DB candidates (correct per Codex Q7: fence rows
     // have no embeddings; FS lock + sync invariant means DB == fence
     // at write time). cosineVerdict: 0.95 for explicit lanes; capture lanes never drop by cosine (#5888).
-    const exact = resolvedSlug ? await decideSingleFact(ctx.engine, ctx.sourceId, { entity_slug: resolvedSlug, fact: f.fact, kind: f.kind ?? 'fact', visibility }, null) : null;
+    const exact = resolvedSlug ? await decideSingleFact(ctx.engine, ctx.sourceId, { entity_slug: resolvedSlug, fact: f.fact, kind: f.kind ?? 'fact', visibility, attributed_to: f.attributed_to ?? null }, null) : null;
     let matchedExistingId: number | null = exact?.candidate?.id ?? null;
     if (matchedExistingId === null && resolvedSlug && f.embedding && !f.entity_inferred) {
       const candidates = await ctx.engine.findCandidateDuplicates(
         ctx.sourceId,
         resolvedSlug,
         f.fact,
-        { embedding: f.embedding, embeddingModel: f.embedding_model, k: DEDUP_CANDIDATE_LIMIT },
+        { embedding: f.embedding, embeddingModel: f.embedding_model, k: DEDUP_CANDIDATE_LIMIT, attributedTo: f.attributed_to ?? null },
       );
       let top: { id: number; score: number; fact: string } | null = null;
       for (const c of candidates) {
@@ -804,7 +804,7 @@ async function runPipelineBodyInner(
       source_session: f.source_session ?? null,
       confidence: f.confidence,
       embedding: f.embedding ?? null,
-      embedding_model: f.embedding_model ?? null,
+      embedding_model: f.embedding_model ?? null, attributed_to: f.attributed_to ?? null,
       // #4206: caller event-time fallback + provenance context. #4819: a
       // DB-only row has no fence to name the page it came from, so the page
       // path's slug fills context when the caller passed no sourceSlug.
@@ -844,7 +844,7 @@ async function runPipelineBodyInner(
       // (historical imports); then import time.
       validFrom: f.valid_from ?? ctx.validFrom ?? new Date(),
       embedding: f.embedding ?? null,
-      embedding_model: f.embedding_model ?? null,
+      embedding_model: f.embedding_model ?? null, attributedTo: f.attributed_to ?? undefined,
       sessionId: f.source_session ?? null,
     }));
 
@@ -893,7 +893,7 @@ async function runPipelineBodyInner(
           source_session: f.source_session ?? null,
           confidence: f.confidence,
           embedding: f.embedding ?? null,
-          embedding_model: f.embedding_model ?? null,
+          embedding_model: f.embedding_model ?? null, attributed_to: f.attributed_to ?? null,
           // #4206: caller event-time fallback + provenance context.
           valid_from: f.valid_from ?? ctx.validFrom,
           context: ctx.sourceSlug ?? input.pageSlug ?? null,
@@ -926,7 +926,7 @@ async function runPipelineBodyInner(
           source_session: f.source_session ?? null,
           confidence: f.confidence,
           embedding: f.embedding ?? null,
-          embedding_model: f.embedding_model ?? null,
+          embedding_model: f.embedding_model ?? null, attributed_to: f.attributed_to ?? null,
           // #4206: caller event-time fallback + provenance context.
           valid_from: f.valid_from ?? ctx.validFrom,
           context: ctx.sourceSlug ?? input.pageSlug ?? null,

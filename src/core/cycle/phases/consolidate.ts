@@ -3,7 +3,8 @@
  *
  * Per /plan-eng-review Phase 5:
  *
- *   For each (source_id, entity_slug) bucket of unconsolidated active facts:
+ *   For each (source_id, entity_slug) bucket of unconsolidated active facts
+ *   the user asserted (or with no recorded speaker):
  *     1. Skip if count < 3 OR oldest fact age < 24h.
  *     2. Cluster by embedding cosine — greedy threshold 0.85.
  *     3. For each cluster ≥ 2: pick the highest-confidence fact's text as
@@ -79,6 +80,7 @@ export async function runPhaseConsolidate(
         AND expired_at IS NULL
         AND (valid_until IS NULL OR valid_until > now())
         AND entity_slug IS NOT NULL
+        AND (attributed_to IS NULL OR attributed_to = 'user')
         AND ($2::boolean=false OR visibility='world')
         AND ($1::text IS NULL OR source_id=$1)
       GROUP BY source_id, entity_slug
@@ -116,7 +118,9 @@ export async function runPhaseConsolidate(
       visibility: managed ? ['world'] : undefined,
       limit: 100,
     });
-    const unconsolidated = managed ? candidates.filter(f => f.visibility === 'world') : candidates;
+    // Takes here are the user's own (holder 'self'): a claim the assistant or
+    // a named third party asserted is never promoted into one.
+    const unconsolidated = candidates.filter(f => (!managed || f.visibility === 'world') && (!f.attributed_to || f.attributed_to === 'user'));
     if (unconsolidated.length < minPerBucket) {
       bucketsSkipped += 1;
       continue;
