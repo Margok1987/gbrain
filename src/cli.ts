@@ -1644,6 +1644,8 @@ export function formatResult(
         : '';
       if (params.json === true) {
         if (incompleteNotice) process.stderr.write(incompleteNotice);
+        // --explain --json: the same per-row score_details object MCP `explain: true` returns.
+        if (getCliOptions().explain) for (const r of results) r.score_details ??= require('./core/search/explain-formatter.ts').buildScoreDetails(r);
         return JSON.stringify(results, null, 2) + '\n';
       }
       // T15/FOV-1: an empty result names its cause when the pipeline told us

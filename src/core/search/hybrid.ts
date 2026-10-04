@@ -28,7 +28,8 @@ import { registerBackgroundWorkDrainer } from '../background-work.ts';
 import { applyAliasHop, isExcludedIdentity, type IdentityTierOpts } from './alias-hop.ts';
 export { applyAliasHop, isExcludedIdentity, type IdentityTierOpts };
 import { dedupResults } from './dedup.ts';
-import { accumulateRrf } from './rrf-page-fusion.ts';
+import { accumulateRrf, type RrfEntry } from './rrf-page-fusion.ts';
+import type { RrfAttribution } from '../types.ts';
 import {
   isAmbiguousModalityQuery,
 } from './query-intent.ts';
@@ -946,6 +947,12 @@ export interface HybridSearchOpts extends SearchOpts {
    * hash `hd=`); eval A/B runs drive it here.
    */
   hubDampening?: HubDampening | string;
+  /**
+   * explain_target (explain-target.ts): when set, each pipeline stage records
+   * whether the target page was present and at what rank. Observation only —
+   * never changes ranking.
+   */
+  explainTarget?: import('./explain-target.ts').TargetTrace;
   /** Override default RRF K constant (default: 60). Lower values boost top-ranked results more. */
   rrfK?: number;
   /** Override dedup pipeline parameters. */
@@ -1174,6 +1181,7 @@ export async function hybridSearch(
 
   // Dedup
   const deduped = dedupResults(fused, dedupOpts);
+  opts?.explainTarget?.observe('deduped', deduped);
 
   // Auto-escalate: if detail=low returned 0, retry with high. The inner
   // call's onMeta fires with the escalated detail_resolved; do NOT also
@@ -1183,9 +1191,11 @@ export async function hybridSearch(
   }
 
   const { rerankPinned, relationalRerankPin } = await rerankAndPin(req, deduped, relationalList, effectiveModality);
+  opts?.explainTarget?.observe('reranked', rerankPinned);
   const { returnPool, adaptiveDecision, autocutDecision, relationalSlotDecision } = await sizeReturnPool(req, {
     rerankPinned, deduped, exactLookupOpts: lexical.exactLookupOpts, relationalList, effectiveModality,
   });
+  opts?.explainTarget?.observe('return_pool', returnPool);
   return finalizeHybridResults(req, returnPool, {
     relaxedDropped, adaptiveDecision, autocutDecision, relationalSlotDecision,
     relationalRerankPin, keywordArmConfidence, metadataBoostGate, hubDampening,
@@ -1470,25 +1480,33 @@ export function rrfFusionWeighted(
   const entries = accumulateRrf(lists);
   if (entries.length === 0) return [];
 
+  // Explain attribution (score_details): the raw summed vote, the normalized
+  // score and the compiled-truth factor, stamped once per fused row.
+  const attribution = new Map<RrfEntry, RrfAttribution>();
   const maxScore = Math.max(...entries.map(e => e.score));
   if (maxScore > 0) {
     for (const e of entries) {
+      const raw = e.score;
       e.score = e.score / maxScore;
       // issue #160 + #3695: unverified stubs and synthetic chunkless title
       // rows never get the compiled-truth authority boost. Numeric = factor.
       const boost = typeof applyBoost === 'number'
         ? compiledTruthBoost(e.result, true, applyBoost)
         : compiledTruthBoost(e.result, applyBoost);
+      attribution.set(e, { raw, normalized: e.score, compiled_truth_boost: boost, arms: e.arms });
       e.score *= boost;
     }
   }
 
   return entries
     .sort((a, b) => b.score - a.score || b.own - a.own)
-    .map(({ result, score, keywordHit }) =>
-      keywordHit && result.keyword_hit !== true
-        ? { ...result, score, keyword_hit: true }
-        : { ...result, score });
+    .map((e) => {
+      const { result, score, keywordHit } = e;
+      const rrf = attribution.get(e) ?? { raw: e.score, normalized: e.score, compiled_truth_boost: 1, arms: e.arms };
+      return keywordHit && result.keyword_hit !== true
+        ? { ...result, score, keyword_hit: true, rrf }
+        : { ...result, score, rrf };
+    });
 }
 
 /**
@@ -1611,7 +1629,7 @@ export async function cosineReScore(
 
     // v0.46.15: stamp the raw cosine — evidence + --explain read it (the
     // hydration map is already paid for; zero extra probes).
-    return { ...r, score: blended, cosine };
+    return { ...r, score: blended, cosine, blend_norm_rrf: normRrf };
   }).sort((a, b) => b.score - a.score);
 }
 

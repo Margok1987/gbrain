@@ -129,6 +129,14 @@ export async function fuseArms(
     },
   });
 
+  // explain_target: per-arm presence (keyword before and after relaxed-row demotion).
+  const trace = opts?.explainTarget;
+  if (trace) {
+    trace.observe('arm:keyword_raw', keywordResults);
+    trace.observe('arm:title_raw', titleResults);
+    for (const entry of allLists) trace.observe(`arm:${entry.arm ?? 'list'}`, entry.list);
+  }
+
   // issue #160: stamp unverified auto-extracted stubs across ALL candidate
   // arms BEFORE fusion so the compiled-truth authority boost skips them.
   await stampUnverifiedExtractions(engine, allLists.flatMap((l) => l.list), opts);
@@ -173,6 +181,7 @@ export async function fuseArms(
     await applyIdentityBoosts(req, fused);
     fused.sort((a, b) => b.score - a.score);
   }
+  trace?.observe('fused', fused);
   return { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate, hubDampening };
 }
 
@@ -444,11 +453,13 @@ export async function finalizeHybridResults(
 ): Promise<SearchResult[]> {
   const { engine, opts, resolvedMode, resolvedCol, limit, offset, suggestions, detailResolved, degraded } = req;
   const sliced = returnPool.slice(offset, offset + limit);
+  opts?.explainTarget?.observe('limit_slice', sliced);
   // v0.32.3 search-lite: budget enforcement at the main return path.
   // hybridSearchCached used to be the only place this fired; now bare
   // hybridSearch enforces it too so eval-replay + eval-longmemeval see
   // the same budget behavior as the production query op.
   const { results: budgeted, meta: budgetMeta } = enforceTokenBudget(sliced, resolvedMode.tokenBudget);
+  opts?.explainTarget?.observe('token_budget', budgeted);
   await stampContentFlags(engine, budgeted, opts);
   req.lastResultsCount = budgeted.length;
   req.lastRank1Score = budgeted[0] ? (budgeted[0].base_score ?? budgeted[0].score) : undefined;
