@@ -206,9 +206,9 @@ export function diagnoseProbe(
   }
   if (scoped.length > 1) {
     return { target, state: 'not_retrieved', code: 'target_ambiguous', arms: [], stages: [],
-      why: `The slug exists in ${scoped.length} readable sources (${scoped.map(r => r.source_id).join(', ')}); name one with explain_target_source.`,
-      fix: { mcp: { tool: opts.retry.tool, arguments: { ...opts.retry.arguments, explain: true, explain_target: ref.slug, explain_target_source: scoped[0].source_id } },
-        consent: [], actor: 'agent', requires_exclusive: false, why: `Repeat with explain_target_source set to one of: ${scoped.map(r => r.source_id).join(', ')}.` } };
+      why: `The slug exists in ${scoped.length} readable sources (${scoped.map(r => r.source_id).join(', ')}); name one as source:slug.`,
+      fix: { mcp: { tool: opts.retry.tool, arguments: { ...opts.retry.arguments, explain_target: `${scoped[0].source_id}:${ref.slug}` } },
+        consent: [], actor: 'agent', requires_exclusive: false, why: `Repeat with explain_target as <source>:${ref.slug}, source one of: ${scoped.map(r => r.source_id).join(', ')}.` } };
   }
   const row = scoped[0];
   const withSource = { ...target, source_id: row.source_id };

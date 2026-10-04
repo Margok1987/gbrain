@@ -507,12 +507,21 @@ const TYPES_PARAM_DESCRIPTION = "Page types, e.g. ['person'].";
 const SOURCE_ID_PARAM_DESCRIPTION = "One source, or '__all__'.";
 const SALIENCE_PARAM = { type: 'string' as const, enum: ['off', 'on', 'strong'], description: 'Boost emotional pages (default: auto).' };
 
-/** Ranking explanation params shared by `search` and `query`. */
+/**
+ * Ranking explanation params, declared on `query` only: every declared param
+ * is re-sent to the model on each turn, so the cheap `search` tool stays
+ * lean. The local CLI passes them to `search` too (`gbrain search --explain`).
+ */
 const EXPLAIN_PARAMS = {
-  explain: { type: 'boolean' as const, description: 'true: each row gets score_details (which retrieval arms found it, at what rank, and every ranking factor). Use when a result looks wrong.' },
-  explain_target: { type: 'string' as const, description: 'Slug of a page you expected but did not get; the response meta explain_target says which stage lost it and what to do next.' },
-  explain_target_source: { type: 'string' as const, description: 'Source id of explain_target when the slug exists in several sources.' },
+  explain: { type: 'boolean' as const, description: 'Per-row score_details.' },
+  explain_target: { type: 'string' as const, description: 'Expected page (slug or source:slug): why it is missing.' },
 };
+
+/** `explain_target` is `slug` or `source_id:slug` (slugs never contain ':'). */
+function parseExplainTarget(raw: string): { slug: string; sourceId?: string } {
+  const at = raw.indexOf(':');
+  return at > 0 ? { sourceId: raw.slice(0, at), slug: raw.slice(at + 1) } : { slug: raw };
+}
 
 /**
  * explain_target, before the search: resolve the target among the pages this
@@ -524,8 +533,7 @@ async function prepareExplainTarget(
   ctx: OperationContext, p: Record<string, unknown>, scope: SourceScope, excludePrivate: boolean, tool: 'search' | 'query',
 ): Promise<{ trace?: TargetTrace; early?: ExplainTargetDiagnosis } | null> {
   if (typeof p.explain_target !== 'string' || p.explain_target.trim() === '') return null;
-  const slug = p.explain_target.trim();
-  const sourceId = typeof p.explain_target_source === 'string' && p.explain_target_source ? p.explain_target_source : undefined;
+  const { slug, sourceId } = parseExplainTarget(p.explain_target.trim());
   const retry = { tool, arguments: explainRetryArgs(p) };
   let probe;
   try {
@@ -542,7 +550,7 @@ async function prepareExplainTarget(
 
 /** The caller's search arguments, minus explain params, so every fix is a complete retry call. */
 function explainRetryArgs(p: Record<string, unknown>): Record<string, unknown> {
-  const { explain: _e, explain_target: _t, explain_target_source: _s, ...rest } = p;
+  const { explain: _e, explain_target: _t, ...rest } = p;
   return rest;
 }
 
@@ -625,7 +633,6 @@ const search: Operation = {
     salience: SALIENCE_PARAM,
     recency: RECENCY_PARAM,
     fields: FIELDS_PARAM,
-    ...EXPLAIN_PARAMS,
   },
   handler: async (ctx, p) => {
     const startedAt = Date.now();
@@ -710,7 +717,7 @@ const search: Operation = {
       decide: { remote: ctx.remote !== false },
     };
     const primary = await hybridSearchCached(ctx.engine, queryText, {
-      ...searchOpts, onMeta: (m) => { capturedMeta = m; }, ...(explainPrep?.trace ? { explainTarget: explainPrep.trace } : {}),
+      ...searchOpts, onMeta: (m) => { capturedMeta = m; }, explain: p.explain === true, explainTarget: explainPrep?.trace,
     });
     const declarations = new DeclarationMemo();
     const results = (await withDeclaredNameFanOut(primary, queryText, declarations,
@@ -956,7 +963,7 @@ const query: Operation = {
       autocut: typeof p.autocut === 'boolean' ? (p.autocut as boolean) : undefined,
       // v0.43 — relational recall override. Omitted = smart default (mode bundle).
       relationalRetrieval: typeof p.relational === 'boolean' ? (p.relational as boolean) : undefined,
-      explainTarget: explainPrep?.trace,
+      explain: p.explain === true, explainTarget: explainPrep?.trace,
     });
     const declarations = new DeclarationMemo();
     results = await withDeclaredNameFanOut(results, queryText, declarations, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {

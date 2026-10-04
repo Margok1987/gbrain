@@ -64,7 +64,7 @@ the next step:
 | `target_not_indexed` | The page has no indexed chunks. | `gbrain doctor --json` names the re-index command. |
 | `target_projection_stale` | The page changed and its searchable text is still being rebuilt. | Retry after `gbrain doctor` shows the backlog drained. |
 | `target_safe_chunks_uncertified` | Remote reads withhold pages indexed before the current safe-chunk format. | The brain host runs `gbrain repair safe-chunks`. |
-| `target_ambiguous` | The slug exists in several sources. | Repeat with `explain_target_source`. |
+| `target_ambiguous` | The slug exists in several sources. | Repeat with `explain_target` as `source:slug`. |
 | `target_not_found_or_not_visible` | No page with that slug is readable here. | Ask the user whether it exists and where; private pages are never confirmed. |
 
 Agents on the default seven-verb memory surface do not have `search` or
