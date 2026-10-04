@@ -37,6 +37,8 @@
  * phase can run hermetically in unit tests without touching the gateway.
  */
 
+import { observationDateLine, observationDateRule, resolveObservationDate, type ObservationDate } from '../ai/date-grounding.ts';
+import { getExtractorVariant } from '../facts/extract.ts';
 import { randomUUID, createHash } from 'node:crypto';
 import { BaseCyclePhase, CYCLE_DEADLINE_RESERVE_MS, type ScopedReadOpts, type BasePhaseOpts } from './base-phase.ts';
 import { defaultTimeoutMsFor } from '../minions/handler-timeouts.ts';
@@ -194,6 +196,15 @@ export type ProposeTakesExtractor = (input: {
   retryMaxTokens?: number;
   /** #5425: include EXTRACT_TAKES_ATTRIBUTION_RULES (opt-in). */
   attributionRules?: boolean;
+  /**
+   * extraction.date_grounding: resolve relative deadlines ("by Q3", "in 18
+   * months") against the page's observation date. Prompt-only; the
+   * idempotency key (prompt_version) is unchanged so enabling it never
+   * reprocesses pages.
+   */
+  dateGrounding?: boolean;
+  /** The page's observation date (date-grounding.ts), null when undated. */
+  observationDate?: ObservationDate | null;
 }) => Promise<ProposedTake[]>;
 
 export interface ProposeTakesOpts extends BasePhaseOpts {
@@ -418,6 +429,9 @@ export async function defaultExtractor(
     ? EXTRACT_TAKES_PROMPT.replace('For each gradeable claim,', `${EXTRACT_TAKES_ATTRIBUTION_RULES}For each gradeable claim,`)
     : EXTRACT_TAKES_PROMPT)
     .replace('{EXISTING_TAKES_JSON}', JSON.stringify(input.existingTakes, null, 2))
+    .replace('PAGE PROSE:\n', input.dateGrounding
+      ? `${observationDateRule()}\n${observationDateLine(input.observationDate ?? null)}\n\nPAGE PROSE:\n`
+      : 'PAGE PROSE:\n')
     .replace('{PAGE_BODY}', input.pageBody);
 
   // #4494: per-run configurable caps (dream.propose_takes.max_tokens /
@@ -702,6 +716,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
 
     const extractor = opts.extractor ?? defaultExtractor;
     const attributionRules = String(await Promise.resolve(engine.getConfig?.('dream.propose_takes.attribution_rules')).catch(() => null) ?? '').trim() === 'true';
+    const dateGrounding = (await getExtractorVariant(engine)).dateGrounding === true;
     const promptVersion = opts.promptVersion ?? `${PROPOSE_TAKES_PROMPT_VERSION}${attributionRules ? PROPOSE_TAKES_ATTRIBUTION_PROMPT_SUFFIX : ''}`;
     const pageLimit = opts.pageLimit ?? 100;
     const skipPagesWithFence = opts.skipPagesWithFence ?? false;
@@ -908,6 +923,7 @@ class ProposeTakesPhase extends BaseCyclePhase {
           maxTokens: extractorMaxTokens,
           retryMaxTokens: extractorRetryMaxTokens,
           attributionRules,
+          ...(dateGrounding ? { dateGrounding, observationDate: resolveObservationDate({ slug: page.slug }) } : {}),
         });
       } catch (err) {
         result.llm_calls_failed += 1;

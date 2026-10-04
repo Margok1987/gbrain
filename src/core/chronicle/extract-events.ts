@@ -307,13 +307,20 @@ export function defaultJudge(engine: BrainEngine): ChronicleJudge {
       const n = parseInt(capRaw, 10);
       if (Number.isFinite(n) && n > 0) maxTokens = n;
     }
+    // extraction.date_grounding: the page date is the observation date; a
+    // relative "last Tuesday" resolves against it, never against today.
+    const { getExtractorVariant } = await import('../facts/extract.ts');
+    const grounded = (await getExtractorVariant(engine)).dateGrounding === true;
+    const { observationDateFrom, observationDateLine, observationDateRule } = await import('../ai/date-grounding.ts');
+    const dateLine = grounded ? `${observationDateLine(observationDateFrom(input.effectiveDate))}\n` : '';
     let text: string;
     try {
       const res = await chat({
-        system: JUDGE_SYSTEM,
+        system: grounded ? `${JUDGE_SYSTEM}\n${observationDateRule()}` : JUDGE_SYSTEM,
         messages: [{
           role: 'user',
           content:
+            dateLine +
             `<page slug="${input.slug}" type="${input.type}" date="${input.effectiveDate ?? ''}">\n` +
             `${input.title}\n\n${body}\n</page>\n\n` +
             `Known attendees: ${input.attendees.slice(0, 10).join(', ') || '(none)'}.\nExtract the events.`,
