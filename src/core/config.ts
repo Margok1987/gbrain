@@ -1397,6 +1397,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'models.dream.triage',
   'models.drift',
   'models.auto_think',
+  'models.standing_questions',
   'models.think',
   'models.subagent',
   'models.expansion',

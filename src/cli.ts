@@ -139,6 +139,7 @@ const SELF_HELP_WITHOUT_ENGINE: Record<string, true | (() => Promise<(engine: ne
   // runLoops / runWaiting answer --help before touching the engine.
   loops: async () => (await import('./commands/loops.ts')).runLoops as never,
   'edge-proposals': async () => (await import('./commands/edge-proposals.ts')).runEdgeProposals as never,
+  questions: async () => (await import('./commands/questions.ts')).runQuestions as never, // --help before the engine
   waiting: async () => (await import('./commands/loops.ts')).runWaiting as never,
   // runSources's `--help`/`-h`/undefined-subcommand branch calls printHelp()
   // without ever touching `engine` — safe to dispatch with no brain
@@ -3032,6 +3033,7 @@ TOOLS
   facts relink [--dry-run]           Link facts saved without an entity to the entity they name
   check-resolvable [--json] [--fix]  Validate skill tree (reachability/MECE/DRY)
   report --type <name> --content ... Save timestamped report to brain/reports/
+  questions pin|list|status|refresh|unpin  Pinned questions: cited answers kept current (owner-private)
 
 OPEN LOOPS (Gmail/Calendar/Contacts connector — v0.47)
   google setup [--account <email>]   One command: BYO OAuth → source → first sync → first digest
