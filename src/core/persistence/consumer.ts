@@ -18,6 +18,7 @@ import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { maybeRefreshPlannerStats } from '../planner-stats.ts';
 import { refreshFenceClear } from './worktree-refresh-schema.ts';
 import { faultPoint } from './fault-points.ts';
+import { OperationError } from '../ops/contract.ts';
 import { releaseAbandonedClaims } from './effect-journal.ts';
 
 type PhaseObservation = { name: string; started_at: string; deadline_exceeded: boolean; attempt: number; first_conn_ms?: number };
@@ -55,6 +56,9 @@ export async function runResidentProjectionInvocation(engine: BrainEngine, hostI
 const PARKED_WORKER: Promise<void> = Promise.resolve();
 
 export type PrepareMutation = (engine: BrainEngine, row: WriteRequest, config: GBrainConfig, signal?: AbortSignal) => Promise<PreparedMutation>;
+/** Preparation deadlines a write may hit before it fails terminally (the first requeues it). */
+const MAX_PREPARATION_DEADLINES = 2;
+
 export class PersistenceConsumer {
   private stopping = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -91,6 +95,8 @@ export class PersistenceConsumer {
   private lastLog: { key: string; at: number } | undefined;
   private lastPhaseError: string | undefined;
   private preparationAttempts = 0;
+  /** Preparation deadlines per request in this process; the second ends the write instead of requeueing it. */
+  private deadlineStrikes = new Map<string, number>();
   private preparing = new Map<string, { request_id: string; started_at: string; deadline_exceeded: boolean; attempt: number }>();
   private executing = new Set<string>();
   private abandonedReleased = false;
@@ -497,6 +503,7 @@ export class PersistenceConsumer {
         this.log('preparation', 'deadline_exceeded');
       }
       if (!claimLive || this.stopping || abort.signal.aborted) {
+        if (claimLive && !this.stopping && observation.deadline_exceeded) { const failed = await this.failRepeatedDeadline(row, budget); if (failed) return this.settled(failed); }
         await releaseUnpublishedClaim(this.engine, row, observation.deadline_exceeded ? 'preparation_deadline' : 'consumer_stopping'); return false;
       }
       this.preparing.delete(row.id);
@@ -511,6 +518,7 @@ export class PersistenceConsumer {
     } catch (error) {
       if (preparationActive && bounded && performance.now() >= deadline) observation.deadline_exceeded = true;
       if (preparationActive && (abort.signal.aborted || observation.deadline_exceeded)) {
+        if (claimLive && !this.stopping && observation.deadline_exceeded) { const failed = await this.failRepeatedDeadline(row, budget); if (failed) return this.settled(failed); }
         await releaseUnpublishedClaim(this.engine, row, observation.deadline_exceeded ? 'preparation_deadline' : 'consumer_stopping');
         return false;
       }
@@ -522,9 +530,29 @@ export class PersistenceConsumer {
       }
       throw error;
     } finally {
+      if (!observation.deadline_exceeded) this.deadlineStrikes.delete(row.id);
       closed = true; clearInterval(interval); if (timeout) clearTimeout(timeout);
       this.abort.signal.removeEventListener('abort', stop); this.preparing.delete(row.id); this.executing.delete(row.id); await renewing;
     }
+  }
+  /**
+   * A write whose preparation overruns its budget is requeued once; the second
+   * overrun ends it as a terminal `preparation_deadline` failure with a fix,
+   * so a page that can never prepare in time does not retry forever.
+   */
+  private async failRepeatedDeadline(row: WriteRequest, budgetMs: number): Promise<WriteRequest | null> {
+    const strikes = (this.deadlineStrikes.get(row.id) ?? 0) + 1;
+    this.deadlineStrikes.set(row.id, strikes);
+    if (strikes < MAX_PREPARATION_DEADLINES) return null;
+    this.deadlineStrikes.delete(row.id);
+    const current = await getWriteRequestById(this.engine, row.id);
+    if (!current || isTerminal(current) || current.execution_token !== row.execution_token || current.recovery) return null;
+    const seconds = Math.round(budgetMs / 1000);
+    const done = await finishUnpublishedFailure(this.engine, current, new OperationError('preparation_deadline',
+      `Preparing this ${row.operation} for ${row.slug || 'the page'} ran past the ${seconds}s preparation budget ${strikes} times, so the write stopped instead of retrying; nothing was published. Resubmit the page with a new request_id; if it overruns again, split it into smaller pages and report it as a gbrain bug.`,
+      'Check the writer with gbrain sources writer status --json, then resubmit the page with a new request_id.'), 'preparation');
+    this.log('preparation', 'preparation_deadline', done.error_message ?? undefined);
+    return done;
   }
   /** #5984: a claimed bulk sync head takes its directly following group members along; one row runs the single path. */
   private async executeOrGroup(row: WriteRequest): Promise<boolean> {

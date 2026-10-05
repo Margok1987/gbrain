@@ -3,6 +3,7 @@
  * Each stage reads the resolved request (HybridRequest, request.ts) and
  * writes its per-request accumulators only as `req.<field>`.
  */
+import { brainHasImageVectors } from '../image-vector-presence.ts';
 import type { ModalityMode } from '../query-intent.ts';
 import type { ExactLookupOpts } from '../exact-lookup.ts';
 import type { HybridRequest } from './request.ts';
@@ -49,6 +50,10 @@ export async function runLexicalArms(req: HybridRequest): Promise<LexicalArms> {
   // We classify modality early (it's also computed after for the modality
   // branch). The classification is pure regex via classifyQuery; running it
   // here is cheap.
+  // An inferred image/both modality on a brain with no image embeddings is
+  // text: the image arm has nothing to search and would only fail open (and
+  // 'image' would drop the keyword arm). Later stages read the same suggestion.
+  if (!(opts?.crossModal && opts.crossModal !== 'auto') && (suggestions.suggestedModality ?? 'text') !== 'text' && !await brainHasImageVectors(engine)) suggestions.suggestedModality = 'text';
   const earlyModality = (opts?.crossModal && opts.crossModal !== 'auto')
     ? opts.crossModal
     : (suggestions.suggestedModality ?? 'text');
@@ -198,6 +203,8 @@ export async function resolveModalityAndQueries(req: HybridRequest) {
   const explicitModality =
     opts?.crossModal && opts.crossModal !== 'auto' ? opts.crossModal : undefined;
   let regexModality = explicitModality ?? suggestions.suggestedModality ?? 'text';
+  // A text-only brain has no image column to search, so the LLM tie-break toward one is skipped.
+  const imageArmPossible = explicitModality !== undefined || await brainHasImageVectors(req.engine);
   // LLM tie-break fires ONLY when:
   //   - no explicit per-call override
   //   - regex returned 'text' (not confident image/both)
@@ -206,6 +213,7 @@ export async function resolveModalityAndQueries(req: HybridRequest) {
   if (
     explicitModality === undefined &&
     regexModality === 'text' &&
+    imageArmPossible &&
     resolvedMode.cross_modal_llm_intent &&
     isAmbiguousModalityQuery(query)
   ) {

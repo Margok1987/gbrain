@@ -242,6 +242,7 @@ export const CODES = {
   plan_output_failed: { class: 'server', summary: "Writing the plan output failed." },
   plan_stale: { class: 'caller', summary: "The saved plan has no valid repository identity." },
   port_in_use: { class: 'retryable', summary: "Google connect credential error: port in use.", docs: 'docs/guides/google-connect.md#troubleshooting' },
+  preparation_deadline: { class: 'server', summary: "Preparing a write ran past its preparation budget twice, so the write ended instead of retrying; nothing was published.", why: "A page whose preparation never fits its budget would otherwise be requeued forever and stall the batch it belongs to.", suggestion: 'Resubmit the page with a new request_id; if it overruns again, split it into smaller pages and report it as a gbrain bug.', fix: { argv: ['gbrain', 'sources', 'writer', 'status', '--json'], consent: [], actor: 'agent', why: 'Shows the writer, its queue and the last preparation error before anything is resubmitted.', requires_exclusive: false } },
   preview_changed: { class: 'caller', summary: "The state changed since the approved preview." },
   profile_incompatible: { class: 'caller', summary: "The stored profile is incompatible with this operation." },
   projection_owner_resident: { class: 'host_only', summary: "A resident owner holds the projection." },

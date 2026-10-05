@@ -232,6 +232,32 @@ for (const cooperates of [true, false]) test(`preparation deadline retains track
   }
 }), 5000);
 
+test('a write whose preparation overruns its deadline twice ends as a terminal preparation_deadline failure, not an endless retry', async () => withEnv(env, async () => {
+  const sources = await fixtures(engine, config);
+  const row = await admitWrite(engine, admission(config, sources[0], 'deadline-twice', 'never prepares in time'));
+  let attempts = 0;
+  const consumer = new PersistenceConsumer(engine, { engine: 'pglite' }, async (_e, _current, _c, signal?: AbortSignal) => {
+    attempts++;
+    await new Promise<void>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }));
+    throw new Error('unreachable');
+  }, { hostId: config.hostId, pollMs: 20, preparationMs: 40 });
+  try {
+    consumer.start();
+    await waitFor(async () => (await getWriteRequestById(engine, row.id))?.state === 'failed');
+    const done = (await getWriteRequestById(engine, row.id))!;
+    expect(attempts).toBe(2);
+    expect(done.error_code).toBe('preparation_deadline');
+    expect(done.error_message).toContain('preparation budget 2 times');
+    expect(done.error_message).toContain('new request_id');
+    expect(await engine.readPageSnapshot(row.slug, { sourceId: row.source_id })).toBeNull();
+    await Bun.sleep(100);
+    expect(attempts).toBe(2);
+    await assertConservation(engine);
+  } finally {
+    await consumer.stop();
+  }
+}), 5000);
+
 test('an edit_page preparation shares the preparation deadline (#5616)', async () => withEnv(env, async () => {
   const sources = await fixtures(engine, config);
   const row = await admitWrite(engine, admission(config, sources[0], 'edit-page-deadline', 'edited body', 0, { operation: 'edit_page' }));

@@ -1679,6 +1679,14 @@ Reasons: `timeout`, `live_serve`.
 
 More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-connect.md#troubleshooting)
 
+### preparation_deadline
+
+<a id="preparation_deadline"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| Preparing a write ran past its preparation budget twice, so the write ended instead of retrying; nothing was published. | A page whose preparation never fits its budget would otherwise be requeued forever and stall the batch it belongs to. | Resubmit the page with a new request_id; if it overruns again, split it into smaller pages and report it as a gbrain bug. Run: gbrain sources writer status --json | agent | `gbrain doctor --json` | 1 | no |
+
 ### preview_changed
 
 <a id="preview_changed"></a>
