@@ -203,8 +203,6 @@ export async function resolveModalityAndQueries(req: HybridRequest) {
   const explicitModality =
     opts?.crossModal && opts.crossModal !== 'auto' ? opts.crossModal : undefined;
   let regexModality = explicitModality ?? suggestions.suggestedModality ?? 'text';
-  // A text-only brain has no image column to search, so the LLM tie-break toward one is skipped.
-  const imageArmPossible = explicitModality !== undefined || await brainHasImageVectors(req.engine);
   // LLM tie-break fires ONLY when:
   //   - no explicit per-call override
   //   - regex returned 'text' (not confident image/both)
@@ -213,7 +211,6 @@ export async function resolveModalityAndQueries(req: HybridRequest) {
   if (
     explicitModality === undefined &&
     regexModality === 'text' &&
-    imageArmPossible &&
     resolvedMode.cross_modal_llm_intent &&
     isAmbiguousModalityQuery(query)
   ) {
@@ -224,6 +221,8 @@ export async function resolveModalityAndQueries(req: HybridRequest) {
       // Fail-open: regex result stands.
     }
   }
+  // The tie-break may still pick image/both; a brain with no image embeddings has nothing for that arm.
+  if (explicitModality === undefined && regexModality !== 'text' && !await brainHasImageVectors(req.engine)) regexModality = 'text';
   const effectiveModality = regexModality;
   const unifiedRouting = resolvedMode.unified_multimodal === true;
 
