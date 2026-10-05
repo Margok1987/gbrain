@@ -77,6 +77,14 @@ These rates belong to this model and are not product numbers. They mean the supe
 checked against the production embedding model. This fixture can do that check with real embeddings for a
 fraction of a cent once paid embedding calls are approved.
 
+## Production embeddings
+
+The [supersession-threshold-dev](../supersession-threshold-dev/README.md) follow-up re-embedded this fixture with
+`voyage:voyage-4` (the default) and `openai:text-embedding-3-large`, and swept thresholds 0.80 to 0.97 for both
+arms. Interleave never helped. With voyage-4 it lost one twin out of 280 to the cut to 5, so at thresholds
+0.80 to 0.89 one more correction was missed than with `rrf_free`. From 0.90 up the two arms decided the same.
+With 3-large both arms found every twin and decided the same at every threshold. The verdict stands: keep `rrf_free`.
+
 ## Reproduce
 
 ```bash

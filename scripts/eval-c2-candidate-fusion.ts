@@ -34,7 +34,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import { cosineSimilarity } from '../src/core/facts/classify.ts';
@@ -46,7 +46,7 @@ import { mulberry32 } from '../src/eval/shared/bootstrap.ts';
 import { holmAdjusted, pairedClusterStatistics } from '../src/core/eval/paired-bootstrap.ts';
 
 export const FIXTURE_SEED = 20261005;
-export const TAUS = [0.85, 0.9, 0.95] as const;
+export const TAUS = [0.85, 0.9, 0.95];
 const MODES: CandidateFusion[] = ['rrf_free', 'interleave'];
 const SOURCE = 'eval:c2-explicit';
 const DRAWS = 10_000;
@@ -174,7 +174,7 @@ const sha256 = (s: string | Buffer) => createHash('sha256').update(s).digest('he
 // Embeddings (int8 + per-vector scale, gzip JSON)
 // ---------------------------------------------------------------------------
 
-interface EmbeddingFile { model: string; dims: number; texts_sha256: string; vectors: Record<string, { s: number; q: string }> }
+interface EmbeddingFile { model: string; dims: number; texts_sha256: string; vectors: Record<string, { s: number; q: string } | { f: string }> }
 
 function loadEmbeddings(path: string, texts: string[]): { model: string; dims: number; sha256: string; get(t: string): Float32Array } {
   const raw = readFileSync(path);
@@ -189,12 +189,41 @@ function loadEmbeddings(path: string, texts: string[]): { model: string; dims: n
       if (hit) return hit;
       const v = file.vectors[sha256(t)];
       if (!v) throw new Error(`No embedding for fixture text: ${t}`);
-      const q = new Int8Array(Buffer.from(v.q, 'base64').buffer.slice(0));
-      const out = Float32Array.from(q, x => x * v.s);
+      const bytes = Buffer.from('f' in v ? v.f : v.q, 'base64');
+      const out = 'f' in v
+        ? new Float32Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+        : Float32Array.from(new Int8Array(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)), x => x * v.s);
       cache.set(t, out);
       return out;
     },
   };
+}
+
+/**
+ * Embed the fixture through the product gateway (`embed`, inputType
+ * 'document', the call prepareFactEmbedding makes) with a configured
+ * provider model. PAID: one batch call per 128 texts; the fixture is about
+ * 24K tokens. Vectors are stored as float32 so cosines near the threshold
+ * are exact.
+ */
+async function embedWithGateway(model: string, dims: number, outPath: string): Promise<void> {
+  const { embed } = await import('../src/core/ai/gateway.ts');
+  const { estimateTokens } = await import('../src/core/chunkers/token-estimate.ts');
+  const texts = fixtureTexts(buildFixture());
+  resetGateway();
+  configureGateway({ embedding_model: model, embedding_dimensions: dims, env: { ...process.env } as Record<string, string> });
+  const vectors: EmbeddingFile['vectors'] = {};
+  for (let i = 0; i < texts.length; i += 128) {
+    const batch = texts.slice(i, i + 128);
+    const out = await embed(batch, { inputType: 'document' });
+    batch.forEach((t, j) => {
+      if (out[j].length !== dims) throw new Error(`expected ${dims} dims from ${model}, got ${out[j].length}`);
+      vectors[sha256(t)] = { f: Buffer.from(new Float32Array(out[j]).buffer).toString('base64') };
+    });
+  }
+  const tokens = texts.reduce((n, t) => n + estimateTokens(t), 0);
+  writeFileSync(outPath, gzipSync(JSON.stringify({ model, dims, texts_sha256: sha256(JSON.stringify(texts)), vectors })));
+  console.log(JSON.stringify({ model, dims, texts: texts.length, approx_cl100k_tokens: tokens, out: outPath }));
 }
 
 // ---------------------------------------------------------------------------
@@ -310,17 +339,18 @@ function judge(g: Gate, stats: ReturnType<typeof pairedStats>): 'pass' | 'fail' 
   return ok ? 'pass' : bad ? 'fail' : 'inconclusive';
 }
 
-async function run(embeddingsPath: string, outDir: string | null): Promise<void> {
+async function run(embeddingsPath: string, outDir: string | null, taus: number[] = TAUS, decisionId = 'c2-interleave-dev'): Promise<void> {
   const companies = buildFixture();
   const texts = fixtureTexts(companies);
   const store = loadEmbeddings(embeddingsPath, texts);
   resetGateway();
   configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: store.dims, env: { OPENAI_API_KEY: 'sk-offline-c2-eval-no-network' } });
-  const model = `local:${store.model}`;
+  const model = store.model.includes(':') ? store.model : `local:${store.model}`;
+  const sweep: Array<Record<string, unknown>> = [];
   const sources: unknown[] = [];
   const summary: Record<string, unknown> = {};
   const allVerdicts: string[] = [];
-  for (const tau of TAUS) {
+  for (const tau of taus) {
     const arms = {} as Record<CandidateFusion, ArmResult>;
     for (const mode of MODES) arms[mode] = await replay(store.dims, model, t => store.get(t), companies, mode, tau);
     const A = arms.rrf_free;
@@ -348,11 +378,36 @@ async function run(embeddingsPath: string, outDir: string | null): Promise<void>
         false_supersession: ps.filter(p => p.outcome === 'false_supersession').length, twin_in_candidates: ps.filter(p => p.has_twin && p.twin_in_candidates).length,
         with_twin: ps.filter(p => p.has_twin).length }];
     }));
-    const falseHits = (arm: ArmResult) => arm.probes.filter(p => p.outcome === 'false_supersession').map(p => `${p.kind}->${p.hit_key}`);
+    const falseHits = (arm: ArmResult) => {
+      const counts: Record<string, number> = {};
+      for (const p of arm.probes.filter(x => x.outcome === 'false_supersession')) {
+        const k = `${p.kind}->${p.hit_key!.split('|')[0]}`;
+        counts[k] = (counts[k] ?? 0) + 1;
+      }
+      return counts;
+    };
+    for (const mode of MODES) {
+      const ps = arms[mode].probes;
+      const rate = (num: number, den: number) => den === 0 ? null : round(num / den);
+      const corr = ps.filter(p => p.has_twin && (p.kind === 'correction' || p.kind === 'concurrent' || p.kind === 'private_correction'));
+      const rest = ps.filter(p => p.has_twin && p.kind === 'restatement');
+      const coex = ps.filter(p => p.kind === 'coexisting');
+      const kept = Object.values(arms[mode].preserved);
+      sweep.push({
+        threshold: tau, arm: mode,
+        correction_miss_rate: rate(corr.filter(p => p.outcome === 'missed').length, corr.length),
+        restatement_miss_rate: rate(rest.filter(p => p.outcome === 'missed').length, rest.length),
+        coexisting_false_supersession_rate: rate(coex.filter(p => p.outcome === 'false_supersession').length, coex.length),
+        false_supersession_rate: rate(ps.filter(p => p.outcome === 'false_supersession').length, ps.length),
+        preserved_distinct_share: rate(kept.reduce((n, k) => n + k.preserved, 0), kept.reduce((n, k) => n + k.claims, 0)),
+        correct_decision_rate: rate(ps.filter(p => p.outcome === 'correct').length, ps.length),
+        stale_single_value_claims_at_end: arms[mode].stale_claims,
+      });
+    }
     sources.push({
       source: `c2-twin-fixture-tau-${tau}`, verdict, threshold: tau,
       arms: { baseline: { config: { [CANDIDATE_FUSION_KEY]: 'rrf_free' } }, candidate: { config: { [CANDIDATE_FUSION_KEY]: 'interleave' } } },
-      family: { family_id: `c2-interleave-dev:tau-${tau}`, verdict, alpha: 0.05, comparisons },
+      family: { family_id: `${decisionId}:tau-${tau}`, verdict, alpha: 0.05, comparisons },
       diagnostics: {
         by_kind: { rrf_free: byKind(A), interleave: byKind(B) },
         false_supersession_hits: { rrf_free: falseHits(A), interleave: falseHits(B) },
@@ -375,19 +430,43 @@ async function run(embeddingsPath: string, outDir: string | null): Promise<void>
     gbrain_git_head: Bun.spawnSync(['git', 'rev-parse', 'HEAD']).stdout.toString().trim() || null,
     gbrain_tree_dirty: Bun.spawnSync(['git', 'status', '--porcelain', '--', 'src']).stdout.toString().trim() !== '',
   };
+  // Preregistered pick (rrf_free, the default arm): the lowest correction miss
+  // rate whose false supersession stays at or under 1% of probes and whose
+  // preserved distinct claims stay at or over 99.5%; plus the equal-weight
+  // balance (correction miss + coexisting false supersession).
+  const base = sweep.filter(r => r.arm === 'rrf_free');
+  const num = (r: Record<string, unknown>, k: string) => Number(r[k] ?? 0);
+  const safe = base.filter(r => num(r, 'false_supersession_rate') <= 0.01 && num(r, 'preserved_distinct_share') >= 0.995);
+  const pickMin = (rows: Array<Record<string, unknown>>, f: (r: Record<string, unknown>) => number) =>
+    rows.length === 0 ? null : rows.reduce((a, b) => f(b) < f(a) ? b : a).threshold;
+  const thresholdPick = {
+    rule: 'lowest correction miss rate with false supersession <= 1% of probes and preserved distinct claims >= 99.5% (rrf_free arm); balanced = argmin(correction miss + coexisting false supersession)',
+    guarded: pickMin(safe, r => num(r, 'correction_miss_rate')),
+    balanced: pickMin(base, r => num(r, 'correction_miss_rate') + num(r, 'coexisting_false_supersession_rate')),
+    product: EXPLICIT_DUPLICATE_THRESHOLD,
+  };
   const decidedAt = new Date().toISOString();
   const verdictJson = {
-    decision_id: 'c2-interleave-dev', plan: 'MEMORY_PROOF_WAVE C2', stage: 'dev', eligible_for_default: false,
-    eligibility_note: 'Dev verdict on a synthetic, offline fixture with a local embedding model; it cannot set a default. The parent wave decides facts.candidate_fusion.',
-    verdict_type: 'quality', overall, decided_at: decidedAt, fixture, sources,
+    decision_id: decisionId, plan: 'MEMORY_PROOF_WAVE C2', stage: 'dev', eligible_for_default: false,
+    eligibility_note: 'Dev verdict on a synthetic fixture; it cannot set a default. The parent wave routes facts.candidate_fusion and the supersession threshold.',
+    verdict_type: 'quality', overall, decided_at: decidedAt, fixture, threshold_sweep: sweep, threshold_pick: thresholdPick, sources,
   };
-  console.log(JSON.stringify({ overall, fixture, summary }, null, 2));
+  console.log(JSON.stringify({ overall, fixture, threshold_pick: thresholdPick, sweep }, null, 2));
   if (!outDir) return;
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, 'verdict.json'), JSON.stringify(verdictJson, null, 2) + '\n');
 }
 
 const round = (x: number) => Math.round(x * 10_000) / 10_000;
+
+/** `0.80:0.97:0.01` (inclusive range) or `0.85,0.9,0.95`. */
+function thresholdRange(spec: string): number[] {
+  if (!spec.includes(':')) return spec.split(',').map(Number);
+  const [lo, hi, step] = spec.split(':').map(Number);
+  const out: number[] = [];
+  for (let i = 0; lo + i * step <= hi + 1e-9; i++) out.push(Math.round((lo + i * step) * 1000) / 1000);
+  return out;
+}
 
 if (import.meta.main) {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -397,10 +476,17 @@ if (import.meta.main) {
   } else if (cmd === 'run') {
     const arg = (flag: string) => { const i = rest.indexOf(flag); return i >= 0 ? rest[i + 1] : null; };
     const embeddings = arg('--embeddings');
-    if (!embeddings) { console.error('run needs --embeddings <file> (make it with scripts/eval-c2-embed.py)'); process.exit(2); }
-    await run(embeddings, arg('--out'));
+    if (!embeddings) { console.error('run needs --embeddings <file> (make it with scripts/eval-c2-embed.py or the embed command)'); process.exit(2); }
+    const range = arg('--taus');
+    const taus = range ? thresholdRange(range) : TAUS;
+    await run(embeddings, arg('--out'), taus, arg('--decision-id') ?? 'c2-interleave-dev');
+  } else if (cmd === 'embed') {
+    const arg = (flag: string) => { const i = rest.indexOf(flag); return i >= 0 ? rest[i + 1] : null; };
+    const model = arg('--model'); const dims = Number(arg('--dims')); const out = arg('--out');
+    if (!model || !Number.isInteger(dims) || !out) { console.error('embed needs --model <provider:model> --dims <n> --out <file> (paid provider calls)'); process.exit(2); }
+    await embedWithGateway(model, dims, out);
   } else {
-    console.error('usage: bun scripts/eval-c2-candidate-fusion.ts texts | run --embeddings <file> [--out <dir>]');
+    console.error('usage: bun scripts/eval-c2-candidate-fusion.ts texts | embed --model m --dims n --out f | run --embeddings <file> [--taus 0.80:0.97:0.01] [--decision-id id] [--out <dir>]');
     process.exit(2);
   }
 }
