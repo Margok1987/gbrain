@@ -1,8 +1,14 @@
 # Entity-anchored retrieval in query and search: verdict
 
-Not yet measured. The gates below were written and pushed before any gated run. The change sits behind
-`search.entity_anchoring`, which is off by default; with the key off, `query` and `search` return what they
-returned before.
+Entity anchoring passes gates 1 and 2 here. `search.entity_anchoring` stays off until the harness lane's gate 3
+(dev slices, then validation) passes, and that run has not happened. On the seeded appended-corrections
+workload (3 seeds, embeddings on), turning the key on lifted `query` + reader at equal tokens from 88.4% to
+100% accuracy, from 11.6% to 0% stale-wrong answers, and from 0.139 to 0 batches of freshness lag. Turning it on
+lowered no question's recall in the existing evals that cover `query`, but on their as-written questions it
+never fired, so that pass shows only that nothing else moves.
+
+Measured build: gbrain 2fa44f149 (the `capy/mpw-integration` branch). c4add4176 moves the op seam into
+`entity-anchor.ts` with no change in behavior. Stage: dev.
 
 ## The change
 
@@ -29,6 +35,67 @@ callers now share it (`entityAnchoredPages`).
   - `src/core/questions/refresh.ts`: `anchoredSlugs` now calls the shared function with the same SQL.
   - `src/core/types.ts`: the optional `SearchResult.entity_anchored` field.
   - `src/core/config.ts`: the key registration.
+
+## Results
+
+### Gate 1: seeded workload (pass)
+
+Every state of every seed triggered anchoring (216 of 216). Each cell is the mean across seeds 42, 7 and 1234,
+with the min and max in brackets.
+
+| Arm | Accuracy | Stale-wrong | Freshness lag (batches) | Correct at change | $ per correct |
+|---|---|---|---|---|---|
+| **key on, equal tokens** | 1.000 [1.000, 1.000] | 0.000 | 0.000 | 1.000 | 0.00127 |
+| key off, equal tokens | 0.884 [0.875, 0.903] | 0.116 [0.097, 0.125] | 0.139 [0.117, 0.150] | 0.861 [0.850, 0.883] | 0.00133 |
+| key on, full evidence | 1.000 | 0.000 | 0.000 | 1.000 | 0.00230 |
+| key off, full evidence | 0.981 [0.972, 0.986] | 0.009 [0.000, 0.028] | 0.022 [0.017, 0.033] | 0.978 [0.967, 0.983] | 0.00235 |
+
+| Seed | Accuracy on / off | Lag on / off | Wins | Accuracy lower |
+|---|---|---|---|---|
+| 42 | 1.000 / 0.875 | 0.000 / 0.150 | yes | no |
+| 7 | 1.000 / 0.903 | 0.000 / 0.117 | yes | no |
+| 1234 | 1.000 / 0.875 | 0.000 / 0.150 | yes | no |
+
+- The key-off arm reproduces run 3's query + reader arm (0.884), so the comparison sits on a known baseline.
+- At equal tokens, anchoring puts the newest note about the entity inside the budget. Off, keyword and vector
+  ranking often surface an older note first, and the reader repeats the superseded city.
+- Cost per correct answer falls slightly (0.00127 against 0.00133), because the reader reads the same tokens
+  and is right more often.
+- **Caveat.** This workload was built around exactly this failure mode, so every question is an entity-scoped
+  current-state question. It shows the mechanism works; it cannot say how often real questions take this shape.
+  Gate 3 measures that.
+
+Metered spend: $1.52 of the $10 cap. Voyage embedding and rerank calls are not metered.
+
+### Gate 2: existing retrieval evals (pass)
+
+All corpora were run through the `query` op, keyword-only and hermetic. Recall@10 and MRR are shown key on /
+key off.
+
+| Corpus | Questions | Anchoring fired | Recall@10 lower | Recall@10 higher | Recall@10 on / off | MRR on / off |
+|---|---|---|---|---|---|---|
+| namedthing | 12 | 0 | 0 | 0 | 0.917 / 0.917 | 1.000 / 1.000 |
+| namedthing+now | 12 | 0 | 0 | 0 | 0.833 / 0.833 | 0.917 / 0.917 |
+| relational | 38 | 0 | 0 | 0 | 1.000 / 1.000 | 0.289 / 0.289 |
+| relational+now | 38 | 24 | 0 | 8 | 0.136 / 0.000 | 0.096 / 0.000 |
+| longmemeval-nightly | 10 | 0 | 0 | 0 | 1.000 / 1.000 | 1.000 / 1.000 |
+| longmemeval-nightly+now | 10 | 0 | 0 | 0 | 1.000 / 1.000 | 1.000 / 1.000 |
+
+- The `+now` rows are a diagnostic, not the gate: each question has " now" appended so anchoring can fire.
+  On the relational fixture it fired on 24 of 38 questions. 8 gained recall and none lost.
+  NamedThingBench titles are not entity pages, and the LongMemEval nightly fixture has none either, so
+  anchoring never fires there.
+- No hard-negative question lost its clean top 3.
+- **Key off matches the build without the change.** Every key-off response in this script, 120 rows across the
+  corpora, matches the same script run on the pre-change code. The only differences are fields that vary
+  between any two runs: scores carry a recency term computed from the clock, and page revisions are random
+  UUIDs.
+- Reproduce: `bun evals/entity-anchoring/regression.ts --json`.
+
+## Where else this applies
+
+The pinned-questions run 3 also recommended think's gather for current-state questions about one entity, and
+context_pack's entity cards. Neither is built. Each needs its own gate.
 
 ## Gates (preregistered)
 
@@ -60,6 +127,17 @@ callers now share it (`entityAnchoredPages`).
 **Decision.** The key becomes default-on only if gates 1 and 2 pass here and gate 3 passes in the harness
 lane. Until then it stays off. The cap for gates 1 and 2 is $10.
 
+## Reproduce
+
+```bash
+bun evals/entity-anchoring/query-gate.ts --plan --seeds 42,7,1234 --embeddings voyage:voyage-4
+bun evals/entity-anchoring/query-gate.ts --run --yes --max-usd 4 --seeds 42,7,1234 --entities 6 \
+  --reader-model anthropic:claude-sonnet-5-5 --embeddings voyage:voyage-4 --json
+bun evals/entity-anchoring/regression.ts --json
+```
+
 ## Changelog
+
+- 2026-10-05: gates 1 and 2 pass on 2fa44f149. The key stays off pending gate 3.
 
 - 2026-10-05: gates preregistered before any gated run.
