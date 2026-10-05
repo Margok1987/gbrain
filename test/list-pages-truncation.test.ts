@@ -33,6 +33,7 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { operations, type OperationContext } from '../src/core/operations.ts';
 import { dispatchToolCall, __resetBackupNoticeForTests } from '../src/mcp/dispatch.ts';
+import { __resetFactsDrainNoticesForTests } from '../src/core/facts/drain.ts';
 import type { ListPagesPagination } from '../src/core/ops/list-pages-pagination.ts';
 
 const list_pages = operations.find(o => o.name === 'list_pages')!;
@@ -236,6 +237,8 @@ describe('list_pages pagination meta for remote callers', () => {
 
   test('MCP dispatch: content[0] stays the bare array; the listing_truncated notice names the next call', async () => {
     __resetBackupNoticeForTests();
+    // Process-wide one-shot notices another file in the same shard may have queued.
+    __resetFactsDrainNoticesForTests();
     await seed(12);
     const opts = { remote: true, transport: 'stdio' as const, sourceId: 'default' };
     const res = await dispatchToolCall(engine as any, 'list_pages', { limit: 10, type: 'note' }, opts);
