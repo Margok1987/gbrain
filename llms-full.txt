@@ -9065,6 +9065,15 @@ degraded_reason?, budget_tokens?, budget_used?, dropped_count? }`. `text` is the
 pre-rendered, envelope-wrapped injectable block; with `budget_tokens` it is
 rendered from the packed sets and never exceeds the declared budget.
 
+Two optional fields carry pinned-question answers
+([pinned questions](../guides/pinned-questions.md)) for owner-capable callers
+(the local CLI, or a connection that reads private pages and is not
+slug-fenced): `pinned_questions[]` (`{ id, question, answer[], freshness }`,
+fresh sentences of published pins scoped to a packed entity) and `withheld`
+(`{ stale_sentences, question_ids[], refresh_command }`, the sentences left out
+because their evidence changed or is unreadable). Both are outside `text` and
+the budget; every other caller gets neither.
+
 ### delta(since?, entities?, budget_tokens?, session_id?, include_private?) — read, zero LLM
 
 "What changed since T" for heartbeats — pages updated after

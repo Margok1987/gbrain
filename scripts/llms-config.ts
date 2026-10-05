@@ -150,6 +150,13 @@ export const SECTIONS: DocSection[] = [
         includeInFull: false,
       },
       {
+        title: "docs/guides/pinned-questions.md",
+        description:
+          "Pinned questions: cited answers kept current from your notes (`gbrain questions pin|list|status|refresh|unpin`, `questions_*` MCP tools), read-time staleness, receipts and blocked reasons, owner-private visibility, consent for paid refresh, the standing_questions phase and the dream.auto_think migration.",
+        path: "docs/guides/pinned-questions.md",
+        includeInFull: false,
+      },
+      {
         title: "docs/guides/live-sync.md",
         description: "Incremental markdown sync setup.",
         path: "docs/guides/live-sync.md",
