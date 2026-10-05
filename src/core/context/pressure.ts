@@ -143,7 +143,7 @@ export function pressureNotice(percent: number): string {
     'Skip anything already saved, secrets, and anything the user asked not to keep. This notice appears once per compaction.';
 }
 
-interface PressureState { segment: string; warned: boolean; maxSeen: number }
+interface PressureState { segment: string; warned: boolean; maxSeen: number; lastUsed: number }
 
 function stateFile(dir: string, sessionKey: string): string {
   return join(dir, `${sessionKey.replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 120) || 'session'}.json`);
@@ -152,7 +152,7 @@ function stateFile(dir: string, sessionKey: string): string {
 function readState(path: string): PressureState | null {
   try {
     const s = JSON.parse(readFileSync(path, 'utf8')) as Partial<PressureState>;
-    return typeof s.segment === 'string' ? { segment: s.segment, warned: s.warned === true, maxSeen: Number(s.maxSeen) || 0 } : null;
+    return typeof s.segment === 'string' ? { segment: s.segment, warned: s.warned === true, maxSeen: Number(s.maxSeen) || 0, lastUsed: Number(s.lastUsed) || 0 } : null;
   } catch { return null; }
 }
 
@@ -163,6 +163,22 @@ function writeState(path: string, dir: string, state: PressureState): void {
     writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
     renameSync(tmp, path);
   } catch { /* best-effort: a lost state file can only re-fire one notice */ }
+}
+
+/** Fill at which harnesses compact automatically (Claude Code compacts a little before the window is full). */
+export const AUTO_COMPACT_RATIO = 0.92;
+/** Turns of headroom the notice leaves: warn when this many more turns like the last one would reach the compaction point. */
+export const HEADROOM_TURNS = 2;
+
+/**
+ * Warn at `warnRatio` fill, or earlier when the context grows fast: when
+ * HEADROOM_TURNS more turns of the size just seen would reach the automatic
+ * compaction point, the next turn may already be compacted.
+ */
+export function shouldWarn(o: { used: number; window: number; warnRatio: number; growth: number }): boolean {
+  if (o.window <= 0) return false;
+  if (o.used / o.window >= o.warnRatio) return true;
+  return o.growth > 0 && (o.used + HEADROOM_TURNS * o.growth) / o.window >= AUTO_COMPACT_RATIO;
 }
 
 export interface PressureDecision { notice: string | null; percent: number; window: number; reason?: string }
@@ -196,9 +212,10 @@ export function decidePressure(input: {
   const ratio = input.usedTokens / window;
   const percent = Math.min(99, Math.round(ratio * 100));
   const warned = sameSegment && prev?.warned === true;
-  const fire = ratio >= gate.warn_ratio && !warned;
-  const next: PressureState = { segment, warned: warned || fire, maxSeen };
-  if (!prev || prev.segment !== next.segment || prev.warned !== next.warned || prev.maxSeen !== next.maxSeen) writeState(path, input.stateDir, next);
+  const growth = sameSegment && prev ? Math.max(0, input.usedTokens - prev.lastUsed) : 0;
+  const fire = shouldWarn({ used: input.usedTokens, window, warnRatio: gate.warn_ratio, growth }) && !warned;
+  const next: PressureState = { segment, warned: warned || fire, maxSeen, lastUsed: input.usedTokens };
+  if (!prev || prev.segment !== next.segment || prev.warned !== next.warned || prev.maxSeen !== next.maxSeen || prev.lastUsed !== next.lastUsed) writeState(path, input.stateDir, next);
   if (warned) return { notice: null, percent, window, reason: 'already_warned' };
   return fire ? { notice: pressureNotice(percent), percent, window } : { notice: null, percent, window, reason: 'below_threshold' };
 }

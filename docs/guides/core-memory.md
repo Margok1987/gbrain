@@ -110,9 +110,10 @@ Two pieces cover that:
   is then saved as its own write and reported with its own status, and
   `partial: true` marks a batch where some items failed. Replaying the same
   `request_id` replays the same per-item outcomes.
-- When a session's context is about 80% full, the next prompt carries one
-  notice telling the agent to save what matters now with `remember` and
-  `items`. It fires once per compaction segment, only when `remember` is
+- When a session's context is about 80% full, or sooner when it is growing
+  fast (two more turns the size of the last one would reach the automatic
+  compaction point), the next prompt carries one notice telling the agent to
+  save what matters now with `remember` and `items`. It fires once per compaction segment, only when `remember` is
   callable, and follows the capture policy (TTL, visibility, exclusions).
   Turn it off with `gbrain config set memory.pressure.enabled false`.
 

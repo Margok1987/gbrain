@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  decidePressure, readTranscriptPressure, resolveContextWindow, scanTranscriptPressure, validatePressureConfigValue,
+  decidePressure, readTranscriptPressure, resolveContextWindow, scanTranscriptPressure, shouldWarn, validatePressureConfigValue,
   type PressureGate,
 } from '../src/core/context/pressure.ts';
 
@@ -80,5 +80,31 @@ describe('window and decision', () => {
     expect(validatePressureConfigValue('memory.pressure.context_window', '32000')).toBeNull();
     expect(validatePressureConfigValue('memory.pressure.context_window', 'big')).not.toBeNull();
     expect(validatePressureConfigValue('memory.pressure.enabled', 'maybe')).not.toBeNull();
+  });
+});
+
+describe('growth-aware trigger', () => {
+  test('warns before the ratio when two more turns of the last size would reach the compaction point', () => {
+    const stateDir = tmp();
+    const base = { gate, sessionKey: 'g1', stateDir, model: null, boundary: null };
+    expect(decidePressure({ ...base, usedTokens: 100_000 }).notice).toBeNull();
+    // +40k in one turn: 140k + 2 x 40k = 220k >= 0.92 x 200k, though 140k is only 70% full.
+    const early = decidePressure({ ...base, usedTokens: 140_000 });
+    expect(early.notice).not.toBeNull();
+    expect(early.percent).toBe(70);
+  });
+
+  test('slow growth below the ratio stays quiet', () => {
+    const stateDir = tmp();
+    const base = { gate, sessionKey: 'g2', stateDir, model: null, boundary: null };
+    decidePressure({ ...base, usedTokens: 100_000 });
+    expect(decidePressure({ ...base, usedTokens: 105_000 }).notice).toBeNull();
+  });
+
+  test('shouldWarn bounds', () => {
+    expect(shouldWarn({ used: 160, window: 200, warnRatio: 0.8, growth: 0 })).toBe(true);
+    expect(shouldWarn({ used: 100, window: 200, warnRatio: 0.8, growth: 0 })).toBe(false);
+    expect(shouldWarn({ used: 100, window: 200, warnRatio: 0.8, growth: 42 })).toBe(true);
+    expect(shouldWarn({ used: 10, window: 0, warnRatio: 0.8, growth: 99 })).toBe(false);
   });
 });

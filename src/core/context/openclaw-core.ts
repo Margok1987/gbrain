@@ -3,10 +3,11 @@
  * notice (core-memory.ts, pressure.ts). One read-only core fetch per TTL
  * window, shared across sessions of the process (core is per brain + source,
  * not per session); staleness of at most CORE_MEMO_TTL_MS is accepted. The
- * pressure notice fires once per session until its next compaction, only
- * when a remember tool is available.
+ * pressure notice fires once per session until its next compaction (at the
+ * warn ratio, or earlier when the context grows fast), only when a remember
+ * tool is available.
  */
-import { pressureNotice, type PressureGate } from './pressure.ts';
+import { pressureNotice, shouldWarn, type PressureGate } from './pressure.ts';
 
 export const CORE_MEMO_TTL_MS = 60_000;
 
@@ -30,6 +31,7 @@ export interface OpenClawCoreLane {
 export function createOpenClawCoreLane(opts: { workspaceDir?: string; timeoutMs: number }): OpenClawCoreLane {
   let memo: { at: number; value: CoreFetch } | null = null;
   const warned = new Set<string>();
+  const lastTokens = new Map<string, number>();
 
   async function fetchCore(sessionId: string | null): Promise<CoreFetch | null> {
     const work = (async (): Promise<CoreFetch | null> => {
@@ -90,8 +92,10 @@ export function createOpenClawCoreLane(opts: { workspaceDir?: string; timeoutMs:
       const window = gate?.context_window ?? tokenBudget ?? 0;
       const key = sessionId ?? 'default';
       const rememberTool = [...(availableTools ?? [])].some((t) => /(^|[_.:-])remember$/.test(t));
-      if (gate?.enabled && rememberTool && window > 0 && !warned.has(key)
-        && process.env.GBRAIN_PRESSURE !== '0' && estimatedTokens / window >= gate.warn_ratio) {
+      const growth = Math.max(0, estimatedTokens - (lastTokens.get(key) ?? estimatedTokens));
+      lastTokens.set(key, estimatedTokens);
+      if (gate?.enabled && rememberTool && window > 0 && !warned.has(key) && process.env.GBRAIN_PRESSURE !== '0'
+        && shouldWarn({ used: estimatedTokens, window, warnRatio: gate.warn_ratio, growth })) {
         warned.add(key);
         out.push(pressureNotice(Math.min(99, Math.round((estimatedTokens / window) * 100))));
       }
@@ -99,6 +103,7 @@ export function createOpenClawCoreLane(opts: { workspaceDir?: string; timeoutMs:
     },
     compacted(sessionId) {
       warned.delete(sessionId ?? 'default');
+      lastTokens.delete(sessionId ?? 'default');
     },
   };
 }
