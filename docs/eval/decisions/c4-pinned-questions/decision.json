@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "decision_id": "c4-pinned-questions",
+  "plan": "MEMORY_PROOF_WAVE C4 + B5",
+  "title": "Pinned questions: B5 safety gate and benefit gate (lifecycle dollars per correct fresh answer)",
+  "verdict_type": "cost_quality",
+  "stage": "dev",
+  "candidate": {
+    "gbrain": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+    "arm": "pinned",
+    "config": {
+      "models.standing_questions": "anthropic:claude-opus-4-7",
+      "cycle.standing_questions.cooldown_days": "0"
+    }
+  },
+  "baselines": [
+    {
+      "gbrain": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+      "arm": "query_reader",
+      "note": "hybrid query (keyword-only: no embedding key in the harness brain) at the pinned answer's delivered-token budget, then one reader call"
+    },
+    {
+      "gbrain": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+      "arm": "think",
+      "note": "on-demand think per read with the default deep model"
+    }
+  ],
+  "models": {
+    "answer_and_refresh": "anthropic:claude-opus-4-7",
+    "think": "anthropic:claude-opus-4-7",
+    "reader": "anthropic:claude-sonnet-5-5",
+    "selection": "answer/refresh and think: gbrain's default for questions (models.standing_questions -> deep tier); reader: the B-suite fixed reader"
+  },
+  "sources": [
+    {
+      "kind": "seeded-workload",
+      "id": "pinned-questions-benefit",
+      "generator": "evals/pinned-questions/benefit-gate.ts generateWorkload",
+      "seed": 42,
+      "entities": 6,
+      "write_batches": 4,
+      "workload_hash": "9428f19ffe229e66",
+      "engine": "pglite"
+    }
+  ],
+  "frozen_reads_per_write": [
+    1,
+    10
+  ],
+  "metrics": [
+    "usd_per_correct_fresh_answer",
+    "correct",
+    "stale_wrong",
+    "break_even_reads"
+  ],
+  "safety_gate": {
+    "suite": "test/helpers/pinned-questions-scenarios.ts",
+    "engines": [
+      "pglite",
+      "postgres"
+    ],
+    "required": "zero stale-sentence or cross-grant leakage on every surface"
+  },
+  "budget": {
+    "max_usd": 40,
+    "metered_spend_usd": 2.3402
+  },
+  "reproduce": "bun evals/pinned-questions/benefit-gate.ts --run --yes --max-usd 40 --entities 6 --batches 4 --seed 42 --reader-model anthropic:claude-sonnet-5-5 --json"
+}
