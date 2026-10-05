@@ -287,7 +287,7 @@ export function applyBacklinkBoost(
       // pages whose inbound degree is far above the half degree H. `off` /
       // undefined → weight 1, byte-identical to the undampened factor.
       const weight = hubWeight(count, halfDegree);
-      const factor = 1.0 + BACKLINK_BOOST_COEF * Math.log(1 + count) * weight;
+      const factor = Math.min(1.02, 1.0 + BACKLINK_BOOST_COEF * Math.log(1 + count) * weight);
       r.score *= factor;
       // v0.40.4 attribution stamp (D12=A) — formatter reads this for
       // --explain output. Stays undefined when count == 0 so the

@@ -377,14 +377,14 @@ export async function applyGraphSignals(
     const degree = opts.degrees?.get(r.page_id) ?? 0;
     const weight = fires ? hubWeight(degree, halfDegree) : 1;
     if (row.hits >= ADJACENCY_MIN_HITS) {
-      const factor = dampenBoost(ADJACENCY_BOOST, degree, halfDegree);
+      const factor = Math.min(1.02, dampenBoost(ADJACENCY_BOOST, degree, halfDegree));
       r.score *= factor;
       r.graph_adjacency_hits = row.hits;
       r.graph_adjacency_boost = factor;
       meta.adjacency_fires++;
     }
     if (row.cross_source_hits >= CROSS_SOURCE_MIN_HITS) {
-      const factor = dampenBoost(CROSS_SOURCE_BOOST, degree, halfDegree);
+      const factor = Math.min(1.02, dampenBoost(CROSS_SOURCE_BOOST, degree, halfDegree));
       r.score *= factor;
       r.graph_cross_source_hits = row.cross_source_hits;
       r.graph_cross_source_boost = factor;
