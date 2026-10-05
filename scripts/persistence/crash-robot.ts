@@ -236,6 +236,16 @@ async function checkAbsorbedOnce(model: ReferenceModel, stage: string): Promise<
 }
 
 /**
+ * A git effect has settled once it is not running and carries an error code
+ * that is not a transient yield. `publication_pending` is the bounded yield a
+ * short commit group takes while publications for its worktree are still
+ * queued (effects.ts), so it is still in motion, not a final error.
+ */
+export function gitEffectSettled(e: { state: string; error_code: string | null }): boolean {
+  return e.state !== 'running' && !!e.error_code && e.error_code !== 'publication_pending';
+}
+
+/**
  * Process faults SIGKILL cannot model. Each must end in a terminal state or a
  * typed, agent-facing error, never a wedge, and must clear once the fault does.
  */
@@ -250,7 +260,7 @@ async function processFault(config: RobotConfig, world: World, model: ReferenceM
     await runSteps(world, model, config.schedule);
     const deadline = Date.now() + 30_000;
     let stuck = await gitEffects();
-    while (Date.now() < deadline && stuck.some(e => e.state === 'running' || !e.error_code)) { await Bun.sleep(250); stuck = await gitEffects(); }
+    while (Date.now() < deadline && stuck.some(e => !gitEffectSettled(e))) { await Bun.sleep(250); stuck = await gitEffects(); }
     for (const e of stuck) if (!e.error_code || !typedGitErrors.has(e.error_code)) {
       model.violate({ class: 'wedge', detail: `stale index.lock: git effect ${e.id} is ${e.state} without a typed error (${e.error_code})` });
     }

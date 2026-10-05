@@ -22,7 +22,7 @@ import { ReferenceModel } from '../scripts/persistence/model.ts';
 import { crossBoundarySequences, randomSchedule } from '../scripts/persistence/generator.ts';
 import { ROBOT_TOPOLOGY, restrict } from '../scripts/persistence/robot-driver.ts';
 import { shrinkRun } from '../scripts/persistence/shrink.ts';
-import { runSchedule, runSteps } from '../scripts/persistence/crash-robot.ts';
+import { gitEffectSettled, runSchedule, runSteps } from '../scripts/persistence/crash-robot.ts';
 import { installLockOrderTrace, lockOrderReport } from '../scripts/persistence/lock-order.ts';
 import { prepareTopology } from '../scripts/persistence/history-fixture.ts';
 import { claimPersistenceEffect, releaseAbandonedClaims } from '../src/core/persistence/effect-journal.ts';
@@ -207,4 +207,12 @@ describe('PGLite releases claims a dead owner left behind', () => {
       expect(row).toEqual({ state: 'queued', token: null });
     });
   }, 60_000);
+});
+
+test('stale-index-lock probe keeps waiting through the transient publication_pending yield', () => {
+  expect(gitEffectSettled({ state: 'queued', error_code: 'publication_pending' })).toBe(false);
+  expect(gitEffectSettled({ state: 'running', error_code: null })).toBe(false);
+  expect(gitEffectSettled({ state: 'queued', error_code: null })).toBe(false);
+  expect(gitEffectSettled({ state: 'queued', error_code: 'git_index_stale' })).toBe(true);
+  expect(gitEffectSettled({ state: 'queued', error_code: 'git_index_locked' })).toBe(true);
 });
