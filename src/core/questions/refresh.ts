@@ -66,7 +66,8 @@ export type RefreshOutcome =
 
 export const EST_INPUT_TOKENS = 8_000;
 export const MAX_OUTPUT_TOKENS = 2_000;
-const MAX_PAGES = 12;
+const MAX_PAGES = 16;
+const MAX_ANCHORED = 10;
 const MAX_FACTS = 30;
 const MAX_TIMELINE = 20;
 const MAX_TAKES = 20;
@@ -143,16 +144,49 @@ function launderingIndex(rows: PublishedAnswer[]): Array<{ text: string; at: num
 
 interface CandidatePage { id: number; slug: string; source_id: string; generation: string | number; revision: string | null; type: string; compiled_truth: string; marker: boolean; updated_at: Date | string }
 
-/** Pages first (hybrid retrieval, keyword fallback), then facts, timeline and takes anchored to them. */
+const escapeRegex = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Pages anchored to the pin's scope, newest first: for an entity, its own page
+ * and every page that links to it or names it as a word; for a slug prefix,
+ * the newest pages under it. Keyword retrieval alone ranks every page that
+ * shares the question's words alike, so the newest note about the entity can
+ * fall outside the window once notes accumulate.
+ */
+async function anchoredSlugs(engine: BrainEngine, pin: PinRow): Promise<string[]> {
+  if (pin.scope_entity) {
+    const [entity] = await engine.executeRaw<{ id: number; title: string | null }>(
+      'SELECT id, title FROM pages WHERE source_id = $1 AND slug = $2 AND deleted_at IS NULL', [pin.source_id, pin.scope_entity]);
+    const names = [...new Set([pin.scope_entity.split('/').pop()!, ...(entity?.title ? [entity.title] : [])].filter(n => n.length >= 3))];
+    const pattern = `\\m(${names.map(escapeRegex).join('|')})\\M`;
+    const rows = await engine.executeRaw<{ slug: string }>(
+      `SELECT p.slug FROM pages p WHERE p.source_id = $1 AND p.deleted_at IS NULL AND p.slug <> $2
+         AND p.type NOT IN ('question', 'synthesis') AND NOT (p.frontmatter ? '${PINNED_QUESTION_MARKER}')
+         AND (p.compiled_truth ~* $3 OR ($4::integer IS NOT NULL AND EXISTS (SELECT 1 FROM links l WHERE l.from_page_id = p.id AND l.to_page_id = $4::integer)))
+       ORDER BY COALESCE(p.effective_date, p.updated_at) DESC, p.id DESC LIMIT ${MAX_ANCHORED}`,
+      [pin.source_id, pin.scope_entity, pattern, entity?.id ?? null]);
+    return [pin.scope_entity, ...rows.map(r => r.slug)];
+  }
+  if (pin.scope_slug_prefix) {
+    const rows = await engine.executeRaw<{ slug: string }>(
+      `SELECT slug FROM pages WHERE source_id = $1 AND deleted_at IS NULL AND slug LIKE $2
+         AND type NOT IN ('question', 'synthesis') AND NOT (frontmatter ? '${PINNED_QUESTION_MARKER}')
+       ORDER BY COALESCE(effective_date, updated_at) DESC, id DESC LIMIT ${MAX_ANCHORED}`,
+      [pin.source_id, `${pin.scope_slug_prefix.replace(/[\\%_]/g, '\\$&')}%`]);
+    return rows.map(r => r.slug);
+  }
+  return [];
+}
+
+/** Pages first (scope-anchored newest, then hybrid retrieval with keyword fallback), then facts, timeline and takes anchored to them. */
 export async function retrieveEvidence(engine: BrainEngine, pin: PinRow): Promise<EvidenceItem[]> {
-  const slugs = new Set<string>();
+  const slugs = new Set<string>(await anchoredSlugs(engine, pin));
   try {
     const { hybridSearch } = await import('../search/hybrid.ts');
     for (const r of await hybridSearch(engine, pin.question, { sourceId: pin.source_id, limit: MAX_PAGES * 2, exclude_slug_prefixes: ['questions/'] })) slugs.add(r.slug);
   } catch {
     for (const r of await engine.searchKeyword(pin.question, { sourceId: pin.source_id, limit: MAX_PAGES * 2 }).catch(() => [])) slugs.add(r.slug);
   }
-  if (pin.scope_entity) slugs.add(pin.scope_entity);
   const candidates = slugs.size === 0 ? [] : await engine.executeRaw<CandidatePage>(
     `SELECT id, slug, source_id, generation, knowledge_revision::text AS revision, type, compiled_truth, updated_at,
        (frontmatter ? '${PINNED_QUESTION_MARKER}') AS marker

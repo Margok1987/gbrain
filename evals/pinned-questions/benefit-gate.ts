@@ -36,7 +36,7 @@ import { runPhaseStandingQuestions } from '../../src/core/questions/phase.ts';
 import { stubAnswerFor, type QuestionChatFn } from './stub.ts';
 
 export const READS_PER_WRITE = [1, 10] as const;
-const CITIES = ['Lisbon', 'Porto', 'Madrid', 'Seville', 'Lyon', 'Turin', 'Ghent', 'Bremen'];
+export const CITIES = ['Lisbon', 'Porto', 'Madrid', 'Seville', 'Lyon', 'Turin', 'Ghent', 'Bremen'];
 
 export interface Workload {
   seed: number;
@@ -85,14 +85,14 @@ export function workloadHash(w: Workload): string {
 }
 
 const question = (name: string) => `Which city does ${name} build widgets in?`;
-const priced = (model: string, input: number, output: number) => {
+export const priced = (model: string, input: number, output: number) => {
   const p = canonicalLookup(normalizeModelId(model)) ?? canonicalLookup(model);
   return p ? (input / 1e6) * p.input + (output / 1e6) * p.output : 0;
 };
-const tokens = (text: string) => Math.ceil(text.length / 4);
-const correctFor = (answer: string, gold: string) => answer.includes(gold);
+export const tokens = (text: string) => Math.ceil(text.length / 4);
+export const correctFor = (answer: string, gold: string) => answer.includes(gold);
 /** States a superseded value and not the current one (an answer that names both is counted correct, not stale). */
-const staleFor = (answer: string, gold: string, past: Set<string>) => !answer.includes(gold) && [...past].some(c => c !== gold && answer.includes(c));
+export const staleFor = (answer: string, gold: string, past: Set<string>) => !answer.includes(gold) && [...past].some(c => c !== gold && answer.includes(c));
 
 async function applyBatch(engine: BrainEngine, sourceId: string, batch: Workload['batches'][number]): Promise<void> {
   const ctx = { engine, config: { engine: engine.kind, embedding_disabled: true } as never, remote: false, sourceId, dryRun: false, logger: { info() {}, warn() {}, error() {} } };
@@ -106,7 +106,7 @@ async function applyBatch(engine: BrainEngine, sourceId: string, batch: Workload
   }
 }
 
-async function readerAnswer(reader: ReaderFn, model: string, q: string, context: string): Promise<ModelCall> {
+export async function readerAnswer(reader: ReaderFn, model: string, q: string, context: string): Promise<ModelCall> {
   return reader({ model, maxTokens: 200, system: 'Answer the question from the context only, in one sentence. If the context does not answer it, say "unknown".',
     user: `Question: ${q}\n\nContext:\n${context || '(none)'}` });
 }
