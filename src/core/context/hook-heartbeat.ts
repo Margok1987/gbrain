@@ -18,6 +18,7 @@ import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import type { ToolCallRecord } from '../transcripts/claude-code-jsonl.ts';
 import { ensureGbrainHome, resolveGbrainHome } from '../gbrain-home.ts';
+import { seatReasonHint } from './seat.ts';
 
 /** Heartbeat file line cap [S3#7]. */
 export const HEARTBEAT_MAX_LINES = 5000;
@@ -165,7 +166,8 @@ export async function writeHeartbeat(
       ...(entry.flush !== undefined ? { flush: entry.flush } : {}),
       ...(entry.pattern !== undefined ? { pattern: entry.pattern } : {}),
       ...(entry.fingerprint !== undefined ? { fingerprint: entry.fingerprint } : {}),
-      ...(entry.hint !== undefined ? { hint: entry.hint } : {}),
+      // A seat reason carries its fixed recovery hint even when the writer did not attach one.
+      ...((entry.hint ?? seatReasonHint(entry.reason)) !== undefined ? { hint: entry.hint ?? seatReasonHint(entry.reason) } : {}),
     });
     appendFileSync(p, line + '\n', { mode: 0o600 });
     if (opts?.trim === false) return;

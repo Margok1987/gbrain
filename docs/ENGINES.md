@@ -19,7 +19,7 @@ Different users have different constraints:
 | Researcher | Analytics, bulk exports, embeddings | DuckDBEngine (someday) |
 | Edge/mobile | Offline-first, sync later | PGLiteEngine + sync (someday) |
 
-The engine interface means we don't have to choose. PGLite is the zero-friction default. Supabase is the production scale path. `gbrain migrate --to supabase/pglite` moves between them.
+The engine interface means we don't have to choose. PGLite is the zero-friction default. Supabase is the production scale path. `gbrain migrate --to postgres` moves a PGLite brain to Postgres with its history ([guide](guides/move-to-postgres.md)); `gbrain migrate --to pglite` moves a brain without write history the other way.
 
 ## The interface
 
@@ -293,26 +293,47 @@ Details in INSTALL_FOR_AGENTS.md ("Engine preference for harness installs").
 | Concurrency | Single process | Connection pooling |
 | Backups | Manual (file copy) | Managed by Supabase |
 
-**Migration:** `gbrain migrate --to supabase` exports everything (pages, chunks, embeddings, links, tags, timeline, facts) and imports into Supabase. Config rows copy in full minus the engine-local denylist (`MIGRATE_CONFIG_ENGINE_LOCAL_KEYS`: the target-owned `engine`/`version` connection + schema ledger and the physical embedding-column registry keys); skipped keys are printed, never silent, and the run ends with a per-table copied-count summary. `gbrain migrate --to pglite` goes the other direction. The copy is lossless for what it carries, but it refuses two kinds of brain: a managed brain (`writer_coordinator_required`, "cannot mutate a managed brain through the legacy writer") and any brain with durable write history, fact withdrawals or canonical worktree ownership (rows in `persistence_requests`, `fact_withdrawals` or `persistence_worktrees`), because the copier cannot carry request IDs, withdrawals or ownership. A brain that has saved memory through the write coordinator (`remember`, `put_page` from an agent or a resident `gbrain serve`) has that history, so in practice `migrate --to` works only for brains that never used it. For those brains, keep the datastore and repair forward (`gbrain doctor`, `gbrain repair`) instead of migrating, and choose Postgres up front if you expect 1000+ files or several machines. An engine move that preserves request IDs, withdrawals, attribution, grants and ownership is planned, not shipped.
+**Migration:** on a PGLite brain, `gbrain migrate --to postgres` (alias `--to supabase`) graduates the brain to Postgres. Without `--yes` it prints the plan and exits 3; `--yes --expect <plan_hash>` runs it. Graduation drains pending writes, copies every table verbatim with its primary keys (pages, facts, takes, versions, links, timeline, embeddings, transcripts and paid caches, request history and withdrawals, token and OAuth rows) into a fenced target, verifies row counts and digests, runs `gbrain doctor` on the target, and only then flips routing. It works for brains with write history and for managed brains. The PGLite data dir is retained as `<path>.graduated-<run_id>` and a tombstone file takes its place. Walkthrough, recovery by error code, rollback and what stays on this computer: [Move a PGLite brain to Postgres](guides/move-to-postgres.md).
 
-The migration and the autopilot daemon do not race: `migrate --to` claims a
-cooperative pause marker before touching the target. The marker doubles as a
-migration mutex — a second concurrent migrate refuses to run, and a marker
-that cannot be written refuses the migration outright. Background job workers
-stop picking up new work while it is parked, and the migration waits for
-in-flight sync/embed/cycle work and running jobs to actually drain (watching
-the DB lock table, capped by `GBRAIN_MIGRATE_QUIESCE_SECONDS` — default 300;
-`0` skips the wait). Cleanup registers the moment the claim lands, so the
-marker is released on failure and on catchable signals; a marker orphaned by
-an uncleanly killed run is adopted by a later migrate only after a
-pid-liveness check (a live migrate's marker is never stolen), and the daemon
-clears an orphan whose owning process died on its next poll. `gbrain
-autopilot --status` reports `paused` (exit 1) while the marker is parked and
-prints the marker path; on a host with no daemon running to self-heal,
-remove an orphan by hand only after confirming the pid it names is dead.
-After a clean flip the daemon detects the engine change on its next
-tick and relaunches onto the new engine, and the migration warns if an
-exported connection-string env var would override the new config.
+**Say to your agent:** *"Upgrade my brain to Postgres. Show me the plan first."*
+
+The legacy copier handles every other direction: `gbrain migrate --to pglite`, PGLite to Postgres when `gbrain config set migrate.graduation false` opts out of graduation, and history-free brains on Windows. It re-creates pages through `putPage` (chunks, embeddings, links, tags, timeline, facts) and copies config rows minus the engine-local denylist (`MIGRATE_CONFIG_ENGINE_LOCAL_KEYS`: the target-owned `engine`/`version` connection + schema ledger and the physical embedding-column registry keys); skipped keys are printed, never silent, and the run ends with a per-table copied-count summary. It does not carry request IDs, withdrawals, attribution or ownership, so it refuses a managed brain and any brain with durable write history, fact withdrawals or canonical worktree ownership (rows in `persistence_requests`, `fact_withdrawals` or `persistence_worktrees`).
+
+<a id="engine-migration-refused"></a>**Engine migration refused (`writer_coordinator_required`).** The legacy copier's refusal is an agent-contract envelope whose `fix` names the refusing side; every branch verifies with the read-only `gbrain doctor --no-migrate --json`, and nothing has changed in either datastore:
+
+| Refusing side | `fix.next` | Next step |
+|---|---|---|
+| A PGLite brain with history (or a managed one) moving to Postgres with graduation turned off | `ask_user` (consent `egress`) | Relay `user_message`: turn graduation back on (`fix.argv`: `gbrain config unset migrate.graduation`) and preview the move with the read-only plan (`fix.then`: `gbrain migrate --to postgres --url-env GBRAIN_TARGET_URL --plan --json`, then the [two-command flow](guides/move-to-postgres.md#move-the-brain)), or keep it on PGLite and share it through `gbrain mcp expose`. |
+| A Postgres brain moving to PGLite | `report` | The brain stays on Postgres; moving down would drop its history. |
+| A target that already holds persistence history | `tell_user_to_run` | Rerun with an empty database the user provides (`--path` for a PGLite target). |
+
+On Windows, a PGLite brain with history gets `graduation_unsupported_platform` instead: it stays on PGLite and is shared with `gbrain mcp expose`.
+
+<a id="graduation-writer-held"></a>**Graduation refused: the brain is held (`graduation_source_writer_held`).** Graduation needs the PGLite kernel lock. A live stdio `gbrain serve` hands the brain over through the intent marker `<path>.gbrain-graduation.json` and exits; autopilot pauses. When another holder (an HTTP serve, a daemon, another command) does not release the brain within 30 seconds, the run refuses and names it with its pid and transport (`fix.next: tell_user_to_run`). The user stops that process, then the agent reruns the same `gbrain migrate` command. Verify with the read-only `gbrain migrate --status --json`. Nothing has changed in either datastore.
+
+The migration and the autopilot daemon do not race: both graduation and the
+legacy copier claim a cooperative pause marker before touching the target. The
+marker doubles as a migration mutex — a second concurrent migrate refuses to
+run (graduation exits 75 with `graduation_in_progress`), and a marker that
+cannot be written refuses the migration outright. Background job workers stop
+picking up new work while it is parked. The legacy copier then waits for
+in-flight sync/embed/cycle work and running jobs to drain (watching the DB lock
+table, capped by `GBRAIN_MIGRATE_QUIESCE_SECONDS` — default 300; `0` skips the
+wait). Graduation holds the PGLite kernel lock instead, so no other process has
+the brain open: expired run locks and active job leases are orphans it resets
+at once, and it waits only for queued write requests, bounded by
+`--drain-timeout` (default 60 seconds; exhaustion exits 11 with a
+`resume_command`). Cleanup registers the moment the claim lands, so the marker
+is released on failure and on catchable signals; a marker orphaned by an
+uncleanly killed run is adopted by a later migrate only after a pid-liveness
+check (a live migrate's marker is never stolen), and the daemon clears an
+orphan whose owning process died on its next poll. `gbrain autopilot --status`
+reports `paused` (exit 1) while the marker is parked and prints the marker
+path; on a host with no daemon running to self-heal, remove an orphan by hand
+only after confirming the pid it names is dead. After a clean flip the daemon
+detects the engine change on its next tick and relaunches onto the new engine,
+and the migration warns if an exported connection-string env var would
+override the new config (graduation lists such a variable as a plan blocker).
 
 ### Troubleshooting: startup abort (`RuntimeError: Aborted()`)
 

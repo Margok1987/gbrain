@@ -75,6 +75,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'auto_chronicle',
   'auto_chronicle_default_on',
   'chronicle_config_invalid',
+  'facts_drain',
   'fact_take_vectors',
   'code_chunk_metadata',
   'content_hash_duplicates',
@@ -151,6 +152,7 @@ export const BRAIN_CHECK_NAMES: ReadonlySet<string> = new Set([
   'takes_weight_grid',
   // #5836: active facts with no entity (invisible to entity recall and the conflict sweep).
   'unlinked_facts',
+  'edge_validity',
   'text_projection_readiness',
   'timeline_coverage',
   'timeline_orphans',
@@ -239,6 +241,8 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   'pglite_scale',
   'db_repair_recurrence',
   'pglite_leftovers',
+  // Engine graduation (PGLite -> Postgres) interrupted / split brain.
+  'graduation_interrupted',
   'pgvector',
   'postgres_cancellation_driver',
   'plugin_lane_collision',
@@ -252,6 +256,8 @@ export const OPS_CHECK_NAMES: ReadonlySet<string> = new Set([
   // F3: legacy tokens on the JSONB-only grant shape (info) and grant drift (warn).
   'legacy_token_grant_shape',
   'legacy_token_grant_drift',
+  // Lane E: tokens minted without scopes (grandfathered read+write+admin).
+  'legacy_token_null_scope',
   'reranker_health',
   'rls',
   'rls_event_trigger',
@@ -292,6 +298,8 @@ export const META_CHECK_NAMES: ReadonlySet<string> = new Set([
   // coherence healed by `gbrain apply-migrations` (sibling of
   // timeline_dedup_index / schema_version).
   'pages_upsert_arbiter',
+  // #5216: the resumable pages.knowledge_revision backfill (resumed by apply-migrations --force-schema).
+  'revision_backfill',
   'schema_columns',
   'schema_pack_active',
   'schema_pack_consistency',

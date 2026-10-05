@@ -91,6 +91,7 @@ import { OperationError } from '../ops/contract.ts';
 import type { WriteReceipt } from '../persistence/types.ts';
 import { acceptedPendingReceipt } from '../persistence/accepted-pending.ts';
 import { AtomPageStateError, completeAtomReceipts, readAtomPageIdentity, writeAtomPageState, type AtomPageInput } from './extract-atoms-page-state.ts';
+import { maintenanceTransaction } from '../persistence/attribution.ts';
 import { ATOM_TYPES, ATOMS_RESPONSE_SCHEMA } from './extract-atoms-schema.ts';
 
 const DEFAULT_BUDGET_USD = 0.3;
@@ -1670,7 +1671,7 @@ async function retireStaleAtoms(
       [sourceId, origin.value, hash16, currentSlugs],
     );
     const stale = rows.map(r => r.slug);
-    for (let i = 0; i < stale.length; i += 500) await engine.softDeletePages(stale.slice(i, i + 500), { sourceId });
+    for (let i = 0; i < stale.length; i += 500) await maintenanceTransaction(engine, tx => tx.softDeletePages(stale.slice(i, i + 500), { sourceId }));
   } catch (err) {
     console.error(`[extract_atoms] stale atom cleanup failed for ${origin.value} (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
   }

@@ -201,27 +201,49 @@ describe('seat sidecar on session capture (#4618)', () => {
     expect(readSeat('sess-wb')).toMatchObject({ seat: 'alice-desk', seat_source: 'env' });
   });
 
-  test('the OpenClaw context-engine compaction writes the same sidecar, keyed to the agent directory', async () => {
+  async function openclawCompact(sessionId: string): Promise<string> {
     __resetSdkLoadStateForTests();
     const ws = join(tmp, 'oc-ws');
     mkdirSync(join(ws, 'memory'), { recursive: true });
     writeFileSync(join(ws, 'memory', 'heartbeat-state.json'), '{}');
     const agentDir = join(tmp, 'openclaw', 'agents', 'agent-a');
     mkdirSync(join(agentDir, 'sessions'), { recursive: true });
-    const sessionFile = join(agentDir, 'sessions', 'oc-sess.jsonl');
+    const sessionFile = join(agentDir, 'sessions', `${sessionId}.jsonl`);
     const msg = (text: string) =>
       JSON.stringify({ type: 'message', timestamp: '2026-08-01T10:00:01Z', message: { role: 'user', content: [{ type: 'text', text }] } });
     writeFileSync(sessionFile, [
-      JSON.stringify({ type: 'session', id: 'oc-sess', cwd: '/w', timestamp: '2026-08-01T10:00:00Z' }),
+      JSON.stringify({ type: 'session', id: sessionId, cwd: '/w', timestamp: '2026-08-01T10:00:00Z' }),
       msg('PRE-BOUNDARY text'),
       JSON.stringify({ type: 'compaction', timestamp: '2026-08-01T10:00:02Z' }),
       msg('POST-BOUNDARY window text'),
     ].join('\n') + '\n');
     const engine = createGBrainContextEngine({ workspaceDir: ws });
-    await engine.compact({ sessionId: 'oc-sess', sessionFile });
+    await engine.compact({ sessionId, sessionFile });
+    return agentDir;
+  }
+
+  test('the OpenClaw context-engine compaction writes the same sidecar, keyed to the agent directory', async () => {
+    const agentDir = await openclawCompact('oc-sess');
     expect(readdirSync(corpus()).filter((f) => f.startsWith('oc-sess.seg-'))).toHaveLength(1);
     expect(readSeat('oc-sess')).toMatchObject({
       seat: expectedHomeSeat(agentDir), seat_source: 'harness_home', harness: 'openclaw', hook_lane: 'context-engine',
     });
+  });
+
+  test('the OpenClaw lane reports a seat write failure in the heartbeat and still banks the segment', async () => {
+    mkdirSync(sidecar('oc-fail'), { recursive: true });
+    await openclawCompact('oc-fail');
+    expect(readdirSync(corpus()).filter((f) => f.startsWith('oc-fail.seg-'))).toHaveLength(1);
+    const hb = await lastHeartbeat();
+    expect(hb).toMatchObject({ event: 'compact', outcome: 'degraded', reason: 'seat_write_failed' });
+    expect(hb?.hint).toContain('make the corpus dir');
+  });
+
+  test('the OpenClaw lane reports an invalid GBRAIN_SEAT like the hook lane does', async () => {
+    process.env.GBRAIN_SEAT = 'Not A Seat!';
+    await openclawCompact('oc-bad');
+    const hb = await lastHeartbeat();
+    expect(hb).toMatchObject({ event: 'compact', outcome: 'degraded', reason: 'seat_label_invalid' });
+    expect(hb?.hint).toContain('gbrain bootstrap hooks --seat');
   });
 });

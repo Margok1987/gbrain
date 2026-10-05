@@ -158,7 +158,7 @@ describe('pull-request CI scope', () => {
     expect(/GBRAIN_E2E_BUN_IMAGE:-oven\/bun:([^}]+)\}/.exec(read('tests/docker/bootstrap-e2e.sh'))?.[1]).toBe(primary);
     const matrices = [load('test.yml').jobs['security-regressions'], ...Object.values(load('persistence-validation.yml').jobs)]
       .map(job => job.strategy?.matrix.bun).filter(Boolean);
-    expect(matrices).toHaveLength(5);
+    expect(matrices).toHaveLength(6);
     for (const bun of matrices) expect(bun).toEqual([MINIMUM_BUN_VERSION, primary]);
     for (const job of ['native', 'musl', 'windows-backup-console', 'windows-backup-dotnet']) {
       expect(native[job].strategy!.matrix.bun).toEqual([MINIMUM_BUN_VERSION, primary]);

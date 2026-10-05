@@ -2,6 +2,7 @@ import type { PageReadScope, PageReadPolicy, AdjacencyRow, RelationalFanoutOpts,
 import { unverifiedExtractionFragment } from '../extraction-review.ts';
 import { currentTextProjectionFilter, requiresSafeChunks, safeChunksFilter } from './safe-chunks.ts';
 import { hasReadPolicy, pageReadFilter } from './read-policy-sql.ts';
+import { relationshipFilterSql } from '../link-validity.ts';
 
 /** Narrow query dependency shared by both engines. */
 export type ReadQuery = <T = Record<string, unknown>>(sql: string, params?: unknown[]) => Promise<T[]>;
@@ -35,6 +36,7 @@ export async function readRelationalFanout(query: ReadQuery, seeds: string[], op
     typeFilter = `AND l.link_type = ANY($${params.length}::text[])`;
   }
   const mentionsFilter = opts?.includeMentions ? '' : `AND l.link_source IS DISTINCT FROM 'mentions'`;
+  const temporalFilter = opts?.temporal ? `AND ${relationshipFilterSql('l', { ...opts.temporal, excludePrivate: opts.excludePrivate })}` : '';
   const recurStep = direction === 'out'
     ? 'JOIN links l ON l.from_page_id = w.id JOIN pages p2 ON p2.id = l.to_page_id'
     : direction === 'in'
@@ -53,7 +55,7 @@ export async function readRelationalFanout(query: ReadQuery, seeds: string[], op
       FROM walk w ${recurStep}
       WHERE w.depth < $2 AND NOT (p2.id = ANY(w.visited))
         AND p2.source_id = w.seed_source AND p2.deleted_at IS NULL
-        AND ${step} AND ${origin} ${mentionsFilter} ${typeFilter}
+        AND ${step} AND ${origin} ${mentionsFilter} ${typeFilter} ${temporalFilter}
     )
     SELECT n.source_id, n.slug, MIN(n.depth) AS hop,
       COUNT(DISTINCT n.last_link_type) AS edge_count,

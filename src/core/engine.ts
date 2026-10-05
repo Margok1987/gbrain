@@ -1,4 +1,5 @@
 import type { PageKey, PageSnapshot, PageSnapshotOptions, PageWriteOptions } from './page-state/types.ts';
+import type { LinkReadScope } from './link-validity.ts';
 import type { ChunkWindowRequest, ChunkWindowOpts, ChunkWindowPage } from './search/chunk-windows.ts';
 import type { DerivedLinkOrigin, DerivedLinkReplacementOptions } from './derived-links.ts';
 export type { PageKey, PageSnapshot, PageSnapshotOptions, PageWriteOptions, PageMutationPrecondition, PageWithdrawal } from './page-state/types.ts';
@@ -65,7 +66,7 @@ export interface SourceRow {
   config: Record<string, unknown>;
 }
 
-export interface TraverseGraphOpts extends PageReadScope {
+export interface TraverseGraphOpts extends LinkReadScope {
   sourceId?: string;
   sourceIds?: string[];
   frontierCap?: number;
@@ -1458,13 +1459,13 @@ export interface BrainEngine {
    * grant); the scalar branch is internal/CLI and keeps cross-source visibility
    * (reconcileLinks + back-link validators depend on it).
    */
-  getLinks(slug: string, opts?: PageReadScope): Promise<Link[]>;
+  getLinks(slug: string, opts?: LinkReadScope): Promise<Link[]>;
   /**
    * v0.31.8 (D12 + D16): same `opts.sourceId` semantics as `getLinks`,
    * applied to the to-page side of the join. #2200: `opts.sourceIds` federated
    * grant constrains both endpoints (see `getLinks`).
    */
-  getBacklinks(slug: string, opts?: PageReadScope): Promise<Link[]>;
+  getBacklinks(slug: string, opts?: LinkReadScope): Promise<Link[]>;
   /**
    * v114 (#1941): distinct link_source provenances with edge counts, for
    * `gbrain link-sources`. Source-scoped via `{sourceId?, sourceIds?}` (both
@@ -1541,7 +1542,7 @@ export interface BrainEngine {
    */
   traversePathsDetailed(
     slug: string,
-    opts?: PageReadScope & { depth?: number; linkType?: string; direction?: 'in' | 'out' | 'both' },
+    opts?: LinkReadScope & { depth?: number; linkType?: string; direction?: 'in' | 'out' | 'both' },
   ): Promise<{ paths: GraphPath[]; truncated: boolean }>;
   /**
    * Typed-edge relational fan-out for the relational recall arm (v0.43).

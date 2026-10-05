@@ -128,8 +128,10 @@ function splitArgs(command: string): string[] {
 }
 
 /** The v0.60.46.0 CHANGELOG section that starts at `heading`, up to the next release heading. */
+/** A section of the contract v1 release entry (v0.60.46.0), which later entries may repeat headings of. */
 function changelogSection(heading: string): string {
-  const after = readFileSync(join(REPO, 'CHANGELOG.md'), 'utf8').split(heading)[1] ?? '';
+  const entry = readFileSync(join(REPO, 'CHANGELOG.md'), 'utf8').split('\n## [0.60.46.0]')[1] ?? '';
+  const after = entry.split(heading)[1] ?? '';
   return after.split('\n## [')[0];
 }
 

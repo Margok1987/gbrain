@@ -519,7 +519,8 @@ gbrain sources writer activate --brain host --confirm-quiesced \
 ```
 
 After activation, managed sync requires `--no-pull` (new upstream commits come in
-through `gbrain sources refresh <source>`, the drained worktree-wide fast-forward;
+through `gbrain sources refresh <source>`, the drained worktree-wide fast-forward,
+which runs inside a resident PGLite owner such as `gbrain serve` when one holds the brain;
 see [worktree refresh refusals](../guides/write-refusals.md#worktree-refresh-refusals)) and refuses `--skip-failed` and
 `--include-gitignored`; after fixing a failed item run
 `gbrain sync --no-pull --retry-failed` with the same source and options. Resume

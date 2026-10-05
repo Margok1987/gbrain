@@ -170,7 +170,7 @@ export async function runPreferPostgresLadder(o: PreferPostgresOpts): Promise<vo
       '[prefer-postgres] a brain is already configured — refusing to re-run the ladder over it.\n' +
       '  Inspect:            gbrain engine status --probe\n' +
       '  Access broken?      gbrain db-repair\n' +
-      '  Move PGLite → PG:   gbrain migrate --to supabase --url <conn>  (the postgres-adopt skill walks it)\n' +
+      '  Move PGLite → PG:   gbrain migrate --to postgres --url-env GBRAIN_TARGET_URL --plan  (the postgres-adopt skill walks it)\n' +
       '  Really start over:  gbrain init --url <conn>  (explicit target, no ladder)',
     );
     process.exit(1);
@@ -387,7 +387,7 @@ export async function runPreferPostgresLadder(o: PreferPostgresOpts): Promise<vo
 
   // Rung 5 — PGLite, the zero-config floor. Terminal; no silent anything.
   if (!rung) {
-    note('falling back to PGLite. Upgrade later: gbrain migrate --to supabase --url <postgres-conn> (docs/ENGINES.md; the postgres-adopt skill walks it).');
+    note('falling back to PGLite. Upgrade later: gbrain migrate --to postgres --plan (docs/guides/move-to-postgres.md; the postgres-adopt skill walks it).');
     await withStdoutToStderr(o.jsonOutput, () => initPGLite({
       jsonOutput: false,
       apiKey: o.apiKey ?? undefined,

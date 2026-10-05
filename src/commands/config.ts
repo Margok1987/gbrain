@@ -63,6 +63,8 @@ const FILE_PLANE_DOTTED_KEYS: ReadonlySet<string> = new Set([
   'mcp.instructions',
   // #5232: the CLI resolves its write wait before choosing a transport, engine-free.
   'persistence.write_wait_ms',
+  // Engine graduation opt-out: the pre-connect migrate router reads it engine-free.
+  'migrate.graduation',
 ]);
 
 /** #5489: every self_upgrade.* reader (cli.ts startup check, autopilot,
@@ -104,7 +106,7 @@ async function unsetFilePlaneKey(key: string): Promise<boolean> {
   const { loadConfigFileOnly, saveConfig } = await import('../core/config.ts');
   const cfg = loadConfigFileOnly();
   const dot = key.indexOf('.');
-  const top = key.slice(0, dot) as 'push' | 'hooks' | 'backup' | 'mcp' | 'self_upgrade' | 'persistence';
+  const top = key.slice(0, dot) as 'push' | 'hooks' | 'backup' | 'mcp' | 'self_upgrade' | 'persistence' | 'migrate';
   const leaf = key.slice(dot + 1);
   const branch = cfg?.[top] as Record<string, unknown> | undefined;
   if (!cfg || !branch || !(leaf in branch)) return false;
@@ -220,7 +222,7 @@ const CONFIG_SET_KNOWN_FLAGS = ['--force', '--coverage-override', '--yes'];
 export async function handleDbPlaneRoutedKeys(key: string, value: string): Promise<boolean> {
   if (key === 'engine') {
     console.error('[config] engine is INFERRED from database_url / database_path — it is never set directly.');
-    console.error('[config] To move your data between engines:  gbrain migrate --to <supabase|pglite>');
+    console.error('[config] To move your data between engines:  gbrain migrate --to <postgres|pglite>');
     console.error('[config] To point at a different database:   gbrain config set database_url <conn>  (or gbrain init --url <conn>)');
     console.error('[config] No --force escape: an engine flip without a data migration splits the brain across two stores.');
     process.exit(1);
@@ -241,6 +243,7 @@ export async function handleDbPlaneRoutedKeys(key: string, value: string): Promi
     process.exit(1);
   }
   const priorEngine = cfg.engine;
+  const priorPath = typeof cfg.database_path === 'string' ? cfg.database_path : null;
   if (key === 'database_url') {
     cfg.database_url = value;
     cfg.engine = 'postgres';
@@ -252,7 +255,12 @@ export async function handleDbPlaneRoutedKeys(key: string, value: string): Promi
   }
   saveConfig(cfg);
   console.log(`Set ${key} = ${redactConfigValue(key, value)} (file plane: ~/.gbrain/config.json; engine inferred: ${cfg.engine})`);
-  if (priorEngine && priorEngine !== cfg.engine) {
+  const { gbrainPath } = await import('../core/config.ts');
+  const { inspectGraduationPath } = await import('../core/persistence/graduation-custody.ts');
+  const graduated = priorEngine === 'pglite' && key === 'database_url' && inspectGraduationPath(priorPath ?? gbrainPath('brain.pglite')).state === 'graduated';
+  if (graduated) {
+    console.error('[config] note: this brain was moved to Postgres by engine graduation; this config now points at it. Restart any MCP client that runs gbrain serve from this config.');
+  } else if (priorEngine && priorEngine !== cfg.engine) {
     // Pointing at the other engine's plane is a legitimate re-point, but it
     // does NOT move data — say so, or the flip reads as a lossless switch.
     console.error(
@@ -291,6 +299,11 @@ async function setConfigWithDecideHooks(engine: BrainEngine, key: string, value:
     if (err) { console.error(`[config] ${err}`); process.exit(1); }
   }
   if (key === 'auto_chronicle' || key.startsWith('chronicle.')) await refuseInvalidChronicleValue(key, value, force);
+  if (key.startsWith('facts.drain_')) {
+    const { validateFactsDrainConfigValue } = await import('../core/facts/drain-config.ts');
+    const err = validateFactsDrainConfigValue(key, value);
+    if (err) { console.error(`[config] ${err}`); process.exit(1); }
+  }
   await engine.setConfig(key, value);
   if (key === 'auto_chronicle') await acknowledgeAutoChronicle(engine, value);
   if (!key.startsWith('decide.slots.')) return;
@@ -433,6 +446,12 @@ async function setFilePlaneKey(key: string, value: string, tail: string[]): Prom
     console.log(`Set ${key} = ${on} (file plane: ~/.gbrain/config.json)`);
   } else if (key === 'persistence.write_wait_ms') {
     await setFileWriteWait(cfg, value, saveConfig);
+  } else if (key === 'migrate.graduation') {
+    const on = isConfigTruthy(value);
+    cfg.migrate = { ...(cfg.migrate ?? {}), graduation: on };
+    saveConfig(cfg);
+    console.log(`Set ${key} = ${on} (file plane: ~/.gbrain/config.json)`);
+    if (!on) console.log('PGLite -> Postgres moves now use the legacy copier, which refuses brains with write history. Turn graduation back on: gbrain config unset migrate.graduation');
   } else if (key === 'backup.check_interval_days') {
     const n = Number.parseInt(value, 10);
     if (!Number.isFinite(n) || n < 1) {

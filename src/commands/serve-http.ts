@@ -904,12 +904,17 @@ ${bootstrapFromEnv
   const deregisterIpcCleanup = registerCleanup('resolve-ipc-close', async () => {
     ipcBinding.close();
   });
-  const deregisterEngineCleanup = registerCleanup('pglite-engine-disconnect', () =>
-    engine.disconnect(),
-  );
+  // Automatic facts drain (Lane D): the resident HTTP serve owns a PGLite brain the way stdio serve does.
+  const { startFactsDrainScheduler } = await import('../core/facts/drain-scheduler.ts');
+  const factsDrain = startFactsDrainScheduler(engine, { owner: 'serve_http', log: (line) => console.error(line) });
+  const deregisterEngineCleanup = registerCleanup('pglite-engine-disconnect', async () => {
+    await factsDrain.stop();
+    await engine.disconnect();
+  });
   try {
     await waitForHttpServerLifecycle(httpServer);
   } finally {
+    await factsDrain.stop();
     // Close the IPC listener + reap the socket file on orderly shutdown
     // (abnormal termination goes through the registered cleanup above).
     ipcBinding.close();

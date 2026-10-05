@@ -29,6 +29,7 @@ import { contextualModeRepair } from './contextual-mode.ts';
 import { connectorCheckpointsRepair } from './connector-checkpoints.ts';
 import { requestIndexesRepair } from './request-indexes.ts';
 import { connectorFencesRepair } from './connector-fences.ts';
+import { takeSupersessionRepair } from './take-supersession.ts';
 import { orphanBindingsRepair } from './orphan-bindings.ts';
 import { embeddingEffectsRepair } from './embedding-effects.ts';
 import { googleFileModesRepair } from './google-file-modes.ts';
@@ -93,6 +94,14 @@ const SPECS: Record<RepairKind, Omit<RepairKindSpec, 'kind'>> = {
     summary: 'Move facts and takes fences that sit below the timeline sentinel of Google and GitHub pages into the page body, so connector re-renders '
       + 'carry them instead of refusing with connector_fence_below_timeline (fix wave 4). Ambiguous fences are kept and counted for a manual edit. '
       + 'Each repaired page is re-embedded by its publication.',
+  },
+  'take-supersession': {
+    handler: takeSupersessionRepair, embeds: 'effect', checks: [],
+    summary: 'Rebuild takes.superseded_by for supersession chains written before the pointer moved onto the old fence row (#5886). Each struck row is linked '
+      + 'to the row that replaced it only from evidence: a committed takes_supersede receipt, a stored superseded_by, or a row carrying the old '
+      + '`superseded by #<own row>` pointer with exactly one possible predecessor. The pointer is written onto the old row and stale self-pointers are '
+      + 'dropped through a revision-bound put_page; a page whose fence is right but whose stored pointers differ is reprojected. Ambiguous pages are '
+      + 'listed with the manual edit and never changed.',
   },
   'orphan-bindings': {
     handler: orphanBindingsRepair, embeds: 'none', checks: ['orphan_persistence_bindings'],

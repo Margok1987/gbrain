@@ -783,14 +783,27 @@ export function sanitizeEngineSessionId(raw: unknown): string | null {
 /**
  * #4618: record the session's seat before its segment is spooled (the hook
  * lane's ordering), keyed to the OpenClaw agent dir holding `sessions/`.
- * Additive provenance: a failure never fails the checkpoint.
+ * Additive provenance: a failure never fails the checkpoint, but a seat
+ * reason (write failure, conflict, invalid label) lands in the hook
+ * heartbeat as a degraded `compact` entry with its fixed recovery hint, the
+ * way the hook lane reports it.
  */
 async function recordOpenclawSeat(dir: string, sessionId: string, sessionFile: string): Promise<void> {
   try {
     const { resolveSeat, writeSeatSidecar } = await import('./context/seat.ts');
-    const seat = resolveSeat({ env: process.env, harness: 'openclaw', transcriptPath: sessionFile });
-    if (seat) writeSeatSidecar(dir, sessionId, seat, { harness: 'openclaw', hookLane: 'context-engine' });
-  } catch { /* best effort */ }
+    let reasons: string[];
+    try {
+      const seat = resolveSeat({ env: process.env, harness: 'openclaw', transcriptPath: sessionFile });
+      reasons = seat ? writeSeatSidecar(dir, sessionId, seat, { harness: 'openclaw', hookLane: 'context-engine' }) : [];
+    } catch {
+      reasons = ['seat_write_failed'];
+    }
+    const reason = reasons[0];
+    if (!reason) return;
+    const { writeHeartbeat } = await import('./context/hook-heartbeat.ts');
+    // trim:false: the gateway process is long-lived; only short-lived hooks trim the heartbeat file. The entry gets the reason's hint.
+    await writeHeartbeat({ ts: new Date().toISOString(), event: 'compact', outcome: 'degraded', reason, duration_ms: 0 }, { trim: false });
+  } catch { /* provenance and telemetry never fail the checkpoint */ }
 }
 
 // ── Engine Implementation ───────────────────────────────────────────────

@@ -351,6 +351,7 @@ export class ConnectionManager {
       // Explicit (matches the postgres.js implicit default; GBRAIN_POOL_MAX_LIFETIME_S overrides).
       max_lifetime: resolveMaxLifetimeSeconds(),
       types: { bigint: postgres.BigInt },
+      onnotice: process.env.GBRAIN_PG_NOTICES === '1' ? undefined : () => {},
       onpoisoned: (status: string) => this.opts.onpoisoned?.('read', status),
     };
     const timeouts = resolveSessionTimeouts();
@@ -501,6 +502,7 @@ export class ConnectionManager {
       // Always use prepared statements on the direct pool — no PgBouncer
       // here, so the prepare-cache invalidation issue doesn't apply.
       prepare: true,
+      onnotice: process.env.GBRAIN_PG_NOTICES === '1' ? undefined : () => {},
       onpoisoned: (status: string) => this.opts.onpoisoned?.('direct', status),
       // Apply DDL session GUCs as connection startup parameters (durable
       // through any intermediary pooling layer, same trick as

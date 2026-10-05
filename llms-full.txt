@@ -2576,7 +2576,7 @@ rung prints a one-line note and falls through; only the PGLite floor is terminal
 | 2. Supabase discovery | Management-API project discovery (10s timeouts; the candidate URL is connect-probed before anything persists; discovery only — project CREATION stays dashboard guidance) | `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD` (+ `SUPABASE_PROJECT_REF` on multi-project accounts) |
 | 3. local Postgres | an already-running local server (detection-only; `CREATE DATABASE gbrain` needs explicit `--allow-create-db`) | `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD` env vars set, or `--local-postgres` |
 | 4. docker | gbrain's own container `gbrain-postgres` (image `pgvector/pgvector:pg16`, loopback-only port 5434, data on the named `gbrain-pgdata` volume, `--restart unless-stopped`; idempotent reuse recovers credentials via `docker inspect`; refuses to share a container/volume that already holds a brain this home's config doesn't record; gbrain never stops or removes it) | explicit `--allow-docker` |
-| 5. PGLite floor | zero-config fallback, with an upgrade-later note (`gbrain migrate --to supabase`) | nothing |
+| 5. PGLite floor | zero-config fallback, with an upgrade-later note (the later move is `gbrain migrate --to postgres`; see [Move a PGLite brain to Postgres](docs/guides/move-to-postgres.md)) | nothing |
 
 The ladder REFUSES to run over an already-configured brain — rung choice is
 environment-dependent, so a re-run during an outage could silently repoint a
@@ -4828,7 +4828,7 @@ Different users have different constraints:
 | Researcher | Analytics, bulk exports, embeddings | DuckDBEngine (someday) |
 | Edge/mobile | Offline-first, sync later | PGLiteEngine + sync (someday) |
 
-The engine interface means we don't have to choose. PGLite is the zero-friction default. Supabase is the production scale path. `gbrain migrate --to supabase/pglite` moves between them.
+The engine interface means we don't have to choose. PGLite is the zero-friction default. Supabase is the production scale path. `gbrain migrate --to postgres` moves a PGLite brain to Postgres with its history ([guide](guides/move-to-postgres.md)); `gbrain migrate --to pglite` moves a brain without write history the other way.
 
 ## The interface
 
@@ -5102,26 +5102,47 @@ Details in INSTALL_FOR_AGENTS.md ("Engine preference for harness installs").
 | Concurrency | Single process | Connection pooling |
 | Backups | Manual (file copy) | Managed by Supabase |
 
-**Migration:** `gbrain migrate --to supabase` exports everything (pages, chunks, embeddings, links, tags, timeline, facts) and imports into Supabase. Config rows copy in full minus the engine-local denylist (`MIGRATE_CONFIG_ENGINE_LOCAL_KEYS`: the target-owned `engine`/`version` connection + schema ledger and the physical embedding-column registry keys); skipped keys are printed, never silent, and the run ends with a per-table copied-count summary. `gbrain migrate --to pglite` goes the other direction. The copy is lossless for what it carries, but it refuses two kinds of brain: a managed brain (`writer_coordinator_required`, "cannot mutate a managed brain through the legacy writer") and any brain with durable write history, fact withdrawals or canonical worktree ownership (rows in `persistence_requests`, `fact_withdrawals` or `persistence_worktrees`), because the copier cannot carry request IDs, withdrawals or ownership. A brain that has saved memory through the write coordinator (`remember`, `put_page` from an agent or a resident `gbrain serve`) has that history, so in practice `migrate --to` works only for brains that never used it. For those brains, keep the datastore and repair forward (`gbrain doctor`, `gbrain repair`) instead of migrating, and choose Postgres up front if you expect 1000+ files or several machines. An engine move that preserves request IDs, withdrawals, attribution, grants and ownership is planned, not shipped.
+**Migration:** on a PGLite brain, `gbrain migrate --to postgres` (alias `--to supabase`) graduates the brain to Postgres. Without `--yes` it prints the plan and exits 3; `--yes --expect <plan_hash>` runs it. Graduation drains pending writes, copies every table verbatim with its primary keys (pages, facts, takes, versions, links, timeline, embeddings, transcripts and paid caches, request history and withdrawals, token and OAuth rows) into a fenced target, verifies row counts and digests, runs `gbrain doctor` on the target, and only then flips routing. It works for brains with write history and for managed brains. The PGLite data dir is retained as `<path>.graduated-<run_id>` and a tombstone file takes its place. Walkthrough, recovery by error code, rollback and what stays on this computer: [Move a PGLite brain to Postgres](guides/move-to-postgres.md).
 
-The migration and the autopilot daemon do not race: `migrate --to` claims a
-cooperative pause marker before touching the target. The marker doubles as a
-migration mutex — a second concurrent migrate refuses to run, and a marker
-that cannot be written refuses the migration outright. Background job workers
-stop picking up new work while it is parked, and the migration waits for
-in-flight sync/embed/cycle work and running jobs to actually drain (watching
-the DB lock table, capped by `GBRAIN_MIGRATE_QUIESCE_SECONDS` — default 300;
-`0` skips the wait). Cleanup registers the moment the claim lands, so the
-marker is released on failure and on catchable signals; a marker orphaned by
-an uncleanly killed run is adopted by a later migrate only after a
-pid-liveness check (a live migrate's marker is never stolen), and the daemon
-clears an orphan whose owning process died on its next poll. `gbrain
-autopilot --status` reports `paused` (exit 1) while the marker is parked and
-prints the marker path; on a host with no daemon running to self-heal,
-remove an orphan by hand only after confirming the pid it names is dead.
-After a clean flip the daemon detects the engine change on its next
-tick and relaunches onto the new engine, and the migration warns if an
-exported connection-string env var would override the new config.
+**Say to your agent:** *"Upgrade my brain to Postgres. Show me the plan first."*
+
+The legacy copier handles every other direction: `gbrain migrate --to pglite`, PGLite to Postgres when `gbrain config set migrate.graduation false` opts out of graduation, and history-free brains on Windows. It re-creates pages through `putPage` (chunks, embeddings, links, tags, timeline, facts) and copies config rows minus the engine-local denylist (`MIGRATE_CONFIG_ENGINE_LOCAL_KEYS`: the target-owned `engine`/`version` connection + schema ledger and the physical embedding-column registry keys); skipped keys are printed, never silent, and the run ends with a per-table copied-count summary. It does not carry request IDs, withdrawals, attribution or ownership, so it refuses a managed brain and any brain with durable write history, fact withdrawals or canonical worktree ownership (rows in `persistence_requests`, `fact_withdrawals` or `persistence_worktrees`).
+
+<a id="engine-migration-refused"></a>**Engine migration refused (`writer_coordinator_required`).** The legacy copier's refusal is an agent-contract envelope whose `fix` names the refusing side; every branch verifies with the read-only `gbrain doctor --no-migrate --json`, and nothing has changed in either datastore:
+
+| Refusing side | `fix.next` | Next step |
+|---|---|---|
+| A PGLite brain with history (or a managed one) moving to Postgres with graduation turned off | `ask_user` (consent `egress`) | Relay `user_message`: turn graduation back on (`fix.argv`: `gbrain config unset migrate.graduation`) and preview the move with the read-only plan (`fix.then`: `gbrain migrate --to postgres --url-env GBRAIN_TARGET_URL --plan --json`, then the [two-command flow](guides/move-to-postgres.md#move-the-brain)), or keep it on PGLite and share it through `gbrain mcp expose`. |
+| A Postgres brain moving to PGLite | `report` | The brain stays on Postgres; moving down would drop its history. |
+| A target that already holds persistence history | `tell_user_to_run` | Rerun with an empty database the user provides (`--path` for a PGLite target). |
+
+On Windows, a PGLite brain with history gets `graduation_unsupported_platform` instead: it stays on PGLite and is shared with `gbrain mcp expose`.
+
+<a id="graduation-writer-held"></a>**Graduation refused: the brain is held (`graduation_source_writer_held`).** Graduation needs the PGLite kernel lock. A live stdio `gbrain serve` hands the brain over through the intent marker `<path>.gbrain-graduation.json` and exits; autopilot pauses. When another holder (an HTTP serve, a daemon, another command) does not release the brain within 30 seconds, the run refuses and names it with its pid and transport (`fix.next: tell_user_to_run`). The user stops that process, then the agent reruns the same `gbrain migrate` command. Verify with the read-only `gbrain migrate --status --json`. Nothing has changed in either datastore.
+
+The migration and the autopilot daemon do not race: both graduation and the
+legacy copier claim a cooperative pause marker before touching the target. The
+marker doubles as a migration mutex — a second concurrent migrate refuses to
+run (graduation exits 75 with `graduation_in_progress`), and a marker that
+cannot be written refuses the migration outright. Background job workers stop
+picking up new work while it is parked. The legacy copier then waits for
+in-flight sync/embed/cycle work and running jobs to drain (watching the DB lock
+table, capped by `GBRAIN_MIGRATE_QUIESCE_SECONDS` — default 300; `0` skips the
+wait). Graduation holds the PGLite kernel lock instead, so no other process has
+the brain open: expired run locks and active job leases are orphans it resets
+at once, and it waits only for queued write requests, bounded by
+`--drain-timeout` (default 60 seconds; exhaustion exits 11 with a
+`resume_command`). Cleanup registers the moment the claim lands, so the marker
+is released on failure and on catchable signals; a marker orphaned by an
+uncleanly killed run is adopted by a later migrate only after a pid-liveness
+check (a live migrate's marker is never stolen), and the daemon clears an
+orphan whose owning process died on its next poll. `gbrain autopilot --status`
+reports `paused` (exit 1) while the marker is parked and prints the marker
+path; on a host with no daemon running to self-heal, remove an orphan by hand
+only after confirming the pid it names is dead. After a clean flip the daemon
+detects the engine change on its next tick and relaunches onto the new engine,
+and the migration warns if an exported connection-string env var would
+override the new config (graduation lists such a variable as a plan blocker).
 
 ### Troubleshooting: startup abort (`RuntimeError: Aborted()`)
 
@@ -8827,7 +8848,7 @@ pending-decision loops — the ADDITIVE-FOREVER optional fields disambiguate:
 All five are absent on threads not backed by a loop row and on servers that
 do not implement them; a server that omits them still certifies. Same propagation to the
 per-entity cards and top-level `open_threads` of `context_pack`.
-- `edges`: top ~10 typed edges, mentions excluded, out-edges first.
+- `edges`: top ~10 typed edges, mentions excluded, out-edges first, live relationships first. Additive fields: `status` (`live`, `ended`, `ended_unknown_date`, `event`, …), `since` / `until` (latest stint). `relationship_note` (additive) summarizes current and ended relationships and flags a summary that still names an ended one ([temporal edges](../guides/temporal-edges.md)).
 - The p99 < 100ms promise is op-layer latency (transport excluded), CI-gated
   on a 20K-page corpus. 200K validation recipe below.
 
@@ -9609,6 +9630,7 @@ Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/tro
 | Symptom | Next step | Who acts | Consent | Verify |
 |---|---|---|---|---|
 | A gbrain call failed with a code you don't recognize | follow `fix.next` ([protocol](../protocol/AGENT_OPERATOR_v1.md)); `gbrain errors <code>` | agent | as the fix's `consent` | the fix's `verify` |
+| A graph read omits a relationship you know existed, or says someone still works somewhere they left | the default read returns relationships true today: repeat with `status: "all"` or `as_of`; to record an end, add a dated timeline line (`Ended works_at [[companies/x]]`) or `add_link ... valid_until` ([temporal edges](temporal-edges.md)) | agent | none | `gbrain doctor --only edge_validity --json` |
 | A command exited 3 (`confirmation_required`) | relay `user_message`; run `fix.command` only after the user agrees | agent, after the user agrees | the payload's `effects` | the fix's `verify` |
 | [Database unreachable or `GBRAIN_DB_ACCESS <reason>`](#database-unreachable) | `gbrain engine status --probe`, then `gbrain db-repair` (diagnose); `gbrain db-repair --yes` applies safe fixes | agent; `--yes` after the user agrees | none to diagnose; `--apply-rewrites` rewrites the config URL (undoable) | `gbrain engine status --probe --json` |
 | [PGLite `RuntimeError: Aborted()` at startup](#pglite-aborted) | automatic repair on the next command; else `gbrain pglite-repair --dry-run`, then `gbrain pglite-repair --yes` | agent; `--yes` after the user agrees | `destructive` (a WAL backup is kept and the restore command printed) | `gbrain doctor --only connection --json` |
@@ -9618,6 +9640,7 @@ Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/tro
 | Low health score | preview `gbrain doctor --remediation-plan --json`; then `gbrain doctor --remediate --yes --target-score 90 --max-usd 5` | agent, after the user agrees | `paid`; `destructive` with `--include-repairs` (approve with `--expect <plan_hash>` from the preview) | `gbrain doctor --json` |
 | [Sync held a file (`Held <path>: invalid_frontmatter …`, `git_held_files`)](#held-files) | `gbrain sources status <id>`, then preview `gbrain repair frontmatter --source <id>` and apply the printed `--apply --expect <hash> --yes` | agent; the apply after the user agrees | `destructive` (rewrites the previewed lines of the files) | `gbrain doctor --only git_held_files --json` |
 | [A Google or GitHub item is held (`connector_held_items`)](#held-connector-items) | `gbrain sources status <id>`, fix the cause, then `gbrain sources retry-held <id>` and `gbrain sync --source <id>` | agent, after the user agrees | `egress` (fetches from the provider again) | `gbrain doctor --only connector_held_items --json` |
+| [`gbrain migrate --to` refused with `writer_coordinator_required`](../ENGINES.md#engine-migration-refused) | follow the refusal's `fix`: relay its `user_message` (stay on PGLite and share with `gbrain mcp expose`, or leave the brain as it is) | agent, after the user agrees | `persistent_install`, `egress` (for `gbrain mcp expose`) | `gbrain doctor --no-migrate --json` |
 | [A write was refused with a named reason](#write-refused) | the reason's recovery in [write refusal reasons](write-refusals.md) | as the refusal's `fix` | as the refusal's `fix` | the refusal's `verify` |
 | [Managed sync blocked with `checkpoint_validation_timeout`](#checkpoint-validation-timeout) | `gbrain repair request-indexes --apply` when an index is missing or INVALID, then the printed `gbrain sync --source <id> --no-pull --retry-failed …` | brain host | none | `gbrain doctor --only persistence_request_indexes --json` |
 | [`queue_capacity`, `persistence_capacity` or `persistence_request_growth`](#write-capacity) | run the printed `gbrain config set persistence.limits.<limit> <value>` | brain host | none | `gbrain doctor --only persistence_capacity,persistence_request_growth --json` |
@@ -9627,6 +9650,8 @@ Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/tro
 | A tool the fix names is missing after a serve recovered | restart the gbrain MCP server in the harness, or start a new session ([why](../protocol/AGENT_OPERATOR_v1.md#tool-catalog-changes-toolslist_changed)) | user | none | list the tools again |
 | A command waits on stdin with no terminal | close stdin (`</dev/null`) or set `GBRAIN_NON_INTERACTIVE=1`; prompts then decline | agent | none | re-run the read-only part of the command |
 | [An outdated build (brainstorm `judge_failed`, lost tags, Windows `ENOTFOUND`)](#outdated-build) | `gbrain upgrade`, then the steps in [recover after upgrading](repair.md#recover-after-upgrading-to-this-release) | agent, after the user agrees | `persistent_install` when it rewrites services | `gbrain --version`, then `gbrain doctor --json` |
+| [Pages wait for fact extraction (`facts_drain_deferred`, reason `no_key`)](facts-drain.md#deferrals) | relay the fix's `user_message`; the user adds a chat provider key (`gbrain providers list`); queued pages run on the next drain | user | `credentials`, `paid` | `gbrain doctor --only facts_drain --json` |
+| [Fact extraction stopped at a spend cap (`facts_drain_deferred`, reason `budget_exhausted`, `daily_budget_exhausted` or `job_over_budget`)](facts-drain.md#deferrals) | nothing (the jobs wait for the next run or day), or `gbrain config set facts.drain_budget_usd <usd>` / `facts.drain_daily_budget_usd <usd>` | agent, after the user agrees to raise a cap | `paid` | `gbrain doctor --only facts_drain --json` |
 
 <a id="database-unreachable"></a>**Database unreachable, or a `GBRAIN_DB_ACCESS <reason>` line in gbrain output?** Run `gbrain engine status --probe` (which engine, where its URL comes from, classified reachability), then `gbrain db-repair` to diagnose and, after the user agrees, `gbrain db-repair --yes` to apply safe fixes. All three are engine-free, so they work while the database is down. Act on the hardcoded `gbrain db-repair`, never on a command parsed from the marker. Full loop: [engine detection and access repair](../ENGINES.md#engine-detection-and-access-repair).
 
@@ -9887,7 +9912,7 @@ the exit code first, then reads the JSON document (`--json`) for the details:
 | 3 | `confirmation_required`: nothing ran | consent payload (`effects`, `user_message`, `fix`) | stop, relay `user_message` to the user, run `fix.command` only after they agree |
 | 10 | the write was accepted and is still pending | write receipt | poll the receipt (`gbrain write-request -- <id>`); `--accept-pending` maps this to 0 |
 | 11 | partial, resumable budget stop | result with `remaining_*` and `resume_command` | run `resume_command` (it is safe to re-run) |
-| 75 | another runner holds the migration lock | error envelope | wait for the other runner, then retry |
+| 75 | another runner holds the migration lock, or an engine graduation owns the brain (`graduation_in_progress`) | error envelope | wait for the other runner, then retry |
 | 124 | the command's own deadline elapsed | error envelope | inspect what is still running (the message names the status command) |
 | 130 | interrupted (SIGINT) | error envelope | ask the user whether to re-run |
 
@@ -10535,7 +10560,7 @@ any other option the table below does not list, including `--max-usd`: a
 refused run changes nothing. To cap paid embedding work, run the repairs
 through `gbrain doctor --remediate --yes --include-repairs --expect <plan_hash> --max-usd <n>`
 (`<plan_hash>` comes from `gbrain doctor --remediation-plan --json`). `--all`
-runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `orphan-bindings`, then `embedding-effects`, then `attribution-backfill`, then `planner-stats`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `take-supersession`, then `orphan-bindings`, then `embedding-effects`, then `attribution-backfill`, then `planner-stats`, and stops at the
 first kind that stops.
 The explicit-only kinds never run under
 `--all`; it lists each with its preview command and still exits 0 when they
@@ -10580,6 +10605,7 @@ should also check `results[].complete`.
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
 | `request-indexes` | `persistence_request_indexes` | Creates a missing managed sync request index, or drops an INVALID one (left by an interrupted concurrent build) and rebuilds it, on a brain whose schema version is already current. Postgres builds each index `CONCURRENTLY`, one at a time, so writes continue; PGLite builds inline. It changes no user data, takes no journal admission and runs brain-wide (`--source` does not narrow it). See [managed sync request indexes](#request-indexes). | `building`: an index another session is still building; it is never dropped. |
 | `connector-fences` | none (a `connector_fence_below_timeline` refusal names it) | Moves a facts or takes fence that sits below the timeline sentinel of a Google or GitHub page into the page body through a revision-bound `put_page`, so the connector's next re-render carries the fence instead of refusing. Then re-attempt the held item with `gbrain sources retry-held <source>`. | `kept_ambiguous_pages`: pages whose fences are duplicated, unbalanced or unparseable. Move the fence by hand: read the page, place the fence above the `<!-- timeline -->` line, and save it with the current `expected_revision`. |
+| `take-supersession` | none | Rebuilds `takes.superseded_by` for supersession chains written before the pointer moved onto the old fence row (#5886). Each struck take is linked to the row that replaced it only from evidence: a committed `takes_supersede` receipt, a stored `superseded_by`, or a row carrying the old `superseded by #<own row>` pointer with exactly one possible predecessor. The pointer is written onto the old row (`<source>; superseded by #N`) and stale self-pointers are dropped through a revision-bound `put_page`; a page whose fence is already right but whose stored pointers differ is reprojected without a page write. See [take supersession](#take-supersession). | `ambiguous_pages` / `ambiguous_rows`: pages where a new row has two or more possible predecessors, or where evidence conflicts. The preview lists each with its candidates and the manual edit; nothing on them changes. `unparsed_pages`: pages whose takes fence does not parse cleanly. |
 | `connector-checkpoints` | `connector_checkpoints` | Deletes managed connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days. They accumulate after a content setting such as `g_history_days` changes, or when a connector host older than v0.60.11.0 runs during an upgrade. Cleanup only: it never copies or re-keys a checkpoint, takes no journal admission and runs brain-wide (`--source` does not narrow it). | Rows a queued or running connector write, or a connector's recorded pending set, still references. |
 | `orphan-bindings` | `orphan_persistence_bindings` | Deletes persistence source bindings whose source was removed, or that belong to an earlier incarnation of a source re-added under the same id. `gbrain sources remove` and `gbrain sources purge` delete the binding; one an older gbrain left behind makes the re-added source read as claimed, so every `gbrain sync --source <id>` fails with `writer_coordinator_required`. Bookkeeping only: no journal admission, no page or file changes, and it runs brain-wide (`--source` does not narrow it). See [orphan bindings](#orphan-bindings). | A binding that a queued, running or recovering write request of the same source incarnation still references. |
 | `embedding-effects` | `stale_embedding_effects` | Settles stale queued and failed embedding effects of committed writes, which block receipt compaction and activation: `reconciled` when current vectors pass the effect verifier, `superseded` when the page was deleted or a newer revision owns its own effect, `retry_queued` for the owner (paid; a used-up retry allowance gets one new bounded cycle per explicit apply). See [stale queued embedding effects](#stale-queued-embedding-effects). | `blocked` effects, counted by reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). |
@@ -10762,6 +10788,34 @@ the item's error code names, then re-attempt. See
 | A sync fails with `connector_holds_exhausted` | `gbrain sources status <source> --json` | Fix the cause, then `gbrain sources retry-held <source>` and `gbrain sync --source <source>` | `gbrain doctor` | agent, after the user agrees | `egress` |
 | A sync refuses with `connector_fence_below_timeline` | `gbrain repair connector-fences --source <source>` | `gbrain repair connector-fences --source <source> --apply`, then `gbrain sources retry-held <source>` | `gbrain sync --source <source>` succeeds | brain host, after the user agrees | `egress` |
 
+<a id="take-supersession"></a>
+### Take supersession
+
+**Say to your agent:** *"My superseded takes don't point at the take that
+replaced them. Repair the supersession chains."*
+
+Takes superseded before the pointer moved onto the old fence row have
+`superseded_by` empty: the old row was struck without a pointer, and the new
+row often cites itself (`superseded by #<its own row>`). Preview, then apply
+after you agree:
+
+```bash
+gbrain repair take-supersession            # per page: each link, its evidence, ambiguous pages
+gbrain repair take-supersession --json     # details.pages[] and details.ambiguous[]
+gbrain repair take-supersession --apply    # writes the pointers; a second apply changes nothing
+```
+
+The repair links a struck row to its replacement only from evidence, in this
+order: a committed `takes_supersede` receipt for the page, a stored
+`superseded_by`, then a self-pointer row that has exactly one struck, unlinked
+row above it (resolved hop by hop, so a chain of supersessions resolves). It
+never guesses. When a new row has two or more possible predecessors, the page
+is listed under `ambiguous` with the candidates and left unchanged. Fix it by
+hand: read the page (`gbrain get --source <source> -- <slug>`), append
+`; superseded by #<new row>` to the source cell of the row each new row
+replaced, save it with the current `expected_revision`, then run the repair
+again; it drops the leftover self-pointers and stores the pointers.
+
 <a id="orphan-bindings"></a>
 ### Orphan persistence bindings
 
@@ -10804,7 +10858,9 @@ The preview also reads every page body and lists the rows it cannot read
 rows. Recover them from a backup, or create a fresh brain and sync it again
 from its source files. Until then, a write that names the revision of a page
 the upgrade could not backfill is refused with `revision_backfill_pending`;
-`gbrain apply-migrations --yes` resumes that backfill and prints its progress.
+doctor's `revision_backfill` check names those pages, and
+`gbrain apply-migrations --force-schema` resumes the backfill for the rest and
+prints its progress.
 
 ### Timeline history scan coverage
 

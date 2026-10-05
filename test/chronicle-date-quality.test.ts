@@ -79,9 +79,10 @@ describe('CL-1: nothing after the page\'s own day', () => {
 
   test('an ended calendar invite still produces its meeting event', () => brain(async ({ engine, ctx }) => {
     await put(ctx, 'calendar/standup', `---\ntype: calendar-event\ntitle: Standup\ndate: ${PAGE_DAY}\nstart: ${PAGE_DAY}T16:00:00Z\nend: ${PAGE_DAY}T16:30:00Z\n---\n\n${BODY}`);
-    const r = await runOnce(engine, async () => ({ events: [ev(`${PAGE_DAY}T16:00:00Z`, 'Standup with Alice')] }));
-    expect(r.details).toMatchObject({ judged: 1, extracted: 1, events_written: 1 });
-    expect((await events(engine)).map((e) => [e.day, e.what])).toEqual([[PAGE_DAY, 'Standup with Alice']]);
+    // An ended invite is projected without the judge (invite-projection.ts); the date screen keeps its event.
+    const r = await runOnce(engine, async () => { throw new Error('an ended invite must not reach the judge'); });
+    expect(r.details).toMatchObject({ judged: 0, extracted: 1, events_written: 1, events_dropped: {} });
+    expect((await events(engine)).map((e) => [e.day, e.what])).toEqual([[PAGE_DAY, 'Scheduled: Standup']]);
   }), 120_000);
 
   test('a multi-day conversation runs to its last message', () => brain(async ({ engine, ctx }) => {

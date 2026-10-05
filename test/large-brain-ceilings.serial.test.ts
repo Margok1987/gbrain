@@ -70,7 +70,7 @@ describe('large-brain ceilings (CLI)', () => {
     commitWorktree(repo, 20_000);
     const add = await runCli(['sources', 'add', 'big', '--path', repo], { home, env: KEYS, timeoutMs: 180_000 });
     expect(add.stderr).not.toContain('request_too_large');
-    expect(add.exitCode).toBe(0);
+    expect(add.exitCode, `sources add exited ${add.exitCode}\nstderr:\n${add.stderr.slice(-4000)}\nstdout:\n${add.stdout.slice(-2000)}`).toBe(0);
     expect(JSON.parse(add.stdout.slice(add.stdout.indexOf('{')))).toMatchObject({ source_id: 'big', state: 'committed' });
   }, 300_000);
 });

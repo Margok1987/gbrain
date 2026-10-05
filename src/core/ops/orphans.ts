@@ -11,8 +11,8 @@ import { invalidParam } from './op-fix.ts';
 
 // --- Orphans ---
 
-const ORPHANS_DEFAULT_LIMIT = 100;
-const ORPHANS_MAX_LIMIT = 1000;
+export const ORPHANS_DEFAULT_LIMIT = 100;
+export const ORPHANS_MAX_LIMIT = 1000;
 
 const find_orphans: Operation = {
   name: 'find_orphans',

@@ -375,6 +375,12 @@ export async function computeWedgedQueueCheck(
     if (wedged.length === 0) {
       return { name: 'wedged_queue', status: 'ok', message: 'No wedged queues' };
     }
+    // The verify-step doctor of an engine graduation runs on the fenced target before any worker may
+    // start, so waiting jobs carried from the quiesced source cannot have progressed yet.
+    if (process.env.GBRAIN_GRADUATION_RUN) {
+      return { name: 'wedged_queue', status: 'warn', message: `Graduation exemption: ${wedged.map(w => w.label).join(', ')} carried from the quiesced source; workers start after cutover.`,
+        details: { graduation_exempt: true, run_id: process.env.GBRAIN_GRADUATION_RUN, queues: wedged.map(w => w.queue) } };
+    }
     // #3063: "worker alive but not claiming work" would be a false claim
     // for a queue no worker process was ever subscribed to. Split the
     // wedged set by whether a registered live worker actually exists for

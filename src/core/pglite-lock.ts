@@ -317,6 +317,36 @@ export async function acquireLock(dataDir: string | undefined, opts: { timeoutMs
   }
 }
 
+/**
+ * Engine graduation: take only the stable sibling kernel lock of `dataDir`,
+ * without creating the data dir or its metadata (the path may hold a
+ * graduation tombstone file, or nothing while the datastore sits at its
+ * moved-aside path). `lockDir` names where the datastore's metadata now
+ * lives so release and a later move retarget it correctly.
+ */
+export async function acquireKernelLockOnly(dataDir: string, opts: { lockDir: string; timeoutMs?: number; signal?: AbortSignal }): Promise<LockHandle> {
+  const timeoutMs = opts.timeoutMs ?? 30_000;
+  if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > 2 ** 31 - 1) throw new RangeError('Invalid PGLite lock timeout');
+  const kernelPath = getPgliteKernelLockPath(dataDir)!;
+  const deadline = performance.now() + timeoutMs;
+  for (;;) {
+    opts.signal?.throwIfAborted();
+    const nativeLock = await tryAcquireNativeLock(kernelPath);
+    if (nativeLock) {
+      const result: LockHandle = { lockDir: opts.lockDir, acquired: true, nativeLock, acquiredAt: Date.now() };
+      retainedOwners.add(result);
+      return result;
+    }
+    if (performance.now() >= deadline) throw busy(getLockDir(canonicalPath(dataDir)));
+    await delay(Math.min(25, deadline - performance.now()), undefined, { signal: opts.signal });
+  }
+}
+
+/** The metadata dir `acquireLock` uses for `dataDir`; a held handle for that datastore carries it as `lockDir`. */
+export function pgliteLockDirFor(dataDir: string): string {
+  return getLockDir(canonicalPath(dataDir));
+}
+
 /** Metadata removal is optional; kernel release is mandatory and never unlinks. */
 export async function releaseLock(lock: LockHandle): Promise<void> {
   if (!lock.acquired) return;

@@ -22,6 +22,7 @@ import { logVerbUsage } from '../core/verbs/usage-log.ts';
 import { localTranscriptsNotice, recallInteropNotices, wantsTranscriptHint } from '../core/interop-notices.ts';
 import { hiddenToolHint } from './hidden-tool-hint.ts';
 import { takePostUpgradeMcpNotice } from '../core/post-upgrade-notice.ts';
+import { takeFactsDrainNotice } from '../core/facts/drain.ts';
 import { sourceGuardBlocksWrite } from '../core/source-resolver.ts';
 import { suggestNearest } from '../core/levenshtein.ts';
 import {
@@ -903,6 +904,7 @@ export async function dispatchToolCall(
     }
     maybeBackupNotice(notices, opts);
     if (opts.transport === 'stdio' && opts.remote !== false) { const up = takePostUpgradeMcpNotice(); if (up) notices.push(up); } // F7
+    if (opts.transport === 'stdio' && opts.remote !== false) { const drain = takeFactsDrainNotice(); if (drain) notices.push(drain); } // Lane D facts drain
     const out: ToolResult = toolResultWithNotices(result, admitNotices(notices, opts), dispatchRenderContext(opts));
     if (evidenceBlocks.length > 0) out.content.splice(1, 0, ...evidenceBlocks.map(text => ({ type: 'text' as const, text })));
     if (opts.transport === 'stdio') {

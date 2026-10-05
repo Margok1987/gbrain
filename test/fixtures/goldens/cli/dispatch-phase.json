@@ -551,6 +551,13 @@
         "thinClient": "refuse",
         "thinClientRoutedSubcommands": []
       },
+      "edge-proposals": {
+        "hasSwitchCase": true,
+        "phase": "post-connect",
+        "preConnectRules": [],
+        "thinClient": "refuse",
+        "thinClientRoutedSubcommands": []
+      },
       "edges-backfill": {
         "hasSwitchCase": true,
         "phase": "post-connect",
@@ -1100,7 +1107,17 @@
       "migrate": {
         "hasSwitchCase": true,
         "phase": "post-connect",
-        "preConnectRules": [],
+        "preConnectRules": [
+          {
+            "condition": "command === 'migrate' && await (await import('./commands/migrate-graduation.ts')).tryRunMigrateGraduation(args)",
+            "connectsEngine": false,
+            "refusesThinClient": false,
+            "routesThinClient": false,
+            "terminates": true,
+            "thinClientCheck": false,
+            "unconditionalFor": []
+          }
+        ],
         "thinClient": "refuse",
         "thinClientRoutedSubcommands": []
       },
@@ -1574,7 +1591,17 @@
       "serve": {
         "hasSwitchCase": true,
         "phase": "post-connect",
-        "preConnectRules": [],
+        "preConnectRules": [
+          {
+            "condition": "command === 'serve' && (dbMarkerBrainId() ?? 'host') === 'host'",
+            "connectsEngine": false,
+            "refusesThinClient": false,
+            "routesThinClient": false,
+            "terminates": false,
+            "thinClientCheck": false,
+            "unconditionalFor": []
+          }
+        ],
         "thinClient": "refuse",
         "thinClientRoutedSubcommands": []
       },
@@ -1677,6 +1704,15 @@
               "forget",
               "call"
             ]
+          },
+          {
+            "condition": "command === 'sources' && args[0] === 'refresh' && !hasHelpFlag(args) && await (await import('./commands/sources-refresh-delegate.ts')).maybeDelegateSourcesRefresh(loadConfig(), args.slice(1))",
+            "connectsEngine": false,
+            "refusesThinClient": false,
+            "routesThinClient": false,
+            "terminates": true,
+            "thinClientCheck": false,
+            "unconditionalFor": []
           }
         ],
         "thinClient": "refuse",

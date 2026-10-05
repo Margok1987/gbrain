@@ -6,8 +6,8 @@
  * Protects (spec 4.5): `auth create` births a unified token; `rescope-token`
  * and `permissions set-takes-holders` stay exact aliases of
  * `rescope --token`; `rescope --client` and `rescope-client` write identical
- * rows and `--sources none` on a client refuses with
- * `client_sources_none_unsupported` (9); `--if-version` mismatch refuses with
+ * rows and `--sources none` and `--takes-holders` on a client succeed
+ * (9); `--if-version` mismatch refuses with
  * the current revision on stdout under --json (8); a bare name that matches a
  * token and a client refuses; `--migrate-legacy --dry-run` writes nothing (10);
  * harness rotation mints a unified token that keeps explicit empty lists (7).
@@ -158,15 +158,17 @@ describe('9. OAuth clients', () => {
     expect(await clientRow(a.clientId)).toMatchObject({ source_id: 'other', federated_read: ['other', 'default'], allowed_operations: ['get_page', 'search'] });
 
     const none = await cli('auth', 'rescope', '--client', a.clientId, '--sources', 'none', '--json');
-    expect(none.exitCode).toBe(1);
-    const body = JSON.parse(none.stdout) as { error: { reasons: string[]; message: string } };
-    expect(body.error.reasons).toEqual(['client_sources_none_unsupported']);
-    expect(body.error.message).toContain(`gbrain auth revoke-client ${a.clientId}`);
-    expect((await clientRow(a.clientId)).source_id).toBe('other');
+    expect(none.exitCode).toBe(0);
+    expect(JSON.parse(none.stdout).principal_grant.sources).toEqual({ kind: 'none' });
+    expect(await clientRow(a.clientId)).toMatchObject({ source_id: null, federated_read: [] });
 
-    const holders = await cli('auth', 'rescope', '--client', a.clientId, '--takes-holders', 'world');
-    expect(holders.exitCode).toBe(1);
-    expect(holders.stderr).toContain('--takes-holders applies to legacy tokens only');
+    const holders = await cli('auth', 'rescope', '--client', a.clientId, '--takes-holders', 'world,brain');
+    expect(holders.exitCode).toBe(0);
+    expect(holders.stdout).toContain('Takes holders: world, brain');
+
+    const reset = await cli('auth', 'rescope', '--client', a.clientId, '--reset-default', 'sources');
+    expect(reset.exitCode).toBe(1);
+    expect(reset.stderr).toContain('--reset-default applies to legacy tokens only');
   }, 180_000);
 
   test('--operations all drops a profile snapshot on both client spellings; a token refuses it', async () => {

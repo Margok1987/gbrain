@@ -39,6 +39,8 @@ function fakeEngine(): Record<string, unknown> {
     getConfig: async (key: string) => (key === 'version' ? '100000' : null),
     setConfig: async () => {},
     initSchema: async () => {},
+    // The connect path's graduation gate probes for a persistence_graduation row; none exists here.
+    executeRaw: async () => [],
   };
 }
 

@@ -220,6 +220,54 @@ requests. Added scopes require a fresh token; refresh cannot widen the original
 token's scope ceiling. Native OAuth clients must reconnect and obtain fresh
 owner approval. TTL changes affect future tokens only.
 
+## Dashboard API keys
+
+**Say to your agent:** *"Make a read-only API key for my notes app."* The
+agent mints it from the dashboard's **+ API Key** form or runs
+`gbrain auth create notes-app --scopes read` on the brain host.
+
+The dashboard form and `POST /admin/api/api-keys` mint a legacy bearer token
+with the same grant shape as `gbrain auth create`. The request body takes:
+
+| Field | Default when omitted | Accepted values |
+| --- | --- | --- |
+| `name` | required | 1-128 printable characters; names need not be unique |
+| `scopes` | `read,write` | a non-empty list of registered scopes; `admin` only when listed |
+| `sources` | no source grant (the `auth create` default) | active source ids; the first is the write source |
+| `takes_holders` | `world` | `world`, `brain`, `people/<slug>`, `companies/<slug>` or a bare slug |
+
+The response carries the token once, the key `id`, the effective grant
+(`scopes_applied`, `sources_applied`, `takes_holders_applied`) and
+`defaults_applied`, the fields that took their defaults. An unknown scope,
+source or holder, or a bad name, refuses with `invalid_params` and mints
+nothing; the message lists the valid values. The plaintext token is never
+written to request logs or the live activity feed.
+
+```bash
+curl -s -X POST "$BRAIN/admin/api/api-keys" -H 'content-type: application/json' \
+  --cookie "$ADMIN_COOKIE" -d '{"name":"notes-app","scopes":["read"]}'
+# the gbrain auth create equivalent on the brain host:
+gbrain auth create notes-app --scopes read --takes-holders world
+```
+
+`GET /admin/api/api-keys` lists every key with its `id`, `status`, `scopes`,
+`sources` and `takes_holders`. `POST /admin/api/api-keys/revoke` takes
+`{"id": "<key id>"}` and revokes exactly that key; a same-name sibling keeps
+working. The CLI equivalent is `gbrain auth revoke --id <id>`.
+
+### Tokens without scopes
+
+A token minted without scopes (every dashboard key before scopes were
+required, and `gbrain auth create` without `--scopes`) holds full read, write
+and admin access. `gbrain doctor` warns `legacy_token_null_scope` with the
+count and, per token, the command that narrows it
+(`details.tokens: [{id, name, argv}]`). Narrowing removes admin operations from
+that key, so ask the user first:
+
+```bash
+gbrain auth rescope --id TOKEN_ID --scopes read,write
+```
+
 ## Legacy token grants
 
 **Say to your agent:** *"Let the hosted token read the workspace source too."*
@@ -243,13 +291,15 @@ gbrain auth rescope --token agent-example --sources none        # deny-all
 gbrain auth rescope --token agent-example --reset-default sources,takes-holders
 gbrain auth rescope --id TOKEN_ID --sources default --if-version 3 --dry-run --json
 gbrain auth rescope --client CLIENT_ID --sources workspace,default --operations get_page,search
+gbrain auth rescope --client CLIENT_ID --takes-holders world,brain
+gbrain auth rescope --client CLIENT_ID --sources none          # deny-all, secret unchanged
 ```
 
 | Flag | Value | Effect |
 | --- | --- | --- |
-| `--sources` | `a,b` or `none` | Source grant; the first id is the write source, the list is the read set. `default` is the source named `default`; to restore the no-grant floor use `--reset-default sources`. Tokens: `none` grants no source, so reads and writes to every source are refused (`permission_denied`, `fence=no_source_grant`), including writes accepted before the change. Clients: `none` refuses (`client_sources_none_unsupported`); cut a client off with `gbrain auth revoke-client <client_id>`. |
+| `--sources` | `a,b` or `none` | Source grant; the first id is the write source, the list is the read set. `default` is the source named `default`; to restore the no-grant floor use `--reset-default sources`. `none` grants no source, so reads and writes to every source are refused (`permission_denied`, `fence=no_source_grant`), including writes accepted before the change; the token or client keeps its scopes and secret. A client with `none` takes no `--read-sources`, and a delegating agent client cannot hold it. |
 | `--read-sources` | `a,b` | Client only: a read set that differs from `--sources`. |
-| `--takes-holders` | `a,b` or `none` | Token only: takes-holder allow-list; `none` hides every take. |
+| `--takes-holders` | `a,b` or `none` | Takes-holder allow-list for a token or client (default `world`); `none` hides every take. |
 | `--operations` | `op,...`, `none` or `all` | Operation snapshot; `none` refuses every operation. Client only: `all` stores no snapshot and clears the profile, so the scopes and the surface alone decide, including operations later upgrades add (tokens: `--reset-default operations`). |
 | `--scopes` | `read,write,...` | Replaces the scopes. |
 | `--reset-default` | `sources,takes-holders,operations` | Token only: restores the `auth create` default for those axes: no source grant (the historical `default` floor), holders `world`, no operation snapshot. |
@@ -266,37 +316,44 @@ from `gbrain auth list`. The older commands stay as aliases:
 `auth rescope --client`, and `gbrain auth permissions <name>
 set-takes-holders <list>` is `auth rescope --token <name> --takes-holders <list>`.
 
-### One grant shape and the lazy migration
+### One grant shape
 
 Tokens store their grant in the same columns as OAuth clients
 (`access_tokens.source_grant`, `source_id`, `federated_read`,
 `allowed_operations`, `takes_holders`, `grant_revision`). `source_grant` is
-`default`, `scalar`, `federated` or `none`; NULL means the token still uses the
-older `permissions` JSON shape. Those tokens keep working unchanged and are not
-re-issued: the next `auth rescope` edit, every `auth create` and every harness
-rotation write the columns, bump `grant_revision`, and rewrite `permissions` as
-a mirror (other keys preserved) so older gbrain binaries enforce the same
-grant. To migrate every remaining token at once, without changing any grant:
+`default`, `scalar`, `federated` or `none`. Authorization reads these columns.
+Every grant write also rewrites `permissions` as a mirror (other keys
+preserved) so older gbrain binaries enforce the same grant; the mirror is kept
+until the end date `gbrain doctor` reports (`details.mirror_window_ends`).
+
+The schema migration that ships with this release converts every active
+token still on the older `permissions`-only shape (`source_grant` NULL) in one
+pass without changing any grant, and prints how many it converted. A token
+an older binary creates afterwards converts on its first request (on a
+read-only database role it is authorized with the identical grant and
+converts later). To convert any remaining tokens now:
 
 ```bash
 gbrain auth rescope --migrate-legacy --dry-run    # list
 gbrain auth rescope --migrate-legacy
 ```
 
-A token whose `permissions` value is not a JSON object is skipped: the HTTP
-paths read it as no grant while publication denies it, so there is no faithful
-column form. Ask the user which grant it should hold, then run
-`gbrain auth rescope --id <id>` with explicit `--sources`, `--takes-holders`
-and `--operations` (or `--reset-default sources,takes-holders,operations`).
-`gbrain doctor` reports the count as `legacy_token_grant_shape`
-(`details.legacy_shape_count`, `details.malformed`).
+A token whose `permissions` value is not a JSON object has no faithful
+grant, so it is never converted and every request it makes is refused.
+`gbrain doctor` warns `legacy_token_grant_shape` with the count
+(`details.legacy_shape_count`, `details.convertible_count`) and, per malformed
+token, the command that gives it the `auth create` default grant
+(`details.malformed: [{name, id, argv}]`). Ask the user which grant it should
+hold first, then run that command or `gbrain auth rescope --id <id>` with
+explicit `--sources`, `--takes-holders` and `--operations`.
 
 ### Grant drift
 
 If an older gbrain binary edits a migrated token's `permissions` JSON (for
-example its `auth rescope-token`), the JSON and the columns disagree. Each
-axis that disagrees (`sources`, `takes-holders`, `operations`) denies every
-request until resolved, and grant edits on that token refuse. `gbrain doctor`
+example its `auth rescope-token`), the JSON and the columns disagree. While
+the mirror is kept, each axis that disagrees (`sources`, `takes-holders`,
+`operations`) denies every request until resolved, and grant edits on that
+token refuse; the columns are never widened from the JSON. `gbrain doctor`
 warns `legacy_token_grant_drift` (`details.drift: [{name, id, axes}]`). Ask the
 user which grant is intended, then run one of:
 

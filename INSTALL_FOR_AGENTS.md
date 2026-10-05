@@ -167,7 +167,7 @@ rung prints a one-line note and falls through; only the PGLite floor is terminal
 | 2. Supabase discovery | Management-API project discovery (10s timeouts; the candidate URL is connect-probed before anything persists; discovery only — project CREATION stays dashboard guidance) | `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD` (+ `SUPABASE_PROJECT_REF` on multi-project accounts) |
 | 3. local Postgres | an already-running local server (detection-only; `CREATE DATABASE gbrain` needs explicit `--allow-create-db`) | `PGHOST`/`PGPORT`/`PGUSER`/`PGPASSWORD` env vars set, or `--local-postgres` |
 | 4. docker | gbrain's own container `gbrain-postgres` (image `pgvector/pgvector:pg16`, loopback-only port 5434, data on the named `gbrain-pgdata` volume, `--restart unless-stopped`; idempotent reuse recovers credentials via `docker inspect`; refuses to share a container/volume that already holds a brain this home's config doesn't record; gbrain never stops or removes it) | explicit `--allow-docker` |
-| 5. PGLite floor | zero-config fallback, with an upgrade-later note (`gbrain migrate --to supabase`) | nothing |
+| 5. PGLite floor | zero-config fallback, with an upgrade-later note (the later move is `gbrain migrate --to postgres`; see [Move a PGLite brain to Postgres](docs/guides/move-to-postgres.md)) | nothing |
 
 The ladder REFUSES to run over an already-configured brain — rung choice is
 environment-dependent, so a re-run during an outage could silently repoint a

@@ -30,6 +30,7 @@ import { opError } from '../ops/contract.ts';
 import { readFix } from '../ops/op-fix.ts';
 import { getProposal, transitionProposal, type ProposalRow } from '../ai/decide/proposals-store.ts';
 import { strikeFenceRow, supersededFact } from './forget.ts';
+import { maintenanceTransaction } from '../persistence/attribution.ts';
 import type { PreparedMutation } from '../persistence/coordinator.ts';
 import type { WriteRequest } from '../persistence/model.ts';
 
@@ -221,7 +222,7 @@ async function acceptUnmanaged(engine: BrainEngine, proposal: ProposalRow): Prom
     const before: SupersedeState = { old: factFields(oldF!), new: factFields(newF!), fence: plan ? fence(plan.before, snapshot?.revision ?? null) : null };
     let published = false;
     try {
-      await engine.transaction(async (tx) => {
+      await maintenanceTransaction(engine, async (tx) => {
         const revision = plan ? await mirrorBody(tx, slug!, fresh.source_id, plan.body, fileBody !== null) : null;
         await expireOld(tx, fresh);
         await finishAccept(tx, fresh, before, plan ? fence(plan.after, revision) : null);
@@ -258,7 +259,7 @@ async function undoUnmanaged(engine: BrainEngine, proposal: ProposalRow): Promis
     }
     let published = false;
     try {
-      await engine.transaction(async (tx) => {
+      await maintenanceTransaction(engine, async (tx) => {
         if (plan) await mirrorBody(tx, before.fence!.slug, fresh.source_id, plan.body, fileBody !== null);
         await applyUndoDb(tx, fresh, before, after);
         if (plan && fileBody !== null) { publishFile(filePath!, plan.body); published = true; }

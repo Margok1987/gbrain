@@ -111,6 +111,13 @@ export const SECTIONS: DocSection[] = [
         path: "docs/ENGINES.md",
       },
       {
+        title: "docs/guides/move-to-postgres.md",
+        description:
+          "Move a PGLite brain to Postgres with its history: --url-env target setup, plan (exit 3) then --yes --expect, status/resume/rollback, what moves vs stays on this computer, recovery by error code.",
+        path: "docs/guides/move-to-postgres.md",
+        includeInFull: false,
+      },
+      {
         title: "docs/GBRAIN_RECOMMENDED_SCHEMA.md",
         description:
           "MECE directory structure (people/, companies/, concepts/).",
@@ -180,6 +187,13 @@ export const SECTIONS: DocSection[] = [
         description:
           "Life Chronicle automatic event extraction (on by default): what qualifies, per-page cost and daily ceiling, privacy, the receipt -> `gbrain dream --phase chronicle` -> `gbrain day` check, skip/failure codes with fixes, opt-out `gbrain config set auto_chronicle false`, history backfill.",
         path: "docs/guides/life-chronicle.md",
+        includeInFull: false,
+      },
+      {
+        title: "docs/guides/facts-drain.md",
+        description:
+          "Automatic facts drain on PGLite (on by default): queued facts-absorb jobs run inside gbrain serve, serve --http and the facts_drain cycle phase with no command; per-run, daily and job-count caps, deferrals that never drop work, doctor facts_drain, opt-out `gbrain config set facts.extraction_enabled false`.",
+        path: "docs/guides/facts-drain.md",
         includeInFull: false,
       },
       {

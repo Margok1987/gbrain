@@ -290,9 +290,22 @@ writes the vectors onto every chunk so the vector arm runs keylessly through
 each with a known-answer check: `get_health`, `list_pages`, local and MCP-path
 `search`, a source-scoped grant search, hybrid `query` with an injected
 vector, `traverse_graph`, `get_backlinks` and `find_orphans`, plus a
-cold-process first query and two concurrent receipt-bearing `put_page`s. It
+cold-process first query and two concurrent receipt-bearing `put_page`s.
+`find_orphans` is checked with one call at the op's maximum page size: its
+rows must hold every fixture island and match `total_orphans`. It
 captures every statement each op sends and replays the reads under
-`EXPLAIN ANALYZE` for the planner check. The report leads with the headline
+`EXPLAIN ANALYZE` for the planner check. With the brain closed, it then runs
+the large-brain operational ceilings through the real CLI
+(`scripts/scale/f4d.ts`), each an enforced data check with its measurement in
+the report's `f4d` section: a `gbrain sync` of a fresh source (1,000 files at 10k and up) past a 1 s
+progress-aware deadline completes (`f4d_sync_deadline`); `gbrain embed
+--stale` against a local stub embedding endpoint stops at its time budget with
+exit 11, the remaining count and the resume command (`f4d_embed_budget_stop`;
+nothing leaves the machine); `gbrain serve` answers initialize and a search
+without hitting its boot deadline (`f4d_serve_boot`); and at 20,000 pages and
+up, `gbrain sources add` registers a 20,000-file checkout on a fresh managed
+brain (`f4d_sources_add_20k`). Each phase logs its start and end, so a run
+stopped by a job timeout shows where it was. The report leads with the headline
 metric, MCP search p50 at the run's size as shipped (no manual ANALYZE).
 
 Exit codes: 0 when every enforced gate passes, or always without `--enforce`;
@@ -313,8 +326,9 @@ nightly runs; a reviewer then sets the repo variable
 `GBRAIN_SCALE_ENFORCE_CEILINGS=1`. The same script picks the nightly sizes.
 Reproduce any report with the command it prints. The fixture's determinism
 is pinned by `test/scripts/scale-fixture.test.ts`, the gate policy by
-`test/scripts/scale-gates.test.ts` and `scale-trend.test.ts`, and a 40-page
-enforced run by `test/scripts/scale-harness.slow.test.ts`.
+`test/scripts/scale-gates.test.ts` and `scale-trend.test.ts`, the
+`find_orphans` known answer by `test/scripts/scale-orphans-verifier.test.ts`,
+and a 40-page enforced run by `test/scripts/scale-harness.slow.test.ts`.
 
 ### Authoring gate
 
@@ -696,7 +710,13 @@ The persistence invariant jobs run the complete `scripts/persistence/validate.ts
 gate (10,000-write soak) on pushes to master and manual dispatches. Pull requests
 run the same schedules and crash boundaries with a 2,500-write soak; the full
 PGLite soak alone takes 15-28 minutes and would otherwise set every PR's wall
-time. `test/scripts/data-safety-native-workflow.test.ts` pins the split.
+time. `test/scripts/data-safety-native-workflow.test.ts` pins the split. The
+crash robot (generated sequences of real operations, SIGKILL at every crash
+seam they reach, process faults, the reference model) runs as its own job
+beside the soak: 150 s on pull requests, 600 s elsewhere, Postgres through a
+transaction-mode PgBouncer. That job also replays the shrunk crash-robot
+regressions (`test/persistence-crash-robot.slow.test.ts`) and the history
+fixture test on both engines; see `scripts/persistence/README.md`.
 
 For platform-only feedback, dispatch
 `gh workflow run test.yml --ref <branch> -f native_only=true`. This explicit manual option uses a separate concurrency
@@ -789,6 +809,36 @@ recovery bytes and pool activity.
 The CLI without `--informational` still enforces the threshold. The original
 heavy shell entry invokes this harness; its optional `STRICT_LATENCY=1`
 flag affects only the latency threshold, never validity requirements.
+
+### Engine graduation
+
+Graduation (`gbrain migrate --to postgres`) is tested against two fixtures.
+`test/fixtures/graduation/legacy-brain.ts` builds a small brain by hand-written
+SQL on a fresh schema, and its expected outcomes live in `expected.json`
+beside it (`test/graduation-legacy-fixture.test.ts` proves the build matches
+and that the target checker discriminates).
+`scripts/persistence/graduation-fixture.ts` wraps `buildHistoryFixture` for
+the 1k and 10k history brains, builds keylessly in a child process, and
+caches each build as a tarball keyed by the fixture sources, schema version,
+seed and size (`GBRAIN_GRADUATION_FIXTURE_CACHE`, default
+`~/.cache/gbrain-graduation-fixtures`). A restore re-homes paths and owner
+stamps and marks sources synced, so the source doctor stays green.
+
+The E2E suites drive the real CLI in child processes:
+`graduation-crash` (SIGKILL at every run and rollback boundary),
+`graduation-faults` (ENOSPC on a tmpfs tablespace, which needs Docker;
+password rotation; DDL route mismatch), `graduation-clients` (older
+releases, respawned and resident serve, stale CLI and MCP configs) and
+`graduation-cli` (agent flow, zero-mutation `--plan`/`--status`, `--force`,
+PgBouncer through `GBRAIN_PGBOUNCER_URL`, a NOSUPERUSER role, the 1k round
+trip). Kill and pause points come from `graduationBoundary()` hooks that only
+`test/helpers/graduation-hooks-preload.ts` registers. Older release binaries
+are built once per tag under `GBRAIN_OLDER_RELEASE_DIR`. The crash suite takes
+about 40 seconds per case, so run it with `GBRAIN_E2E_FILE_TIMEOUT=3600`.
+`scripts/persistence/graduation-ttv.ts` records the commands and wall time
+from the first plan to a green doctor, the run's phase timings and query
+p50/p95 on both engines. The 1k-page gate is five minutes;
+`tests/heavy/graduation_10k.sh` reports the 10k run.
 
 ### PGLite schema snapshot (default-on)
 
@@ -2167,7 +2217,7 @@ E2E tests live in `test/e2e/` and run against real Postgres+pgvector (require `D
 - `test/e2e/serve-http-oauth.test.ts` — real-Postgres E2E against `gbrain serve --http` with full OAuth 2.1. Spawns a subprocess server, registers a client via the CLI, mints `client_credentials` tokens, exercises the `/mcp` JSON-RPC pipeline. Real DCR `/register` HTTP-level response-shape test (asserts `typeof body.client_id_issued_at === 'number'` over the wire, RFC 7591 §3.2.1); real CLI subprocess test for `revoke-client` (registers → mints token → revokes via `execSync` → asserts token rejected at `/mcp` → asserts re-run exits 1); server fixture flips on `--enable-dcr` so `/register` is reachable. **bun execSync env-inheritance contract:** bun's `execSync` does NOT inherit env mutations done via `process.env.X = ...`, only OS-level env from before bun started. helpers.ts loads `.env.testing` and sets `DATABASE_URL` via `process.env` mutation, which is invisible to subprocesses unless `env: { ...process.env }` is passed explicitly — every subprocess call in this file passes `env: { ...process.env }`. The same contract applies to the sibling sync/cycle/dream/claw-test E2Es. `afterAll` cleanup is guarded on `clientId` (won't throw if `beforeAll` failed before registration); cleanup errors surface to stderr without throwing so real test failures aren't masked. Also covers the trust boundary: an HTTP MCP `submit_job` for `name: "shell"` MUST reject with a permission error (request handler sets `remote: true` and `submit_job`'s protected-name guard fires), and the same guard rejects subagent submission. Skips without `DATABASE_URL`.
 - `test/e2e/sync-parallel.test.ts` — `DATABASE_URL`-gated. 60-file Postgres sync at concurrency=4 imports all + no connection leak (probes `pg_stat_activity` before/after to confirm worker engines disconnected). 120-file serial-vs-parallel benchmark prints `SYNC_PARALLEL_BENCH N files | serial=Xms | parallel(4)=Yms | speedup=Zx`. Asserts parallel ≤ serial × 1.5 (CI-noise tolerant; not a strict speedup gate).
 - `test/e2e/multi-source-bug-class.test.ts` — PGLite in-memory regression suite pinning every multi-source bug site: `listAllPageRefs` ordering by `(source_id, slug)`, `getPage` with sourceId picks the right `(source, slug)` row, `extract-takes` processes both overlapping `people/alice` rows independently, `listPages` filters correctly with `PageFilters.sourceId`, `addLinksBatch` with `from/to_source_id` targets the right rows, `validateSourceId` rejects path traversal, reverse-write disk layout uses `brainDir/.sources/<id>/<slug>.md` for non-default sources, `copyMigrationSources` lands source metadata before overlapping-slug pages. No `DATABASE_URL` needed. Wired into `scripts/e2e-test-map.ts` so changes to extract-takes / patterns / synthesize / embed / extract / migrate-engine auto-trigger it.
-- `test/e2e/migrate-engine-sources-postgres.test.ts` — `DATABASE_URL`-gated companion for `gbrain migrate --to`: migrates a PGLite brain carrying two non-default sources with overlapping slugs into real Postgres and asserts `copyMigrationSources` created every `sources` FK parent (config JSONB intact, not double-encoded) before any page write. Unit-level manifest identity (crash manifest resumes only against the SAME target; legacy engine-only manifests start fresh) is `test/migrate-engine-resume.test.ts`.
+- `test/e2e/migrate-engine-sources-postgres.test.ts` — `DATABASE_URL`-gated companion for the legacy engine copier (`gbrain migrate --to pglite`, and `--to postgres` with `migrate.graduation false`): migrates a PGLite brain carrying two non-default sources with overlapping slugs into real Postgres and asserts `copyMigrationSources` created every `sources` FK parent (config JSONB intact, not double-encoded) before any page write. Unit-level manifest identity (crash manifest resumes only against the SAME target; legacy engine-only manifests start fresh) is `test/migrate-engine-resume.test.ts`.
 - `test/e2e/facts-fence-reconcile-postgres.test.ts` — `DATABASE_URL`-gated round-trip for the escape-aware fence parser: renders a `## Facts` fence whose cells carry literal pipes, backslashes (Windows paths), and empty cells via `renderFactsTable`, runs the wipe-and-reinsert reconcile (`runExtractFacts`) on real Postgres, and asserts every cell survives byte-identically with no column shift.
 - `test/e2e/source-isolation-pglite.test.ts` — PGLite in-memory regression suite pinning the source-isolation seal at two layers. Engine layer: `searchKeyword` / `searchVector` / `searchKeywordChunks` / `listPages` / `getPage` / `traverseGraph` / `traversePaths` apply `sourceId` (scalar fast path) and `sourceIds` (array path) correctly across both engines. Op-handler layer: routes through `sourceScopeOpts(ctx)` so a `read+write`-scoped OAuth client bound to `--source dept-x` cannot see rows from neighboring sources via `search`, `query`, `list_pages`, `get_page`, or `find_experts`. Covers both `ctx.sourceId` (single-source clients) and `ctx.auth.allowedSources` (federated_read clients) precedence; federated array wins over scalar wins over nothing. No `DATABASE_URL` needed.
 - `test/e2e/think-source-isolation-pglite.test.ts` — PGLite in-memory suite pinning the `think` gather stage's source scope: seeds three sources with cross-source links and embedded takes, then asserts `runGather` under a federated `sourceIds` grant (and under a scalar `sourceId`) keeps every stream — hybrid retrieval, takes keyword + vector (`searchTakes`/`searchTakesVector`), and the `traversePaths` graph walk — inside the grant while still reaching authorized neighboring sources. No `DATABASE_URL` needed.

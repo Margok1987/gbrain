@@ -202,7 +202,7 @@ export async function checkCompanyBrainDestination(engine: BrainEngine, input: C
   }
   const [broad] = await engine.executeRaw<{ count: string }>(
     `SELECT count(*)::text AS count FROM (
-      SELECT client_id AS id FROM oauth_clients WHERE deleted_at IS NULL AND source_id IS NULL AND cardinality(federated_read)=0
+      SELECT client_id AS id FROM oauth_clients WHERE deleted_at IS NULL AND source_id IS NULL AND cardinality(federated_read)=0 AND source_grant IS DISTINCT FROM 'none'
         AND (scope IS NULL OR scope ~ '(^|\\s)(read|admin)(\\s|$)') AND (allowed_operations IS NULL OR cardinality(allowed_operations)>0)
       UNION ALL SELECT id::text FROM persistence_local_writers WHERE lane='stdio' AND revoked_at IS NULL
         AND grant_ceiling->'sourceIds' ? '*' AND grant_ceiling->'scopes' ? 'read'

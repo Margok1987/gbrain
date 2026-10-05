@@ -252,7 +252,7 @@ describe('#3056: rename fallback reconciles the stale old row', () => {
 
     // Inject a transient failure into the reconcile delete (#4587: the
     // reconcile soft-deletes via softDeletePages now).
-    const origDelete = engine.softDeletePages.bind(engine);
+    const origDelete = engine.softDeletePages;
     engine.softDeletePages = async () => { throw new Error('injected transient delete failure'); };
     let blocked;
     try {
@@ -343,7 +343,7 @@ describe('#3479 blocker 1: a permanent reconcile failure has a documented operat
     // environment where UPDATE still works but this DELETE never will):
     // every retry fails the same way. Capture stderr to pin that the
     // blocked message documents the operator exit, not just the retry.
-    const origDelete = engine.softDeletePages.bind(engine);
+    const origDelete = engine.softDeletePages;
     engine.softDeletePages = async () => { throw new Error('permission denied for table pages (injected permanent failure)'); };
     const stderrChunks: string[] = [];
     const origWrite = process.stderr.write.bind(process.stderr);
@@ -415,7 +415,7 @@ describe('#3479 blocker 2: an orphaned rename sentinel self-clears; a real dupli
     }, { sourceId: 'default' });
     execSync('git mv people/carol.md people/dana.md', { cwd: repo, stdio: 'pipe' });
     execSync('git commit -m "rename carol to dana"', { cwd: repo, stdio: 'pipe' });
-    const origDelete = engine.softDeletePages.bind(engine);
+    const origDelete = engine.softDeletePages;
     engine.softDeletePages = async () => { throw new Error('injected transient delete failure'); };
     try {
       const blocked = await performSync(engine, { repoPath: repo, ...SYNC_OPTS });
@@ -561,7 +561,7 @@ describe('#3479: non-unique source_path — a soft-deleted row must not mask a l
     }, { sourceId: 'default' });
     execSync('git mv people/carol.md people/dana.md', { cwd: repo, stdio: 'pipe' });
     execSync('git commit -m "rename carol to dana"', { cwd: repo, stdio: 'pipe' });
-    const origDelete = engine.softDeletePages.bind(engine);
+    const origDelete = engine.softDeletePages;
     engine.softDeletePages = async () => { throw new Error('injected transient delete failure'); };
     try {
       const blocked = await performSync(engine, { repoPath: repo, ...SYNC_OPTS });

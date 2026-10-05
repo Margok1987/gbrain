@@ -9,6 +9,7 @@ import { softDeleteSyncPages } from '../../core/company-brain/profile.ts';
 import { serr } from '../../core/console-prefix.ts';
 import { DELETE_BATCH_SIZE } from '../../core/engine-constants.ts';
 import { importFile, isImageFilePath as isImageImportPath, importImageFile } from '../../core/import-file.ts';
+import { maintenanceTransaction } from '../../core/persistence/attribution.ts';
 import {
   resolveSlugsForRemovedPaths,
   refusedRemovedPathMessage,
@@ -245,7 +246,7 @@ async function applyRename(
   let renameApplied = false;
   if (oldSlug !== undefined) {
     try {
-      renameApplied = (await engine.updateSlug(oldSlug, newSlug, renameOpts)) > 0;
+      renameApplied = (await maintenanceTransaction(engine, tx => tx.updateSlug(oldSlug, newSlug, renameOpts))) > 0;
     } catch {
       // Destination slug occupied or invalid — treat as add; the
       // reconcile below removes the stale old row once the destination

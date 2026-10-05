@@ -74,7 +74,7 @@ any other option the table below does not list, including `--max-usd`: a
 refused run changes nothing. To cap paid embedding work, run the repairs
 through `gbrain doctor --remediate --yes --include-repairs --expect <plan_hash> --max-usd <n>`
 (`<plan_hash>` comes from `gbrain doctor --remediation-plan --json`). `--all`
-runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `orphan-bindings`, then `embedding-effects`, then `attribution-backfill`, then `planner-stats`, and stops at the
+runs `timeline`, then `visibility`, then `safe-chunks`, then `contextual-mode`, then `connector-checkpoints`, then `request-indexes`, then `connector-fences`, then `take-supersession`, then `orphan-bindings`, then `embedding-effects`, then `attribution-backfill`, then `planner-stats`, and stops at the
 first kind that stops.
 The explicit-only kinds never run under
 `--all`; it lists each with its preview command and still exits 0 when they
@@ -119,6 +119,7 @@ should also check `results[].complete`.
 | `visibility` | `derived_visibility` | Stamps an explicit `visibility` on extracted atoms and synthesized concepts. An atom takes its origin page's visibility; transcript atoms and atoms whose origin is gone become `private`; a concept takes the strictest visibility of its input atoms. A concept input found only through an atom's `concepts:` list counts as private. Atoms are repaired before concepts. It never loosens an explicit value: `private` stays `private`, and `world` can only become `private`. A missing value is stamped with the origin's value, which is `world` when the origin page is public. | `concepts_without_lineage`: concepts whose inputs cannot be found. They stay as they are, and remote readers already treat a missing visibility as private. `atoms_origin_gone_to_private` counts atoms made private because their origin page no longer exists. |
 | `request-indexes` | `persistence_request_indexes` | Creates a missing managed sync request index, or drops an INVALID one (left by an interrupted concurrent build) and rebuilds it, on a brain whose schema version is already current. Postgres builds each index `CONCURRENTLY`, one at a time, so writes continue; PGLite builds inline. It changes no user data, takes no journal admission and runs brain-wide (`--source` does not narrow it). See [managed sync request indexes](#request-indexes). | `building`: an index another session is still building; it is never dropped. |
 | `connector-fences` | none (a `connector_fence_below_timeline` refusal names it) | Moves a facts or takes fence that sits below the timeline sentinel of a Google or GitHub page into the page body through a revision-bound `put_page`, so the connector's next re-render carries the fence instead of refusing. Then re-attempt the held item with `gbrain sources retry-held <source>`. | `kept_ambiguous_pages`: pages whose fences are duplicated, unbalanced or unparseable. Move the fence by hand: read the page, place the fence above the `<!-- timeline -->` line, and save it with the current `expected_revision`. |
+| `take-supersession` | none | Rebuilds `takes.superseded_by` for supersession chains written before the pointer moved onto the old fence row (#5886). Each struck take is linked to the row that replaced it only from evidence: a committed `takes_supersede` receipt, a stored `superseded_by`, or a row carrying the old `superseded by #<own row>` pointer with exactly one possible predecessor. The pointer is written onto the old row (`<source>; superseded by #N`) and stale self-pointers are dropped through a revision-bound `put_page`; a page whose fence is already right but whose stored pointers differ is reprojected without a page write. See [take supersession](#take-supersession). | `ambiguous_pages` / `ambiguous_rows`: pages where a new row has two or more possible predecessors, or where evidence conflicts. The preview lists each with its candidates and the manual edit; nothing on them changes. `unparsed_pages`: pages whose takes fence does not parse cleanly. |
 | `connector-checkpoints` | `connector_checkpoints` | Deletes managed connector checkpoint rows and retry pointers that no registered connector source can load and that are older than 7 days. They accumulate after a content setting such as `g_history_days` changes, or when a connector host older than v0.60.11.0 runs during an upgrade. Cleanup only: it never copies or re-keys a checkpoint, takes no journal admission and runs brain-wide (`--source` does not narrow it). | Rows a queued or running connector write, or a connector's recorded pending set, still references. |
 | `orphan-bindings` | `orphan_persistence_bindings` | Deletes persistence source bindings whose source was removed, or that belong to an earlier incarnation of a source re-added under the same id. `gbrain sources remove` and `gbrain sources purge` delete the binding; one an older gbrain left behind makes the re-added source read as claimed, so every `gbrain sync --source <id>` fails with `writer_coordinator_required`. Bookkeeping only: no journal admission, no page or file changes, and it runs brain-wide (`--source` does not narrow it). See [orphan bindings](#orphan-bindings). | A binding that a queued, running or recovering write request of the same source incarnation still references. |
 | `embedding-effects` | `stale_embedding_effects` | Settles stale queued and failed embedding effects of committed writes, which block receipt compaction and activation: `reconciled` when current vectors pass the effect verifier, `superseded` when the page was deleted or a newer revision owns its own effect, `retry_queued` for the owner (paid; a used-up retry allowance gets one new bounded cycle per explicit apply). See [stale queued embedding effects](#stale-queued-embedding-effects). | `blocked` effects, counted by reason (`owner_unavailable`, `embedding_disabled`, `embedding_unconfigured`, `projection_pending`, `no_replacement_obligation`). |
@@ -301,6 +302,34 @@ the item's error code names, then re-attempt. See
 | A sync fails with `connector_holds_exhausted` | `gbrain sources status <source> --json` | Fix the cause, then `gbrain sources retry-held <source>` and `gbrain sync --source <source>` | `gbrain doctor` | agent, after the user agrees | `egress` |
 | A sync refuses with `connector_fence_below_timeline` | `gbrain repair connector-fences --source <source>` | `gbrain repair connector-fences --source <source> --apply`, then `gbrain sources retry-held <source>` | `gbrain sync --source <source>` succeeds | brain host, after the user agrees | `egress` |
 
+<a id="take-supersession"></a>
+### Take supersession
+
+**Say to your agent:** *"My superseded takes don't point at the take that
+replaced them. Repair the supersession chains."*
+
+Takes superseded before the pointer moved onto the old fence row have
+`superseded_by` empty: the old row was struck without a pointer, and the new
+row often cites itself (`superseded by #<its own row>`). Preview, then apply
+after you agree:
+
+```bash
+gbrain repair take-supersession            # per page: each link, its evidence, ambiguous pages
+gbrain repair take-supersession --json     # details.pages[] and details.ambiguous[]
+gbrain repair take-supersession --apply    # writes the pointers; a second apply changes nothing
+```
+
+The repair links a struck row to its replacement only from evidence, in this
+order: a committed `takes_supersede` receipt for the page, a stored
+`superseded_by`, then a self-pointer row that has exactly one struck, unlinked
+row above it (resolved hop by hop, so a chain of supersessions resolves). It
+never guesses. When a new row has two or more possible predecessors, the page
+is listed under `ambiguous` with the candidates and left unchanged. Fix it by
+hand: read the page (`gbrain get --source <source> -- <slug>`), append
+`; superseded by #<new row>` to the source cell of the row each new row
+replaced, save it with the current `expected_revision`, then run the repair
+again; it drops the leftover self-pointers and stores the pointers.
+
 <a id="orphan-bindings"></a>
 ### Orphan persistence bindings
 
@@ -343,7 +372,9 @@ The preview also reads every page body and lists the rows it cannot read
 rows. Recover them from a backup, or create a fresh brain and sync it again
 from its source files. Until then, a write that names the revision of a page
 the upgrade could not backfill is refused with `revision_backfill_pending`;
-`gbrain apply-migrations --yes` resumes that backfill and prints its progress.
+doctor's `revision_backfill` check names those pages, and
+`gbrain apply-migrations --force-schema` resumes the backfill for the rest and
+prints its progress.
 
 ### Timeline history scan coverage
 

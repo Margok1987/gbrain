@@ -97,7 +97,7 @@ did not re-probe clean.
 5. If the operator wants to change engines (e.g. abandon a dead server for
    Supabase), that is NOT this skill — route to
    [postgres-adopt](../postgres-adopt/SKILL.md), which wraps
-   `gbrain migrate --to` with its guardrails.
+   `gbrain migrate --to postgres` (plan, ask, then run).
 
 ## When it fails
 

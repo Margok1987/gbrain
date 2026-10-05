@@ -703,6 +703,7 @@ const context_pack: Operation = {
         open_threads: c.open_threads,
         edges: c.edges,
         backlink_count: c.backlink_count,
+        ...(c.relationship_note ? { relationship_note: c.relationship_note } : {}),
       })),
       open_threads,
       facts: (ctx.remote === false ? rawFacts.slice(0, facts.length) : facts).map((f) => ({

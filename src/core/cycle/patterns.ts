@@ -636,10 +636,11 @@ When done, briefly list the pattern slugs you wrote/updated in your final messag
 async function stampPatternOutputs(engine: BrainEngine, maintenance: MaintenanceAuthority | null,
   refs: Array<{ slug: string; source_id: string }>, cycleDate: string, sourceSlugPrefix: string, seat: string | undefined, signal?: AbortSignal): Promise<void> {
   const reason = `derived from reflections under ${sourceSlugPrefix}/; raw traces live on the cited reflection pages`;
-  if (!maintenance) return stampDreamProvenance(engine, refs.map(ref => ({ ...ref, raw_trace_exempt_reason: reason, ...(seat ? { seat } : {}) })), cycleDate, signal);
+  // A pattern earns a seat only while its reflections share one, so a pattern without one drops a seat an earlier run stamped.
+  if (!maintenance) return stampDreamProvenance(engine, refs.map(ref => ({ ...ref, raw_trace_exempt_reason: reason, seat: seat ?? null })), cycleDate, signal);
   for (const ref of refs) {
     throwIfAborted(signal, '[dream] patterns provenance');
-    await stampMaintenancePage(engine, maintenance, ref.slug, cycleDate, undefined, reason, seat);
+    await stampMaintenancePage(engine, maintenance, ref.slug, cycleDate, undefined, reason, seat ?? null);
   }
 }
 

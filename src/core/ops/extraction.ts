@@ -15,6 +15,7 @@ import { hostOnlyError, paramUse, readFix } from './op-fix.ts';
 import { sourceScopeOpts } from './context.ts';
 import { unverifiedExtractionFragment, isUnverifiedExtraction, EXTRACTION_STATUS_KEY, STATUS_VERIFIED } from '../extraction-review.ts';
 import { buildVisibilityClause } from '../search/sql-ranking.ts';
+import { maintenanceTransaction } from '../persistence/attribution.ts';
 
 // ---------------------------------------------------------------------------
 // Extraction quarantine lane (issue #160)
@@ -229,16 +230,16 @@ const extraction_review: Operation = {
         // trail of HOW the page came to exist; status → 'verified' records
         // the owner's call. jsonb_build_object binds as text (no
         // JSON.stringify-into-::jsonb hazard); identical on both engines.
-        await ctx.engine.executeRaw(
+        await maintenanceTransaction(ctx.engine, tx => tx.executeRaw(
           `UPDATE pages
            SET frontmatter = COALESCE(frontmatter, '{}'::jsonb) || jsonb_build_object($1::text, $2::text),
                updated_at = now()
            WHERE slug = $3 AND source_id = $4`,
           [EXTRACTION_STATUS_KEY, STATUS_VERIFIED, slug, page.source_id],
-        );
+        ));
         results.push({ slug, status: 'promoted' });
       } else {
-        await ctx.engine.softDeletePage(slug, { sourceId: page.source_id });
+        await maintenanceTransaction(ctx.engine, tx => tx.softDeletePage(slug, { sourceId: page.source_id }));
         results.push({ slug, status: 'rejected' });
       }
     }

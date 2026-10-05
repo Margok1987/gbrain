@@ -75,6 +75,7 @@ import { buildManifestContext, buildLinkManifest, type ManifestContext } from '.
 import { resolveCycleDate, utcDate } from './cycle-date.ts';
 import { throwIfAborted } from '../abort-check.ts';
 import { stampDreamProvenance } from './dream-provenance.ts';
+import { maintenanceTransaction } from '../persistence/attribution.ts';
 
 // Re-exports: the drain was peeled to inline-drain.ts (dream-wave C7), the
 // allow-list loader to filing-rules.ts (#2397); patterns.ts and the
@@ -3207,13 +3208,13 @@ async function writeSummaryPage(
 
   const { parseMarkdown } = await import('../markdown.ts');
   const parsed = parseMarkdown(fullMarkdown);
-  if (!maintenance) await engine.putPage(summarySlug, {
+  if (!maintenance) await maintenanceTransaction(engine, tx => tx.putPage(summarySlug, {
     type: parsed.type,
     title: parsed.title,
     compiled_truth: parsed.compiled_truth,
     timeline: parsed.timeline,
     frontmatter: parsed.frontmatter,
-  }, { sourceId });
+  }, { sourceId }));
 
   const fileWriteRaw = (await engine.getConfig('dream.synthesize.summary_file_write'))?.trim().toLowerCase();
   const fileWriteEnabled = !(fileWriteRaw === 'false' || fileWriteRaw === '0' || fileWriteRaw === 'off');

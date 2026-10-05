@@ -13,8 +13,8 @@
  * modification committed between that read and the publication stays pending.
  *
  * Call sites: the PGLite engine's planner-sensitive reads (first relevant
- * read, `planner.first_read_budget_ms`), bulk import and managed sync every
- * `import.analyze_every_pages` pages, the cycle after its freshness phases,
+ * read, `planner.first_read_budget_ms`), bulk import, managed sync and the
+ * database timeline walk every `import.analyze_every_pages` pages, the cycle after its freshness phases,
  * the resident consumer's idle tick, and `refreshProjectionStatistics` (full
  * ANALYZE, then watermarks for every table). `planner.auto_analyze=false`
  * (env GBRAIN_PLANNER_AUTO_ANALYZE) disables all of them; doctor
@@ -31,7 +31,7 @@ export const DEFAULT_FIRST_READ_BUDGET_MS = 2000;
 export const DEFAULT_IMPORT_ANALYZE_EVERY_PAGES = 500;
 export const PLANNER_STATS_REPAIR_COMMAND = 'gbrain repair planner-stats --apply';
 
-export type PlannerRefreshReason = 'first_read' | 'import' | 'managed_sync' | 'cycle' | 'idle' | 'repair';
+export type PlannerRefreshReason = 'first_read' | 'import' | 'managed_sync' | 'extract' | 'cycle' | 'idle' | 'repair';
 
 export interface PlannerTableState {
   table: PlannerStatsTable;

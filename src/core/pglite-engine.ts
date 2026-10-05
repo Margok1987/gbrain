@@ -82,7 +82,8 @@ import { readStoredEmbeddingIdentity } from './stored-embedding-identity.ts';
 import { DELETE_BATCH_SIZE, TRAVERSE_PATH_ROW_CAP, TRAVERSE_WALK_ROW_CAP } from './engine-constants.ts';
 import { PageMissingError } from './engine-errors.ts';
 import { SAFE_FENCE_CHUNKER_VERSION, bodyWriteChunkVersion, chunkWriteInvalidation, currentTextProjectionFilter, requiresSafeChunks, safeChunksFilter } from './search/safe-chunks.ts';
-import { acquireLock, releaseLock, type LockHandle } from './pglite-lock.ts';
+import { acquireLock, pgliteLockDirFor, releaseLock, type LockHandle } from './pglite-lock.ts';
+import { assertPgliteGraduationOpenable } from './persistence/graduation-custody.ts';
 // Engine-live path (#3596): static import, never a lazy `import()` in the
 // connect() catch. No cycle: pglite-repair.ts imports nothing from this file.
 import { attemptWalRepairAndRetry, closeRepairEpisodeIfOpen, readRepairFailedMarker, recordFailedAutoRepair, type WalRepairReceipt } from './pglite-repair.ts';
@@ -129,7 +130,7 @@ import {
 import { hasCJK } from './cjk.ts';
 import * as factsImpl from './engine-sql/facts.ts';
 import * as takesImpl from './engine-sql/takes.ts';
-import { PgliteCheckpointGuard } from './pglite-engine/checkpoint-guard.ts';
+import { PgliteCheckpointGuard, writesWal } from './pglite-engine/checkpoint-guard.ts';
 import { pgliteExecutor } from './engine-sql/dialect-pglite.ts';
 import type { SqlExecutor } from './engine-sql/executor.ts';
 import { scopedRead, unscopedExecutor } from './engine-sql/brands.ts';
@@ -710,6 +711,8 @@ export class PGLiteEngine implements BrainEngine {
   readonly kind = 'pglite' as const;
   private _db: PGLiteDB | null = null;
   private _lock: LockHandle | null = null;
+  /** Graduation custody: a kernel lock this process already holds, adopted by the next open instead of acquired. */
+  private _adoptedLock: LockHandle | null = null;
   private _dbWork: ReturnType<typeof trackPgliteDatabase<PGLiteDB>> | null = null;
   private _connectPromise: Promise<void> | null = null;
   private _closingWork: Promise<void> | null = null;
@@ -784,7 +787,7 @@ export class PGLiteEngine implements BrainEngine {
         if (registerRoots) await registerManagedFilesystemEngine(this, config.database_path);
       }
       catch (error) {
-        try { await this._closeInternal(); }
+        try { await this._closeInternal({ retainLock: this._lock !== null && this._lock === this._adoptedLock }); }
         catch (closeError) {
           this._closePoison = new PgliteClosingError(`PGLite registry failure cleanup did not close; lock retained: ${String(closeError)}`);
           throw this._closePoison;
@@ -797,12 +800,55 @@ export class PGLiteEngine implements BrainEngine {
     try { await opening; }
     catch (error) {
       if (!this._db && !this._closePoison && this._lock?.acquired) {
-        await releaseLock(this._lock);
+        if (this._lock !== this._adoptedLock) await releaseLock(this._lock);
         this._lock = null;
       }
       throw error;
     }
-    finally { if (this._connectPromise === opening) this._connectPromise = null; }
+    finally {
+      if (this._connectPromise === opening) this._connectPromise = null;
+      this._adoptedLock = null;
+    }
+  }
+
+  /**
+   * Engine graduation: open a persistent datastore under a kernel lock this
+   * process already holds (the rollback move-back), so ownership never gaps.
+   * A failed open hands the lock back to the caller unreleased.
+   */
+  async connectWithHeldLock(config: EngineConfig, lock: LockHandle): Promise<void> {
+    if (!config.database_path || !lock.acquired) throw new Error('A held-lock open needs a persistent datastore and its held kernel lock');
+    if (lock.lockDir !== pgliteLockDirFor(config.database_path)) throw new Error('The held kernel lock does not belong to this datastore');
+    if (this._db || this._connectPromise) throw new Error('PGLite engine is already connected or connecting');
+    this._adoptedLock = lock;
+    return this._connectWithRootRegistration(config, true);
+  }
+
+  /**
+   * Engine graduation: drain admitted statements, checkpoint and close the
+   * database, then hand the kernel lock back to the caller instead of
+   * releasing it. The caller owns the handle (move-aside, then releaseLock).
+   * Call the engine's ordinary disconnect afterwards to drop its wrappers.
+   */
+  async closeRetainingLock(): Promise<LockHandle> {
+    if (this._closePoison) throw this._closePoison;
+    if (this._disconnectCall || this._closingWork || this._connectPromise) throw new PgliteClosingError();
+    const lock = this._lock;
+    if (!this._db || !lock?.acquired || !this._savedConfig?.database_path) {
+      throw new Error('closeRetainingLock needs an open persistent datastore that holds its kernel lock');
+    }
+    this.vectorIterativeScan = undefined;
+    this._disconnectRequested = true;
+    const work = this._closeInternal({ retainLock: true });
+    this._closingWork = work;
+    try { await work; }
+    catch (error) {
+      this._closePoison = new PgliteClosingError(`PGLite shutdown failed; datastore ownership is retained until process exit: ${String(error)}`);
+      this._db = null;
+      throw this._closePoison;
+    }
+    finally { this._closingWork = null; this._disconnectRequested = false; }
+    return lock;
   }
 
   private async _connectInternal(config: EngineConfig): Promise<void> {
@@ -815,11 +861,17 @@ export class PGLiteEngine implements BrainEngine {
     const failedRepair = dataDir ? readRepairFailedMarker(dataDir) : null;
     if (dataDir && failedRepair) throw (await import('./pglite-repair-consent.ts')).repairFailedRefusal(dataDir, failedRepair); // engine-dynamic-import-ok: refusal path only, keeps the consent graph off every open
 
+    // Engine graduation: a tombstone, a stray datastore or a live run stops the open before the lock.
+    if (dataDir) assertPgliteGraduationOpenable(dataDir, 'pre_lock');
     // Acquire file lock to prevent concurrent PGLite access (crashes with Aborted())
-    this._lock = await acquireLock(dataDir);
+    this._lock = this._adoptedLock ?? await acquireLock(dataDir);
 
     if (!this._lock.acquired) {
       throw new Error('Could not acquire PGLite lock. Another gbrain process is using the database.');
+    }
+    if (dataDir && this._lock !== this._adoptedLock) {
+      try { assertPgliteGraduationOpenable(dataDir, 'locked'); }
+      catch (error) { await releaseLock(this._lock); this._lock = null; throw error; }
     }
 
     // Tier 3: optional snapshot fast-restore. Only applies to in-memory
@@ -947,14 +999,14 @@ export class PGLiteEngine implements BrainEngine {
         (retryError === undefined ? '' : `\n  Cold retry error: ${retryError}`));
       const repairFailed = dataDir ? recordFailedAutoRepair(dataDir, ctx.repair, ctx.backupPath, original) : null;
       if (this._db) {
-        try { await this._closeInternal(); }
+        try { await this._closeInternal({ retainLock: this._lock !== null && this._lock === this._adoptedLock }); }
         catch (closeError) {
           this._db = null;
           this._closePoison = new PgliteClosingError(`PGLite initialization cleanup failed; lock retained: ${String(closeError)}`);
           throw this._closePoison;
         }
       } else if (this._lock?.acquired) {
-        await releaseLock(this._lock);
+        if (this._lock !== this._adoptedLock) await releaseLock(this._lock);
         this._lock = null;
       }
       if (dataDir && repairFailed) throw (await import('./pglite-repair-consent.ts')).repairFailedRefusal(dataDir, repairFailed, original, wrapped.message); // engine-dynamic-import-ok: refusal path only
@@ -1000,7 +1052,7 @@ export class PGLiteEngine implements BrainEngine {
     return call;
   }
 
-  private async _closeInternal(): Promise<void> {
+  private async _closeInternal(opts: { retainLock?: boolean } = {}): Promise<void> {
     const db = this._db;
     const lock = this._lock;
     const work = this._dbWork;
@@ -1027,7 +1079,7 @@ export class PGLiteEngine implements BrainEngine {
         catch (error) { warnOncePerProcess('pglite-checkpoint-failed', `[pglite] checkpoint failed; retaining ownership through close: ${String(error)}`); }
         await db.close();
       }
-      if (lock?.acquired) await releaseLock(lock);
+      if (lock?.acquired && !opts.retainLock) await releaseLock(lock);
       this._lock = null;
       this._dbWork = null;
       this._statements = null;
@@ -1855,11 +1907,11 @@ export class PGLiteEngine implements BrainEngine {
     return linksImpl.removeLink(this.engineSql, from, to, linkType, linkSource, opts);
   }
 
-  async getLinks(slug: string, opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean }): Promise<Link[]> {
+  async getLinks(slug: string, opts?: import("./link-validity.ts").LinkReadScope): Promise<Link[]> {
     return linksImpl.getLinks(scopedRead(this.engineSql), slug, opts);
   }
 
-  async getBacklinks(slug: string, opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean }): Promise<Link[]> {
+  async getBacklinks(slug: string, opts?: import("./link-validity.ts").LinkReadScope): Promise<Link[]> {
     return plannerRead(this, this._pageTransaction, () => linksImpl.getBacklinks(scopedRead(this.engineSql), slug, opts));
   }
 
@@ -2749,7 +2801,11 @@ export class PGLiteEngine implements BrainEngine {
     if (opts?.signal?.aborted) {
       throw new DOMException('aborted', 'AbortError');
     }
-    const queryPromise = this.db.query(sql, params).then((r) => r.rows as T[]);
+    // #5449: an autocommit write is its own outermost transaction, so it takes the WAL checkpoint guard.
+    const queryPromise = !this._pageTransaction && this._dbWork !== null && writesWal(sql)
+      ? (this._checkpointGuard ??= new PgliteCheckpointGuard())
+        .runStatement(q => this.db.query(q), () => this.db.query(sql, params)).then((r) => r.rows as T[])
+      : this.db.query(sql, params).then((r) => r.rows as T[]);
     if (!opts?.signal) return queryPromise;
     const abortPromise = new Promise<T[]>((_resolve, reject) => {
       opts.signal!.addEventListener('abort', () => {

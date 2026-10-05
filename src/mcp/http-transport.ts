@@ -52,7 +52,8 @@ import { degradedLastError, isEngineDegraded } from '../core/degraded-marker.ts'
 import { classifyPgAccessError } from '../core/pg-access-classify.ts';
 import { redactConnectionInfo } from '../core/audit/redact-connection-info.ts';
 import { redactUrlsInText } from '../core/url-redact.ts';
-import { authSourcesFromGrant, grantFromTokenRow } from '../core/grants/model.ts';
+import { authSourcesFromGrant } from '../core/grants/model.ts';
+import { resolveTokenGrant } from '../core/grants/legacy-token.ts';
 export { parseLegacyTokenScope } from '../core/legacy-token-scope.ts';
 
 const DEFAULT_BODY_CAP = 1024 * 1024; // 1 MiB
@@ -271,10 +272,11 @@ export async function startHttpTransport(opts: HttpTransportOptions) {
           WHERE id IN (SELECT id FROM access_tokens WHERE id = ${rowId}
             AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds') FOR UPDATE SKIP LOCKED)`
         .catch(() => { /* fire-and-forget */ });
-      // F3: one grant shape (grants/model.ts) shared with the OAuth provider
-      // behind `serve --http`, so the two transports cannot drift. Takes
-      // holders fail safe to ['world']; #1336 honors the stored source grant.
-      const grant = grantFromTokenRow(row);
+      // One grant shape (grants/model.ts) shared with the OAuth provider
+      // behind `serve --http`, so the two transports cannot drift; a row still
+      // on the legacy shape is converted on this read. Takes holders fail safe
+      // to ['world']; #1336 honors the stored source grant.
+      const grant = await resolveTokenGrant(sql, row);
       const allowList = grant.takesHolders ?? ['world'];
       const { sourceId, allowedSources, hasSourceGrant } = authSourcesFromGrant(grant);
       const auth: AuthInfo = {

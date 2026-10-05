@@ -30,8 +30,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { corpusMarkdownFiles, generateScaleFixture, SCALE_SOURCES, scaleVector, writeScaleCorpus, type ScaleFixture } from './fixture.ts';
+import { runF4dChecks } from './f4d.ts';
 import {
-  BUDGET_MULTIPLIER, evaluateScaleGates, HEADLINE_OP, HOT_TABLES, PLANNER_HEALTH_ENFORCED, PLANNER_STATS_MIN_ROWS, reproduceCommand, resultHits, verdictLines,
+  BUDGET_MULTIPLIER, evaluateScaleGates, FIND_ORPHANS_PARAMS, HEADLINE_OP, HOT_TABLES, PLANNER_HEALTH_ENFORCED, PLANNER_STATS_MIN_ROWS, orphansProblem, reproduceCommand, resultHits, verdictLines,
   type DataCheck, type GatePolicy, type OpPlan, type OpResult, type PlanStatement, type ScaleReport,
 } from './gates.ts';
 
@@ -107,19 +108,23 @@ async function closeEngine(engine: Engine): Promise<void> {
   await engine.disconnect();
 }
 
-async function createFreshPostgres(): Promise<void> {
+async function freshPostgresDatabase(suffix = ''): Promise<{ url: string; drop: () => Promise<void> }> {
   const { default: postgres } = await import('#postgres');
   const admin = postgres(adminUrl!, { max: 1, onnotice: () => {} });
-  const name = `gbrain_scale_${process.pid}_${Date.now()}`;
+  const name = `gbrain_scale_${process.pid}_${Date.now()}${suffix}`;
   await admin.unsafe(`CREATE DATABASE ${name}`);
   await admin.end();
   const url = new URL(adminUrl!);
   url.pathname = `/${name}`;
-  databaseUrl = url.toString();
-  dropDatabase = async () => {
+  return { url: url.toString(), drop: async () => {
     const drop = postgres(adminUrl!, { max: 1, onnotice: () => {} });
     try { await drop.unsafe(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`); } finally { await drop.end(); }
-  };
+  } };
+}
+async function createFreshPostgres(): Promise<void> {
+  const fresh = await freshPostgresDatabase();
+  databaseUrl = fresh.url;
+  dropDatabase = fresh.drop;
 }
 
 /** Record every statement the engine sends while `fn` runs (postgres.js debug hook; PGLite query wrapper). */
@@ -236,7 +241,8 @@ async function main(): Promise<FullReport> {
   const phases: Record<string, number> = {};
   const timed = async <T>(name: string, fn: () => Promise<T>): Promise<T> => {
     const t = performance.now();
-    try { return await fn(); } finally { phases[name] = Math.round(performance.now() - t); }
+    console.log(`[scale] phase ${name} start`);
+    try { return await fn(); } finally { phases[name] = Math.round(performance.now() - t); console.log(`[scale] phase ${name} done in ${phases[name]} ms`); }
   };
   console.log(`[scale] engine=${engineKind} pages=${pagesArg} seed=${seed} import-mode=${importMode} ${enforce ? 'enforce' : 'report-only'}`);
   const fixture: ScaleFixture = generateScaleFixture({ pages: pagesArg, seed });
@@ -363,8 +369,8 @@ async function main(): Promise<FullReport> {
       verify: r => hub.links.every(target => resultHits(r).some(h => h.slug === target)) ? null : 'a direct link target of the hub is missing' },
     { op: 'get_backlinks', run: () => op('get_backlinks').handler(local, { slug: hub.links[0] }),
       verify: r => JSON.stringify(r).includes(`"${fixture.hub}"`) ? null : `${fixture.hub} missing from backlinks of ${hub.links[0]}` },
-    { op: 'find_orphans', run: () => op('find_orphans').handler(local, {}),
-      verify: r => fixture.islands.every(slug => resultHits(r).some(h => h.slug === slug)) ? null : 'an island page is missing from find_orphans' },
+    { op: 'find_orphans', run: () => op('find_orphans').handler(local, { ...FIND_ORPHANS_PARAMS }),
+      verify: r => orphansProblem(r, fixture.islands) },
   ];
   const ops: OpResult[] = [];
   const statRows: Record<string, number> = {};
@@ -473,6 +479,18 @@ async function main(): Promise<FullReport> {
   phases.budgets = Math.round(performance.now() - budgetsStart);
   await closeEngine(engine);
 
+  // F4d operational ceilings through the real CLI (the brain is closed: PGLite has one owner).
+  const f4d = await timed('f4d', async () => {
+    const result = await runF4dChecks({ repo: REPO, home, pages: fixture.pages.length, dim, probeToken: probe.token,
+      freshManagedBrain: async () => {
+        if (engineKind === 'pglite') return { initArgs: ['--pglite', '--path', join(home, 'f4d-managed', 'brain.pglite')], cleanup: async () => {} };
+        const fresh = await freshPostgresDatabase('_f4d');
+        return { initArgs: ['--non-interactive', '--url', fresh.url], cleanup: fresh.drop };
+      } });
+    data.push(...result.checks);
+    return result.measured;
+  });
+
   const budgets = existsSync(BUDGETS_FILE) ? (JSON.parse(readFileSync(BUDGETS_FILE, 'utf8')) as { budgets?: Record<string, Record<string, number>> }).budgets ?? {} : {};
   const budgetKey = `${engineKind}:${pagesArg}`;
   const headline = ops.find(o => o.op === HEADLINE_OP)!;
@@ -490,7 +508,7 @@ async function main(): Promise<FullReport> {
     extract,
     planner: { hot_table_stat_rows: statRows, hot_table_rows: tableRows, probed_after: probedAfter,
       tables_without_stats: HOT_TABLES.filter(t => tableRows[t]! > PLANNER_STATS_MIN_ROWS && statRows[t] === 0) },
-    ops, data, cold_query: cold, vector_dim: dim, phases_ms: phases,
+    ops, data, f4d, cold_query: cold, vector_dim: dim, phases_ms: phases,
     ...(budgets[budgetKey] ? { budgets_ms: budgets[budgetKey] } : {}),
   };
 }
@@ -519,6 +537,7 @@ try {
     console.log(`[scale] ${r.known_answer === 'pass' ? 'PASS' : 'FAIL'} ${r.op}: p50 ${r.p50_ms} ms${r.plan?.worst_loops ? `, worst nested-loop inner loops ${r.plan.worst_loops.inner_loops}` : ''}${r.detail ? ` (${r.detail})` : ''}`);
   }
   for (const d of report.data) console.log(`[scale] ${d.status === 'pass' ? 'PASS' : 'FAIL'} ${d.check}${d.detail ? ` (${d.detail})` : ''}`);
+  for (const [name, measured] of Object.entries(report.f4d)) console.log(`[scale] F4D ${name}: ${JSON.stringify(measured)}`);
   console.log(`[scale] phases (ms): ${Object.entries(report.phases_ms).map(([k, v]) => `${k}=${v}`).join(' ')}`);
   for (const line of verdictLines(report, verdict, policy)) console.log(line);
   console.log(`[scale] report: ${out}${explain ? ` (EXPLAIN for failures: ${out.replace(/\.json$/, '')}.explain.txt)` : ''}; reproduce with: ${full.reproduce}`);

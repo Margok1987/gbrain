@@ -34,6 +34,7 @@ import { admitGroup, freezeFollowers, groupableIntent, nextGroupSize, type BulkS
 import { isContentRefusal } from '../import-screen.ts';
 import { SYNC_READ_BOUND, type TreeBlob } from './sync-blobs.ts';
 import { dryRunScreen, isSyncReadBound, loadSyncScreenRun, pinnedBlob, screenFrozenImport, type HeldEntry, type SyncScreenRun } from './sync-screen.ts';
+import { faultPoint } from './fault-points.ts';
 import { addRecovered, buildHoldReport, clearGitHold, clearGitHoldRetryPaths, readSyncHoldPolicy, recordSyncConversion, recoveredReport, writeGitHold } from './sync-holds.ts';
 
 export interface ManagedSyncWriteDiagnostic {
@@ -105,7 +106,7 @@ async function readCursor(engine: BrainEngine, key: string, cached?: Cursor): Pr
 }
 async function saveCursor(engine: BrainEngine, key: string, before: Cursor | null, next: Cursor, requireIdle = false, assertActive?: () => void,
   inTx?: (tx: BrainEngine) => Promise<unknown>): Promise<Cursor> {
-  return engine.transaction(async tx => {
+  const saved = await engine.transaction(async tx => {
     assertActive?.();
     await tx.executeRaw("SELECT set_config('synchronous_commit','on',true)");
     if (requireIdle) {
@@ -121,6 +122,8 @@ async function saveCursor(engine: BrainEngine, key: string, before: Cursor | nul
     assertActive?.();
     return current;
   });
+  await faultPoint('sync:mid_checkpoint', { sourceId: next.sourceId });
+  return saved;
 }
 /** Compare-and-swap inside the caller's transaction; a lost swap returns the cursor that won. */
 async function writeCursor(tx: BrainEngine, key: string, before: Cursor | null, next: Cursor, inTx?: (tx: BrainEngine) => Promise<unknown>): Promise<Cursor> {

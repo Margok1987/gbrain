@@ -97,6 +97,8 @@ export async function buildDeferredAnnIndexes(
       if (engine.kind === 'postgres') {
         await engine.withReservedConnection(async conn => {
           if (validity === false) await conn.executeRaw(`DROP INDEX CONCURRENTLY IF EXISTS ${next.name}`);
+          // CONCURRENTLY cannot run in a transaction, so SET LOCAL is unavailable: lift the session timeout on this reserved backend and restore it below.
+          await conn.executeRaw('SET statement_timeout = 0');
           const build = conn.executeRaw(next.def.replace(/^CREATE INDEX (?:IF NOT EXISTS )?/, 'CREATE INDEX CONCURRENTLY IF NOT EXISTS '));
           const timer = setInterval(() => {
             void engine.executeRaw<{ blocks_done: number; blocks_total: number; phase: string }>(
@@ -109,7 +111,7 @@ export async function buildDeferredAnnIndexes(
               })
               .catch(() => {});
           }, io.monitorIntervalMs ?? 30_000);
-          try { await build; } finally { clearInterval(timer); }
+          try { await build; } finally { clearInterval(timer); await conn.executeRaw('RESET statement_timeout').catch(() => {}); }
         });
       } else {
         if (validity === false) await engine.executeRaw(`DROP INDEX IF EXISTS ${next.name}`);

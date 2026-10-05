@@ -190,6 +190,10 @@
         "name": "pglite_leftovers"
       },
       {
+        "category": "ops",
+        "name": "graduation_interrupted"
+      },
+      {
         "category": "meta",
         "name": "default_source_local_path"
       },
@@ -551,6 +555,10 @@
       },
       {
         "category": "ops",
+        "name": "legacy_token_null_scope"
+      },
+      {
+        "category": "ops",
         "name": "index_audit"
       },
       {
@@ -611,6 +619,10 @@
       },
       {
         "category": "brain",
+        "name": "edge_validity"
+      },
+      {
+        "category": "brain",
         "name": "auto_chronicle"
       },
       {
@@ -623,11 +635,19 @@
       },
       {
         "category": "brain",
+        "name": "facts_drain"
+      },
+      {
+        "category": "brain",
         "name": "fact_take_vectors"
       },
       {
         "category": "ops",
         "name": "planner_stats_stale"
+      },
+      {
+        "category": "meta",
+        "name": "revision_backfill"
       },
       {
         "category": "ops",

@@ -100,6 +100,21 @@ export async function runPersistenceAdministration(engine: BrainEngine, operatio
   // Early refusal before any native lock or preview; the checks inside each transaction stay authoritative.
   if (['writer_claim', 'writer_activate', 'writer_transfer_prepare', 'writer_transfer_accept'].includes(operation)) await assertWriterAdminUnlocked(engine);
   if (operation === 'writer_sync') return (await import('./sync-administration.ts')).runAuthenticatedSyncSlice(engine, params);
+  if (operation === 'writer_refresh') {
+    keys(params, ['source_id', 'dry_run', 'resume', 'abandon', 'wait_drain_ms', 'fetch_timeout_ms']);
+    const writer = currentVerifiedLocalWriter();
+    if (!writer || writer.remote || writer.principal.kind !== 'local_cli') throw trustedCliRequired('Worktree refresh requires a trusted CLI registration.');
+    const ms = (value: unknown, name: string) => {
+      if (value === undefined) return undefined;
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) throw invalid(`${name} must be a non-negative number of milliseconds.`);
+      return value;
+    };
+    const waitDrainMs = ms(params.wait_drain_ms, 'wait_drain_ms');
+    const fetchTimeoutMs = ms(params.fetch_timeout_ms, 'fetch_timeout_ms');
+    return { ...await (await import('./worktree-refresh.ts')).refreshWorktree(engine, source(params.source_id), {
+      dryRun: params.dry_run === true, resume: params.resume === true, abandon: params.abandon === true,
+      ...(waitDrainMs !== undefined ? { waitDrainMs } : {}), ...(fetchTimeoutMs !== undefined ? { fetchTimeoutMs } : {}) }) };
+  }
   if (operation === 'writer_extract_stale') {
     keys(params, ['source_id', 'dry_run']);
     const writer = currentVerifiedLocalWriter();

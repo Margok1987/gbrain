@@ -24,7 +24,7 @@ import { initializeLocalPersistence, requestPrincipalForContext } from '../persi
 import { lookupEmbeddingPrice, estimateCostFromChars } from '../embedding-pricing.ts';
 import { shellQuote } from '../agent-output.ts';
 
-export const REPAIR_KINDS = ['timeline', 'visibility', 'safe-chunks', 'contextual-mode', 'connector-checkpoints', 'request-indexes', 'connector-fences', 'orphan-bindings', 'embedding-effects', 'attribution-backfill', 'planner-stats', 'google-file-modes', 'stale-atoms', 'extractor-facts', 'captured-facts', 'loop-facts', 'orphan-children', 'failed-writes', 'frontmatter'] as const;
+export const REPAIR_KINDS = ['timeline', 'visibility', 'safe-chunks', 'contextual-mode', 'connector-checkpoints', 'request-indexes', 'connector-fences', 'take-supersession', 'orphan-bindings', 'embedding-effects', 'attribution-backfill', 'planner-stats', 'google-file-modes', 'stale-atoms', 'extractor-facts', 'captured-facts', 'loop-facts', 'orphan-children', 'failed-writes', 'frontmatter'] as const;
 export type RepairKind = typeof REPAIR_KINDS[number];
 
 export interface RepairScope { brain_id: string; source_ids: string[] }

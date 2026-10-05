@@ -138,6 +138,7 @@ const SELF_HELP_WITHOUT_ENGINE: Record<string, true | (() => Promise<(engine: ne
     (await import('./commands/compile-context.ts')).runCompileContext as never,
   // runLoops / runWaiting answer --help before touching the engine.
   loops: async () => (await import('./commands/loops.ts')).runLoops as never,
+  'edge-proposals': async () => (await import('./commands/edge-proposals.ts')).runEdgeProposals as never,
   waiting: async () => (await import('./commands/loops.ts')).runWaiting as never,
   // runSources's `--help`/`-h`/undefined-subcommand branch calls printHelp()
   // without ever touching `engine` — safe to dispatch with no brain
@@ -2062,6 +2063,8 @@ async function routeEngineFreeSubcommands(command: string, args: string[]): Prom
     const { tryRunConfigEngineFree } = await import('./commands/config.ts');
     if (await tryRunConfigEngineFree(args)) return true;
   }
+  // Engine graduation owns its connections (routing rules: commands/migrate-graduation.ts routesToGraduation).
+  if (command === 'migrate' && await (await import('./commands/migrate-graduation.ts')).tryRunMigrateGraduation(args)) return true;
   if (command === 'mcp') {
     const { runMcp, mcpNeedsEngine } = await import('./commands/mcp.ts');
     if (!mcpNeedsEngine(args)) { await runMcp(args); return true; }
@@ -2444,6 +2447,7 @@ async function prepareConnectedDispatch(command: string, args: string[]): Promis
     }
   }
 
+  if (command === 'sources' && args[0] === 'refresh' && !hasHelpFlag(args) && await (await import('./commands/sources-refresh-delegate.ts')).maybeDelegateSourcesRefresh(loadConfig(), args.slice(1))) return null;
   if (command === 'reindex-code') {
     if (await (await import('./commands/reindex-code-delegate.ts')).maybeDelegateReindexCode(loadConfig(), args)) return null;
   }
@@ -2570,6 +2574,8 @@ async function connectCliOnlyEngine(command: string, args: string[]): Promise<Br
   let engine: BrainEngine;
   // F4: a stdio serve with no brain / a missing or repair-failed brain / unreadable config
   // completes the MCP handshake in status-only mode instead of exiting (connectEngine exits).
+  // Engine graduation (§6.4): a serve (re)launched while a run owns the host brain exits 75 with graduation_in_progress.
+  if (command === 'serve' && (dbMarkerBrainId() ?? 'host') === 'host') (await import('./core/persistence/graduation-serve-guard.ts')).exitIfGraduationRunning();
   const serveStatus = command === 'serve' ? await import('./commands/serve-status.ts') : null;
   const serveStatusEligible = !!serveStatus?.statusModeEligible(args, (dbMarkerBrainId() ?? 'host') === 'host');
   const preConnectReason = serveStatusEligible ? serveStatus!.preConnectStatusReason() : null;
@@ -2629,6 +2635,7 @@ async function connectCliOnlyEngine(command: string, args: string[]): Promise<Br
         console.error(`${formatDbMarker(d)}\n${d.message}\n${d.remediation} Run: gbrain db-repair`);
       } catch { /* marker is best-effort; degraded serve still starts */ }
       const { createDegradedEngine } = await import('./core/degraded-engine.ts');
+      const graduationGate = (await import('./core/persistence/graduation-serve-guard.ts')).engineIdentityGate();
       const degraded = createDegradedEngine({
         initialError: serveConnectError,
         // Guarded reconnect: connectEngine's no-config path calls
@@ -2638,6 +2645,7 @@ async function connectCliOnlyEngine(command: string, args: string[]): Promise<Br
         // through connectMountEngine before loadConfig() and needs no host
         // config, so the guard must not brick a mount serve's recovery.
         reconnect: async () => {
+          if ((dbMarkerBrainId() ?? 'host') === 'host') graduationGate();
           if ((dbMarkerBrainId() ?? 'host') === 'host' && !loadConfig()) {
             throw new Error('No brain configured (config.json missing or unreadable). Run: gbrain init');
           }
@@ -2804,6 +2812,8 @@ async function connectEngine(opts?: { probeOnly?: boolean }): Promise<BrainEngin
                   process.env.GBRAIN_NO_RETRY_CONNECT === '1';
   const { connectWithRetry } = await import('./core/db.ts');
   await exitOnRepairFailed(() => connectWithRetry(engine, toEngineConfig(config), { noRetry }));
+  // Engine graduation: a fenced target or a cut-over source refuses every connect but the run's own.
+  await (await import('./core/persistence/graduation-custody.ts')).gateGraduationConnect(engine);
 
   // v0.30.1 (Codex X1 / C2): probeOnly skips both hasPendingMigrations() probe
   // AND initSchema(). Used by `get_health` MCP op + `gbrain upgrade --status`
@@ -2960,7 +2970,7 @@ SETUP
   engine status [--json] [--probe]   Which engine + URL source, engine-free
   db-repair [--yes] [--json]         Diagnose/fix Postgres access, engine-free
                                      (--yes --apply-rewrites for config rewrites)
-  migrate --to <supabase|pglite>     Transfer brain between engines
+  migrate --to <postgres|pglite>     Move the brain between engines (PGLite -> Postgres graduates: plan, then --yes --expect)
   migrate embeddings --to <p:model>  Re-embed onto another embedding provider
   embeddings enable --embedding-model <p:model>  Turn on embeddings in place (keeps pages/facts)
   upgrade                            Self-update

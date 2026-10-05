@@ -10,6 +10,291 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.57.0] - 2026-10-05
+
+**gbrain now knows when a relationship was true: a person who left a company stops showing up as working there, "where did Alice work in 2022" answers from dated evidence, and a nightly check closes jobs that cannot both still hold.**
+
+Before this release every typed link was forever. A timeline line saying someone left Acme changed nothing, so "who works at Acme" kept listing former employees and an entity card kept calling them CTO. Now each relationship carries dated stints built from the notes themselves, with no model call on the write path: timeline lines ("Left [Acme] to join [Widget]"), an explicit `Ended works_at [[companies/acme]]` line, frontmatter `since`/`until`, and `add_link` dates. Graph reads return what is true today, and history is one parameter away. On held-out data written by someone other than the implementer, current-employer precision went from 0.38 to 0.94 with no loss of recall and no false closures.
+
+### The numbers that matter
+
+Held-out runs by the evaluation custodian on a phrasing set the implementation never saw (seeds 11, 13, 17):
+
+| What we measured | Before | Now |
+| --- | --- | --- |
+| "Who works at C now": precision of the people returned | 0.376 | 0.943 |
+| Employer on a given date (as-of exact) | 0.208 | 0.678 |
+| Employers during a year (set-F1) | 0.455 | 0.653 |
+| Stale summary flagged in `context_pack` | 0 | 0.364 |
+| Current-employer recall | 0.616 | 0.612 (non-inferior) |
+| Traps: advisor roles, investments and alumni meetings at a former employer | n/a | 115 of 115 left alone |
+| Same notes written in a different order give the same state | n/a | 240 of 240 |
+| Nightly check in apply mode: wrong closures, 5 models × 3 runs | n/a | 0 |
+
+### How to use it
+
+```bash
+gbrain doctor --only edge_validity --json            # relationship state, lag, open proposals
+gbrain edge-proposals list --status all              # what the nightly check proposed or applied
+gbrain edge-proposals undo <id>                      # remove a closure line it wrote
+gbrain config set dream.edge_contradictions.mode propose   # review closures before anything is written
+gbrain config set graph.edge_validity off            # every edge, as before
+```
+
+MCP: `get_links { slug, link_type: "works_at", as_of: "2022-06-30" }`, `get_links { slug, during: "2022" }`, `get_backlinks { slug, status: "all" }`, `add_link { from, to, link_type, valid_until }`.
+
+### Things to watch
+
+- Graph reads (`get_links`, `get_backlinks`, `traverse_graph`, the relational search arm) now hide relationships that ended. A response that hid any carries a `former_relationships_hidden` notice with the exact call that shows them.
+- The nightly `edge_contradictions` phase makes one small chat call per changed subject (cap $1.00 per cycle, 200 subjects). With a certified model (the default `claude-haiku-4-5`, `claude-sonnet-5-5`, `claude-opus-5-5`, `claude-fable-5-1`, `gpt-6.1-sol`) it writes each closure as an undoable "(inferred) Ended …" timeline line; other models only propose.
+- Closures from the nightly check are often dated late: with only "joined" lines, a gap between jobs closes the earlier job on the next start date. An explicit end line or a "left" line dates it exactly.
+- Recall is capped by link typing, not by dates: a line such as "Signed on with [X] as CTO" is not typed `works_at` yet, so there is no relationship to date.
+- `traverse_graph` walks live relationships; read history with `get_links` or `get_backlinks`.
+
+## To take advantage of v0.60.57.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Your agent reads `skills/migrations/v0.60.57.0.md` the next time you interact with it.** Migration v204 adds the relationship tables; existing pages re-extract over the next dream cycles (no model calls), which records the dated evidence already in their timelines. `gbrain post-upgrade` prints a one-time notice that asks the user to keep live-by-default reads and the nightly check.
+3. **Verify the outcome:**
+   ```bash
+   gbrain doctor --only edge_validity --json
+   gbrain stats
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+#### Relationship state
+
+- Migration v204: `link_transitions` (dated start/end evidence with its producer), `link_relationships` (stints per relationship and read scope, `recorded_at`, `retired_at`), `link_edge_proposals`, `links.assertion_tense` and a graph generation sequence. Engine graduation carries all three tables; `gbrain migrate-engine` copies manual transitions.
+- Relations are state (`works_at`, `advises`, `yc_partner`: can end, can rejoin) or event (`founded`, `invested_in`, `led_round`, `attended`, `discussed_in`, `cited`: happened on a date). Schema packs declare their own with `link_types[].temporal: state | event`; lint rule `link_types_temporal` flags `mentions` (error), a redeclared built-in and a mismatched inverse.
+- Evidence is derived on every write with no model call (`src/core/link-temporal-evidence.ts`). A cue moves a relationship only when it is about that relationship: investing, meeting and event lines and qualified references ("[X]'s round", "[X] alumni") move nothing; event relations never close; a dated start stays open until a dated end. "Moved from [A] to [B]" and "Left [A] for [B]" end A and start B. Frontmatter `since`/`until` work with partial dates and rejoins.
+- The extract cycle phase sweeps relationships whose state is missing or older than their evidence.
+
+#### Reads
+
+- `get_links` takes `status` (`live`, `ended`, `all`), `as_of`, `during` and `link_type`; `get_backlinks` takes `status` and `as_of`. Default reads keep the existing row shape; history reads add `status`, `stints`, `recorded_at` and `retired_at`. `graph.edge_validity off` restores every edge.
+- `entity` and `context_pack` keep every edge with `status`, `since` and `until` and add a `relationship_note` ("now: works_at widget-co (since 2025-03-01); ended: works_at acme-example (2025-03-01); summary may be stale"). The same note reaches ambient turn context and compiled context.
+- The relational search arm follows the question's tense: "who works at" reads live relationships, "who worked at" reads history.
+- `add_link` takes `valid_from` and `valid_until`.
+
+#### Nightly relationship check
+
+- Dream phase `edge_contradictions`: a chat model judges only whether two live relationships of one subject can both hold; date arithmetic decides which ended and when, and undated pairs ask for a date instead. Modes `apply` (certified models), `propose` (other models) and `off`; settings `dream.edge_contradictions.{mode,max_subjects,max_usd}` and `models.dream.edge_contradictions`.
+- `gbrain edge-proposals list|show|accept|reject|undo|date`. Deleting an applied line by hand reopens the relationship and is remembered.
+- Doctor check `edge_validity` and a one-time post-upgrade [AGENT] notice.
+
+#### Entity resolution
+
+- The phantom-redirect tier gains a type guard and a name-entropy gate, so short or common names stop merging across types.
+
+#### Evaluation
+
+- Records in `docs/eval/decisions/` (`p1-dev-2026-10-04`, `p1-dev-2026-10-04-r2`, `p1-e2-2026-10-05`): development verdicts, the preregistrations and the held-out results. A first held-out run failed on traps and recall because the cue rules had overfit the development wording; the conservative rules above passed on a fresh held-out set.
+
+## [0.60.53.0] - 2026-10-04
+
+**gbrain now crash-tests its own write path on every pull request, notes on a PGLite brain turn into facts without anyone running a command, and new dashboard API keys stop handing out admin access by default.**
+
+Three things got measurably better in this release. First, the gate that guards your data now kills gbrain in the middle of real writes, over and over, and checks that nothing was lost, duplicated or leaked into another source afterwards. A full 10-minute run kills it 69 to 75 times on PGLite and 18 times on Postgres behind a connection pooler, at 11 different points in the write path, and finds zero problems. Second, on a PGLite brain served by `gbrain serve`, ten new meeting notes became 49 facts within about 20 minutes with no further command; before, they waited forever. Third, an API key created in the admin dashboard used to get full admin access unless you knew better. Now 0 of 20 do.
+
+### The numbers that matter
+
+| What we measured | Before | Now |
+| --- | --- | --- |
+| Crash runs in one full persistence gate run (600 s budget) | 0 | 69 to 75 on PGLite, 18 on Postgres through PgBouncer, 11 crash points, 0 violations |
+| Past persistence fixes the gate catches when the fix is reverted (12 tried) | 0 | 1 on each engine |
+| Facts from 10 meeting notes on a served PGLite brain, no command run | 0 after 22 min (10 jobs waiting) | 49 facts from all 10 pages at about 20 min, $0.084 |
+| Dashboard-minted API keys with full admin access | 20 of 20 | 0 of 20 |
+| Legacy tokens authorized from the old JSON grant after upgrade | 50 of 50 | 0 of 50 (all 50 still work) |
+| Unattributed writer references in the code | 90 in 40 files | 7 in 3 files |
+| Scale tier enforced gates at 10,000 pages | n/a | 25 of 25 PGLite, 24 of 24 Postgres |
+| Scale tier at 20,000 pages | nightly timed out at 50 min | green on both engines, about 8 min per job |
+| `gbrain extract timeline --source db` at 20,000 PGLite pages | 12.6 min | about 2 min |
+
+Search latency did not regress with the facts drain running beside it (12 pages, real model): `get_page` p95 3.2 to 3.3 ms, `list_pages` 9.1 to 8.8 ms, search 439 to 389 ms.
+
+### How to use it
+
+```bash
+gbrain doctor --only legacy_token_null_scope,facts_drain --json   # full-access keys and the drain's state
+gbrain auth rescope --id <token-id> --scopes read,write           # narrow an old full-access key
+gbrain auth rescope --client <id> --sources none                  # an OAuth client that reads no source
+gbrain auth rescope --client <id> --takes-holders world,brain     # per-client takes holders
+gbrain repair take-supersession                                   # preview; add --apply after review
+gbrain config set facts.extraction_enabled false                  # turn automatic fact extraction off
+```
+
+### Things to watch
+
+- The facts drain is on by default on PGLite and spends real money: one chat call per page, capped at $1 per run and $5 per rolling day (`facts.drain_budget_usd`, `facts.drain_daily_budget_usd`). A brain without a chat key queues the pages and `gbrain doctor` says so.
+- Large-brain ceilings (MCP search latency at 10k and 20k pages, calibrated budgets) are still report-only. The scale tier measures them every night; enforcement stays off until five nightly runs are stable.
+- MCP search on Postgres slows from 78.6 ms at 10k pages to 615 ms at 20k (1,169 ms source-scoped). This is filed, not fixed.
+- Older binaries keep reading tokens through the `permissions` mirror, which is written until 2026-11-04.
+
+## To take advantage of v0.60.53.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Your agent reads `skills/migrations/v0.60.53.0.md` the next time you interact with it.** Migration v202 converts every legacy token grant to the grant columns without changing what any token can do, and v203 adds the per-client source and takes-holder columns. Restart every `gbrain serve`, autopilot and worker so the facts drain and the new token reads take effect.
+3. **Verify the outcome:**
+   ```bash
+   gbrain doctor --only legacy_token_null_scope,legacy_token_grant_shape,facts_drain,revision_backfill --json
+   gbrain stats
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+#### Crash robot in the persistence gate
+
+- The persistence gate runs a crash robot (`scripts/persistence/crash-robot.ts`, `generator.ts`, `model.ts`, `ops.ts`): seeded sequences of real operations across two sources and a connector source (local CLI, an OAuth client and a legacy token as remote agents; page writes, edits, deletes and restores, `remember`/`forget`, takes add and supersede, timeline entries, `sync_brain`, a GitHub connector publish, credential revocation). It SIGKILLs the owner at every crash seam the sequences reach (`src/core/persistence/fault-points.ts`), and runs process faults: a stale `index.lock`, a hung `git commit`, Postgres session drops every 400 ms, and the owner killed right after a `facts-absorb` job commits. A reference model checks for lost or duplicated writes, untrue receipts, withdrawn facts coming back, cross-source writes, request-id replay across principals, takes and facts rows against their page fences, write attribution, orphan rows, wedged queues and lock order.
+- `.github/workflows/persistence-validation.yml` adds a `crash-robot` job per engine with PgBouncer for Postgres: 150 s on pull requests, 600 s on pushes, schedules and manual runs. Failing runs replay with `--replay` and shrink with `--shrink`; accepted shrunk sequences live in `test/fixtures/crash-robot/`.
+- A restarted PGLite owner (for example `gbrain serve` after a crash) resumes the effects and writes its predecessor left claimed instead of waiting out a 2-minute lease that also held back writes to a withdrawn page.
+- `buildHistoryFixture(engine, { pages, seed, sources, worktrees })` (`scripts/persistence/history-fixture.ts`) builds a managed brain with real persistence history at up to 10,000 pages.
+
+#### Facts and chronicle
+
+- Automatic facts drain on PGLite (`src/core/facts/drain.ts`, `drain-scheduler.ts`): `gbrain serve` (stdio and `--http`) and the new `facts_drain` cycle phase run queued `facts-absorb` jobs under per-run and daily spend caps. Jobs without a key are deferred without spending an attempt (minion job deferral); doctor `facts_drain` reports the state. Guide: `docs/guides/facts-drain.md`.
+- The `extract_facts` cycle phase fences facts without a fence row itself (#5299).
+- `gbrain repair take-supersession` rebuilds supersession chains broken on managed brains (#5886).
+- Doctor `revision_backfill` reports pages waiting on the page revision backfill with a resume command that works, and the backfill runs on managed brains (#5216).
+- Life chronicle: two same-day events of one page that share who and what both survive (`src/core/chronicle/event-identity.ts`), and an ended calendar invite becomes a `Scheduled:` meeting event without a model call (`invite-projection.ts`).
+
+#### Keys and grants
+
+- Dashboard API keys mint through `mintLegacyToken` with read and write by default; admin only when the box is checked. The dashboard revokes a key by id, so two keys with the same name no longer revoke each other.
+- Doctor `legacy_token_null_scope` names every existing full-access key with the command that narrows it.
+- Migration v202 (`legacy_token_grant_conversion`) converts every legacy token grant to the unified grant columns; HTTP auth on both transports reads those columns, and a row created later converts on its first read. A malformed `permissions` value now denies every axis on every path.
+- Migration v203 (`oauth_client_grant_axes`) adds `oauth_clients.source_grant` and `oauth_clients.takes_holders`: `gbrain auth rescope --client <id> --sources none` and `--takes-holders a,b|none`.
+
+#### Write attribution
+
+- Imports, legacy sync renames and deletes, timeline extraction, legacy facts and takes helpers, cycle phases, schema-pack conversions and repairs record the local maintenance principal (`maintenanceTransaction`). Changed rows keep their creator and move their last writer. `gbrain extract`, meeting-timeline extraction and enrichment remain unattributed (`docs/architecture/system-of-record.md`).
+- Batch maintenance writers commit one bounded transaction per batch: 10,000 pages of timeline extraction run as 100 transactions of at most 100 rows.
+- `gbrain repair attribution-backfill` on a 10,000-page managed history with 75% of rows reset refilled 6,868 of 7,509 pages, 5,502 of 5,609 versions and 1,501 of 1,501 facts exactly and changed no content; the rest were last changed by `forget`.
+- `gbrain calibration undo-wave` works on Postgres.
+
+#### Scale and operations
+
+- The scale tier asserts the large-brain ceilings through the real CLI at every size: progress-aware sync deadline, loud `embed --stale` budget stop, serve boot window, and a 20,000-file `sources add` at 20k pages and up. Ceiling enforcement stays report-only.
+- The Postgres `find_orphans` known answer reads totals and one maximal page (it read 1 page of 100 against 104 orphans and failed the 20k nightly).
+- PGLite writes made outside a transaction take the WAL checkpoint guard, so large raw writes no longer hang at a 529 MB WAL.
+- `gbrain extract timeline --source db` refreshes PGLite planner statistics on batch boundaries during the walk.
+- `gbrain migrate --to` refusals carry why and a filled fix naming the refusing side; an unknown engine is `invalid_params`; `postgres` is the canonical engine name (`supabase` stays an alias).
+- `gbrain sources refresh` runs inside a resident PGLite owner (`writer_refresh` administration operation); delegated syncs keep the progress-aware deadline; the consumer's idle probe honors the refresh fence.
+- `gbrain sources add` no longer fails with `internal_error` (ENOENT under `.git/objects`) when a background `git gc` prunes the checkout while it is being registered.
+- Search reuses its projection-readiness answer until the brain changes (`GBRAIN_PROJECTION_READINESS_CACHE=0` turns it off).
+- The OpenClaw context-engine heartbeat reports seat write failures with their hints; a pattern page drops a seat its reflections no longer share (#4618).
+
+### For contributors
+
+- Generated files were regenerated, not merged: migration registry, flag registry, schema blobs, llms bundles, goldens.
+- New write-attribution suites `test/write-attribution-<family>.test.ts`; helpers `test/helpers/unmanaged-attribution.ts` and `attribution-history-fixture.ts` (`GBRAIN_TEST_BACKFILL_FIXTURE_PAGES`). A test that overrides an engine method with a copy bound to the base engine deadlocks on PGLite once the writer runs in a transaction; override through the transaction engine instead.
+- `scripts/persistence/would-have-caught.ts` reverts past fixes one at a time and reports which the gate catches.
+
+## [0.60.52.0] - 2026-10-04
+
+**A PGLite brain that has saved memory can now move to Postgres with nothing lost: one command shows the plan, one confirmation moves it, and the move proves the copy matches before it switches.**
+
+PGLite is the zero-setup local database a new brain starts on. When a brain outgrows it (thousands of pages, several machines, a hosted server), the next step is Postgres. Until now `gbrain migrate --to postgres` refused almost every real brain: anything an agent had saved through the write coordinator carried history the old copier could not move, such as which saves already happened, which facts you told it to forget, who wrote what, and which keys can get in. Now the move carries all of it, row for row, with the same IDs.
+
+The move locks the old brain so nothing can write to it, finishes saves that are still in flight, copies every table, and then checks the copy: row counts and a fingerprint of every table, a replay of a saved request to show it is not done twice, and a health check on the new brain. Only after that passes does gbrain point at Postgres. The old folder becomes a small "this brain moved" file that tells any gbrain (old or new, including a restarted `gbrain serve`) where the brain went, and the old data is kept beside it. At every moment at most one of the two databases accepts writes, including after a crash; `--resume` picks up from the last finished step.
+
+### How to use it
+
+```bash
+export GBRAIN_TARGET_URL='postgresql://...'                           # the empty Postgres database
+gbrain migrate --to postgres --url-env GBRAIN_TARGET_URL --json      # shows the plan, exits 3, changes nothing
+gbrain migrate --to postgres --url-env GBRAIN_TARGET_URL --yes --expect <plan_hash> --json
+gbrain doctor --no-migrate --json
+```
+
+`--status` and `--plan` are read-only. `--resume` continues an interrupted move, and `--rollback-to-source` goes back to PGLite (it refuses once you have withdrawn facts or revoked a key on Postgres, because going back would undo that). Existing access tokens, OAuth clients and local writer credentials keep working on Postgres. Full guide: [Move a PGLite brain to Postgres](docs/guides/move-to-postgres.md). To keep the old copier, run `gbrain config set migrate.graduation false`.
+
+### The numbers that matter
+
+Measured with the history fixture (real write history: requests, withdrawals, versions, takes, tokens, embedded chunks), a resident `gbrain serve` holding the brain, and a local Postgres 16:
+
+| Brain | Commands | Wall time, plan to green doctor | Copy | Verify | Target doctor |
+| --- | --- | --- | --- | --- | --- |
+| 1,000 pages (1,737 requests, 4,702 effects, 1,168 embedded chunks) | 2 plus 1 doctor | 16.4 s | 2.9 s | 4.3 s | no failing check |
+| 10,000 pages (17,344 requests, 46,986 effects, 11,668 embedded chunks) | 2 plus 1 doctor | 47.4 s | 15.9 s | 13.3 s | no failing check |
+
+Search latency, PGLite then Postgres: at 1,000 pages p50 5.3 ms / 8.4 ms and p95 9.0 ms / 9.9 ms; at 10,000 pages p50 37.4 ms / 30.5 ms and p95 41.8 ms / 58.9 ms.
+
+### Things to watch
+
+- A move to a hosted Postgres where the role is not a superuser needs the `vector` extension installed, `BYPASSRLS`, and the row-level-security event trigger owned by the role. The plan names the exact SQL your database admin runs. Supabase's `postgres` role already qualifies.
+- On Windows a brain with write history still cannot move; brains without history keep the old copier.
+- The kept PGLite copy (`<path>.graduated-<run_id>`) still holds private memory and token hashes. `gbrain doctor` reports it; deleting it is your call.
+
+### Behavior changes for scripts and agents
+
+| Area | Before | Now | What to change |
+| --- | --- | --- | --- |
+| `gbrain migrate --to postgres` (or `--to supabase`) on a PGLite brain | copied at once, or exit 1 `writer_coordinator_required` for a brain with write history | exit 3 `confirmation_required` with the plan and `plan_hash`; the move runs with `--yes --expect <plan_hash>` | relay the plan to the user, then run `fix.argv` after they agree; `gbrain config set migrate.graduation false` keeps the old copier |
+| `gbrain serve` started while a move runs | waited on the lock or started status-only | exit 75 `graduation_in_progress` | let the supervisor retry after the move |
+| A CLI or MCP config that still points at a moved PGLite path | opened or recreated the PGLite folder | `engine_graduated` with the one-step fix | run `fix.argv`, restart the MCP client |
+| `doctor` `pglite_scale` fix | `gbrain migrate --to supabase` | `gbrain migrate --to postgres --plan --json` | none |
+
+## To take advantage of v0.60.52.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes --no-autopilot-install
+   ```
+   Migration v201 adds the `persistence_graduation` table; no existing rows change.
+2. **Your agent reads `skills/migrations/v0.60.52.0.md` the next time you interact with it.** Nothing moves until you ask for a move and confirm the plan.
+3. **Verify:**
+   ```bash
+   gbrain doctor --json
+   gbrain migrate --status --json
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue: https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+### Itemized changes
+
+#### Engine graduation (`gbrain migrate --to postgres`)
+
+- Every table is classified in one versioned inventory: 94 copied verbatim with IDs, 2 re-checked for this machine (brain identity, worktree host bindings), 2 caches rebuilt, 6 transient or unused tables (PGLite planner statistics, cycle locks, an unused reservation table, rate leases, one-time OAuth codes) dropped. A schema with an unclassified table refuses the move, and a test fails when a migration adds one without a classification.
+- The copy runs with database triggers bypassed for the copy transaction only, so stored attribution, revisions and generations land unchanged; leases on queued jobs and effects are reset so the new database's workers pick them up, and delayed effects keep their schedule.
+- Verify compares row counts (twice: by a plain count and by the batched fingerprint read), a canonical per-table fingerprint computed the same way on both engines, sequence positions, every foreign key, trigger state and the relation set, replays a drained request through admission inside a rolled-back transaction, and runs the target doctor.
+- Custody: the PGLite kernel lock is held from the start of the move until routing flips; an intent marker beside the brain and a database fence on Postgres refuse every other writer; the old folder is renamed and replaced by an exclusive-create tombstone before Postgres takes authority. A stray brain created at the old path by an older gbrain is detected and refused (`graduation_split_brain`).
+- New error codes, each with a reason, an exact fix and a read-only verify command: `graduation_source_writer_held`, `graduation_unclassified_table`, `graduation_embedding_dimension_mismatch`, `graduation_drain_timeout`, `graduation_target_not_empty`, `graduation_foreign_host_binding`, `graduation_verify_failed`, `graduation_interrupted`, `graduation_in_progress`, `graduation_split_brain`, `graduation_rollback_writes_lost`, `graduation_target_auth_failed`, `graduation_target_ddl_unreachable`, `graduation_target_unsupported`, `graduation_unsupported_platform`, `engine_graduated`.
+- `gbrain engine status --json` shows the graduation state; `pglite_leftovers` reports the kept PGLite copy; a dead interrupted move is a doctor failure with the resume command.
+
+#### Tests
+
+- A hand-built legacy brain with independently written expected outcomes, plus 1,000- and 10,000-page history brains, graduate end to end on Postgres 16 and through a transaction-mode PgBouncer.
+- Crash tests kill the move at every step of the move and of rollback, including around the routing flip and the first write on Postgres; a restarted `gbrain serve`, older released binaries against the tombstone, stale CLI and MCP configs, a full target disk and a rotated target password are each tested.
+
 ## [0.60.49.0] - 2026-10-04
 
 **Automatic event extraction now records only what happened. On the independent lift eval that failed it, wrong or premature events drop from 1.11 per judged page to 0.07 and 0.11 (gate: 0.20), and recall rises from 35/38 to 38/38.**

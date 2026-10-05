@@ -18,6 +18,7 @@ import { tryAcquirePublicationCapacity } from './pool-capacity.ts';
 import { assertRecoveryStagingAbsent, cleanupRecoveryStaging, upgradeRecoveryStaging } from './staging.ts';
 import { declarePersistenceProtocol } from './protocol.ts';
 import { advanceEffectCursor } from './effect-journal.ts';
+import { faultPoint } from './fault-points.ts';
 
 const effectStatusFix = (effect: Pick<PersistenceEffect, 'source_id'>): Action => readFix(
   `Shows source ${effect.source_id}'s canonical owner with its blocking, retrying and parked effects, read-only.`,
@@ -89,6 +90,7 @@ async function clearRecovery(tx: BrainEngine, effect: PersistenceEffect): Promis
   if (effect.recovery_bytes) for (const key of ['brain', `worktree:${effect.worktree_id}`]) {
     await tx.executeRaw('UPDATE persistence_counters SET recovery_bytes=recovery_bytes-$2 WHERE key=$1', [key, Number(effect.recovery_bytes)]);
   }
+  await faultPoint('effect_recovery:before_clear', { effectId: effect.id, requestId: effect.request_id, sourceId: effect.source_id });
   await tx.executeRaw('UPDATE persistence_effects SET recovery=NULL,recovery_bytes=0 WHERE id=$1', [effect.id]);
 }
 

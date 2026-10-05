@@ -34,6 +34,7 @@ import { buildVisibilityClause } from './sql-ranking.ts';
 import { hasReadPolicy, pageReadFilter } from './read-policy-sql.ts';
 import { sanitizeRemoteBody } from '../remote-body.ts';
 import { parseRelationalQuery, type RelationalQuery, type RelationVocab } from './relational-intent.ts';
+import { edgeValidityEnabled } from '../link-validity.ts';
 import { stampEvidence, type EvidenceOpts } from './evidence.ts';
 
 export interface RelationalArmOpts extends PageReadPolicy {
@@ -318,7 +319,9 @@ export async function buildRelationalArm(
 
   try {
     const sources = await scopeSources(engine, opts);
+    const temporal = await edgeValidityEnabled(engine) ? { status: parsed.edgeStatus } : undefined;
     const fanoutOpts = {
+      temporal,
       sourceId: opts.sourceId,
       sourceIds: opts.sourceIds,
       excludePrivate: opts.excludePrivate,

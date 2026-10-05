@@ -57,6 +57,7 @@ import { sanitizeRecordedSourcePath, recordedPathFromFileUri, scannerSlugRootMod
 import { isWriteTargetContained, msysToNativePath } from './path-confine.ts';
 import { atomicWriteFileSync } from './atomic-write.ts';
 import { commitWriteThroughFile, isDurabilityHardened } from './brain-repo-durability.ts';
+import { maintenanceTransaction } from './persistence/attribution.ts';
 
 export type TakesWriteErrorCode =
   | 'page_not_found'      // slug has no pages row (scoped)
@@ -566,12 +567,12 @@ export async function addTakeToPage(
     writePageBody(path, nextBody, writeRoot, target.slug);
     let mirrorWarning: string | undefined;
     try {
-      await target.engine.addTakesBatch([{
+      await maintenanceTransaction(target.engine, tx => tx.addTakesBatch([{
         page_id: pageId, row_num: rowNum, claim: input.claim, kind: input.kind,
         holder: input.holder, weight: input.weight ?? 0.5,
         since_date: input.sinceDate, source: input.source,
         active: true, superseded_by: null,
-      }]);
+      }]));
     } catch (err) {
       // P1-4/F4: md is canonical + already written — a failed DB mirror is
       // healed by the next reconcile, so surface a warning instead of throwing
@@ -631,7 +632,7 @@ export async function appendTakesToPageMdFirst(
     const after = parseTakesFence(nextBody).takes.filter(t => appended.has(t.rowNum));
     let mirrorWarning: string | undefined;
     try {
-      await target.engine.addTakesBatch(after.map(t => toBatchInput(pageId, t)));
+      await maintenanceTransaction(target.engine, tx => tx.addTakesBatch(after.map(t => toBatchInput(pageId, t))));
     } catch (err) {
       mirrorWarning = mirrorErrorMessage(err); // P1-4/F4: md written; DB mirror deferred to reconcile.
     }
@@ -685,7 +686,7 @@ export async function updateTakeOnPage(
     // base columns only, resolution columns preserved by the DO UPDATE list.
     let mirrorWarning: string | undefined;
     try {
-      await target.engine.addTakesBatch([toBatchInput(pageId, updated)]);
+      await maintenanceTransaction(target.engine, tx => tx.addTakesBatch([toBatchInput(pageId, updated)]));
     } catch (err) {
       mirrorWarning = mirrorErrorMessage(err); // P1-4/F4: md written; DB mirror deferred to reconcile.
     }
@@ -753,7 +754,7 @@ export async function supersedeTakeOnPage(
     if (newAfter) mirrorRows.push(toBatchInput(pageId, newAfter, null));
     let mirrorWarning: string | undefined;
     try {
-      await target.engine.addTakesBatch(mirrorRows);
+      await maintenanceTransaction(target.engine, tx => tx.addTakesBatch(mirrorRows));
     } catch (err) {
       mirrorWarning = mirrorErrorMessage(err); // P1-4/F4: md written; DB mirror deferred to reconcile.
     }
@@ -832,12 +833,14 @@ export async function resolveTakeOnPage(
     // md write and duplicate the row).
     let mirrorWarning: string | undefined;
     try {
-      await target.engine.resolveTake(pageId, rowNum, resolveArgs);
+      await maintenanceTransaction(target.engine, tx => tx.resolveTake(pageId, rowNum, resolveArgs));
     } catch (err) {
       if (err instanceof Error && err.message.includes('TAKE_ROW_NOT_FOUND')) {
         try {
-          await target.engine.addTakesBatch([toBatchInput(pageId, targetRow)]);
-          await target.engine.resolveTake(pageId, rowNum, resolveArgs);
+          await maintenanceTransaction(target.engine, async tx => {
+            await tx.addTakesBatch([toBatchInput(pageId, targetRow)]);
+            await tx.resolveTake(pageId, rowNum, resolveArgs);
+          });
         } catch (healErr) {
           mirrorWarning = mirrorErrorMessage(healErr);
         }

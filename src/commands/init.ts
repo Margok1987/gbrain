@@ -1333,7 +1333,7 @@ function printMemoryVerbsQuickstart(opts: { emptyBrain?: boolean; onPglite?: boo
   console.log(
     'More: ' +
       (opts.emptyBrain ? 'bulk-load notes `gbrain import <dir>` · ' : '') +
-      (opts.onPglite ? 'scale up `gbrain migrate --to supabase` · ' : '') +
+      (opts.onPglite ? 'scale up `gbrain migrate --to postgres --plan` · ' : '') +
       'health `gbrain doctor`',
   );
 }

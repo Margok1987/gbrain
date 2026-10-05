@@ -31,6 +31,9 @@ import { runChronicleBackfill } from '../src/core/chronicle/backfill.ts';
 import { LINK_EXTRACTOR_VERSION_TS } from '../src/core/link-extraction.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
+import { claimPersistenceEffect } from '../src/core/persistence/effect-journal.ts';
+import { dispatchFactsBackstopEffect } from '../src/core/persistence/effect-facts.ts';
+import { localHostId } from '../src/core/persistence/identity.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import type { ChatOpts, ChatResult } from '../src/core/ai/gateway.ts';
 import { configureGateway, resetGateway, __setChatTransportForTests, __setEmbedTransportForTests } from '../src/core/ai/gateway.ts';
@@ -278,6 +281,23 @@ const MATRIX: Record<CyclePhase, Entry> = {
       expect((await engine.getPage(slug!, { sourceId: 'default' }))?.compiled_truth).toContain('DRIFTED — notes/drift-example');
     },
   },
+  edge_contradictions: {
+    config: { 'dream.edge_contradictions.mode': 'apply', 'models.dream.edge_contradictions': 'anthropic:claude-sonnet-4-6' },
+    seed: async ({ engine, sourceId }) => {
+      await put(engine, sourceId, 'companies/acme-example', page('company', 'Acme', 'A company.'));
+      await put(engine, sourceId, 'companies/widget-co', page('company', 'Widget', 'A company.'));
+      await put(engine, sourceId, 'people/edge-example', page('person', 'Edge Example',
+        'Works at [Acme](../companies/acme-example) and at [Widget](../companies/widget-co).\n\n## Timeline\n\n' +
+        '- **2019-02-01** | test — joined [Acme](../companies/acme-example)\n- **2024-05-01** | test — joined [Widget](../companies/widget-co)'));
+    },
+    reply: () => JSON.stringify({ pairs: [{ a: 1, b: 2, conflict: true, confidence: 0.9 }] }),
+    assert: async ({ engine, sourceId, result }) => {
+      expect(result.details).toMatchObject({ proposed: 1, applied: 1 });
+      const ops = await committed(engine, sourceId, 'people/edge-example');
+      expect(ops.some(o => (o as { operation: string }).operation === 'add_timeline_entry')).toBe(true);
+      expect((await engine.getPage('people/edge-example', { sourceId }))?.timeline).toContain('Ended works_at [[companies/acme-example]]');
+    },
+  },
   chronicle: {
     seed: async ({ engine, sourceId }) => {
       await put(engine, sourceId, 'meetings/chronicle-example', page('meeting', 'Weekly sync',
@@ -290,6 +310,29 @@ const MATRIX: Record<CyclePhase, Entry> = {
       const [event] = await engine.executeRaw<{ slug: string }>("SELECT slug FROM pages WHERE source_id=$1 AND type='event'", [sourceId]);
       expect(await committed(engine, sourceId, event.slug)).not.toHaveLength(0);
       expect(await engine.executeRaw("SELECT state FROM chronicle_page_state WHERE source_id=$1", [sourceId])).toEqual([{ state: 'extracted' }]);
+    },
+  },
+  facts_drain: {
+    config: { embedding_disabled: 'true' },
+    seed: async ({ engine, sourceId }) => {
+      if (engine.kind !== 'pglite') return;
+      await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+      await put(engine, sourceId, 'notes/drain-example', page('note', 'Field notes', 'Carol Example founded Widget Co in 2019 and leads its design team. '.repeat(3)));
+      const held = await engine.executeRaw<{ id: number; next_attempt_at: string | null }>(
+        "SELECT id, next_attempt_at::text FROM persistence_effects WHERE kind<>'facts-backstop'");
+      await engine.executeRaw("UPDATE persistence_effects SET next_attempt_at=now()+interval '1 hour' WHERE kind<>'facts-backstop'");
+      const effect = await claimPersistenceEffect(engine, localHostId());
+      for (const h of held) await engine.executeRaw('UPDATE persistence_effects SET next_attempt_at=$2::timestamptz WHERE id=$1', [h.id, h.next_attempt_at]);
+      if (effect) await dispatchFactsBackstopEffect(engine, effect, localHostId());
+      const jobs = await engine.executeRaw("SELECT id FROM minion_jobs WHERE name='facts-absorb' AND data->>'slug'='notes/drain-example' AND status='waiting'");
+      expect(jobs).toHaveLength(1);
+    },
+    reply: () => JSON.stringify({ facts: [{ fact: 'Carol founded Widget Co in 2019', kind: 'fact', entity: 'people/carol-example', confidence: 0.9, notability: 'high' }] }),
+    assert: async ({ engine, sourceId, result }) => {
+      if (engine.kind !== 'pglite') { expect(result.details.reason).toBe('not_applicable'); return; }
+      expect(result.details).toMatchObject({ outcome: 'drained', failed: 0, backlog_after: 0 });
+      expect(Number(result.details.completed)).toBeGreaterThanOrEqual(1);
+      expect(await engine.executeRaw("SELECT fact FROM facts WHERE source_id=$1 AND fact LIKE '%Widget Co%'", [sourceId])).not.toHaveLength(0);
     },
   },
   conversation_facts_backfill: {

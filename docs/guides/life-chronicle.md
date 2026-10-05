@@ -10,7 +10,8 @@ When you save a meeting, conversation or calendar page, gbrain turns it into
 timeline events (`life/events/` pages plus a day-by-day projection) so
 `gbrain day <date>`, `gbrain since <date>` and `gbrain on-this-day` can answer
 "what happened". This runs automatically and is **on by default**. Each
-eligible page costs one paid chat call.
+eligible page costs one paid chat call, except an ended calendar invite, which
+is projected without a model call (see [Calendar invites](#calendar-invites)).
 
 To turn it off:
 
@@ -35,9 +36,7 @@ A page is extracted automatically when all of these hold:
   within `chronicle.auto_recent_days` (default 30). Undated pages count as
   recent.
 - A calendar invite has ended. An invite for next week is picked up once its
-  end time passes, with no edit needed. An ended invite is not proof that you
-  attended; its events carry `kind: meeting`, `captured_via:
-  life-chronicle:auto` and a link to the invite page.
+  end time passes, with no edit needed.
 - The writer is not confined. Slug-bound, delegated or namespace-restricted
   clients, and grants without `extract_facts`, never trigger extraction.
 - The sync did not run with `--no-extract`. A remote sync never extracts.
@@ -67,6 +66,45 @@ Two rules are enforced after the model answers, before anything is written:
 The phase result reports dropped proposals by reason in `events_dropped`. When
 every proposed event of a page is dropped, its ledger row records that reason
 instead of `no_events`.
+
+## Calendar invites
+
+A calendar invite is a page under `calendar/` or `cal/` (or of type
+`calendar-event`) with a title and frontmatter `start` and `end`, the shape the
+Google calendar import writes. Once its end time passes, the chronicle phase
+turns it into one event without a chat call:
+
+| Event field | Value |
+|---|---|
+| `what` and title | `Scheduled: <invite title>` |
+| `when` | the invite's `start` |
+| `who` | the invite's `attendees` |
+| `where` | the invite's `location` |
+| `kind` | `meeting` |
+| `captured_via` | `life-chronicle:invite` |
+
+An invite is not proof that you attended. The `Scheduled:` prefix and
+`captured_via: life-chronicle:invite` say the meeting was on the calendar, not
+that it happened; meeting notes under `meetings/` carry what happened. The
+projection takes no daily-limit slot and records a zero cost; publication,
+operator-edit protection and retirement work exactly as for judged events. A
+calendar page without a title, `start` and `end` is judged like a meeting page.
+The date rules above apply to projected invites too.
+
+## Event pages
+
+Each event is a `life/events/<day>-<hash>` page. `<day>` is the event's day in
+the brain timezone (`chronicle.tz`, default UTC), and `<hash>` is derived from
+who, what and the source page, so re-extracting the same content updates the
+same page.
+
+Two events of one page can share who, what and day, for example a morning and
+an afternoon "Call with alice-example". Both are kept: one holds the bare slug
+and the other gets `-<hash6>`, derived from its time, place and kind.
+Byte-identical events get `-2`, `-3`. The assignment does not depend on the
+order the model lists events: an event keeps the slug it already has across
+reorderings and re-extractions, the earliest event takes a free bare slug, and
+correcting one event moves only that event.
 
 ## Cost and limits
 
@@ -129,6 +167,13 @@ gbrain config set auto_chronicle false   # opt out
 
 A brain that already had `auto_chronicle true` sees the notice too, because
 that setting had no effect before v0.60.45.0.
+
+An upgrade that changes how events are extracted raises the extractor version,
+which makes already-extracted pages new to the ledger. On an unmanaged brain,
+the phase re-extracts recent pages changed since activation, under the daily
+limit. A managed brain records `no_write_decision` for them, and backfill
+re-extracts them on request. Ended calendar invites re-project without a call.
+Re-extraction keeps each existing event's slug.
 
 ## History: backfill on request
 

@@ -7,7 +7,9 @@
  * judge; attempts and retries count) → judge one immutable snapshot inside a
  * BudgetTracker scope labelled `chronicle:<trigger>` with the per-page cap →
  * explicit post-call budget check → publish with re-validation and
- * reconciliation → ledger outcome. A failed or superseded run never retires
+ * reconciliation → ledger outcome. An ended calendar invite takes the judge's
+ * place with its deterministic projection (invite-projection.ts): no
+ * reservation, no model call. A failed or superseded run never retires
  * the previous generation.
  */
 import type { BrainEngine } from '../engine.ts';
@@ -24,6 +26,7 @@ import {
   allDroppedReason, buildChronicleEvents, chronicleJudgeContext, isValidProposal,
   type ChronicleDropCounts, type ChronicleJudge, type ChronicleJudgeResult,
 } from './extract-events.ts';
+import { endedInviteProposal, markInviteEvents } from './invite-projection.ts';
 import { RETIRE_REASONS, reserveChronicleSlot } from './ledger.ts';
 import { pinDepth, publishChronicleGeneration, type ChronicleDepthPin } from './publish.ts';
 
@@ -167,7 +170,9 @@ export async function executeChronicleRow(ctx: ChronicleExecContext, row: Chroni
     return done('skipped', reason);
   }
 
-  if (auto && !(await reserveChronicleSlot(engine, settings.dailyLimit, { sourceId: row.source_id, pageId: Number(row.page_id), contentHash: row.content_hash }))) {
+  const judgeCtx = chronicleJudgeContext(snapshot.page);
+  const invite = endedInviteProposal(snapshot.page, judgeCtx.attendees, now);
+  if (auto && !invite && !(await reserveChronicleSlot(engine, settings.dailyLimit, { sourceId: row.source_id, pageId: Number(row.page_id), contentHash: row.content_hash }))) {
     await setNextAttempt(engine, row, null);
     return { kind: 'deferred', reason: 'daily_limit' };
   }
@@ -175,7 +180,6 @@ export async function executeChronicleRow(ctx: ChronicleExecContext, row: Chroni
     `UPDATE chronicle_page_state SET attempts=attempts+1 WHERE source_id=$1 AND page_id=$2 AND content_hash=$3 AND extractor_version=$4 RETURNING attempts`,
     [...key(row)]);
 
-  const judgeCtx = chronicleJudgeContext(snapshot.page);
   const tracker = new BudgetTracker({
     maxCostUsd: ctx.gate.enforceCap ? settings.jobBudgetUsd : undefined,
     label: ctx.label ?? `chronicle:${row.trigger}`,
@@ -185,7 +189,7 @@ export async function executeChronicleRow(ctx: ChronicleExecContext, row: Chroni
   let thrown: unknown = null;
   const parent = getCurrentBudgetTracker();
   try {
-    result = await withBudgetTracker(tracker, () => ctx.judge(judgeCtx.input));
+    result = await withBudgetTracker(tracker, () => (invite ? Promise.resolve({ events: [invite] }) : ctx.judge(judgeCtx.input)));
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error;
     thrown = error ?? new Error('judge failed');
@@ -195,7 +199,7 @@ export async function executeChronicleRow(ctx: ChronicleExecContext, row: Chroni
   const models = tracker.snapshot().models;
   const unpriced = models.some((m) => m.cost_usd === null && m.calls > 0);
   const spend = { costUsd: unpriced ? null : tracker.totalSpent, unpriced };
-  const judged = { judged: true, ...spend };
+  const judged = { judged: !invite, ...spend };
 
   // E4: gateway accounting defers a breach to the next reservation; check the cap explicitly.
   const overCap = tracker.cap !== undefined && tracker.totalSpent > tracker.cap;
@@ -212,7 +216,8 @@ export async function executeChronicleRow(ctx: ChronicleExecContext, row: Chroni
   let generation;
   try {
     generation = await publishChronicleGeneration(engine, {
-      sourceId: row.source_id, pin, decisionRequestId: row.request_id, maintenance: ctx.maintenance, signal: ctx.signal, events,
+      sourceId: row.source_id, pin, decisionRequestId: row.request_id, maintenance: ctx.maintenance, signal: ctx.signal,
+      events: invite ? markInviteEvents(events) : events,
     });
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error;

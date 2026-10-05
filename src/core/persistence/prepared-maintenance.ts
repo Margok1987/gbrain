@@ -165,13 +165,14 @@ export async function submitDatabaseMaintenanceIntent(engine: BrainEngine, autho
 }
 
 export async function stampMaintenancePage(engine: BrainEngine, authority: MaintenanceAuthority, slug: string,
-  cycleDate: string, rawSource?: string, rawTraceExemptReason?: string, seat?: string): Promise<void> {
+  cycleDate: string, rawSource?: string, rawTraceExemptReason?: string, seat?: string | null): Promise<void> {
   const snapshot = await engine.readPageSnapshot(slug, { sourceId: authority.writer.sourceId });
   if (!snapshot) throw opError('page_not_found', 'A maintenance output page disappeared.',
     `Output page ${slug} in '${authority.writer.sourceId}' no longer exists, so it was not stamped. Confirm with the command in fix, then run maintenance again to regenerate it if it is still wanted.`,
     { fix: readFix('Shows whether the page exists in this source now.', { argv: ['gbrain', 'get', '--source', authority.writer.sourceId, '--', slug] }) });
   const firstDate = snapshot.page.frontmatter.dream_created_cycle_date || snapshot.page.frontmatter.dream_cycle_date || cycleDate;
-  const page = { ...snapshot.page, frontmatter: { ...snapshot.page.frontmatter, dream_generated: true,
+  const { seat: _staleSeat, ...kept } = snapshot.page.frontmatter;
+  const page = { ...snapshot.page, frontmatter: { ...(seat === null ? kept : snapshot.page.frontmatter), dream_generated: true,
     dream_cycle_date: firstDate, dream_created_cycle_date: firstDate, ...(rawSource ? { raw_source: rawSource } : {}),
     ...(rawTraceExemptReason ? { raw_trace_exempt: true, raw_trace_exempt_reason: rawTraceExemptReason } : {}),
     ...(seat ? { seat } : {}) } };

@@ -16,7 +16,7 @@ import { disabledOpsForPublishGates } from './publish-gates.ts';
 import type { InstructionTools } from './instructions.ts';
 
 /** Readiness entries the instructions tail may name, most limiting first. */
-const TAIL_PRIORITY = ['embeddings', 'chat_llm', 'migrations', 'worker', 'local_transcripts'] as const;
+const TAIL_PRIORITY = ['embeddings', 'chat_llm', 'migrations', 'worker', 'facts_drain', 'local_transcripts'] as const;
 
 /** Config plane + probed tier (≤ 250 ms), ordered by TAIL_PRIORITY; [] on any failure. */
 export async function instructionReadiness(

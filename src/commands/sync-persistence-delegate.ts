@@ -17,7 +17,8 @@ import { buildSingleSyncJsonEnvelope } from '../core/sync-embed-backfill.ts';
 import { printManagedSyncDiagnostic } from './sync-diagnostics.ts';
 import { parseDurationSeconds } from '../core/sync-concurrency.ts';
 import { runDrain, drainJsonFields, formatDrainSummary, syncOutcome } from '../core/persistence/sync-drain.ts';
-import { syncResumeCommand } from '../core/sync-reconcile.ts';
+import { resolveStallAbortSeconds, resolveSyncHardDeadline, syncResumeCommand } from '../core/sync-reconcile.ts';
+import { noteForwardProgress } from '../core/forward-progress.ts';
 
 export async function parsePersistenceSyncArgs(args:string[],cwd=process.cwd()) {
   const options:Record<string,unknown>={};
@@ -41,6 +42,69 @@ export async function parsePersistenceSyncArgs(args:string[],cwd=process.cwd()) 
   const timeoutSeconds=softTimeout && softTimeout>0 ? hardTimeout>0 ? Math.min(softTimeout,hardTimeout) : softTimeout : hardTimeout;
   return validateSyncWireParams({options,cwd,timeoutSeconds});
 }
+
+/**
+ * The delegated sync's progress window: the default and env deadlines extend
+ * while the owner keeps committing pages, exactly as a local `gbrain sync`
+ * does; `--timeout` and `--hard-deadline` stay strict wall-clock caps.
+ */
+export function delegatedProgressWindowMs(args:string[],env:Record<string,string|undefined>=process.env,isTty=Boolean(process.stdout.isTTY)):number|undefined {
+  if(args.includes('--timeout')||args.includes('--hard-deadline')||args.includes('--no-hard-deadline'))return undefined;
+  return (resolveSyncHardDeadline(args,{isTty,env})?.progressWindowMs)??resolveStallAbortSeconds(env)*1000;
+}
+
+/**
+ * The client-side stop for a delegated sync. Past `timeoutMs` a progress-aware
+ * deadline extends to one progress window after the last slice that advanced
+ * the cursor, and stops only after a full window without progress.
+ */
+export class DelegatedSyncDeadline {
+  readonly stop=new AbortController();
+  private at:number;
+  private lastProgressAt:number;
+  private lastIndex=-1;
+  private timer:ReturnType<typeof setTimeout>|undefined;
+  private extended=false;
+  constructor(timeoutMs:number,private readonly progressWindowMs:number|undefined,private readonly log:(line:string)=>void=line=>console.error(line)) {
+    this.lastProgressAt=performance.now();
+    this.at=timeoutMs>0?this.lastProgressAt+timeoutMs:Infinity;
+    this.arm();
+  }
+  /**
+   * Seconds the next slice may run (the owner ends a slice that reaches it as
+   * timed out). A progress-aware slice gets at least one progress window, so
+   * the owner's own slice bound ends it and this deadline decides between
+   * slices whether the run continues.
+   */
+  sliceSeconds(fallback:number):number {
+    if(!Number.isFinite(this.at))return fallback;
+    const remainingMs=Math.max(this.at-performance.now(),this.progressWindowMs??0);
+    return Math.max(1,Math.ceil(remainingMs/1000));
+  }
+  /** Call with each slice's committed cursor index; an advance is progress. */
+  noteCursor(index:number|undefined):void {
+    if(index===undefined||index<=this.lastIndex)return;
+    this.lastIndex=index;
+    this.lastProgressAt=performance.now();
+    noteForwardProgress();
+  }
+  dispose():void { if(this.timer)clearTimeout(this.timer); }
+  private arm():void {
+    if(!Number.isFinite(this.at))return;
+    this.timer=setTimeout(()=>this.check(),Math.max(0,this.at-performance.now()));
+    this.timer.unref?.();
+  }
+  private check():void {
+    const now=performance.now();
+    if(this.progressWindowMs&&now-this.lastProgressAt<this.progressWindowMs) {
+      this.at=this.lastProgressAt+this.progressWindowMs;
+      if(!this.extended){this.extended=true;this.log(`[sync] past the delegated deadline and still progressing; extends while the owner keeps committing pages (stops after ${Math.round(this.progressWindowMs/1000)}s without progress).`);}
+      this.arm();
+      return;
+    }
+    this.stop.abort();
+  }
+}
 /** Any resident native owner may proxy; its durable registration, not a process label, authorizes work. */
 export async function maybeDelegateSyncToPersistence(hostConfig:GBrainConfig|null,args:string[]):Promise<boolean> {
   if(args.includes('--no-delegate')||process.env.GBRAIN_SYNC_NO_DELEGATE==='1')return false;
@@ -49,20 +113,21 @@ export async function maybeDelegateSyncToPersistence(hostConfig:GBrainConfig|nul
   if(config?.engine!=='pglite'||!config.database_path||config.database_url||!inspectLockHolder(config.database_path).held)return false;
   try {
     const params=await parsePersistenceSyncArgs(args);
-    const deadline=params.timeoutSeconds>0?performance.now()+params.timeoutSeconds*1000:Infinity;
-    const stop=new AbortController();
-    const timer=Number.isFinite(deadline)?setTimeout(()=>stop.abort(),deadline-performance.now()):undefined;
+    const deadline=new DelegatedSyncDeadline(params.timeoutSeconds*1000,delegatedProgressWindowMs(args));
     console.error('[sync] Delegating to the registered PGLite owner.');
     // #5984: the owner returns one bounded slice per call; the shared drain owns re-entry and the stop rules.
     let result:SyncResult&{source_id?:string};
     try {
-      result=await runDrain({signal:stop.signal,announce:true,pass:async()=>{
-        const delegated=await maybeDelegateLocalAdministration('writer_sync',{...params,timeoutSeconds:Number.isFinite(deadline)?Math.max(1,Math.ceil((deadline-performance.now())/1000)):params.timeoutSeconds} as unknown as Record<string,unknown>,config,
-          {timeoutMs:Math.min(86_400_000,Math.max(30_000,deadline-performance.now()+30_000))});
+      result=await runDrain({signal:deadline.stop.signal,announce:true,pass:async()=>{
+        const sliceSeconds=deadline.sliceSeconds(params.timeoutSeconds);
+        const delegated=await maybeDelegateLocalAdministration('writer_sync',{...params,timeoutSeconds:sliceSeconds} as unknown as Record<string,unknown>,config,
+          {timeoutMs:sliceSeconds>0?Math.min(86_400_000,Math.max(30_000,sliceSeconds*1000+30_000)):86_400_000});
         if(!delegated.handled)throw new OperationError('owner_unavailable','The observed PGLite owner stopped before sync admission.','Retry the same sync options to resume its durable cursor.');
-        return delegated.result as SyncResult;
+        const slice=delegated.result as SyncResult;
+        deadline.noteCursor(slice.managedCursor?.index);
+        return slice;
       }});
-    } finally { if(timer)clearTimeout(timer); }
+    } finally { deadline.dispose(); }
     const sourceId=result.source_id??params.options.sourceId??'default';
     const resume=syncResumeCommand(args,getCliOptions().brain);
     if(args.includes('--json')) {

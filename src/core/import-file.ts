@@ -629,7 +629,7 @@ export async function importFromContent(
 
   const originUri = fileOriginUri(existing?.source_uri, opts.sourceRoot, opts.sourcePath);
   const persistUnchanged = async (refreshBody = false) => {
-    await engine.transaction(async tx => {
+    await maintenanceTransaction(engine, async tx => {
       await assertImportBase(tx, slug, sourceId ?? 'default', existing);
       if (refreshBody) await tx.refreshPageBody(slug, sourceId ?? 'default', parsed.compiled_truth, parsed.timeline || '', hash);
       await refreshSourcePath(tx, slug, sourceId, opts.sourcePath, existing, originUri);
@@ -686,7 +686,7 @@ export async function importFromContent(
     body: { title: parsed.title, compiled_truth: parsed.compiled_truth, timeline: parsed.timeline || '' },
   });
   if (identity.kind === 'move' && !existing && !opts.prepare
-    && await engine.updateSlug(identity.dupSlug, slug, { sourceId: sourceId ?? 'default' }) > 0) {
+    && await maintenanceTransaction(engine, tx => tx.updateSlug(identity.dupSlug, slug, { sourceId: sourceId ?? 'default' })) > 0) {
     process.stderr.write(
       `[import] ${opts.sourcePath} carries frontmatter.id=${fmIdStr} from moved file ${identity.dupSourcePath}; ` +
       `renamed ${identity.dupSlug} -> ${slug} in source ${sourceId ?? 'default'}.\n`

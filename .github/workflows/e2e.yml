@@ -207,7 +207,7 @@ jobs:
     # mechanical.test.ts went from ~2s to past their 15-30s kill timeouts
     # (measured September 29, 2026), while every other E2E lane ran as fast.
     runs-on: ubicloud-standard-16-ubuntu-2404
-    timeout-minutes: 45
+    timeout-minutes: 70
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -314,6 +314,21 @@ jobs:
           GBRAIN_CI_REQUIRE_PGBOUNCER: '1'
           GBRAIN_TEST_DB: '1'
           GBRAIN_TEST_ALLOW_DATABASE_URL: '1'
+      - name: Run engine graduation suites (direct Postgres and PgBouncer)
+        # PGLite -> Postgres graduation (docs/guides/move-to-postgres.md): the
+        # agent flow, stale clients and respawned serves, SIGKILL at every
+        # custody boundary, faults, and the legacy copier. Every PR, with the
+        # transaction-mode pooler as a second target route (pooledUrl).
+        # Excluded from the selected matrix (scripts/e2e-matrix.ts) so they
+        # run once. Named files only, no glob.
+        shell: bash
+        run: bash scripts/run-e2e.sh test/e2e/graduation-cli.test.ts test/e2e/graduation-clients.test.ts test/e2e/graduation-crash.test.ts test/e2e/graduation-faults.test.ts test/e2e/graduation-legacy-copy.test.ts
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gbrain_test
+          GBRAIN_PGBOUNCER_URL: postgresql://postgres:postgres@localhost:55433/gbrain_test?prepare=false
+          GBRAIN_TEST_ALLOW_DATABASE_URL: '1'
+          GBRAIN_TEST_DB: '1'
+          E2E_FILE_TIMEOUT_SECS: '900'
       - name: Run multi-agent serve suite
         # cathedral-6 (T7): multi-agent continuity + isolation over a real
         # `gbrain serve --http`. Own invocation line (engine-parity

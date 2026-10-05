@@ -1518,6 +1518,7 @@ export interface RelationalFanoutRow {
 
 /** Options for BrainEngine.relationalFanout. */
 export interface RelationalFanoutOpts extends PageReadPolicy {
+  temporal?: import('./link-validity.ts').EdgeTemporalOpts; // per-hop temporal edge policy; absent = every edge
   /** Resolved seed identities; separate from the read grant for edge origins. */
   seedRefs?: Array<{ source_id: string; slug: string }>;
   /** Edge types to traverse; null/empty = type-agnostic. */

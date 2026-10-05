@@ -433,28 +433,50 @@ async function runHomeDirInWorktree(ctx: DoctorContext): Promise<Check[]> {
     const durableEngine = (
       JSON.parse(readFileSync(join(gbrainPath(), 'config.json'), 'utf8')) as { engine?: unknown }
     ).engine;
-    const { assessPgliteLeftovers } = await import('../../../core/pglite-leftovers-check.ts');
+    const { assessPgliteLeftovers, SIZE_WALK_MAX_ENTRIES } = await import('../../../core/pglite-leftovers-check.ts');
+    const { readGraduationManifestSummary, TERMINAL_MANIFEST_STATES } = await import('../../../core/persistence/graduation-serve-guard.ts');
+    const manifest = readGraduationManifestSummary();
     const leftovers = assessPgliteLeftovers(
       typeof durableEngine === 'string' ? durableEngine : undefined,
       gbrainPath(),
+      SIZE_WALK_MAX_ENTRIES,
+      manifest ? { inFlight: !TERMINAL_MANIFEST_STATES.has(manifest.state), retainedPath: `${manifest.dataDir}.graduated-${manifest.runId}` } : null,
     );
     if (leftovers.status !== 'skip') {
+      const copy = leftovers.retained?.[0];
       checks.push({
         name: 'pglite_leftovers',
         status: leftovers.status,
         message: leftovers.message,
+        ...(copy ? {
+          details: { retained: leftovers.retained },
+          fix: {
+            argv: ['rm', '-rf', copy.path], consent: ['destructive'], actor: 'agent', requires_exclusive: false,
+            verify: { argv: ['gbrain', 'doctor', '--only', 'pglite_leftovers', '--json'] }, docs: 'docs/guides/move-to-postgres.md#after-the-move',
+            why: `${copy.path} is the PGLite brain engine graduation moved to Postgres; it still holds private memory and token hashes. Deleting it frees the disk and ends the option to roll back.`,
+            user_message: `After moving your brain to Postgres, gbrain kept the old local copy at ${copy.path}. It still contains your private memory and access-token hashes. Should I delete it? You could then no longer roll back to it.`,
+          },
+        } : {}),
       });
     }
   } catch {
     // Best-effort filesystem-hygiene check; never block doctor (a missing/
     // unparseable config.json lands here and skips, same fail-open posture).
   }
+  // Engine graduation state (filesystem only; src/commands/doctor/checks/engine-graduation.ts).
+  try {
+    const { graduationStateCheck } = await import('./engine-graduation.ts');
+    const graduation = graduationStateCheck();
+    if (graduation) checks.push(graduation);
+  } catch {
+    // Best-effort: a malformed manifest or marker never blocks doctor.
+  }
   return checks;
 }
 
 export const homeDirInWorktreeEntry: DoctorEntry = {
   name: 'home_dir_in_worktree',
-  emits: ['home_dir_in_worktree', 'npm_squat', 'pglite_leftovers'],
+  emits: ['home_dir_in_worktree', 'npm_squat', 'pglite_leftovers', 'graduation_interrupted'],
   run: runHomeDirInWorktree,
 };
 

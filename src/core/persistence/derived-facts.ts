@@ -4,7 +4,7 @@ import { opError } from '../ops/contract.ts';
 import { readFix, trustedCliRequired } from '../ops/op-fix.ts';
 import { currentSubmissionAuthority } from '../minions/submission-authority.ts';
 import { withCoordinatedWrite } from './context.ts';
-import { maintenanceAttribution } from './attribution.ts';
+import { maintenanceAttribution, maintenanceTransaction } from './attribution.ts';
 import { currentVerifiedLocalWriter } from './identity.ts';
 import { managedPersistenceEnabled } from './ownership.ts';
 import { assertPersistenceAccepting } from './service.ts';
@@ -55,13 +55,13 @@ export async function withDerivedFactsWrite<T>(engine: BrainEngine, sourceId: st
 }
 
 /**
- * Legacy writers keep their own engine call on unmanaged brains. On a managed
- * brain the page must still be live under its lock, so rows are never
+ * Legacy writers run in one maintenance transaction on unmanaged brains. On a
+ * managed brain the page must still be live under its lock, so rows are never
  * published for a page deleted or purged while the model ran.
  */
 export async function writeDerivedFacts<T>(engine: BrainEngine, sourceId: string, slug: string,
   fn: (db: BrainEngine) => Promise<T>): Promise<T> {
-  if (!await managedPersistenceEnabled(engine)) return fn(engine);
+  if (!await managedPersistenceEnabled(engine)) return maintenanceTransaction(engine, fn);
   return withDerivedFactsWrite(engine, sourceId, [slug], async tx => {
     const [page] = await tx.executeRaw('SELECT id FROM pages WHERE source_id=$1 AND slug=$2 AND deleted_at IS NULL', [sourceId, slug]);
     if (!page) {

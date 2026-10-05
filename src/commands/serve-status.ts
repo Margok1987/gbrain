@@ -30,7 +30,7 @@ export function statusModeEligible(args: readonly string[], hostBrain: boolean):
 export function preConnectStatusReason(): StatusReason | null {
   if (!loadConfig()) return 'no_brain';
   const probed = probeStatus();
-  return probed && (probed.reason === 'missing_brain' || probed.reason === 'repair_failed') ? probed.reason : null;
+  return probed && (probed.reason === 'missing_brain' || probed.reason === 'repair_failed' || probed.reason === 'engine_graduated') ? probed.reason : null;
 }
 
 /** Map a connect failure to a status reason; null when status mode does not apply. */
@@ -47,10 +47,16 @@ export async function runStatusModeServe(
 ): Promise<void> {
   const state = initialStatusState(reason);
   const { createDegradedEngine } = await import('../core/degraded-engine.ts');
+  // Engine graduation (§6.4): re-resolve config on each reconnect and exit for relaunch on an engine change.
+  const { engineIdentity, exitOnEngineIdentityChange } = await import('../core/persistence/graduation-serve-guard.ts');
+  const startIdentity = engineIdentity();
   const kind = loadConfig()?.engine === 'postgres' ? 'postgres' : 'pglite';
   const engine = markStatusModeEngine(createDegradedEngine({
     initialError: initialError ?? new Error(statusHeadline(state)),
-    reconnect: () => gatedReconnect(state, connect),
+    reconnect: () => {
+      exitOnEngineIdentityChange(startIdentity, { startedGraduated: state.reason === 'engine_graduated' });
+      return gatedReconnect(state, connect);
+    },
     // A PGLite open + pending migrations can take longer than the degraded default.
     callerWaitMs: 20_000,
     kind,

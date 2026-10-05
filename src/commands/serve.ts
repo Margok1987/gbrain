@@ -7,7 +7,9 @@ import { startMcpServer, stdioRpcsInFlightCount, resolveMcpStdioSourceScope } fr
 import { VERB_NAMES } from '../core/verbs.ts';
 import { RESIDENT_POOL_FLOOR } from '../core/pg-access-classify.ts';
 import { redirectStdoutLoggingToStderr } from '../core/console-prefix.ts';
+import { startFactsDrainScheduler, type FactsDrainScheduler, type FactsDrainSchedulerOpts } from '../core/facts/drain-scheduler.ts';
 import { onForwardProgress } from '../core/forward-progress.ts';
+import { graduationHandoffRequested, writeServeGraduationEnvelope } from '../core/persistence/graduation-serve-guard.ts';
 import {
   installLoopStallWatchdog,
   resolveServeStallWatchdogMs,
@@ -66,6 +68,8 @@ const IDLE_SWEEP_INTERVAL_MS = 10 * 60_000;
 // Small per-run budget for idle sweeps: the serve must snap back to
 // serving tool calls the moment the client wakes up.
 const IDLE_SWEEP_BUDGET_MS = 3_000;
+/** How often a PGLite stdio serve checks for a graduation run's intent marker (a stat; plan: at most every 2 s). */
+const GRADUATION_HANDOFF_POLL_MS = 2_000;
 
 export interface ServeOptions {
   // Test seam — defaults to the live process. The lifecycle plumbing reads
@@ -78,6 +82,8 @@ export interface ServeOptions {
   signals?: Pick<NodeJS.Process, 'on'>;
   exit?: (code?: number) => void;
   log?: (msg: string) => void;
+  /** Receives the stdio lifecycle's drain-then-shutdown (the graduation hand-off uses it). */
+  onShutdownReady?: (shutdown: (reason: string) => void) => void;
   // Test seam: replace startMcpServer to avoid booting the real MCP SDK
   // (which unconditionally attaches a 'data' listener to real
   // process.stdin and would pollute the test runner's stdin handle).
@@ -146,6 +152,9 @@ export interface ServeOptions {
   // (pre-#4409 behavior). Defaults to GBRAIN_SERVE_EOF_DRAIN_MS (30s when
   // unset; lenient parse).
   eofDrainMs?: number;
+  // Test seam for the automatic facts drain (src/core/facts/drain-scheduler.ts):
+  // false disables it; an object overrides its timer and run body.
+  factsDrain?: false | Pick<FactsDrainSchedulerOpts, 'run' | 'tickMs' | 'maxGapMs' | 'now'>;
 }
 
 /**
@@ -346,7 +355,7 @@ export async function runServe(
   // the MCP client log "Failed to parse JSONRPC message" for every line.
   redirectStdoutLoggingToStderr();
 
-  const activateStdioIdleActivityTracking = installStdioLifecycle(engine, args, opts);
+  const activateStdioIdleActivityTracking = installStdioLifecycle(engine, args, installGraduationHandoff(engine, opts));
 
   const start = opts.startMcpServer ?? startMcpServer;
 
@@ -469,6 +478,37 @@ function resolveBootTimeoutMs(): number {
   return n * 1000;
 }
 
+/**
+ * Engine graduation hand-off (§13): a PGLite stdio serve polls (a stat every
+ * 2 s) for another live run's intent marker. On one it writes the
+ * graduation_in_progress envelope and takes the lifecycle's drain-then-shutdown
+ * (in-flight requests finish, bounded; the engine closes and releases the
+ * brain); the process exits 75 so a supervisor relaunch (which exits the same
+ * way while the marker stands) is distinguishable from a clean stop.
+ */
+function installGraduationHandoff(engine: BrainEngine, opts: ServeOptions): ServeOptions {
+  if (engine.kind !== 'pglite') return opts;
+  const exit = opts.exit ?? ((code?: number) => { process.exit(code); });
+  const log = opts.log ?? ((msg: string) => console.error(msg));
+  let handoffExit: number | null = null;
+  let shutdown: ((reason: string) => void) | null = null;
+  const timer = setInterval(() => {
+    if (handoffExit !== null || !shutdown || isEngineDegradedForServe(engine)) return;
+    const request = graduationHandoffRequested();
+    if (!request) return;
+    clearInterval(timer);
+    log('GBrain MCP server: an engine graduation run asked for this brain; handing it over.');
+    handoffExit = writeServeGraduationEnvelope(request, (s) => log(s.trimEnd()));
+    shutdown('graduation-handoff');
+  }, GRADUATION_HANDOFF_POLL_MS);
+  timer.unref?.();
+  return {
+    ...opts,
+    exit: (code?: number) => exit(handoffExit ?? code),
+    onShutdownReady: (fn) => { shutdown = fn; opts.onShutdownReady?.(fn); },
+  };
+}
+
 interface StdioLifecycleDeps {
   stdin: NodeJS.ReadableStream & { isTTY?: boolean };
   signals: Pick<NodeJS.Process, 'on'>;
@@ -478,6 +518,34 @@ interface StdioLifecycleDeps {
   setInterval: (fn: () => void, ms: number) => unknown;
   clearInterval: (handle: unknown) => void;
   probeWatchdog: () => boolean;
+}
+
+/**
+ * Automatic facts drain (Foundations 2, Lane D): PGLite has no job worker, so
+ * the resident serve runs queued facts-absorb jobs on its own unref'd timer,
+ * bounded per run and per day. Activity is read from stdin 'data' chunks
+ * through a listener attached on the first tick (same reason as the idle
+ * sweep: never before the SDK transport attaches). Opt out with
+ * `gbrain config set facts.extraction_enabled false`.
+ */
+function installFactsDrain(engine: BrainEngine, opts: ServeOptions, deps: StdioLifecycleDeps, shuttingDown: () => boolean): FactsDrainScheduler | null {
+  if (opts.factsDrain === false || engine.kind !== 'pglite') return null;
+  let lastStdinDataAt = 0;
+  let listenerAttached = false;
+  return startFactsDrainScheduler(engine, {
+    owner: 'serve',
+    ...(opts.factsDrain ?? {}),
+    setInterval: deps.setInterval,
+    clearInterval: deps.clearInterval,
+    log: (line) => deps.log(line),
+    lastActivityAt: () => {
+      if (listenerAttached) return lastStdinDataAt;
+      listenerAttached = true;
+      deps.stdin.on('data', () => { lastStdinDataAt = Date.now(); });
+      return Number.MAX_SAFE_INTEGER;
+    },
+    canRun: async () => !shuttingDown() && !isEngineDegradedForServe(engine) && !(await loadSyncRunner()).isDelegatedSyncRunning(),
+  });
 }
 
 function installStdioLifecycle(
@@ -500,6 +568,7 @@ function installStdioLifecycle(
   let parentWatchdog: unknown = null;
   let idleSweepTimer: unknown = null;
   let activateIdleActivityTracking = (): void => {};
+  let factsDrain: FactsDrainScheduler | null = null;
   const beginShutdown = (reason: string): void => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -548,6 +617,9 @@ function installStdioLifecycle(
     armDeadline(CLEANUP_DEADLINE_MS);
 
     Promise.resolve()
+      // The facts drain aborts its in-flight job (left queued, no attempt
+      // counted) before the engine goes away.
+      .then(() => factsDrain?.stop())
       // Idempotent shared promise — mcp/server.ts's shutdown races here on
       // the same signals; whichever runs first does the abort+settle, the
       // other awaits it. Must precede disconnect (settle writes need the
@@ -635,6 +707,7 @@ function installStdioLifecycle(
       beginShutdown(reason);
     })();
   };
+  opts.onShutdownReady?.(drainThenShutdown);
   if (!deps.stdin.isTTY && !mcpStdioMode) {
     deps.stdin.once('end', () => drainThenShutdown('stdin-end'));
     deps.stdin.once('close', () => drainThenShutdown('stdin-close'));
@@ -755,6 +828,9 @@ function installStdioLifecycle(
     }, IDLE_SWEEP_INTERVAL_MS);
     (idleSweepTimer as { unref?: () => void } | null)?.unref?.();
   }
+
+  // Automatic facts drain (Lane D): see installFactsDrain.
+  factsDrain = installFactsDrain(engine, opts, deps, () => shuttingDown);
 
   // Optional idle-timeout safety net. Default OFF; opt-in via
   // `--stdio-idle-timeout <seconds>`. The flag is for the rare case where

@@ -62,6 +62,7 @@ import { maintenancePreflight, submitDatabaseMaintenanceIntent } from '../persis
 import { compareWriterVersions, recentWriterVersions, writerVersionLabel } from '../persistence/writer-versions.ts';
 import { clearApprovedSet, loadApprovedSet, previewChangedError, previewHash, saveApprovedSet } from '../persistence/preview-approval.ts';
 import { afterCursor, type RepairHandler, type RepairItem, type RepairItemOutcome, type RepairListing, type RepairPlan, type RepairScope } from './core.ts';
+import { maintenanceTransaction } from '../persistence/attribution.ts';
 
 export const EXTRACTOR_FACTS_INTENT = 'managed_maintenance_restore_extractor_facts';
 export const EXTRACTOR_FACTS_SOURCE_PREFIX = 'cli:extract-conversation-facts';
@@ -320,7 +321,7 @@ export const extractorFactsRepair: RepairHandler = {
     const { page, hash, last } = entry as PageItem;
     const result = await managedPersistenceEnabled(ctx.engine)
       ? await restoreManaged(ctx.engine, ctx.config, page, hash)
-      : await ctx.engine.transaction(async tx => {
+      : await maintenanceTransaction(ctx.engine, async tx => {
         await tx.lockPageKeys([{ sourceId: page.source_id, slug: page.slug }]);
         return restorePageFacts(tx, page, false);
       });

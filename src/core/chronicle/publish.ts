@@ -40,6 +40,7 @@ import { maintenancePreflight, submitDatabaseMaintenanceIntent, type Maintenance
 import { preparePageMutation } from '../persistence/page-prepare.ts';
 import { effectiveVisibility, type Visibility } from '../search/private-visibility.ts';
 import type { ChronicleEventProposal } from './extract-events.ts';
+import { resolveChronicleEventSlugs } from './event-identity.ts';
 
 export const CHRONICLE_RETIRED_BY = 'life-chronicle';
 export const CHRONICLE_EVENT_INTENT = 'managed_maintenance_chronicle_event';
@@ -94,7 +95,7 @@ export interface BuiltChronicleEvent {
   summary: string;
 }
 
-/** Event identity is content-addressed on (who, what, depth): a re-run upserts the same page. */
+/** Event identity is content-addressed on (who, what, depth): a re-run upserts the same page. Same-day collisions are resolved at publication (event-identity.ts). */
 export function buildChronicleEvent(ev: ChronicleEventProposal, ctx: {
   depthSlug: string; attendees: string[]; effectiveDate: string | null; tz: string; visibility: Visibility; depthHash: string;
   isoDay: (when: string, tz: string) => string; normalizeKind: (kind: string) => string;
@@ -173,8 +174,9 @@ export async function publishChronicleGeneration(engine: BrainEngine, opts: {
   const abort = () => { if (opts.signal?.aborted) { const e = new Error('aborted'); e.name = 'AbortError'; throw e; } };
   const broken = await depthPinBroken(engine, sourceId, pin, opts.decisionRequestId);
   if (broken) return { ...result, superseded: broken };
+  const events = await resolveChronicleEventSlugs(engine, sourceId, opts.events);
 
-  for (const ev of opts.events) {
+  for (const ev of events) {
     abort();
     const existing = await engine.readPageSnapshot(ev.slug, { sourceId, includeDeleted: true });
     const verdict = judgeTarget(existing, owned);
@@ -210,7 +212,7 @@ export async function publishChronicleGeneration(engine: BrainEngine, opts: {
     }
   }
 
-  const keep = new Set(opts.events.map((e) => e.slug));
+  const keep = new Set(events.map((e) => e.slug));
   const stale = await engine.executeRaw<{ slug: string; revision: string; content_hash: string }>(
     `SELECT slug, knowledge_revision::text AS revision, content_hash FROM pages
       WHERE source_id=$1 AND type='event' AND deleted_at IS NULL AND frontmatter->'event'->>'depth'=$2

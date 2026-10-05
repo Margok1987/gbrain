@@ -3,7 +3,7 @@ import { assertLegacyEngineMigration, assertUnmanagedCanonicalWriter } from '../
  * Engine migration: transfer brain data between PGLite and Postgres.
  *
  * Usage:
- *   gbrain migrate --to supabase [--url <connection_string>]
+ *   gbrain migrate --to supabase [--url <connection_string>]   (PGLite -> Postgres: graduation, src/commands/migrate-graduation.ts)
  *   gbrain migrate --to pglite [--path <db_path>]
  *   gbrain migrate --to <engine> --force  (overwrite non-empty target)
  */
@@ -38,14 +38,19 @@ interface MigrateOpts {
 function parseArgs(args: string[]): MigrateOpts {
   const toIdx = args.indexOf('--to');
   if (toIdx === -1 || !args[toIdx + 1]) {
-    throw opError('invalid_params', 'gbrain migrate needs --to <supabase|pglite>.',
-      'Usage: gbrain migrate --to <supabase|pglite> [--url <url>] [--path <path>] [--force]. Example: gbrain migrate --to pglite --path ~/.gbrain/brain.pglite');
+    throw opError('invalid_params', 'gbrain migrate needs --to <postgres|supabase|pglite>.',
+      'Usage: gbrain migrate --to <postgres|supabase|pglite> [--url <url>] [--path <path>] [--force]. Example: gbrain migrate --to pglite --path ~/.gbrain/brain.pglite');
   }
 
   const targetRaw = args[toIdx + 1];
   const targetEngine = targetRaw === 'supabase' ? 'postgres' : targetRaw as 'postgres' | 'pglite';
   if (targetEngine !== 'postgres' && targetEngine !== 'pglite') {
-    throw new Error(`Unknown target engine: "${targetRaw}". Use: supabase or pglite`);
+    throw opError('invalid_params', `Unknown target engine: "${targetRaw}". Use postgres (alias supabase) or pglite.`,
+      'Usage: gbrain migrate --to <postgres|supabase|pglite> [--url <url>] [--path <path>] [--force].',
+      { why: `gbrain migrate moves a brain between its two engines, postgres and pglite; "${targetRaw}" is neither.`,
+        fix: { argv: ['gbrain', 'migrate', '--to', '<engine>'], inputs: [{ name: 'engine', how: 'postgres (alias supabase) or pglite, whichever engine the user wants to move to.' }],
+          consent: [], actor: 'agent', requires_exclusive: true, verify: { argv: ['gbrain', 'engine', 'status', '--json'] },
+          why: 'Names an engine gbrain supports.' } });
   }
 
   const urlIdx = args.indexOf('--url');
@@ -422,6 +427,22 @@ export async function copyPageLinksToTarget(
       { fromSourceId: page.source_id, toSourceId },
     );
     copied++;
+  }
+  // Temporal typed edges: manual dated statements (add_link valid_from /
+  // valid_until) exist only in the database, so they travel with the page.
+  // Statements derived from page content re-derive on the target's next
+  // extract pass.
+  const manual = await source.executeRaw<{ to_slug: string; to_source_id: string; link_type: string; kind: string; occurred_on: string }>(
+    `SELECT t.slug AS to_slug, t.source_id AS to_source_id, lt.link_type, lt.kind, lt.occurred_on::text AS occurred_on
+       FROM link_transitions lt JOIN pages f ON f.id = lt.from_page_id JOIN pages t ON t.id = lt.to_page_id
+      WHERE f.slug = $1 AND f.source_id = $2 AND lt.producer = 'manual'`, [page.slug, page.source_id]).catch(() => []);
+  if (manual.length) {
+    const { writeManualTransitions } = await import('../core/link-temporal-apply.ts');
+    for (const m of manual) {
+      if (failedKeys.has(makeManifestKey(m.to_source_id, m.to_slug))) continue;
+      await writeManualTransitions(target, { from: page.slug, to: m.to_slug, linkType: m.link_type, sourceId: page.source_id },
+        m.kind === 'start' ? { validFrom: m.occurred_on.slice(0, 10) } : { validUntil: m.occurred_on.slice(0, 10) });
+    }
   }
   return copied;
 }
@@ -826,10 +847,34 @@ export async function quiesceAutopilot(engine?: BrainEngine): Promise<(() => voi
   return resume;
 }
 
+/**
+ * PGLite -> Postgres reaches this legacy copier only when graduation is not
+ * routed (src/commands/migrate-graduation.ts routesToGraduation): opted out
+ * with migrate.graduation=false, or Windows. On Windows a brain with write
+ * history gets graduation's platform refusal; a history-free brain copies here.
+ */
+export async function assertWindowsGraduationPlatform(sourceEngine: BrainEngine, opts: Pick<MigrateOpts, 'targetEngine'>, platform: NodeJS.Platform = process.platform): Promise<void> {
+  if (platform !== 'win32' || sourceEngine.kind !== 'pglite' || opts.targetEngine !== 'postgres') return;
+  const { graduationOptedOut } = await import('./migrate-graduation.ts');
+  if (graduationOptedOut(loadConfig())) return;
+  const tables = ['persistence_requests', 'fact_withdrawals', 'persistence_worktrees'];
+  const present = await sourceEngine.executeRaw<{ name: string }>(
+    `SELECT table_name AS name FROM information_schema.tables WHERE table_schema = 'public' AND table_name = ANY($1::text[])`, [tables]);
+  for (const { name } of present) {
+    const [row] = await sourceEngine.executeRaw<{ present: boolean }>(`SELECT EXISTS(SELECT 1 FROM ${name}) AS present`);
+    if (row?.present) {
+      const { unsupportedPlatformError } = await import('../core/persistence/graduation-errors.ts');
+      throw unsupportedPlatformError({ platform: 'Windows' });
+    }
+  }
+}
+
 export async function runMigrateEngine(sourceEngine: BrainEngine, args: string[]): Promise<void> {
   const opts = parseArgs(args);
-  await assertUnmanagedCanonicalWriter(sourceEngine, 'engine migration');
-  await assertLegacyEngineMigration(sourceEngine);
+  await assertWindowsGraduationPlatform(sourceEngine, opts);
+  const migration = { from: sourceEngine.kind, to: opts.targetEngine };
+  await assertUnmanagedCanonicalWriter(sourceEngine, 'engine migration', { migration: { side: 'source', ...migration } });
+  await assertLegacyEngineMigration(sourceEngine, { side: 'source', ...migration });
   const config = loadConfig();
   if (!config) {
     console.error('No brain configured. Run: gbrain init');
@@ -880,8 +925,8 @@ export async function runMigrateEngine(sourceEngine: BrainEngine, args: string[]
   await targetEngine.connect(targetConfig);
   await targetEngine.initSchema();
   try {
-    await assertUnmanagedCanonicalWriter(targetEngine, 'engine migration');
-    await assertLegacyEngineMigration(targetEngine);
+    await assertUnmanagedCanonicalWriter(targetEngine, 'engine migration', { migration: { side: 'target', ...migration } });
+    await assertLegacyEngineMigration(targetEngine, { side: 'target', ...migration });
   } catch (error) {
     try { await targetEngine.disconnect(); } finally { resumeAutopilot(); }
     throw error;

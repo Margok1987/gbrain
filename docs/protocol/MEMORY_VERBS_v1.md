@@ -325,7 +325,7 @@ pending-decision loops — the ADDITIVE-FOREVER optional fields disambiguate:
 All five are absent on threads not backed by a loop row and on servers that
 do not implement them; a server that omits them still certifies. Same propagation to the
 per-entity cards and top-level `open_threads` of `context_pack`.
-- `edges`: top ~10 typed edges, mentions excluded, out-edges first.
+- `edges`: top ~10 typed edges, mentions excluded, out-edges first, live relationships first. Additive fields: `status` (`live`, `ended`, `ended_unknown_date`, `event`, …), `since` / `until` (latest stint). `relationship_note` (additive) summarizes current and ended relationships and flags a summary that still names an ended one ([temporal edges](../guides/temporal-edges.md)).
 - The p99 < 100ms promise is op-layer latency (transport excluded), CI-gated
   on a 20K-page corpus. 200K validation recipe below.
 

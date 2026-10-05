@@ -45,7 +45,7 @@ import { resolveWritebackConfigFromFile } from './facts/writeback-config.ts';
 export type ReadinessState = 'ok' | 'disabled_by_choice' | 'not_applicable' | 'missing' | 'degraded' | 'unknown';
 export type CapabilityId =
   | 'embeddings' | 'chat_llm' | 'worker' | 'writeback' | 'backup' | 'tool_surface'
-  | 'sync' | 'migrations' | 'harness_wiring' | 'local_transcripts';
+  | 'sync' | 'migrations' | 'harness_wiring' | 'local_transcripts' | 'facts_drain';
 
 export interface ReadinessEntry {
   capability: CapabilityId;
@@ -91,6 +91,8 @@ export const SYNC_REASONS = [
 export const MIGRATIONS_REASONS = ['current', 'pending', 'engine_unreachable', 'probe_failed', 'probe_timeout'] as const;
 /** Raw session transcripts on the brain host: present (read through the CLI) or none. */
 export const LOCAL_TRANSCRIPTS_REASONS = ['transcripts_cli_only', 'no_transcripts', 'engine_unreachable', 'probe_failed', 'probe_timeout'] as const;
+/** Automatic facts drain on PGLite (src/core/facts/drain.ts). */
+export const FACTS_DRAIN_REASONS = ['not_applicable', 'disabled', 'idle', 'ok', 'deferred', 'no_owner', 'engine_unreachable', 'probe_failed', 'probe_timeout'] as const;
 export const HARNESS_WIRING_REASONS = [
   'wired_running', 'registration_unverified', 'http_serve_running', 'multiple_sessions', 'multiple_harnesses',
   'no_harness_detected', 'binary_unresolved', 'remote_transport',
@@ -545,7 +547,10 @@ async function bounded(probe: Prober, engine: BrainEngine): Promise<ReadinessEnt
 }
 
 async function countWaitingJobs(engine: BrainEngine): Promise<number> {
-  const [row] = await engine.executeRaw<{ n: number }>(`SELECT count(*)::int AS n FROM minion_jobs WHERE status = 'waiting'`);
+  // PGLite facts-absorb jobs belong to the automatic facts drain (its own readiness entry), not a worker.
+  const [row] = await engine.executeRaw<{ n: number }>(engine.kind === 'pglite'
+    ? `SELECT count(*)::int AS n FROM minion_jobs WHERE status = 'waiting' AND name <> 'facts-absorb'`
+    : `SELECT count(*)::int AS n FROM minion_jobs WHERE status = 'waiting'`);
   return Number(row?.n ?? 0);
 }
 
@@ -646,7 +651,18 @@ const transcriptsProbe: Prober = {
   },
 };
 
-const PROBERS: readonly Prober[] = [workerProbe, backupProbe, migrationsProbe, syncProbe, transcriptsProbe];
+const factsDrainProbe: Prober = {
+  capability: 'facts_drain',
+  async run(engine) {
+    const { readFactsDrainStatus } = await import('./facts/drain.ts');
+    const s = await readFactsDrainStatus(engine);
+    const state: ReadinessState = s.health === 'not_applicable' ? 'not_applicable' : s.health === 'disabled' ? 'disabled_by_choice'
+      : s.health === 'deferred' || s.health === 'no_owner' ? 'degraded' : 'ok';
+    return { capability: 'facts_drain', tier: 'probed', http_visible: false, state, reason: s.health, why: s.message, ...(s.fix ? { fix: s.fix } : {}) };
+  },
+};
+
+const PROBERS: readonly Prober[] = [workerProbe, backupProbe, migrationsProbe, syncProbe, transcriptsProbe, factsDrainProbe];
 
 async function runProbes(engine: BrainEngine): Promise<ReadinessEntry[]> {
   if (isEngineDegraded(engine)) return PROBERS.map(p => failedEntry(p.capability, 'engine_unreachable'));

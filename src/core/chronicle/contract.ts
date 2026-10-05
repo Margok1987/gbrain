@@ -23,8 +23,13 @@ import { CHRONICLE_RUN_NOW_ARGV, type ChronicleReasonCode } from './reasons.ts';
 import type { Action } from '../agent-output.ts';
 import type { ChronicleDropCounts } from './extract-events.ts';
 
-/** Bump to re-extract every page once (the ledger key includes it). */
-export const CHRONICLE_EXTRACTOR_VERSION = 1;
+/**
+ * The ledger key includes it, so a bump makes already-extracted content new again: the phase's
+ * discovery re-decides pages changed since activation (unmanaged brains judge the recent ones under
+ * the daily limit; managed brains record `no_write_decision`) and backfill re-queues the rest on request.
+ * 2: same-day event slug disambiguation (event-identity.ts) and ended-invite projection (invite-projection.ts).
+ */
+export const CHRONICLE_EXTRACTOR_VERSION = 2;
 
 /** Ledger table and its columns (migration `chronicle_page_state`). */
 export const CHRONICLE_LEDGER_TABLE = 'chronicle_page_state';

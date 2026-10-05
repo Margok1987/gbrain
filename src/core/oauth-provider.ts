@@ -37,10 +37,12 @@ import {
   dcrScopeViolation,
 } from './scope.ts';
 import type { AuthInfo as CoreAuthInfo } from './operations.ts';
-import { authSourcesFromGrant, grantFromRow, grantFromTokenRow, normalizeGrantBrain, intersectGrantedScopes, type GrantPatch } from './grants/model.ts';
+import { authSourcesFromGrant, grantFromRow, normalizeGrantBrain, intersectGrantedScopes, type GrantPatch } from './grants/model.ts';
 import { assertValidSlugPrefixes, pgArray } from './grants/encoding.ts';
 import { rescopeOAuthClient, type RescopeClientOptions, type RescopeClientResult } from './grants/rescope.ts';
 import { grantValidationContext, validateClientGrant, insertClientGrant, assertGrantPatch } from './grants/service.ts';
+import { resolveTokenGrant } from './grants/legacy-token.ts';
+import { NO_SOURCES } from './source-id.ts';
 
 /**
  * A slug-prefix write binding is only meaningful if every entry actually
@@ -850,6 +852,11 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
       // fail-open by design: the server ceiling still bounds every request.
       const rowSurface = typeof row.surface === 'string' ? row.surface : undefined;
       const rowSurfaceSetBy = typeof row.surface_set_by === 'string' ? row.surface_set_by : undefined;
+      // The explicit no-source grant: every read and write refuses
+      // (NO_SOURCES, the same sentinel a `--sources none` token carries).
+      const sourcesNone = currentGrant.source_grant === 'none';
+      const clientHolders = Array.isArray(currentGrant.takes_holders)
+        ? (currentGrant.takes_holders as unknown[]).filter((h): h is string => typeof h === 'string') : undefined;
       return {
         token,
         clientId: row.client_id as string,
@@ -874,11 +881,14 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
         // v0.34.1 (#861, D2): source-isolation scope from oauth_clients.
         // Undefined when the row predates v60 or when the brain itself
         // predates v60 (fell through to the legacy projection above).
-        sourceId: rowSourceId,
+        sourceId: sourcesNone ? NO_SOURCES : rowSourceId,
         // v0.34.1 (#876): federated read scope. sourceScopeOpts in
         // operations.ts prefers this array over scalar sourceId when set
         // and non-empty.
-        allowedSources,
+        allowedSources: sourcesNone ? [] : allowedSources,
+        ...(sourcesNone ? { hasSourceGrant: true } : {}),
+        // Per-client takes holders; undefined → the /mcp dispatch site's fail-closed ['world'].
+        ...(clientHolders ? { takesHoldersAllowList: clientHolders } : {}),
         // v0.42.72.0: write fence — consumed by enforceClientSlugFence in
         // operations.ts on every direct slug-mutating write op.
         boundSlugPrefixes,
@@ -913,13 +923,14 @@ export class GBrainOAuthProvider implements OAuthServerProvider {
           AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds') FOR UPDATE SKIP LOCKED)
       `.catch(() => { /* fire-and-forget */ });
       const name = legacyRows[0].name as string;
-      // F3: one grant shape (grants/model.ts), shared with the legacy HTTP
-      // transport so the two cannot drift. Unmigrated rows read through lane
-      // F's JSONB parsers; unified rows read the columns, fail-closed on drift.
-      // Scopes: NULL (every token minted before #4043) is grandfathered full
-      // access; an array is honored as-is, including [] as deny. Takes holders
-      // null → the /mcp dispatch site defaults to the fail-closed ['world'].
-      const grant = grantFromTokenRow(legacyRows[0]);
+      // One grant shape (grants/model.ts), shared with the legacy HTTP
+      // transport so the two cannot drift. Unified rows read the columns,
+      // fail-closed on drift; a row still on the legacy shape is converted on
+      // this read (resolveTokenGrant). Scopes: NULL (every token minted before
+      // #4043) is grandfathered full access; an array is honored as-is,
+      // including [] as deny. Takes holders null → the /mcp dispatch site
+      // defaults to the fail-closed ['world'].
+      const grant = await resolveTokenGrant(this.sql, legacyRows[0]);
       return {
         token,
         clientId: name,

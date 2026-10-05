@@ -13,6 +13,7 @@ import { loadConfig } from '../config.ts';
 import { resolveDefaultVisibility } from '../facts/visibility.ts';
 import { declarePersistenceProtocol, PERSISTENCE_PROTOCOL_PREDICATE } from './protocol.ts';
 import { refreshFenceClear } from './worktree-refresh-schema.ts';
+import { EFFECT_FAULT_POINTS, faultPoint } from './fault-points.ts';
 
 /** `snapshot` is the publication's final read of the page, including deleted rows, in this transaction. */
 export async function queuePublicationEffects(tx: BrainEngine, row: EffectRequest & Partial<Pick<WriteRequest, 'operation' | 'intent' | 'authority' | 'principal_kind' | 'principal_id'>>, snapshot: PageSnapshot | null,
@@ -114,6 +115,25 @@ export async function claimCoalescedGitEffects(engine: BrainEngine, hostId: stri
   return rows.sort((a, b) => Number(a.id) - Number(b.id));
 }
 
+/**
+ * PGLite only: the datastore admits one process, and this one opened it at
+ * `processStartedAt`, so a claim last written before then was held by an owner
+ * that has exited (a crash or SIGKILL). Release those claims now instead of
+ * waiting out their leases (effects 2 minutes, requests 30 s); a withdrawal
+ * mirror left running would otherwise also hold back writes to its pages.
+ * Claims with a recovery record stay with the recovery path.
+ */
+export async function releaseAbandonedClaims(engine: BrainEngine, processStartedAt: Date): Promise<number> {
+  if (engine.kind !== 'pglite') return 0;
+  const effects = await engine.executeRaw(`UPDATE persistence_effects SET state='queued',execution_token=NULL,claim_expires_at=NULL,
+    next_attempt_at=LEAST(next_attempt_at,now()) WHERE state='running' AND recovery IS NULL AND updated_at<$1::timestamptz
+    AND ${PERSISTENCE_PROTOCOL_PREDICATE} RETURNING id`, [processStartedAt.toISOString()]);
+  const requests = await engine.executeRaw(`UPDATE persistence_requests SET state='queued',execution_token=NULL,claim_expires_at=NULL
+    WHERE state='running' AND recovery IS NULL AND publication_started=false AND updated_at<$1::timestamptz
+    AND ${PERSISTENCE_PROTOCOL_PREDICATE} RETURNING id`, [processStartedAt.toISOString()]);
+  return effects.length + requests.length;
+}
+
 export async function renewPersistenceEffectClaim(engine: SqlEngine, effect: PersistenceEffect): Promise<boolean> {
   const rows = await engine.executeRaw(`UPDATE persistence_effects SET claim_expires_at=now()+interval '2 minutes',updated_at=now()
     WHERE id=$1 AND execution_token=$2::uuid AND state='running' AND recovery IS NULL AND ${PERSISTENCE_PROTOCOL_PREDICATE} RETURNING id`, [effect.id, effect.execution_token]);
@@ -139,6 +159,7 @@ export async function advanceEffectCursor(engine: SqlEngine, effect: Persistence
 
 /** An effect with parked targets finishes as failed (`targets_parked`), never as committed. */
 export async function completeEffect(engine: SqlEngine, effect: PersistenceEffect, outcome: Record<string, unknown> = {}): Promise<void> {
+  await faultPoint(EFFECT_FAULT_POINTS[effect.kind], { effectId: effect.id, requestId: effect.request_id, sourceId: effect.source_id });
   await engine.executeRaw(`UPDATE persistence_effects SET
     state=CASE WHEN jsonb_array_length(COALESCE(data->'parked','[]'::jsonb))>0 THEN 'failed' ELSE 'committed' END,
     error_code=CASE WHEN jsonb_array_length(COALESCE(data->'parked','[]'::jsonb))>0 THEN 'targets_parked' END,

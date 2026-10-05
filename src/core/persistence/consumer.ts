@@ -15,8 +15,13 @@ import { redactConnectionInfo } from '../audit/redact-connection-info.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks';
 import { maybeRefreshPlannerStats } from '../planner-stats.ts';
+import { refreshFenceClear } from './worktree-refresh-schema.ts';
+import { faultPoint } from './fault-points.ts';
+import { releaseAbandonedClaims } from './effect-journal.ts';
 
 type PhaseObservation = { name: string; started_at: string; deadline_exceeded: boolean; attempt: number; first_conn_ms?: number };
+/** When this process started; on PGLite no claim written earlier can belong to a live owner. */
+const PROCESS_STARTED_AT = new Date(performance.timeOrigin);
 /** #5801: the phase a connection checkout belongs to, carried through its async chain. */
 const phaseScope = new AsyncLocalStorage<{ observation: PhaseObservation; startedAt: number }>();
 
@@ -45,6 +50,8 @@ export async function runResidentProjectionInvocation(engine: BrainEngine, hostI
   return rebuildPendingPageProjections(engine, writesWaiting ? WRITE_WAITING_PROJECTION_PAGES : RESIDENT_PROJECTION_PAGES,
     { deadlineMs: RESIDENT_PROJECTION_BUDGET_MS, now, retryCooldown: true });
 }
+
+const PARKED_WORKER: Promise<void> = Promise.resolve();
 
 export type PrepareMutation = (engine: BrainEngine, row: WriteRequest, config: GBrainConfig, signal?: AbortSignal) => Promise<PreparedMutation>;
 export class PersistenceConsumer {
@@ -85,17 +92,24 @@ export class PersistenceConsumer {
   private preparationAttempts = 0;
   private preparing = new Map<string, { request_id: string; started_at: string; deadline_exceeded: boolean; attempt: number }>();
   private executing = new Set<string>();
+  private abandonedReleased = false;
   readonly hostId: string;
   constructor(readonly engine: BrainEngine, readonly config: GBrainConfig, readonly prepare: PrepareMutation,
     private opts: { hostId?: string; concurrency?: number; pollMs?: number; idleMaxMs?: number; phaseMs?: number; preparationMs?: number; onError?: (error: unknown) => void;
-      onSettled?: (row: WriteRequest) => void } = {}) {
+      onSettled?: (row: WriteRequest) => void;
+      /** Engine graduation drain: claim, recover and publish requests only; effect, projection, topology and maintenance workers never start. */
+      requestsOnly?: boolean } = {}) {
     this.hostId = opts.hostId ?? localHostId();
   }
   private get checkoutObservable(): ((listener: () => void) => () => void) | undefined {
     const engine = this.engine as { onCheckout?: unknown };
     return typeof engine.onCheckout === 'function' ? (engine.onCheckout as (listener: () => void) => () => void).bind(this.engine) : undefined;
   }
-  start(): void { this.stopping = false; this.abort = new AbortController(); this.fullTickRequested = true; this.idleDelayMs = this.pollMs; this.schedule(0); }
+  start(): void {
+    this.stopping = false; this.abort = new AbortController(); this.fullTickRequested = true; this.idleDelayMs = this.pollMs;
+    if (this.opts.requestsOnly) this.projectionWorker = this.effectsWorker = this.topologyWorker = this.maintenanceWorker = PARKED_WORKER;
+    this.schedule(0);
+  }
   /**
    * Work admitted by this process: tick now instead of waiting out the idle
    * backoff. Like a completed publication, it claims at once and leaves scans
@@ -146,7 +160,7 @@ export class PersistenceConsumer {
         AND (r.worktree_id IS NULL OR EXISTS (SELECT 1 FROM persistence_worktrees w WHERE w.id=r.worktree_id AND w.owner_host_id=$1::uuid)))
       OR EXISTS (SELECT 1 FROM persistence_effects e LEFT JOIN persistence_worktrees w ON w.id=e.worktree_id
         WHERE (e.state='queued' OR e.state='running' AND e.claim_expires_at<now()) AND e.next_attempt_at<=now()
-        AND (e.worktree_id IS NULL OR w.owner_host_id=$1::uuid) AND e.recovery IS NULL
+        AND (e.worktree_id IS NULL OR w.owner_host_id=$1::uuid) AND (e.worktree_id IS NULL OR ${refreshFenceClear('e')}) AND e.recovery IS NULL
         AND NOT EXISTS (SELECT 1 FROM persistence_effects blocked WHERE blocked.worktree_id=e.worktree_id AND blocked.recovery IS NOT NULL)
         AND NOT EXISTS (SELECT 1 FROM persistence_requests blocked WHERE blocked.worktree_id=e.worktree_id AND blocked.recovery IS NOT NULL)
         AND (e.kind='withdrawal-mirror' OR NOT EXISTS (SELECT 1 FROM persistence_effects mirror
@@ -293,6 +307,10 @@ export class PersistenceConsumer {
       .catch(error => this.report(error)).finally(() => { this.projectionWorker = undefined; });
     // Recover only our owner roots. Kernel exclusion, not elapsed heartbeat,
     // proves that a previous process can no longer be publishing this root.
+    if (scan && this.engine.kind === 'pglite' && !this.abandonedReleased) {
+      await this.phase('abandoned_claims', () => releaseAbandonedClaims(this.engine, PROCESS_STARTED_AT));
+      this.abandonedReleased = true;
+    }
     const now = Date.now();
     for (const [root, retryAt] of this.rootRetryAfter) if (retryAt <= now) this.rootRetryAfter.delete(root);
     if (scan) {
@@ -482,6 +500,7 @@ export class PersistenceConsumer {
       }
       this.preparing.delete(row.id);
       preparationActive = false;
+      await faultPoint('consumer:prepared', { requestId: row.request_id, sourceId: row.source_id, operation: row.operation });
       const done = await publishMutation(this.engine, row, prepared, this.hostId);
       if (done.state === 'failed') this.log('publication', done.error_code ?? 'storage_error', done.error_message ?? undefined);
       if (done.state === 'committed' && row.worktree_id && !String(row.intent?.kind).startsWith('managed_sync_')) {

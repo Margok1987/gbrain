@@ -81,9 +81,11 @@ gbrain init --prefer-postgres    # env URL → Supabase token discovery → loca
 To switch later:
 
 ```bash
-gbrain migrate --to supabase     # PGLite → Postgres
-gbrain migrate --to pglite       # Postgres → PGLite (rare)
+gbrain migrate --to postgres --url-env GBRAIN_TARGET_URL --json   # PGLite → Postgres: prints the plan, exits 3
+gbrain migrate --to pglite                                        # Postgres → PGLite (rare; brains without write history)
 ```
+
+The move to Postgres carries the brain's full history and runs after the user approves the plan (`--yes --expect <plan_hash>`). Walkthrough: [Move a PGLite brain to Postgres](guides/move-to-postgres.md).
 
 If Postgres access ever breaks at runtime, `gbrain engine status --probe` diagnoses it and `gbrain db-repair` fixes it — see the "Engine detection and access repair" section of [`docs/ENGINES.md`](ENGINES.md).
 

@@ -177,6 +177,10 @@ export async function authorizeTakeHolder(engine: SqlEngine, authority: WriteAut
     const [row] = await engine.executeRaw<Record<string, unknown>>('SELECT * FROM access_tokens WHERE id=$1 AND revoked_at IS NULL', [authority.principal.id]);
     if (!row) deny('The owning token is revoked.');
     current = grantFromTokenRow(row).takesHolders ?? ['world'];
+  } else if (authority.principal.kind === 'oauth_client') {
+    const [row] = await engine.executeRaw<{ takes_holders: unknown }>('SELECT takes_holders FROM oauth_clients WHERE client_id=$1 AND deleted_at IS NULL', [authority.principal.id]);
+    if (!row) deny('The owning OAuth client is revoked.');
+    current = row.takes_holders == null ? ['world'] : strings(row.takes_holders) ? row.takes_holders : [];
   }
   if (!current.includes(holder)) deny('The current holder grant excludes this write.');
 }

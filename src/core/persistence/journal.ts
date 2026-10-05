@@ -14,6 +14,7 @@ import { publicFailureDetail } from './publication-failure.ts';
 import { catalogueError } from '../error-catalogue.ts';
 import { ACTIVE_REFRESH_STATES_SQL, refreshFenceClear } from './worktree-refresh-schema.ts';
 import { assertMutationProtocol, assertSharedSkillPersistence, declarePersistenceProtocol, PERSISTENCE_PROTOCOL_PREDICATE } from './protocol.ts';
+import { assertGraduationAdmission } from './graduation-custody.ts';
 import {
   isTerminal, principalKey, requestPrincipal, recoveryFiles,
   type JournalLimits, type Principal, type RecoveryRecord, type RequestState,
@@ -147,6 +148,7 @@ async function prepareAdmission(engine: BrainEngine, input: WriteAdmission, over
   const stamp = writerStamp();
   return { requestId, apply: async (tx: BrainEngine): Promise<WriteRequest> => {
     await declarePersistenceProtocol(tx);
+    await assertGraduationAdmission(tx);
     assertMutationProtocol({ target_kind: input.targetKind, protocol_version: input.protocolVersion });
     if (input.worktreeId) {
       await tx.executeRaw('SELECT id FROM persistence_worktrees WHERE id=$1::uuid FOR SHARE', [input.worktreeId]);
@@ -227,6 +229,7 @@ export async function admitWriteGroupInTransaction(tx: BrainEngine, inputs: Writ
   const items = inputs.map(input => ({ input, requestId: requireUuid(input.requestId ?? randomUUID()), fingerprint: intentDigest(input),
     bytes: jsonBytes(input.intent) + jsonBytes(input.authority), terminalBytes: input.terminalReservation ?? Math.max(16_384, jsonBytes(input.authority) + 8192) }));
   await declarePersistenceProtocol(tx);
+  await assertGraduationAdmission(tx);
   assertMutationProtocol({ target_kind: 'page', protocol_version: 1 });
   if (first.worktreeId) {
     await tx.executeRaw('SELECT id FROM persistence_worktrees WHERE id=$1::uuid FOR SHARE', [first.worktreeId]);

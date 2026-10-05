@@ -20,6 +20,7 @@ import { MAX_FILE_SIZE, contentRefusalFromReceipt, isContentRefusal, type Conten
 import { slugConflictHoldMessage, type ImportResult } from '../../core/import-file.ts';
 import { classifyImportHold, parseMarkdown } from '../../core/markdown.ts';
 import { readSourceFileSync } from '../../core/minions/source-filesystem.ts';
+import { maintenanceTransaction } from '../../core/persistence/attribution.ts';
 import type { SyncRename } from '../../core/persistence/sync-discovery.ts';
 import {
   addRecovered, buildHoldReport, clearGitHold, clearGitHoldRetryPaths, gitHoldItem, readGitHoldRetryPaths, readGitSourceHolds,
@@ -339,8 +340,10 @@ export async function moveHeldRenames(engine: BrainEngine, holds: LegacyHolds | 
       continue;
     }
     try {
-      if (await engine.updateSlug(origin.slug, resolveSlugForPath(record.path), { sourceId: holds.sourceId }) === 0) continue;
-      await engine.executeRaw('UPDATE pages SET source_path=$1 WHERE id=$2 AND source_id=$3', [record.path, origin.pageId, holds.sourceId]);
+      await maintenanceTransaction(engine, async tx => {
+        if (await tx.updateSlug(origin.slug, resolveSlugForPath(record.path), { sourceId: holds.sourceId }) === 0) return;
+        await tx.executeRaw('UPDATE pages SET source_path=$1 WHERE id=$2 AND source_id=$3', [record.path, origin.pageId, holds.sourceId]);
+      });
     } catch { /* the walk imports the file as an ordinary add; the old page stays until a full walk proves it gone */ }
   }
 }

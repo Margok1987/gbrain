@@ -1973,6 +1973,25 @@ export class MinionQueue {
     return rowToMinionJob(rows[0]);
   }
 
+  /**
+   * Return a claimed job to `delayed` without counting an attempt or growing
+   * its stacktrace (a deferral is a state, not a failure; a job that waits for
+   * a key for weeks must not accumulate one stack entry per retry).
+   */
+  async deferJob(id: number, lockToken: string, note: string, delayMs: number): Promise<MinionJob | null> {
+    const rows = await this.engine.executeRaw<Record<string, unknown>>(
+      `UPDATE minion_jobs SET
+        status = 'delayed', error_text = $1,
+        delay_until = now() + ($2::double precision * interval '1 millisecond'),
+        started_at = NULL, timeout_at = NULL,
+        lock_token = NULL, lock_until = NULL, updated_at = now()
+       WHERE id = $3 AND status = 'active' AND lock_token = $4
+       RETURNING *`,
+      [note, Math.max(0, delayMs), id, lockToken],
+    );
+    return rows.length === 0 ? null : rowToMinionJob(rows[0]);
+  }
+
   async releaseConfigurationJob(
     id: number,
     lockToken: string,

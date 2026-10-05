@@ -21,6 +21,7 @@ import type { Page, PageType } from '../core/types.ts';
 import { parseTimelineEntries, deriveTimelineAnchor } from '../core/link-extraction.ts';
 import { retractRemovedTimelineEntries } from '../core/timeline-extract.ts';
 import { managedPersistenceEnabled } from '../core/persistence/ownership.ts';
+import { maintenanceTransaction } from '../core/persistence/attribution.ts';
 import { unrecordedCanonicalTimeline } from '../core/persistence/canonical-projections.ts';
 import { maintenancePreflight, submitDatabaseMaintenanceIntent, type MaintenanceAuthority } from '../core/persistence/prepared-maintenance.ts';
 import { authorizeWrite } from '../core/persistence/authority.ts';
@@ -30,6 +31,7 @@ import { digest } from '../core/persistence/digest.ts';
 import type { PreparedMutation } from '../core/persistence/coordinator.ts';
 import { OperationError } from '../core/ops/contract.ts';
 import { createProgress } from '../core/progress.ts';
+import { importAnalyzeEveryPages, maybeRefreshPlannerStats } from '../core/planner-stats.ts';
 import { getCliOptions, cliOptsToProgressOptions } from '../core/cli-options.ts';
 import { filterRefsSince } from './extract.ts';
 
@@ -113,13 +115,18 @@ export async function extractTimelineFromDB(engine: BrainEngine, opts: TimelineD
   const managed = !opts.dryRun && await managedPersistenceEnabled(engine);
   const dryRunSeen = opts.dryRun ? new Set<string>() : null;
   const batch: TimelineBatchInput[] = [];
+  // PGLite has no autovacuum: a walk that grows timeline_entries from empty
+  // re-plans its per-page reads against stale statistics and slows with
+  // every row, so it refreshes them on the bulk-import cadence.
+  const analyzeEvery = opts.dryRun ? 0 : await importAnalyzeEveryPages(engine);
+  let walked = 0;
 
   async function flush() {
     if (batch.length === 0) return;
     const snapshot = batch.slice();
     batch.length = 0;
     try {
-      result.created += await engine.addTimelineEntriesBatch(snapshot, { auditSite: 'extract.timeline_db' });
+      result.created += await maintenanceTransaction(engine, tx => tx.addTimelineEntriesBatch(snapshot, { auditSite: 'extract.timeline_db' }));
     } catch (e) {
       const code = refusalCode(e);
       codes.add(code);
@@ -129,6 +136,11 @@ export async function extractTimelineFromDB(engine: BrainEngine, opts: TimelineD
   }
 
   for (const { slug, source_id } of refs) {
+    if (analyzeEvery > 0 && walked > 0 && walked % analyzeEvery === 0) {
+      await flush();
+      await maybeRefreshPlannerStats(engine, 'extract', { throttle: false }).catch(() => undefined);
+    }
+    walked++;
     if (managed) {
       try {
         const outcome = await publishPageTimeline(engine, await authorityFor(source_id), slug, source_id, opts);

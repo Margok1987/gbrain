@@ -38,7 +38,6 @@ src/core/backup/repository.ts	1
 src/core/brainstorm/error-classify.ts	1
 src/core/connectors/sync.ts	8
 src/core/context/hook-heartbeat.ts	2
-src/core/cycle.ts	1
 src/core/cycle/patterns.ts	1
 src/core/cycle/synthesize.ts	1
 src/core/error-catalogue.ts	2

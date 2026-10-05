@@ -23,9 +23,11 @@ import { configPath, gbrainPath, loadConfig, type GBrainConfig } from '../core/c
 import { inspectLockHolder, peekLock } from '../core/pglite-lock.ts';
 import { HANDS_OFF_BRAIN_FILES, readRepairFailedMarker, type RepairFailedMarker } from '../core/pglite-repair.ts';
 import { resetReadinessMemo } from '../core/readiness.ts';
+import { engineGraduatedFor, graduationStatusReason } from '../core/persistence/graduation-serve-guard.ts';
+import { inspectGraduationPath } from '../core/persistence/graduation-custody.ts';
 
 export const STATUS_TOOL_NAME = 'gbrain_status';
-export type StatusReason = 'lock_held' | 'no_brain' | 'config_unreadable' | 'missing_brain' | 'brain_unopenable' | 'repair_failed';
+export type StatusReason = 'lock_held' | 'no_brain' | 'config_unreadable' | 'missing_brain' | 'brain_unopenable' | 'repair_failed' | 'engine_graduated';
 
 export interface StatusModeState {
   reason: StatusReason;
@@ -72,6 +74,8 @@ export function probeStatus(): Omit<StatusModeState, 'recovered'> | null {
   if (!dataDir) return null;
   // A configured brain that is not there (unmounted drive, moved folder) is never recreated empty here.
   if (!existsSync(dataDir)) return { reason: 'missing_brain', config_path: cfgPath, brain_path: dataDir, checked_at: now };
+  // A graduated brain's old path is a tombstone file: answer engine_graduated, never open or recreate it.
+  if (graduationStatusReason(cfg)) return { reason: 'engine_graduated', config_path: cfgPath, brain_path: dataDir, checked_at: now };
   const marker = readRepairFailedMarker(dataDir);
   if (marker) return { reason: 'repair_failed', config_path: cfgPath, brain_path: dataDir, checked_at: now, repair_failed: marker };
   const holder = inspectLockHolder(dataDir);
@@ -126,6 +130,7 @@ export function statusHeadline(state: StatusModeState): string {
   if (state.reason === 'config_unreadable') return `The gbrain config at ${state.config_path} exists but cannot be read (invalid JSON or unreadable), so this server cannot open a brain.`;
   if (state.reason === 'brain_unopenable') return `The brain at ${state.brain_path ?? 'its configured path'} exists, but its writer lock file next to it cannot be opened (a read-only or unmounted drive, or permissions), so this server cannot open it.`;
   if (state.reason === 'missing_brain') return `The brain configured in ${state.config_path} is not at ${state.brain_path ?? 'its configured path'} (an unmounted drive or a moved folder?), so this server cannot open it. Nothing was created there.`;
+  if (state.reason === 'engine_graduated') return `This brain moved to Postgres; ${state.brain_path ?? 'its old PGLite path'} is a tombstone, and this server's config still points at it.`;
   if (state.reason === 'repair_failed') return `The brain at ${state.brain_path ?? 'its data directory'} is damaged and gbrain's automatic repair failed, so gbrain refuses to open it until the user decides how to recover.`;
   return `No gbrain brain is set up on this machine yet (no config at ${state.config_path}), so this server has no brain to open.`;
 }
@@ -168,6 +173,10 @@ function statusFix(state: StatusModeState): { fix: Action; user_message: string;
         default_reason: 'Nothing is created or overwritten; the user\'s existing brain comes back as soon as its drive does.',
       }] : undefined,
     };
+  }
+  if (state.reason === 'engine_graduated' && state.brain_path) {
+    const fix = engineGraduatedFor(inspectGraduationPath(state.brain_path), 'stdio').fix!;
+    return { fix, user_message: fix.user_message ?? statusHeadline(state) };
   }
   if (state.reason === 'repair_failed') {
     const user_message = `Your gbrain brain at ${state.brain_path ?? 'its data directory'} is damaged and gbrain's automatic repair did not fix it, so gbrain has stopped opening it to keep it from getting worse. In a terminal you can preview the repair with \`gbrain pglite-repair --dry-run\` and run the one it prints after you agree, or restore the brain from a backup. Nobody should copy, move or edit the brain files by hand.`;

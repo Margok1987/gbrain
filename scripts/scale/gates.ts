@@ -15,6 +15,7 @@
  * variable GBRAIN_SCALE_ENFORCE_CEILINGS=1.
  */
 
+import { ORPHANS_MAX_LIMIT } from '../../src/core/ops/orphans.ts';
 import { PLANNER_STATS_MIN_PENDING } from '../../src/core/planner-stats.ts';
 
 /**
@@ -211,4 +212,28 @@ export function resultHits(value: unknown): Array<{ slug: string; source_id?: st
   };
   walk(value);
   return hits;
+}
+
+/**
+ * The find_orphans known-answer call: one page at the op's maximum size. The
+ * op returns a page of rows (default 100) plus `total_orphans`, and recomputes
+ * the whole orphan set per call, so the check reads totals and one maximal page
+ * instead of paging (a 20k brain holds more orphans than one default page).
+ */
+export const FIND_ORPHANS_PARAMS = { limit: ORPHANS_MAX_LIMIT } as const;
+
+/** Null when every fixture island is among the orphans, else what is wrong. */
+export function orphansProblem(result: unknown, islands: readonly string[]): string | null {
+  const r = (result ?? {}) as { orphans?: Array<{ slug?: string }>; total_orphans?: unknown };
+  const rows = Array.isArray(r.orphans) ? r.orphans : [];
+  const total = Number(r.total_orphans);
+  if (!Number.isInteger(total)) return 'find_orphans returned no total_orphans';
+  if (total < islands.length) return `find_orphans counts ${total} orphans, fewer than the fixture's ${islands.length} island pages`;
+  if (rows.length < total) {
+    return `find_orphans returned ${rows.length} of ${total} orphans in one call; the known-answer check reads every orphan in one page `
+      + `of at most ${ORPHANS_MAX_LIMIT}, so this fixture size needs a paged check`;
+  }
+  const found = new Set(rows.map(h => h.slug));
+  const missing = islands.filter(slug => !found.has(slug));
+  return missing.length ? `${missing.length} of ${islands.length} island pages missing from find_orphans (first: ${missing[0]})` : null;
 }

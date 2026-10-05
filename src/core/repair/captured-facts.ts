@@ -54,6 +54,7 @@ import { claudeProjectsDir } from '../bootstrap/host-specs.ts';
 import { corpusFileSessionId, corpusTextForExtraction } from '../context/corpus-segments.ts';
 import { pruneDir } from '../sync.ts';
 import { afterCursor, repairRequestId, type RepairHandler, type RepairItem, type RepairItemOutcome, type RepairListing, type RepairPlan, type RepairScope } from './core.ts';
+import { maintenanceTransaction } from '../persistence/attribution.ts';
 
 export const CAPTURE_LANES = ['hook:writeback', 'hook:compact', 'sweep:corpus'] as const;
 const CORPUS_KEY = 'dream.synthesize.session_corpus_dir';
@@ -310,7 +311,7 @@ const expireRows = (tx: BrainEngine, sourceId: string, ids: number[]) => tx.exec
  * unmanaged brain one transaction.
  */
 async function expireDatabaseRows(engine: BrainEngine, page: CapturedFactsPage, hash: string, ids: number[]): Promise<number[]> {
-  if (!await managedPersistenceEnabled(engine)) return (await engine.transaction(tx => expireRows(tx, page.source_id, ids))).map(row => Number(row.id));
+  if (!await managedPersistenceEnabled(engine)) return (await maintenanceTransaction(engine, tx => expireRows(tx, page.source_id, ids))).map(row => Number(row.id));
   const authority = (await maintenancePreflight(engine, page.source_id))!;
   const snapshot = await engine.readPageSnapshot(page.slug, { sourceId: page.source_id });
   const h = digest(['captured-facts-expire-v1', hash, page.source_id, page.slug, ids, snapshot?.revision ?? null]);

@@ -7,7 +7,7 @@
  * page_versions row an edit archives), the unmanaged extract_facts page
  * reconcile, extract-takes and `gbrain repair stale-atoms --apply`. Fails if
  * one of those transactions stops entering maintenanceTransaction. Also pins the
- * "unattributed until Foundations 2" list in docs/architecture/system-of-record.md
+ * attributed and "unattributed" lists in docs/architecture/system-of-record.md
  * against a grep of src, so a new direct writer cannot fall out silently.
  * Runs on PGLite, and on Postgres (direct and transaction-mode PgBouncer)
  * through test/e2e/write-attribution-postgres.test.ts.
@@ -200,7 +200,7 @@ describe('write attribution inventory', () => {
     const attributed = documentedList('write-attribution-covered');
     expect(Object.keys(unattributed).filter(path => path in attributed)).toEqual([]);
     expect({ ...attributed, ...unattributed }, 'A direct writer moved. Run it in maintenanceTransaction (or route it through the coordinator) and list it under '
-      + '"attributed" with its new count, or list it under "unattributed until Foundations 2 mutation attribution" in docs/architecture/system-of-record.md.')
+      + '"attributed" with its new count, or list it under "unattributed" in docs/architecture/system-of-record.md.')
       .toEqual(directWriters());
   });
 });

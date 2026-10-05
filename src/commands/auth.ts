@@ -836,8 +836,9 @@ async function rescopeClientWith(engine: BrainEngine, clientId: string, parsed: 
   console.log(`OAuth client ${parsed.dryRun ? 'grant preview' : 'rescoped'}: ${result.after.clientName} (${clientId})`);
   console.log(`  Revision: ${result.before.revision} -> ${result.after.revision}`);
   console.log(`  Scopes: ${result.after.scopes.join(' ') || '<none>'}`);
-  console.log(`  Write source: ${result.after.sourceId}`);
-  console.log(`  Federated reads: ${result.after.federatedRead.join(', ')}`);
+  console.log(`  Write source: ${result.after.sourcesNone ? 'none (every read and write refused)' : result.after.sourceId}`);
+  console.log(`  Federated reads: ${result.after.federatedRead.join(', ') || '<none>'}`);
+  console.log(`  Takes holders: ${result.after.takesHolders === null ? 'world (default)' : result.after.takesHolders.join(', ') || 'none (every take hidden)'}`);
   console.log(`  Tool surface: ${result.after.surface ?? '<server default>'}`);
   console.log(`  Delegated spending: ${result.after.budgetUsdPerDay === null ? 'unlimited' : '$' + result.after.budgetUsdPerDay + '/day'}`);
   console.log('Restrictions apply on the next request. Added scopes require a new access token; the client secret is unchanged.');
@@ -1122,9 +1123,9 @@ Usage:
                                                           grants. A bare name matching both a token and a
                                                           client refuses; pass --token or --client.
      --sources <id1,id2,...|none>                         Source grant (first = write source; 'none' = deny-all,
-                                                          tokens only — revoke a client with revoke-client)
+                                                          scopes and secret unchanged)
      --read-sources <id1,id2,...>                         Client only: a read set that differs from --sources
-     --takes-holders <h1,h2,...|none>                     Token only: takes-holder allow-list ('none' = deny-all)
+     --takes-holders <h1,h2,...|none>                     Takes-holder allow-list (default world; 'none' = deny-all)
      --operations <op1,op2,...|none|all>                  Operation snapshot ('none' = deny-all). Client only:
                                                           'all' = no snapshot: every operation the scopes and the
                                                           surface allow, including ones later upgrades add; clears
