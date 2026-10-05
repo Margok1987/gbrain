@@ -79,6 +79,16 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 |---|---|---|---|---|---|---|
 | The legacy id matches multiple readable pages. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
 
+### ambiguous_ref
+
+<a id="ambiguous_ref"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A page reference in a rating matches pages in more than one source of that answer. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/retrieval-feedback.md#ambiguous_ref](../../docs/guides/retrieval-feedback.md#ambiguous_ref)
+
 ### ambiguous_skill
 
 <a id="ambiguous_skill"></a>
@@ -86,6 +96,36 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
 | This name belongs to multiple authorized sources. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
+
+### answer_not_yours
+
+<a id="answer_not_yours"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The rated answer was returned to a different client. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/retrieval-feedback.md#answer_not_yours](../../docs/guides/retrieval-feedback.md#answer_not_yours)
+
+### answer_pending
+
+<a id="answer_pending"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The rated answer is still being recorded; retry in a few seconds. | A temporary condition (a lock, a pending write, a rate limit); the same request can succeed later. | Wait briefly, then retry the same request (writes: reuse the same request_id). | agent | `repeat the read that failed` | 1 | yes |
+
+More: [docs/guides/retrieval-feedback.md#answer_pending](../../docs/guides/retrieval-feedback.md#answer_pending)
+
+### answer_unavailable
+
+<a id="answer_unavailable"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The rated answer is not recorded: unknown, dropped, or older than the retention window. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/retrieval-feedback.md#answer_unavailable](../../docs/guides/retrieval-feedback.md#answer_unavailable)
 
 ### api_not_enabled
 
@@ -803,6 +843,26 @@ More: [docs/guides/facts-drain.md#deferrals](../../docs/guides/facts-drain.md#de
 |---|---|---|---|---|---|---|
 | The accepted fact extraction failed and its retained payload has expired. | The server failed; this is not a caller mistake. | Server-side failure, not a caller mistake. Run `gbrain doctor --json` on the brain host; if it repeats, report it to the user. | host_admin | `gbrain doctor --json` | 1 | no |
 
+### feedback_disabled
+
+<a id="feedback_disabled"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| Retrieval feedback is off (or not learning) on this brain, so ratings are not recorded. | Only the operator of the brain host can change what blocks this. | Only the brain host's operator can resolve this. Tell the user the message and run `gbrain doctor --json` on the brain host. | host_admin | `gbrain doctor --json` | 1 | no |
+
+More: [docs/guides/retrieval-feedback.md#feedback_disabled](../../docs/guides/retrieval-feedback.md#feedback_disabled)
+
+### feedback_not_authorized
+
+<a id="feedback_not_authorized"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| This caller may not change the brain's shared ranking for that source. | Only the operator of the brain host can change what blocks this. | Only the brain host's operator can resolve this. Tell the user the message and run `gbrain doctor --json` on the brain host. | host_admin | `gbrain doctor --json` | 1 | no |
+
+More: [docs/guides/retrieval-feedback.md#feedback_not_authorized](../../docs/guides/retrieval-feedback.md#feedback_not_authorized)
+
 ### fetch_failed
 
 <a id="fetch_failed"></a>
@@ -1202,6 +1262,16 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
 | A parameter is missing, has the wrong type, or has an invalid value. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 2 | no |
+
+### invalid_rating
+
+<a id="invalid_rating"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A rating must be an integer from 1 to 5. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/retrieval-feedback.md#invalid_rating](../../docs/guides/retrieval-feedback.md#invalid_rating)
 
 ### invalid_receipt
 
@@ -1744,6 +1814,16 @@ More: [docs/guides/company-brain-ingestion.md#agent-and-ci-use](../../docs/guide
 | Google connect credential error: redirect uri mismatch. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
 
 More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-connect.md#troubleshooting)
+
+### ref_not_in_answer
+
+<a id="ref_not_in_answer"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The rated page is not one of the pages the answer used. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. | agent | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/retrieval-feedback.md#ref_not_in_answer](../../docs/guides/retrieval-feedback.md#ref_not_in_answer)
 
 ### refresh_dirty
 

@@ -24,12 +24,15 @@ import { CONNECTOR_SLUG, contextFor, type OpDescriptor, type OpKind, type OpObse
  * queues it. A new effect kind without an entry fails typecheck.
  * facts-backstop is queued only when facts extraction is configured; keyless
  * robot brains never queue it, so its seam is exercised by the facts drain.
+ * links is queued only for remote (untrusted) page writes; its seam is
+ * exercised whenever the generator's put_page runs as a remote caller.
  */
 export const EFFECT_SEAMS = {
   git: { op: 'put_page', point: EFFECT_FAULT_POINTS.git },
   embedding: { op: 'put_page', point: EFFECT_FAULT_POINTS.embedding },
   'withdrawal-mirror': { op: 'forget', point: EFFECT_FAULT_POINTS['withdrawal-mirror'] },
   'facts-backstop': { op: 'put_page', point: EFFECT_FAULT_POINTS['facts-backstop'] },
+  links: { op: 'put_page', point: EFFECT_FAULT_POINTS.links },
 } as const satisfies Record<EffectKind, { op: OpKind; point: FaultPoint }>;
 
 /** Retry a harness read across a dropped connection (the pooler_disconnect fault); other errors propagate. */

@@ -1,3 +1,4 @@
+import { searchAnswerFeedback } from '../feedback/record.ts';
 import { parseRelationalPlan } from '../search/relational-plan.ts';
 import { loadSearchModeConfig, resolveSearchMode } from '../search/mode.ts';
 import { WRITE_REQUEST_PARAM } from '../persistence/params.ts';
@@ -562,6 +563,7 @@ const recall: Operation = {
               ...(r.relational ? { relational: r.relational } : {}),
             })),
             ...(searchDegraded ? { search_degraded: searchDegraded } : {}),
+            ...(searchDegraded ? {} : await searchAnswerFeedback(ctx, 'recall', packedResults)),
           }
         : {}),
       ...(budgetTokens !== null

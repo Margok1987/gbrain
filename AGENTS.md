@@ -45,8 +45,10 @@ Recall relevant saved context before answering. Save explicit requests to rememb
 Durable preferences and facts belong in shared memory when the user wants them
 recalled later. Transient task state, credentials, local configuration, and harness
 activation state do not. Remote `put_page` saves references as text without inline
-graph extraction; stdio has best-effort startup/idle sweeps, while HTTP requires
-explicit host maintenance or authorized `add_link` calls. Configured model
+graph extraction; a post-commit `links` effect then adds plain mention edges to
+existing pages the writer can see (`mcp.remote_auto_links`, on by default). Typed
+edges rely on stdio's best-effort startup/idle sweeps, explicit host maintenance
+or authorized `add_link` calls. Configured model
 providers can receive text; Markdown export is not a full database backup.
 Read [memory boundaries](docs/guides/memory-boundaries.md) before promising
 portability, graph freshness, privacy, or recovery.

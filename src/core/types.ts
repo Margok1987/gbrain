@@ -919,6 +919,8 @@ export interface SearchResult {
   relational_hop?: number;
   /** Shortest connecting slug path seed→…→result (for "how I know this"). */
   relational_path?: string[];
+  /** Stored-direction edges along `relational_path` (for retrieval feedback attribution). */
+  relational_path_edges?: string[];
   /**
    * Multi-hop chain evidence: why a chain put this page here. `role` is the
    * page's place on the chain (a candidate answer, an intermediate page, or the
@@ -955,6 +957,10 @@ export interface SearchResult {
   cosine?: number;
   /** Multiplier applied by applyBacklinkBoost (1.0 = unchanged). */
   backlink_boost?: number;
+  /** Use-attributed feedback multiplier on the ordering score (src/core/search/feedback-boost.ts); absent when neutral. */
+  feedback_boost?: number;
+  /** The page's content_hash when this result was retrieved (stamped while retrieval feedback is enabled). */
+  content_hash?: string | null;
   /** Multiplier applied by applySalienceBoost. */
   salience_boost?: number;
   /** Multiplier applied by applyRecencyBoost. */
@@ -1528,6 +1534,8 @@ export interface RelationalFanoutRow {
   edge_count: number;
   via_link_types: string[];
   path: string[];
+  /** Stored-direction edges ('from_slug|link_type|to_slug') along `path`, in order. */
+  path_edges?: string[];
   canonical_chunk_id: number | null;
 }
 

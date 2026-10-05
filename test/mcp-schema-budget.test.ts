@@ -34,6 +34,10 @@
  * descriptions and parameter text; every pinned phrase kept), recall -50,
  * remember -40, get_page -30, list_pages -30 (slack). Served starter list
  * after: 24,324 model-visible characters, 5,471 tokens, 25,959 JSON characters.
+ * #6007 raised put_page (wait_ms param, put_pages and remote mention-link
+ * disclosure), get_write_request (poll cadence and final states),
+ * add_timeline_entry (when no call is needed) and the instructions (write
+ * guidance); the served list still fits 25,000 model-visible characters.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -46,20 +50,20 @@ import { cl100kAvailable, estimateTokens } from '../src/core/chunkers/token-esti
 
 const SERVED_STARTER_MAX_CHARS = 25_000;
 const SERVED_STARTER_MAX_TOKENS = 5_700;
-/** The whole tools/list JSON, annotations included (25,735 measured at v0.60.46.0; traverse_graph's `hops` is full-surface-only, 25,941 measured; 26,402 once mute_notice, the dismissal for the coaching notices starter sessions receive, joined starter). */
-const SERVED_STARTER_MAX_JSON_CHARS = 26_450;
+/** The whole tools/list JSON, annotations included (25,735 measured at v0.60.46.0; traverse_graph's `hops` is full-surface-only, 25,941 measured; 26,402 once mute_notice, the dismissal for the coaching notices starter sessions receive, joined starter; 26,671 with #6007's put_page wait_ms param and write guidance, which carry the put_pages hint and the receipt poll rule starter agents need). */
+const SERVED_STARTER_MAX_JSON_CHARS = 26_700;
 /** 4,042 at the cost wave + 586 for the operator contract's error protocol, notice prefix and memory loop (F1); no schema guidance moved here. */
-const INSTRUCTIONS_MAX_CHARS = 4_628;
+const INSTRUCTIONS_MAX_CHARS = 4_868; // #6007: +240 for the issue-required write guidance (put_pages, wait_ms)
 const DESCRIPTION_HARD_CAP = 1_200;
 const PARAM_DESCRIPTION_HARD_CAP = 200;
 
 /** Per-tool budget: JSON.stringify of the served tool definition. get_backlinks / traverse_graph carry the temporal status + as_of params (live relationships by default). */
 const TOOL_BUDGETS: Record<string, number> = {
-  add_timeline_entry: 640, cancel_job: 270, cancel_write_request: 350, capture: 1250, context_pack: 760,
+  add_timeline_entry: 680, cancel_job: 270, cancel_write_request: 350, capture: 1250, context_pack: 760,
   delete_skill: 810, delta: 830, edit_page: 1090, entity: 470, find_anomalies: 520, forget: 560, get_agent_job: 270,
   get_backlinks: 770, get_ingest_log: 280, get_page: 930, get_recent_salience: 660, get_skill: 910,
-  get_skill_asset: 790, get_write_request: 330, join_brain: 560, leave_brain: 540, list_brain_skillpack: 230,
-  list_link_sources: 220, list_pages: 1060, list_skills: 670, list_write_requests: 450, put_page: 1320,
+  get_skill_asset: 790, get_write_request: 360, join_brain: 560, leave_brain: 540, list_brain_skillpack: 230,
+  list_link_sources: 220, list_pages: 1060, list_skills: 670, list_write_requests: 450, put_page: 1460,
   mute_notice: 460, put_skill: 1420, query: 3100, recall: 1540, remember: 1330, request_tools: 560, resolve_slugs: 410, search: 1670,
   submit_agent: 750, sync_brain_skills: 770, synthesize: 550, traverse_graph: 810, whoami: 230,
 };

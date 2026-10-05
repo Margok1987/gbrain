@@ -156,6 +156,13 @@ export const SECTIONS: DocSection[] = [
         includeInFull: false,
       },
       {
+        title: "docs/guides/retrieval-feedback.md",
+        description:
+          "Use-attributed retrieval feedback: answer ids, `rate_answer` / `gbrain rate` (whole answer or single pages), how ratings move page weights and ranking (bounded ±λ), citation learning, revision handling, who may teach the brain, `gbrain feedback status|reset`, config keys and every refusal code.",
+        path: "docs/guides/retrieval-feedback.md",
+        includeInFull: false,
+      },
+      {
         title: "docs/guides/pinned-questions.md",
         description:
           "Pinned questions: cited answers kept current from your notes (`gbrain questions pin|list|status|refresh|unpin`, `questions_*` MCP tools), read-time staleness, receipts and blocked reasons, owner-private visibility, consent for paid refresh, the standing_questions phase and the dream.auto_think migration.",

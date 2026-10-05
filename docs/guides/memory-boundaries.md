@@ -31,7 +31,8 @@ history, or private backups. See [ambient writeback](ambient-writeback.md).
 | Write path | Graph behavior |
 |---|---|
 | Trusted local `put_page` / capture | Extracts supported page references without an LLM when auto-linking is enabled. |
-| MCP `put_page` / capture, including stdio | Saves body references as text; no inline graph extraction. The receipt reports `auto_links.skipped: remote`. |
+| MCP `put_page` / capture / `edit_page`, including stdio | Saves body references as text; no inline graph extraction. The receipt reports `auto_links.skipped: remote`. |
+| Post-commit `links` effect of an MCP page write | Adds untyped `mentions` edges (`link_source: mcp-remote-mention`) for the body's markdown links, `[[wikilinks]]` and page-path mentions whose target already exists in the same source, is not deleted, is visible to the writer and is inside its slug grant. No typed, frontmatter, timeline or cross-source edges and no new pages. The receipt reports `auto_links.mention_links: queued`; `get_write_request` lists the effect with `added`/`removed` counts. `gbrain config set mcp.remote_auto_links off` (or `auto_link off`) disables it. |
 | Stdio `gbrain serve` | Has bounded, best-effort startup and idle maintenance sweeps, unless disabled. This is eventual maintenance, not a guarantee that a remote write immediately has edges. |
 | `gbrain serve --http` | Does not self-sweep. The host must run maintenance explicitly. |
 

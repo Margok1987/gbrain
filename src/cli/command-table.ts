@@ -315,6 +315,7 @@ export const CLI_COMMANDS: readonly CliCommandRecord[] = [  // Pre-connect: disp
   { name: 'reindex', phase: 'post-connect', thinClient: 'none', selfHelp: true, load: () => import('./commands/reindex.ts') },
   { name: 'salience', phase: 'post-connect', thinClient: 'none', selfHelp: true, load: () => import('./commands/salience.ts') },
   { name: 'anomalies', phase: 'post-connect', thinClient: 'none', selfHelp: true, load: () => import('./commands/anomalies.ts') },
+  { name: 'feedback', phase: 'post-connect', thinClient: 'refuse', selfHelp: true, load: () => import('./commands/feedback.ts') },
   { name: 'status', phase: 'post-connect', thinClient: 'none', help: () => import('./help/status.ts'), load: () => import('./commands/status.ts') },
   { name: 'advisor', phase: 'post-connect', thinClient: 'refuse', selfHelp: true, load: () => import('./commands/advisor.ts') },
   { name: 'conversation-parser', phase: 'post-connect', thinClient: 'none', selfHelp: true, load: () => import('./commands/conversation-parser.ts') },

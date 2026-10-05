@@ -58,6 +58,11 @@ export { parseLegacyTokenScope } from '../core/legacy-token-scope.ts';
 
 const DEFAULT_BODY_CAP = 1024 * 1024; // 1 MiB
 
+/** #6007: what an agent does after a 413: nothing was processed, so split the request. */
+function oversizeSuggestion(bodyCap: number): string {
+  return `Nothing was processed. Send smaller requests: split put_pages into calls under ${bodyCap} bytes each (a new request_id per call). The host operator sets this limit with GBRAIN_HTTP_MAX_BODY_BYTES.`;
+}
+
 function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
@@ -382,7 +387,7 @@ export async function startHttpTransport(opts: HttpTransportOptions) {
       if (bodyText === null) {
         logRequest(null, 'unknown', 'body_too_large', Date.now() - startedMs);
         return Response.json(
-          { error: 'payload_too_large', message: `Request body exceeds ${bodyCap} bytes` },
+          { error: 'payload_too_large', message: `Request body exceeds ${bodyCap} bytes`, suggestion: oversizeSuggestion(bodyCap) },
           { status: 413, headers: corsHeaders(origin) },
         );
       }

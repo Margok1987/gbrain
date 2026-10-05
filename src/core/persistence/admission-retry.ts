@@ -3,8 +3,8 @@ import { OperationError } from '../ops/contract.ts';
 import { getCode } from '../retry-matcher.ts';
 
 /** Retry only database-confirmed transaction aborts, retaining the accepted intent and UUID. */
-export async function retryWriteAdmission<T>(requestId: string, attempt: (remainingMs: number) => Promise<T>): Promise<T> {
-  const deadline = performance.now() + 5000;
+export async function retryWriteAdmission<T>(requestId: string, attempt: (remainingMs: number) => Promise<T>, budgetMs = 5000): Promise<T> {
+  const deadline = performance.now() + budgetMs;
   for (;;) {
     try {
       return await attempt(Math.max(1, Math.floor(deadline - performance.now())));

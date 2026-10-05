@@ -14,6 +14,7 @@ import { type MetadataBoostGateDecision, decideMetadataBoosts, lexicalArmsVoted 
 import { type PostFusionOpts, RRF_K, cosineReScore, resolveWalkDedupCap, rrfFusionWeighted, runPostFusionStages, stampContentFlags, stampUnverifiedExtractions, textVectorArmNonEmpty } from '../hybrid.ts';
 import { type RelationalEvidenceSlotDecision, ensureRelationalEvidenceSlot } from '../relational-recall.ts';
 import { type RelationalRerankPinDecision, pinRelationalRows } from '../relational-rerank-pin.ts';
+import { applyFeedbackStage } from '../feedback-boost.ts';
 import { type RerankFailedReason, type RerankPassThroughReason, type RerankSkipReason, applyReranker } from '../rerank.ts';
 import type { RerankMeta } from '../../ai/gateway.ts';
 import { applyEvidenceGate, recordRerankReceipts, startRerankShadow } from '../decide-stage.ts';
@@ -239,7 +240,7 @@ export async function rerankAndPin(
   relationalList: SearchResult[],
   effectiveModality: ModalityMode,
 ) {
-  const { query, opts, resolvedMode, degraded } = req;
+  const { engine, query, opts, resolvedMode, degraded } = req;
   // v0.35.0.0+: cross-encoder reranker. Slots between dedup and slice so the
   // reranker sees the full candidate pool (its own topNIn caps how many
   // get sent upstream). Fail-open: any error returns deduped unchanged.
@@ -288,6 +289,7 @@ export async function rerankAndPin(
     : deduped;
   if (s1 && rerankerOpts.enabled) recordRerankReceipts(req.decide, query, reranked.slice(0, rerankerOpts.topNIn).filter((r) => s1Failure !== undefined || r.rerank_score !== undefined), s1Meta, s1Failure);
   if (s1Shadow) await s1Shadow(reranked);
+  const ordered = await applyFeedbackStage(engine, reranked, { reranked: reranked !== deduped });
 
   // Ranker wave (R1 receipt) — relational-arm rows bypass reranker DEMOTION:
   // re-pinned above the reranked text rows in fused order, bounded by
@@ -297,8 +299,8 @@ export async function rerankAndPin(
   // not fused there). Contract + tie policy: relational-rerank-pin.ts.
   let relationalRerankPin: RelationalRerankPinDecision | undefined;
   const rerankPinned = reranked !== deduped && effectiveModality !== 'image'
-    ? pinRelationalRows(reranked, relationalList, { max: resolvedMode.relational_rerank_pin, fusedOrder: deduped, onPin: (d) => { relationalRerankPin = d; } })
-    : reranked;
+    ? pinRelationalRows(ordered, relationalList, { max: resolvedMode.relational_rerank_pin, fusedOrder: deduped, onPin: (d) => { relationalRerankPin = d; } })
+    : ordered;
   return { rerankPinned, relationalRerankPin };
 }
 

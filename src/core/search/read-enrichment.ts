@@ -36,6 +36,12 @@ export async function readRelationalFanout(query: ReadQuery, seeds: string[], op
     typeFilter = `AND l.link_type = ANY($${params.length}::text[])`;
   }
   const mentionsFilter = opts?.includeMentions ? '' : `AND l.link_source IS DISTINCT FROM 'mentions'`;
+  const edgeExpr = direction === 'out'
+    ? `w.slug || '|' || l.link_type || '|' || p2.slug`
+    : direction === 'in'
+      ? `p2.slug || '|' || l.link_type || '|' || w.slug`
+      : `CASE WHEN l.from_page_id = w.id THEN w.slug || '|' || l.link_type || '|' || p2.slug
+              ELSE p2.slug || '|' || l.link_type || '|' || w.slug END`;
   const temporalFilter = opts?.temporal ? `AND ${relationshipFilterSql('l', { ...opts.temporal, excludePrivate: opts.excludePrivate })}` : '';
   const recurStep = direction === 'out'
     ? 'JOIN links l ON l.from_page_id = w.id JOIN pages p2 ON p2.id = l.to_page_id'
@@ -47,11 +53,11 @@ export async function readRelationalFanout(query: ReadQuery, seeds: string[], op
     WITH RECURSIVE walk AS (
       SELECT p.id, p.slug, p.source_id, 0::int AS depth,
         ARRAY[p.id] AS visited, ARRAY[p.slug] AS path,
-        p.source_id AS seed_source, NULL::text AS last_link_type
+        p.source_id AS seed_source, NULL::text AS last_link_type, ARRAY[]::text[] AS edges
       FROM pages p WHERE p.slug = ANY($1::text[]) AND p.deleted_at IS NULL AND ${seed} ${seedIdentities}
       UNION ALL
       SELECT p2.id, p2.slug, p2.source_id, w.depth + 1,
-        w.visited || p2.id, w.path || p2.slug, w.seed_source, l.link_type
+        w.visited || p2.id, w.path || p2.slug, w.seed_source, l.link_type, w.edges || (${edgeExpr})
       FROM walk w ${recurStep}
       WHERE w.depth < $2 AND NOT (p2.id = ANY(w.visited))
         AND p2.source_id = w.seed_source AND p2.deleted_at IS NULL
@@ -62,6 +68,8 @@ export async function readRelationalFanout(query: ReadQuery, seeds: string[], op
       array_agg(DISTINCT n.last_link_type) FILTER (WHERE n.last_link_type IS NOT NULL) AS via_link_types,
       (array_agg(array_to_string(n.path, chr(9)) ORDER BY n.depth ASC,
         array_length(n.path, 1) ASC, array_to_string(n.path, chr(9)) ASC))[1] AS path_str,
+      (array_agg(array_to_string(n.edges, chr(9)) ORDER BY n.depth ASC,
+        array_length(n.path, 1) ASC, array_to_string(n.path, chr(9)) ASC))[1] AS edges_str,
       (SELECT cc.id FROM content_chunks cc WHERE cc.page_id = n.id
         ${requiresSafeChunks(opts) ? `AND EXISTS (SELECT 1 FROM pages cp WHERE cp.id = n.id AND ${safeChunksFilter('cp')})` : ''}
         ORDER BY cc.chunk_index ASC LIMIT 1) AS canonical_chunk_id
@@ -72,6 +80,7 @@ export async function readRelationalFanout(query: ReadQuery, seeds: string[], op
     hop: Number(row.hop), edge_count: Number(row.edge_count),
     via_link_types: Array.isArray(row.via_link_types) ? row.via_link_types as string[] : [],
     path: row.path_str ? String(row.path_str).split('\t') : [],
+    path_edges: row.edges_str ? String(row.edges_str).split('\t') : [],
     canonical_chunk_id: row.canonical_chunk_id == null ? null : Number(row.canonical_chunk_id),
   }));
 }

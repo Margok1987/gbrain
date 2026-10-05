@@ -408,6 +408,15 @@ purpose, no dedicated status); a `max_tokens`-cut envelope parses as
 `output_truncated` (warning `LLM_OUTPUT_TRUNCATED`) so a too-small output
 budget is distinguishable from malformed model output.
 
+#### Answer feedback fields (additive)
+
+`recall` (when its `query` arm searched pages on the hybrid path) and
+`synthesize` add `answer_id` (`ans_…`) and `feedback: { rateable: true, how_to_rate? }`
+when the caller may change this brain's shared ranking and retrieval feedback is
+on. Callers that cannot rate see no new fields. Pass the id to the `rate_answer`
+operation to rate how useful the answer's evidence was; see
+[retrieval feedback](../guides/retrieval-feedback.md).
+
 ### forget(id, reason?, request_id?) — write
 
 Expire a fact by its opaque string id (from `remember` or

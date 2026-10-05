@@ -81,6 +81,7 @@ export async function runSchema(args: string[]): Promise<void> {
     case 'downgrade': return runDowngradeCmd(args.slice(1));
     case 'usage':    return runUsageCmd(args.slice(1));
     case 'stats':    return runStatsCmd(args.slice(1));
+    case 'cardinality-preview': return runCardinalityPreviewCmd(args.slice(1));
     case 'sync':     return runSyncCmd(args.slice(1));
     case 'reload':   return runReloadCmd(args.slice(1));
     case 'add-type': return runAddTypeCmd(args.slice(1));
@@ -117,6 +118,8 @@ Inspection:
   graph                   Show type/primitive graph with link-verb edges
   lint [<pack>]           Lint a pack for duplicates, dangling refs, etc.
   stats [--source <id>]   Per-type page counts + typed-coverage from the DB
+  cardinality-preview [--source <id>]
+                          Pages with several live relationships of a declared single-value type, and what the dream cycle closes (read-only)
   explain <type>          Print resolved settings for a single type
   usage [--since N(d|w|m)] CLI invocation telemetry summary
 
@@ -1042,6 +1045,28 @@ async function runStatsCmd(args: string[]): Promise<void> {
         console.log(`  ${dp.type.padEnd(20)} ${dp.prefix}`);
       }
     }
+  });
+}
+
+async function runCardinalityPreviewCmd(args: string[]): Promise<void> {
+  const { json, source } = parseFlags(args);
+  await withConnectedEngine(async (engine) => {
+    const { previewSingleValue } = await import('../core/link-single-value.ts');
+    const result = await previewSingleValue(engine, source);
+    if (json) { console.log(JSON.stringify(result, null, 2)); return; }
+    if (Object.keys(result.declared).length === 0) {
+      console.log('No single-value relations declared. A pack declares one with `cardinality: one_per_from` on a state relation (docs/guides/temporal-edges.md#declared-single-value-relations).');
+      return;
+    }
+    for (const [src, types] of Object.entries(result.declared)) console.log(`Source ${src}: single-value ${types.join(', ')}`);
+    if (result.groups.length === 0) { console.log('No page holds more than one live relationship of a declared type.'); return; }
+    for (const g of result.groups) {
+      console.log(`\n${g.subject} ${g.link_type} (${g.source_id}): ${g.live.map(l => `${l.target}${l.since ? ` since ${l.since}` : ' (undated)'}`).join(', ')}`);
+      for (const c of g.would_close) console.log(`  closes ${c.target} on ${c.close_date} (superseded by ${c.superseded_by})`);
+      for (const u of g.undated) console.log(`  leaves ${u} open: no dated start; add one to the page timeline`);
+      for (const [a, b] of g.same_date) console.log(`  leaves ${a} and ${b} open: both start on the same date`);
+    }
+    console.log('\nThe dream cycle (edge_contradictions phase) applies the closures as timeline lines; `gbrain edge-proposals list` shows them, and deleting a line reopens the relationship.');
   });
 }
 

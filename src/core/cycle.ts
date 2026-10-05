@@ -1758,6 +1758,8 @@ async function runPhasePurge(engine: BrainEngine, dryRun: boolean): Promise<Phas
     // System One: decision receipts past decide.receipts.retention_days (reported only when rows were pruned).
     let purgedDecisionReceipts = 0;
     try { purgedDecisionReceipts = await (await import('./ai/decide/store.ts')).pruneReceiptsForCycle(engine); } catch { /* pre-v179 brain */ }
+    let purgedFeedback = { events: 0, weights: 0 };
+    try { purgedFeedback = await (await import('./feedback/store.ts')).pruneRetrievalFeedback(engine, (await (await import('./feedback/settings.ts')).loadFeedbackSettings(engine)).eventRetentionDays); } catch { /* pre-v207 brain */ }
     return {
       phase: 'purge',
       status: purgedPages.error ? 'fail' : 'ok', error: purgedPages.error,
@@ -1783,6 +1785,7 @@ async function runPhasePurge(engine: BrainEngine, dryRun: boolean): Promise<Phas
         purged_batch_retry_audit_files_count: purgedBatchRetryAuditFiles,
         purged_volunteer_events_count: purgedVolunteerEvents,
         ...(purgedDecisionReceipts > 0 ? { purged_decision_receipts_count: purgedDecisionReceipts } : {}),
+        ...(purgedFeedback.events + purgedFeedback.weights > 0 ? { purged_retrieval_feedback_events_count: purgedFeedback.events, purged_retrieval_weights_count: purgedFeedback.weights } : {}),
       },
     };
   } catch (e) {

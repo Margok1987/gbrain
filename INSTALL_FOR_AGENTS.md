@@ -307,8 +307,10 @@ gbrain stats                                             # verify links > 0
 
 For brand-new empty brains, skip this backfill: there is nothing to extract yet.
 Trusted local page writes auto-link when enabled. Remote `put_page` (both stdio
-and HTTP MCP) saves references as text without inline graph extraction. Stdio
-`gbrain serve` runs bounded startup/idle sweeps; `gbrain serve --http` does not
+and HTTP MCP) saves references as text without inline graph extraction; a
+post-commit `links` effect then adds plain mention edges to existing pages the
+writer can see (`gbrain config set mcp.remote_auto_links off` disables it). Stdio
+`gbrain serve` runs bounded startup/idle sweeps for typed edges; `gbrain serve --http` does not
 self-sweep. For HTTP, arrange explicit host-side `gbrain sweep --once` or
 extraction; use authorized `add_link` calls for edges needed immediately.
 

@@ -849,7 +849,7 @@ export async function importFromContent(
       createdAt: fallbackCreatedAt({ existing, fileTimes: opts.fileTimes, now: nowDate }),
     });
 
-    await tx.putPage(slug, {
+    const written = await tx.putPage(slug, {
       type: parsed.type,
       title: parsed.title,
       compiled_truth: parsed.compiled_truth,
@@ -974,6 +974,7 @@ export async function importFromContent(
       // guard. Deferred provider results cannot replace newer text or chunks.
       persistedProjection = await readProjectionSnapshot(tx, slug, txOpts.sourceId);
     }
+    return { pageId: written && written.deleted_at == null ? written.id : undefined, sealed: !opts.coordinated && !opts.beforeCommit };
   };
   if (opts.prepare) return opts.prepare({
     slug, parsedPage, observedRevision: (existing as (typeof existing & { knowledge_revision?: string }) | null)?.knowledge_revision ?? null,

@@ -56,7 +56,7 @@ import {
  * never cleans (see src/schema.sql). `manual` is intentionally absent — it IS
  * the user-facing provenance and the default for omitted link_source.
  */
-export const MANAGED_LINK_SOURCES = ['markdown', 'frontmatter', 'mentions', 'wikilink-resolved'];
+export const MANAGED_LINK_SOURCES = ['markdown', 'frontmatter', 'mentions', 'wikilink-resolved', 'mcp-remote-mention'];
 
 /** add_link valid_from / valid_until: calendar dates on a dated relation type. Null when neither is given. */
 function validateLinkDates(ctx: OperationContext, p: Record<string, unknown>, linkType: string): { validFrom?: string; validUntil?: string } | null {
@@ -85,7 +85,7 @@ const add_link: Operation = {
   name: 'add_link',
   idempotent: false,
   outputRedaction: 'no_stored_text',
-  description: 'Create a typed link (edge) from one page to another in the same source. Use when recording a relationship (works_at, invested_in, mentions). Needs write scope; an explicit link_type must be declared by the active schema pack. On page_not_found: resolve both slugs with resolve_slugs.',
+  description: 'Create a typed link (edge) from one page to another in the same source. Use when recording a relationship (works_at, invested_in, mentions); remote page writes already link [[wikilinks]] to existing pages as mentions (receipt auto_links), so add only typed links or ones the text lacks. Needs write scope; an explicit link_type must be declared by the active schema pack. On page_not_found: resolve both slugs with resolve_slugs.',
   params: {
     from: { type: 'string', required: true, description: "Slug of the page the link originates from (the edge renders on this page), e.g. 'people/alice-example'. These are page slugs — there is no `source`/`target` pair." },
     to: { type: 'string', required: true, description: "Slug of the page the link points to, e.g. 'companies/acme-example'." },

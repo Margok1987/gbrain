@@ -819,6 +819,13 @@
         "thinClient": "none",
         "thinClientRoutedSubcommands": []
       },
+      "feedback": {
+        "hasSwitchCase": true,
+        "phase": "post-connect",
+        "preConnectRules": [],
+        "thinClient": "refuse",
+        "thinClientRoutedSubcommands": []
+      },
       "files": {
         "hasSwitchCase": true,
         "phase": "post-connect",

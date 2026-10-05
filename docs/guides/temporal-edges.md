@@ -169,11 +169,52 @@ An applied proposal is one timeline line on the subject page:
 Delete the line to reopen the relationship; the check records that and does not
 propose it again until the evidence changes.
 
+## Declared single-value relations
+
+A schema pack can declare that a state relation has one current value per page, for
+example a company brain where `works_at` means the one current employer:
+
+```yaml
+link_types:
+  - name: works_at
+    cardinality: one_per_from   # default: many
+```
+
+For a declared type the nightly check asks no model: the declaration already says two
+live relationships cannot both hold. The chain rule orders the page's live
+relationships by their latest dated start and ends each one on the date the next one
+started, so an out-of-order import (Acme from January, Widget from March, then Gadget
+from February) ends Acme in February and Gadget in March. Relationships without a dated
+start, and two that start on the same date, stay open and appear in
+`gbrain edge-proposals list`. Closures are recorded as proposals with model
+`schema-pack:cardinality`; `gbrain edge-proposals accept <id>` writes one as the same
+reversible timeline line.
+
+- Only state relations take `cardinality`: the built-in ones (`works_at`, `advises`, `yc_partner`) and any type the
+  pack declares `temporal: state`. `gbrain schema lint` rejects it elsewhere, because only state relations end.
+- The declaration comes from the source's resolved pack. A child pack that redeclares
+  the type replaces the whole entry, so it must restate `cardinality`.
+- `gbrain schema cardinality-preview [--source <id>] [--json]` lists every page with
+  more than one live relationship of a declared type and what the next dream cycle
+  closes or leaves open. It writes nothing; run it before activating a pack that adds a
+  declaration.
+- `dream.single_value.mode` is `propose` by default: closures wait for review in
+  `gbrain edge-proposals list`. `gbrain config set dream.single_value.mode apply` writes them
+  automatically; `off` hands declared types back to the model judge. Held-out testing found
+  wrong closures when an advisory timeline line ("Took an advisory role with X") counted as
+  the start of a new job at X, so review proposals before accepting them.
+- To stop further closures, remove the declaration. `gbrain edge-proposals undo <id>`
+  (or deleting the line) reopens a relationship it closed.
+
+Older gbrain releases reject a pack that uses `cardinality`, so set the pack's
+`gbrain_min_version` to the release that adds it.
+
 ## Turning it off
 
 - `gbrain config set graph.edge_validity off`: graph reads return every edge, as
   before. Dated evidence keeps being recorded, so turning it back on loses nothing.
-- `gbrain config set dream.edge_contradictions.mode off`: no relationship checks.
+- `gbrain config set dream.edge_contradictions.mode off`: no model-judged relationship checks
+  (declared single-value relations follow `dream.single_value.mode`).
   Lines it already wrote stay until `gbrain edge-proposals undo --all-applied`.
 
 ## Health

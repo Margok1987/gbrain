@@ -35,7 +35,11 @@ function namedTools(text: string): string[] {
  * contract stays within Lane I's +15% token-overhead gate.
  */
 const PRE_F1_BYTES = 4042;
-const LANE_I_CEILING = Math.floor(PRE_F1_BYTES * 1.15);
+/** #6007: the issue's acceptance criteria require write guidance (put_pages, wait_ms) in initialize. */
+const WRITING_CLAUSE_BYTES = 240;
+const LANE_I_CEILING = Math.floor(PRE_F1_BYTES * 1.15) + WRITING_CLAUSE_BYTES;
+/** Claude Code reads only the first 2,048 characters of a server's initialize instructions. */
+const HARNESS_READ_LIMIT = 2_048;
 
 describe('F1 generated instructions', () => {
   for (const surface of SURFACES) {
@@ -78,7 +82,8 @@ describe('F1 generated instructions', () => {
   });
 
   test('recorded tail-free instruction sizes per surface', () => {
-    const recorded = { verbs: 2_243, starter: 4_546, full: 4_607 };
+    // #6007: starter +140 and full +230 for the write guidance (wait_ms; put_pages where it is served), within WRITING_CLAUSE_BYTES.
+    const recorded = { verbs: 2_243, starter: 4_686, full: 4_837 };
     for (const surface of SURFACES) {
       const listed = new Set(filterOpsForSurface(operations, surface).map(o => o.name));
       const size = buildMcpInstructions({ tools: { callable: n => listed.has(n) } }).length;
@@ -100,13 +105,31 @@ describe('F1 generated instructions', () => {
     expect(text).toContain('worker missing: 3 jobs');
     expect(text).not.toContain('keyless by choice');
     expect(text).not.toContain('Schema is behind');
-    expect(Buffer.byteLength(text) - PRE_F1_BYTES).toBeLessThanOrEqual(1200);
+    expect(Buffer.byteLength(text) - PRE_F1_BYTES).toBeLessThanOrEqual(1200 + WRITING_CLAUSE_BYTES);
   });
 
   for (const surface of SURFACES) {
     test(`${surface}: tail-free contract stays within +15% of the pre-F1 contract`, () => {
       const listed = new Set(filterOpsForSurface(operations, surface).map(o => o.name));
       expect(Buffer.byteLength(buildMcpInstructions({ tools: { callable: n => listed.has(n) } }))).toBeLessThanOrEqual(LANE_I_CEILING);
+    });
+  }
+
+  for (const surface of SURFACES) {
+    test(`${surface}: prompt-critical lines end within the first ${HARNESS_READ_LIMIT} characters`, () => {
+      const listed = new Set(filterOpsForSurface(operations, surface).map(o => o.name));
+      const text = buildMcpInstructions({ tools: { callable: n => listed.has(n) } });
+      const critical = [
+        listed.has('context_pack') && 'call `context_pack` at session start',
+        listed.has('put_page') && listed.has('get_page') && 'put_page REPLACES the entire page',
+        listed.has('put_page') && 'Writing:',
+      ].filter((marker): marker is string => typeof marker === 'string');
+      for (const marker of critical) {
+        const start = text.indexOf(marker);
+        expect(start).toBeGreaterThanOrEqual(0);
+        const end = text.indexOf('\n', start);
+        expect(end === -1 ? text.length : end).toBeLessThanOrEqual(HARNESS_READ_LIMIT);
+      }
     });
   }
 

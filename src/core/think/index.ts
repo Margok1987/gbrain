@@ -209,6 +209,8 @@ export interface ThinkResult {
   usage?: { input_tokens: number; output_tokens: number } | null;
   /** Evidence delivery meta, present only when think.return_unit is not chunk. */
   evidence_delivery?: import('../search/evidence-delivery.ts').DeliveryMeta;
+  /** Gathered pages with the revision retrieved, for retrieval-feedback recording; the op layer strips it. */
+  feedback_evidence?: Array<{ source_id: string; slug: string; content_hash: string | null }>;
   /** Only set when --save was true and the caller persisted a synthesis page. */
   savedSlug?: string;
   /** Diagnostics for `--explain` callers (CLI surface for v0.29). */
@@ -962,6 +964,7 @@ export async function runThink(
     // ANDs the not-JSON/sentinel flag with a content check (catches valid-but-empty JSON).
     synthesisOk: synthesisOk && response.answer.trim().length > 0,
     synthesis_status: synthesisStatus,
+    feedback_evidence: gather.pages.map(pg => ({ source_id: pg.source_id ?? 'default', slug: pg.slug, content_hash: pg.content_hash ?? null })),
     ...(extractive ? { extractive } : {}),
     usage, ...(evidenceDelivery ? { evidence_delivery: evidenceDelivery } : {}),
     diagnostics: {

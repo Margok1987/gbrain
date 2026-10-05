@@ -397,7 +397,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   return { observedRevision, noop, additionalPageKeys:links?.pageKeys, file, ...await pageDatabaseOnlyPublication(engine, row, file), validate: ready.validate, apply: async tx => {
     let autoLinks: Awaited<ReturnType<NonNullable<typeof links>['apply']>> | undefined;
     if (!noop) {
-      await ready.apply(tx);
+      const applied = await ready.apply(tx);
       // Mandatory metadata shares publication rollback; exact no-ops never heal it.
       if (sourcePath && !snapshot?.page.source_path) await tx.executeRaw(`UPDATE pages SET source_path = $1
         WHERE source_id=$2 AND slug=$3 AND source_path IS NULL`, [sourcePath, row.source_id, row.slug]);
@@ -415,11 +415,13 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
         for (const tag of snapshot!.tags) if (!versionTags.includes(tag)) await tx.removeTag(row.slug, tag, source);
         for (const tag of versionTags) await tx.addTag(row.slug, tag, source);
       }
-      await project?.(tx);
+      // #6007: the page the import just wrote live is the page the projections describe; no re-read.
+      await project?.(tx, row.operation === 'restore_page' ? undefined : applied?.pageId);
       autoLinks = await links?.apply(tx);
       if (targetDeleted) await tx.softDeletePage(row.slug, source);
-      // Index installation and terminal receipt share this transaction.
-      await sealPageTextProjection(tx, row.slug, row.source_id);
+      // Index installation and terminal receipt share this transaction. The import sealed the projection
+      // as its last revision-changing step; only a later revision change (restore, tags, links, delete) reseals.
+      if (!(applied?.sealed && row.operation !== 'restore_page' && !versionTags && !links && !targetDeleted)) await sealPageTextProjection(tx, row.slug, row.source_id);
     }
     return { ...advisories, ...(autoLinks ? {auto_links:autoLinks} : {}),
       status: noop ? 'skipped' : row.operation === 'restore_page' ? 'restored' : row.operation === 'revert_version' ? 'reverted' : 'created_or_updated',

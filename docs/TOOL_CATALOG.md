@@ -4,7 +4,7 @@
 <!-- Regenerate: bun run scripts/generate-tool-catalog.ts -->
 <!-- Freshness-guarded by scripts/check-tool-catalog-fresh.sh (bun run verify). -->
 
-Every non-localOnly operation on the MCP surface: 142 tools across 24 areas. **Starter** marks membership in the ~40-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
+Every non-localOnly operation on the MCP surface: 144 tools across 24 areas. **Starter** marks membership in the ~40-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
 
 ## admin
 
@@ -168,10 +168,11 @@ Every non-localOnly operation on the MCP surface: 142 tools across 24 areas. **S
 | `get_page` | Read a page by slug (fuzzy optional; renamed slugs redirect). | read | yes |  |
 | `get_raw_data` | Retrieve raw data for a page. | read |  |  |
 | `get_versions` | Page version history. | read |  |  |
-| `get_write_request` | Read the receipt of your write by request_id (after write_pending or a lost reply). | write | yes |  |
+| `get_write_request` | Read your write's receipt by request_id (after write_pending or a lost reply). | write | yes |  |
 | `list_pages` | List pages with filters. | read | yes |  |
 | `list_write_requests` | List your write receipts in one source, newest first. | write | yes |  |
 | `put_page` | Replace a complete Markdown page: content REPLACES the whole page. | write | yes |  |
+| `put_pages` | Write up to 50 complete Markdown pages (8 MB total) in one call; use instead of put_page for more than 3 pages. | write |  |  |
 | `put_raw_data` | Store a raw provider payload (API response JSON) alongside a page, keyed by source. | write |  |  |
 | `resolve_slugs` | Fuzzy-match a partial slug or title to page slugs. | read | yes |  |
 | `restore_page` | Restore a soft-deleted page (clear deleted_at) and re-create its markdown file on disk (the counterpart to delete_page removing it; the result write_through field reports the outcome). | write |  |  |
@@ -208,6 +209,7 @@ Every non-localOnly operation on the MCP surface: 142 tools across 24 areas. **S
 | `assemble_evidence` | Deliver whole evidence for an ordered list of search hits (each {source_id, slug, chunk_id} from a prior search/query result): the same windows, sections or pages `query` returns with return_unit, packed into token_budget. | read |  |  |
 | `cache_stats` | Semantic query-cache introspection: resolved knobs (enabled, similarity threshold, TTL) plus row counts and total hits. | admin |  |  |
 | `query` | Hybrid search plus multi-query expansion for concept or landscape questions (expansion recovers synonym-phrased matches). | read | yes |  |
+| `rate_answer` | Rate how useful an answer's retrieved evidence was, so this brain ranks better next time (zero LLM calls). | write |  |  |
 | `search` | Cheap hybrid search (vector + keyword), no LLM expansion, top 20: for exact tokens, names, field values. | read | yes |  |
 | `search_by_image` | Image-as-query retrieval. | read |  |  |
 | `search_modes` | Read-only search-mode dashboard: active mode, EVERY mode-bundle knob resolved with attribution (mode default vs config override), the three frozen bundles, and a reranker_readiness verdict (whether the resolved reranker will actually run; remote callers get the verdict without the host key inventory). | read |  |  |

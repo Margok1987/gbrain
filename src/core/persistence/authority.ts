@@ -108,7 +108,8 @@ export async function authorizeWrite(engine: SqlEngine, a: WriteAuthority, opera
   }
   deny('Application authority is unavailable through submitted write requests.');
 }
-export async function authorizeStoredRequest(engine: SqlEngine, row: WriteRequest, lock = false): Promise<void> {
+/** `pageVisibility: false` is for a caller that checks the target's visibility itself after locking the page. */
+export async function authorizeStoredRequest(engine: SqlEngine, row: WriteRequest, lock = false, opts: { pageVisibility?: boolean } = {}): Promise<void> {
   // #5984: one membership read per source per transaction; a FOR SHARE read also answers a plain one.
   const [source] = await transactionMemo(engine, lock ? [`source-membership:${row.source_id}:share`] : [`source-membership:${row.source_id}`, `source-membership:${row.source_id}:share`],
     () => engine.executeRaw<{ incarnation: string; archived: boolean }>(`SELECT incarnation,archived FROM sources WHERE id=$1${lock ? ' FOR SHARE' : ''}`, [row.source_id]));
@@ -125,7 +126,7 @@ export async function authorizeStoredRequest(engine: SqlEngine, row: WriteReques
       for (const slug of affected) await authorizeWrite(engine, row.authority, row.operation, slug, lock);
     }
   }
-  if (!skillWrite(row.operation)) await authorizePageVisibility(engine, row.authority, row.slug);
+  if (!skillWrite(row.operation) && opts.pageVisibility !== false) await authorizePageVisibility(engine, row.authority, row.slug);
   if (row.authority.remote && ['takes_add', 'takes_update', 'takes_resolve', 'takes_supersede'].includes(row.operation)) {
     await authorizeStoredTakeHolders(engine, row);
   }
@@ -160,11 +161,31 @@ async function authorizeStoredTakeHolders(engine: SqlEngine, row: WriteRequest):
   if (row.state === 'committed' && holders.size === 0) deny('The legacy take receipt has no verifiable holder authority.');
   for (const holder of holders) await authorizeTakeHolder(engine, row.authority, holder);
 }
+/**
+ * #6007: one access check answers identical read-only statements once (the
+ * current and the stored authority read the same writer row and visibility).
+ * The memo lives for that single check and holds no locking reads.
+ */
+function onceReads(engine: BrainEngine): BrainEngine {
+  const reads = new Map<string, Promise<unknown[]>>();
+  return new Proxy(engine, { get(target, key) {
+    if (key === 'executeRaw') return (sql: string, params?: unknown[], opts?: { signal?: AbortSignal }) => {
+      if (/\bFOR (?:SHARE|UPDATE)\b/i.test(sql)) return target.executeRaw(sql, params, opts);
+      const id = JSON.stringify([sql, params ?? null]);
+      let read = reads.get(id);
+      if (!read) { read = target.executeRaw(sql, params, opts); reads.set(id, read); read.catch(() => reads.delete(id)); }
+      return read;
+    };
+    const value = Reflect.get(target, key, target);
+    return typeof value === 'function' ? value.bind(target) : value;
+  } });
+}
 export async function ownRequestAccessible(ctx: OperationContext, row: WriteRequest): Promise<boolean> {
   try {
-    const auth = await submissionAuthority(ctx, row.operation, row.source_id, row.source_incarnation, row.slug);
+    const engine = onceReads(ctx.engine);
+    const auth = await submissionAuthority({ ...ctx, engine }, row.operation, row.source_id, row.source_incarnation, row.slug);
     if (auth.principal.kind !== row.principal_kind || auth.principal.id !== row.principal_id) return false;
-    await authorizeStoredRequest(ctx.engine, row);
+    await authorizeStoredRequest(engine, row);
     return true;
   } catch (error) {
     if (error instanceof OperationError && ['permission_denied','source_changed','writer_registration_required','page_not_found'].includes(error.code)) return false;

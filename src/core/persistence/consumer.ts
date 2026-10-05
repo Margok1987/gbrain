@@ -1,9 +1,9 @@
 import type { BrainEngine, ReservedConnection } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
-import { CLAIMABLE_WRITE_SQL, claimGroupFollowers, claimNextWrite, compactWriteReceipts, hasClaimableWrite, getWriteRequestById, releaseUnpublishedClaim, renewWriteClaim, vacuumPersistenceQueues } from './journal.ts';
+import { CLAIMABLE_WRITE_SQL, claimGroupFollowers, claimNextWrite, publicationGroupKey, compactWriteReceipts, hasClaimableWrite, getWriteRequestById, releaseUnpublishedClaim, renewWriteClaim, vacuumPersistenceQueues } from './journal.ts';
 import { finishUnpublishedFailure, publishMutation, recoverPublication, type PreparedMutation } from './coordinator.ts';
 import { localHostId } from './identity.ts';
-import { executeClaimedGroup } from './group-publish.ts';
+import { executeClaimedGroup, PAGE_BATCH_GROUP_MAX } from './group-publish.ts';
 import { isTerminal, type WriteRequest } from './model.ts';
 import { refreshManagedFilesystemRoots } from './filesystem-guard.ts';
 import { PROJECTION_RETRY_READY_SQL, rebuildPendingPageProjections } from '../page-state/projections.ts';
@@ -531,15 +531,22 @@ export class PersistenceConsumer {
     // #5984 admit-ahead: a window group whose predecessor did not commit is cancelled, never published after it.
     const orphaned = await cancelOrphanedWindowGroup(this.engine, row);
     if (orphaned) { for (const done of orphaned) this.settled(done); return true; }
-    const group = typeof row.intent?.group === 'string' ? row.intent.group : null;
+    const group = publicationGroupKey(row);
     if (!group || this.engine.kind !== 'postgres') return this.execute(row);
-    const followers = await claimGroupFollowers(this.engine, row, group, 63);
+    // #6007: a put_pages batch publishes in groups of at most PAGE_BATCH_GROUP_MAX pages.
+    const followers = await claimGroupFollowers(this.engine, row, group, group.startsWith('batch:') ? PAGE_BATCH_GROUP_MAX - 1 : 63);
     if (!followers.length) return this.execute(row);
     const rows = [row, ...followers];
     for (const member of rows) this.executing.add(member.id);
     try {
       return await executeClaimedGroup(this.engine, rows, { hostId: this.hostId, prepare: member => this.prepare(this.engine, member, this.config),
-        settled: done => { this.executing.delete(done.id); this.settled(done); } });
+        settled: done => {
+          this.executing.delete(done.id);
+          if (done.state === 'committed' && done.worktree_id && !String(done.intent?.kind).startsWith('managed_sync_')) {
+            this.foregroundCounts.set(done.worktree_id, this.foregroundCompletions(done.worktree_id) + 1);
+          }
+          this.settled(done);
+        } });
     } finally { for (const member of rows) this.executing.delete(member.id); }
   }
   /** Mandatory barrier: engine.close must be sequenced AFTER this promise. */

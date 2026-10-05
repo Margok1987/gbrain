@@ -49,4 +49,5 @@ test/e2e/apply-migrations-orchestration-lock.test.ts
 test/e2e/postgres-poisoned-connection.test.ts
 test/e2e/write-attribution-postgres.test.ts
 test/e2e/write-attribution-read-parity.test.ts
+test/e2e/feedback-parity.test.ts
 test/e2e/mentions-parity.test.ts

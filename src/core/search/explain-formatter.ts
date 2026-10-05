@@ -88,6 +88,10 @@ export function formatResultExplain(
     const prefix = result.graph_session_prefix ?? '?';
     lines.push(`   - session_demote ×${fmt(result.session_demote_factor)} (prefix=${prefix})`);
   }
+  if (result.feedback_boost !== undefined && result.feedback_boost !== 1.0) {
+    anyBoost = true;
+    lines.push(`   + feedback ×${fmt(result.feedback_boost)} (use-attributed ratings)`);
+  }
   if (result.reranker_delta !== undefined && result.reranker_delta !== 0) {
     anyBoost = true;
     const arrow = result.reranker_delta > 0 ? '↑' : '↓';

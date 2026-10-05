@@ -10,6 +10,138 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.64.0] - 2026-10-05
+
+**An agent connected to a remote brain can now save a stack of long pages in under a minute, and gbrain tells it how.**
+
+Agents writing to a brain over MCP (for example through `gbrain serve --http` on another machine) used to save pages one at a time, and each page cost several seconds of back-and-forth with the database. A large page also outlasted the reply's built-in wait, so the agent got "still pending" and had to keep asking. Writing 27 long research pages took about 15 minutes, followed by around 30 more calls to wire up links the pages already contained.
+
+Now the agent sends its pages in batches with `put_pages`, waits for the commit in the same reply with `wait_ms`, and the server links `[[wikilinks]]` between the pages by itself. The server also does far less database work per page and publishes a whole batch in one transaction. The instructions every MCP agent receives at connect time say all of this up front.
+
+Measured with 25 pages of 60 KB each, written over MCP to a Postgres brain 30 ms away (round trip), with embeddings and Git on:
+
+| | Before | Now |
+| --- | --- | --- |
+| 25 pages, one `put_page` at a time, with polling | nearly 5 minutes (about 11 s a page) | not needed |
+| 25 pages, 4 `put_pages` calls sent one after another | not available | 49 s, no polling |
+| One 60 KB `put_page` | 7.2 s reply saying "pending", then polls (about 11 s total) | committed in about 6 s, in the reply |
+| SQL statements on one page's publish path | 135 | 115 |
+| Backlinks between the pages you just wrote | about 30 manual `add_link` calls | built automatically after the commit |
+
+## To take advantage of v0.60.64.0
+
+`gbrain upgrade` should do this automatically. Remote agents pick up the new instructions the next time they connect.
+
+1. **Tell your agent** (or let the connect-time instructions do it): *"When you save more than three pages to gbrain, use put_pages with one request_id per batch and wait_ms 25000."*
+2. **Turn mention links off** if you don't want them: `gbrain config set mcp.remote_auto_links false`.
+3. **Verify:** `gbrain call put_pages '{"request_id":"<uuid>","pages":[{"slug":"notes/test-a","content":"# A"},{"slug":"notes/test-b","content":"# B\n\nSee [[notes/test-a]]."}],"wait_ms":25000}'` returns `"state": "committed"`, and `gbrain call get_links '{"slug":"notes/test-b"}'` shows the `mentions` link to `notes/test-a`.
+
+### Itemized changes
+
+#### Batch writes
+- New MCP tool `put_pages` (full surface): 1-50 complete pages, 8 MB of content at most, per call. Every page is an ordinary `put_page` write with the same fences, revision checks and receipts. The pages are accepted together, so queue capacity (request count and bytes) is reserved for the whole batch, or the call refuses with `queue_capacity` and accepts none.
+- One receipt per batch: the state of each page with its revision or its own error envelope, totals, `links`, and `next` (`done`, `poll` or `fix_pages`). A page refused for its own reason does not stop the others. A grant that cannot write refuses the whole call with one `permission_denied`.
+- Replaying the identical call with the same `request_id` never writes twice. `put_pages` with only `request_id` reports progress without resending content. A replay with different pages refuses with `idempotency_conflict` and names the changed pages.
+- Every page needs `put_page` permission; bound clients get each page's slug fenced like `put_page`.
+
+#### Waiting for the commit
+- `put_page` and `put_pages` accept `wait_ms` (0-30000, counted from arrival; default 5000 for `put_page`, 25000 for `put_pages`). It is not part of the write's identity, so a replay with a different wait is still the same write. Out-of-range values refuse with `invalid_write_wait` before anything is accepted.
+- A pending receipt's `retry_after_ms` comes from the server's recent publishing pace instead of a fixed 1 s.
+- `get_write_request` states its poll cadence and final states; a pending `put_page` names `wait_ms` and `put_pages`.
+
+#### Faster publishing
+- A `put_pages` batch publishes up to 8 pages per database transaction, with file-safe recovery: if one page fails, the group rolls back, every file is restored, and the pages publish one at a time so each failure stays with its own page.
+- Fewer database round trips per write: claiming, admission, recovery records and completion each take fewer statements, a page's own writes skip repeated reads, and a batch's shared admission reads run once.
+- Connector writes wait for a pending withdrawal rewrite of the same page before reading its file, so a sync right after a `forget` no longer fails with `source_changed`.
+
+#### Links for remote writes
+- Remote `put_page`, `put_pages`, `capture` and `edit_page` writes queue a `links` effect after the commit. It turns `[[wikilinks]]` and markdown links in the page body into plain `mentions` links to pages that already exist in the same source, are visible to the writer and sit inside its slug grant. Typed, frontmatter and timeline edges stay off for untrusted writes. A batch links its pages to each other once its last page commits.
+- On by default; `mcp.remote_auto_links false` turns it off. Receipts report `auto_links.mention_links` and the effect's `added`/`removed` counts.
+
+#### Agent guidance
+- The connect-time instructions put the prompt-critical lines first, so harnesses that read only the first 2,048 characters still see them: `context_pack` at session start, `put_page` replaces the whole page, and the writing guidance (`put_pages`, `wait_ms`, following `next`).
+- `put_page`, `add_link` and `add_timeline_entry` descriptions say when links and timeline entries come from the page itself.
+- The simple HTTP transport's 413 reply tells the agent to split the request and names `GBRAIN_HTTP_MAX_BODY_BYTES`.
+
+### For contributors
+- New e2e coverage: Postgres statement budgets per write phase, two-connection page-guard tests, grouped `put_page` publication (happy path and per-member failure), and the remote links effect on both engines.
+- The initialize-instructions and served-schema budgets grew for the write guidance; a new test pins the prompt-critical lines inside the first 2,048 characters.
+
+## [0.60.63.0] - 2026-10-05
+
+**Your brain can learn which pages actually helped, if you turn it on.**
+
+Retrieval feedback records which pages each answer used. When you or your agent rate an answer (`rate_answer`, or `gbrain rate <answer_id> 1-5`), those pages rank a little higher or lower next time: a capped 0.9x to 1.1x multiplier, no model call, nothing leaves the machine. It ships **off**. In held-out tests with consistent ratings it improved ranking on entity-centric brains (people, companies, deals: +2.0 NDCG@10) and did not help on chat-history brains, which is why it is opt-in. `gbrain post-upgrade` prints a one-time notice with the same facts and the command.
+
+A schema pack can now also declare a state relation single-valued (`cardinality: one_per_from`, for example `works_at` meaning the one current employer). The nightly relationship check then proposes, without a model, which competing relationship ended and when. It only proposes: held-out testing found an advisory timeline line read as a new job, so every closure waits for review.
+
+### How to use it
+
+```bash
+gbrain config set feedback.enabled true      # opt in (explicit ratings only)
+gbrain search "acme renewal"                 # prints: answer: ans_… (rate with: gbrain rate ans_… 1-5)
+gbrain rate ans_01J… 5                       # the pages that answer used rank a little higher
+gbrain search "acme renewal" --explain       # shows feedback ×1.01 on rated pages
+gbrain feedback status                       # what the brain has learned; gbrain feedback reset undoes it
+gbrain schema cardinality-preview            # with a pack that declares cardinality: what would close
+```
+
+Over MCP, `rate_answer { answer_id, rating }` rates an answer, or `pages: [{ ref, rating }]` rates single pages. Guide: `docs/guides/retrieval-feedback.md`.
+
+### The numbers that matter
+
+| Measure (held-out, custodian) | Result |
+|---|---|
+| Entity brain (world-v1 relational), consistent ratings, NDCG@10 | +2.04 [+1.03, +3.28]; beats a frequency-only baseline (−1.50) |
+| Chat-history brain (LoCoMo), consistent ratings, NDCG@10 | −0.12 [−1.02, +0.61]: no gain |
+| Feedback on, no ratings: LongMemEval-S retrieval lists (500 questions) | identical; mean read latency +0.6 ms |
+| Declared single-value closures (temporal-edges set C) | 3 of 3 applied closures wrong, so closures are review-only |
+
+Full record: `docs/eval/decisions/p3-retrieval-feedback/VERDICTS.md`.
+
+### Things to watch
+
+- With feedback on, answers carry an `answer_id` and a `how_to_rate` line; agents should rate answers they used. A brain with no ratings ranks exactly as before.
+- A rating applies to the page revision the answer read; a page edited since is skipped.
+- Relational triplet scoring was tested and is not included: the relational arm recognized too few held-out phrasings for it to matter.
+
+## To take advantage of v0.60.63.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Your agent reads `skills/migrations/v0.60.63.0.md` the next time you interact with it.** It relays the retrieval feedback notice and turns feedback on only if you say yes.
+3. **Verify the outcome:**
+   ```bash
+   gbrain doctor --only retrieval_feedback_health --json
+   gbrain feedback status --json
+   ```
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+- **Retrieval feedback store** (migration v207): `retrieval_events`, `retrieval_event_pages`, `retrieval_event_links`, `retrieval_feedback`, `retrieval_weights`; a write-behind recording queue with overflow and drain accounting; retention in the purge phase; all five tables classified in the engine graduation inventory.
+- **Feedback ranking stage** after fusion (`src/core/search/feedback-boost.ts`), bounded by `feedback.influence` λ; `--explain` shows the per-row factor.
+- **`rate_answer`** MCP operation, `gbrain rate`, and CLI-only `gbrain feedback status|reset`, with agent-first refusal codes (`invalid_rating`, `answer_pending`, `answer_unavailable`, `answer_not_yours`, `ref_not_in_answer`, `ambiguous_ref`, `feedback_disabled`, `feedback_not_authorized`).
+- **Defaults**: `feedback.enabled=false`, `feedback.implicit=false`; doctor `retrieval_feedback_health` and the post-upgrade notice say how to turn it on.
+- **Declared single-value relations** (`src/core/link-single-value.ts`): schema pack `cardinality: one_per_from` on state relations (built in or `temporal: state`), lint rule `link_types_cardinality`, the declared pass in `edge_contradictions`, `gbrain schema cardinality-preview`, `dream.single_value.mode` (default `propose`).
+- **Raw-query routing guard**: a test asserts no operation reachable by a remote caller accepts SQL or graph-query text.
+
+### For contributors
+
+- Tests: `test/feedback-*.test.ts`, `test/e2e/feedback-parity.test.ts` (PGLite and Postgres), `test/link-single-value.test.ts`, `test/raw-query-routing-guard.test.ts`.
+- Preregistration and verdicts: `docs/eval/decisions/p3-retrieval-feedback/`. Eval runners live in gbrain-evals.
+- Catalog, doctor, migration and upgrade-replay goldens regenerated for migration v207.
+
 ## [0.60.62.0] - 2026-10-05
 
 **Ask your agent for a brief on an account and it now finds the open ticket, the latest contact and the blocker, and it spends about a quarter less to get there.**

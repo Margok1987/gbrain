@@ -299,8 +299,12 @@ const think: Operation = {
     const { keylessThinkNotice, thinkNotSavedNotice } = await import('../interop-notices.ts');
     if (result.synthesis_status === 'no_llm') ctx.emitNotice?.(keylessThinkNotice());
     if (remote && (Boolean(p.save) || Boolean(p.take))) ctx.emitNotice?.(thinkNotSavedNotice());
+    const { recordThinkAnswer, feedbackMetaFields } = await import('../feedback/record.ts');
+    const feedbackMeta = feedbackMetaFields(await recordThinkAnswer(ctx, 'think', result));
+    delete result.feedback_evidence;
     return {
       ...result,
+      ...feedbackMeta,
       // #1698 (#10): the persist-skip signal returns slug '' — map it (and any
       // falsy) to null so callers never see an empty-string "slug".
       saved_slug: savedSlug || null,

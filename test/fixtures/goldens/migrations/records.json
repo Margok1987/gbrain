@@ -18,7 +18,6 @@
       "dropInvalidConcurrentIndex": "6864d844b7dfb2fbecdd0fb9c73e06248473376feb794b3fe58f036c70d2d44c",
       "getFtsLanguage": "0d790b4c4af1f67a2a1bbd59470beb13f434917b381931baf8404a41c5d903db",
       "hnswMaxDimsForType": "a187cdcc520f813b7c39da97ce53da58509232ed9f851627ef41abfe1b68bd26",
-      "migrateAutoThinkToPins": "acdb45b8a1c474004b119f900ddd4a902d98681d6379edad15708d87dd834bb4",
       "migrateConnectorCheckpoints": "e0403022a56559556c82a9fa1e90d928f36e1d09c7db570e1d788a87d2dc9521",
       "migrateLegacyTokens": "6e4abe3670127e7a495b56ecbf9f5789edd3a7362d45704656c2210a85b27f4c",
       "migrationNotice": "9a6607b26a9719ef1833571b137bc8ebfcd1e16d545e89ff8728cf3ccbcbb409",
@@ -3058,18 +3057,12 @@
         "version": 206
       },
       {
-        "handler": {
-          "form": "arrow",
-          "helpers": [
-            "migrateAutoThinkToPins"
-          ],
-          "sha256": "6538d483dacf5b76e4eb837603082e0c8611c613f6c534007fa2f2b197e1e1ed"
-        },
+        "handler": "absent",
         "idempotent": true,
-        "name": "pinned_questions",
+        "name": "retrieval_feedback",
         "sql": {
-          "length": 2746,
-          "sha256": "07ff5ebf8abd16f5edf1bb76318ef541e7a74a3c275a78dac04acb103858e93b"
+          "length": 2490,
+          "sha256": "d1e3de98a671e85253ee73b0e67ccf297ba16c663832560c20f88788c1c43600"
         },
         "sqlFor": "absent",
         "transaction": "absent",

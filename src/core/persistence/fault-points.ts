@@ -24,6 +24,7 @@ export const EFFECT_FAULT_POINTS: Record<EffectKind, FaultPoint> = {
   embedding: 'effect:embedding:mid',
   'withdrawal-mirror': 'effect:withdrawal-mirror:mid',
   'facts-backstop': 'effect:facts-backstop:mid',
+  links: 'effect:links:mid',
 };
 
 let installed: FaultHook | undefined;

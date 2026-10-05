@@ -5,6 +5,7 @@
  */
 import { type HybridRequest, applyIdentityBoosts, emitHybridMeta } from './request.ts';
 import type { LexicalArms } from './arms.ts';
+import { applyFeedbackStage } from '../feedback-boost.ts';
 import { type PostFusionOpts, RRF_K, rrfFusionWeighted, runPostFusionStages, stampContentFlags, stampUnverifiedExtractions } from '../hybrid.ts';
 import { type RelationalEvidenceSlotDecision, ensureRelationalEvidenceSlot } from '../relational-recall.ts';
 import type { SearchResult } from '../../types.ts';
@@ -46,6 +47,7 @@ export async function searchWithoutEmbeddings(
     await runPostFusionStages(engine, noEmbedResults, postFusionOpts);
     await applyIdentityBoosts(req, noEmbedResults);
     noEmbedResults.sort((a, b) => b.score - a.score);
+    noEmbedResults = await applyFeedbackStage(engine, noEmbedResults, { reranked: false });
   }
   // T3/T4 — alias hop + evidence stamp even without an embedding provider
   // (the named-thing fix is most valuable exactly when vector is unavailable).
@@ -149,6 +151,7 @@ export async function searchVectorFallback(
     await runPostFusionStages(engine, fallbackResults, postFusionOpts);
     await applyIdentityBoosts(req, fallbackResults);
     fallbackResults.sort((a, b) => b.score - a.score);
+    fallbackResults = await applyFeedbackStage(engine, fallbackResults, { reranked: false });
   }
   const kwPreExact = await applyAliasHop(engine, dedupResults(fallbackResults), query, aliasHopOpts);
   // #1663 — structural exact-lookup tier (slug / exact-title identity).
