@@ -117,6 +117,10 @@ export const E2E_TEST_MAP: Record<string, string[]> = {
   ],
   "src/commands/export.ts": ["test/e2e/export-snapshot-postgres.test.ts", "test/e2e/memory-safety-wave-postgres.test.ts"],
   "src/core/export-*.ts": ["test/e2e/export-snapshot-postgres.test.ts", "test/e2e/memory-safety-wave-postgres.test.ts"],
+  // C4 pinned questions: B5 safety gate and operator journeys on Postgres/PgBouncer.
+  "src/core/questions/**": ["test/e2e/pinned-questions-postgres.test.ts"],
+  "src/core/ops/questions.ts": ["test/e2e/pinned-questions-postgres.test.ts"],
+  "src/commands/questions.ts": ["test/e2e/pinned-questions-postgres.test.ts"],
   // System One decide storage, egress page query and decide_health on Postgres/PgBouncer.
   "src/core/ai/decide/**": ["test/e2e/decide-store-postgres.test.ts"],
   // #5836 facts relink: write-target routing (file, page body, unbound refusal, managed) on Postgres.

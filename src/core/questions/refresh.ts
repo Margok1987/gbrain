@@ -117,21 +117,31 @@ async function recordBlocked(engine: BrainEngine, id: number, code: string): Pro
      WHERE id = $1 AND (lease_token IS NULL OR lease_expires_at < now())`, [id, code]);
 }
 
-function normalizedSentenceSet(pins: Array<{ answer: string | null }>): Set<string> {
-  const out = new Set<string>();
-  for (const p of pins) {
-    if (!p.answer) continue;
+interface PublishedAnswer { answer: string | null; published_at: Date | string | null; cited: number[] | string | null }
+
+/**
+ * Answer sentences already published in this source, with when they were
+ * published and which pages they cite. A page that repeats one of them is a
+ * copy of the answer (citation laundering) when it changed after the answer
+ * was published and is not that sentence's own evidence.
+ */
+function launderingIndex(rows: PublishedAnswer[]): Array<{ text: string; at: number; cited: Set<number> }> {
+  const out: Array<{ text: string; at: number; cited: Set<number> }> = [];
+  for (const r of rows) {
+    if (!r.answer) continue;
+    const at = r.published_at ? new Date(r.published_at).getTime() : 0;
+    const cited = new Set((Array.isArray(r.cited) ? r.cited : []).map(Number));
     try {
-      for (const s of JSON.parse(p.answer) as Array<{ text?: unknown }>) {
+      for (const s of JSON.parse(r.answer) as Array<{ text?: unknown }>) {
         const t = typeof s.text === 'string' ? normalizeQuestion(s.text).toLowerCase() : '';
-        if (t.length >= 24) out.add(t);
+        if (t.length >= 24) out.push({ text: t, at, cited });
       }
     } catch { /* unreadable stored answer contributes nothing */ }
   }
   return out;
 }
 
-interface CandidatePage { id: number; slug: string; source_id: string; generation: string | number; revision: string | null; type: string; compiled_truth: string; marker: boolean }
+interface CandidatePage { id: number; slug: string; source_id: string; generation: string | number; revision: string | null; type: string; compiled_truth: string; marker: boolean; updated_at: Date | string }
 
 /** Pages first (hybrid retrieval, keyword fallback), then facts, timeline and takes anchored to them. */
 export async function retrieveEvidence(engine: BrainEngine, pin: PinRow): Promise<EvidenceItem[]> {
@@ -144,19 +154,22 @@ export async function retrieveEvidence(engine: BrainEngine, pin: PinRow): Promis
   }
   if (pin.scope_entity) slugs.add(pin.scope_entity);
   const candidates = slugs.size === 0 ? [] : await engine.executeRaw<CandidatePage>(
-    `SELECT id, slug, source_id, generation, knowledge_revision::text AS revision, type, compiled_truth,
+    `SELECT id, slug, source_id, generation, knowledge_revision::text AS revision, type, compiled_truth, updated_at,
        (frontmatter ? '${PINNED_QUESTION_MARKER}') AS marker
      FROM pages WHERE source_id = $1 AND slug = ANY($2::text[]) AND deleted_at IS NULL`, [pin.source_id, [...slugs]]);
-  const laundered = normalizedSentenceSet(await engine.executeRaw<{ answer: string | null }>(
-    `SELECT answer FROM pinned_questions WHERE source_id = $1 AND answer IS NOT NULL`, [pin.source_id]));
+  const laundered = launderingIndex(await engine.executeRaw<PublishedAnswer>(
+    `SELECT q.answer, q.last_refresh_at AS published_at,
+       COALESCE(array_agg(e.page_id) FILTER (WHERE e.page_id IS NOT NULL), ARRAY[]::integer[]) AS cited
+     FROM pinned_questions q LEFT JOIN question_evidence e ON e.question_id = q.id AND e.answer_revision = q.answer_revision
+     WHERE q.source_id = $1 AND q.answer IS NOT NULL GROUP BY q.id, q.answer, q.last_refresh_at`, [pin.source_id]));
   const order = [...slugs];
   const pages = candidates
     .filter(p => p.type !== 'question' && p.type !== 'synthesis' && !p.marker)
     .filter(p => !pin.scope_slug_prefix || p.slug.startsWith(pin.scope_slug_prefix) || p.slug === pin.scope_entity)
     .filter(p => {
       const body = normalizeQuestion(p.compiled_truth ?? '').toLowerCase();
-      for (const s of laundered) if (body.includes(s)) return false;
-      return true;
+      const changed = new Date(p.updated_at).getTime();
+      return !laundered.some(s => !s.cited.has(p.id) && changed >= s.at && body.includes(s.text));
     })
     .sort((a, b) => order.indexOf(a.slug) - order.indexOf(b.slug))
     .slice(0, MAX_PAGES);
