@@ -6,6 +6,7 @@
  * this entire surface, so existing importers are unchanged.
  */
 
+import type { WriteInference } from './write-inference.ts';
 import type { BrainEngine } from '../engine.ts';
 import type { GBrainConfig } from '../config.ts';
 import { MEMORY_VERBS_VERSION } from '../verbs.ts';
@@ -652,6 +653,11 @@ export interface Operation {
   handler: (ctx: OperationContext, params: Record<string, unknown>) => Promise<unknown>;
   outputRedaction: OutputRedactionPolicy;
   mutating?: boolean;
+  /**
+   * What model work this write may do and when (`src/core/ops/write-inference.ts`).
+   * Unset resolves through OP_WRITE_INFERENCE, then to `'none'`.
+   */
+  writeInference?: WriteInference;
   /**
    * Agent contract v1 (A2): repeating the call with the same arguments (and,
    * for journaled writes, the same request identity) has the same effect as

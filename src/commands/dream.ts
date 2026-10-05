@@ -158,6 +158,10 @@ function parseArgs(args: string[]): DreamArgs {
   const phaseWasExplicit = phaseValues.length > 0;
   let phases: CyclePhase[] = [];
   for (const rawPhase of phaseValues) {
+    if (rawPhase === 'auto_think') {
+      dreamExit(usageError('The auto_think phase is replaced by pinned questions: dream.auto_think.questions became pins (inactive when auto_think was off).',
+        'Run: gbrain questions list (refresh one with gbrain questions refresh <id>, or run gbrain dream --phase standing_questions)'), json);
+    }
     if (!(ALL_PHASES as string[]).includes(rawPhase)) {
       dreamExit(usageError(`Unknown phase "${rawPhase}". Valid: ${ALL_PHASES.join(', ')}`, 'Example: gbrain dream --phase lint'), json);
     }

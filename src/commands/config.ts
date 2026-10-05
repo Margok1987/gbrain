@@ -746,6 +746,12 @@ export async function runConfig(engine: BrainEngine, args: string[]) {
   const positionals = args.filter((a) => a !== '--raw');
   const key = positionals[1];
   const value = positionals[2];
+  if ((action === 'get' || action === 'set') && key) {
+    // C4: dream.auto_think.* keys were migrated to pinned questions (v205); name the replacement.
+    const { autoThinkReplacement } = await import('../core/questions/auto-think-migration.ts');
+    const replacement = autoThinkReplacement(key);
+    if (replacement) console.error(`[config] ${key} is replaced by pinned questions (docs/guides/pinned-questions.md): ${replacement}`);
+  }
 
   if (action === 'get' && key) {
     // #2120: `get` used to read only the DB plane, so a runtime-effective key

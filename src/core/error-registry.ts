@@ -225,6 +225,8 @@ export const CODES = {
   projection_pending: { class: 'retryable', summary: "The current text projection is not ready." },
   provenance_required: { class: 'caller', summary: "provenance is required and must be non-empty." },
   publication_pending: { class: 'retryable', summary: "The catalog adoption is accepted but not fully committed." },
+  question_not_found: { class: 'caller', summary: "No pinned question has this id in the caller's scope; ids are source-qualified (default:questions/<slug>).", docs: 'docs/guides/pinned-questions.md#ids-and-scope' },
+  question_owner_only: { class: 'host_only', summary: "Pinned questions are owner-private: this connection cannot read private pages (or is slug-fenced or delegated), so the owner runs the command on the brain host.", docs: 'docs/guides/pinned-questions.md#who-can-see-pinned-questions' },
   queue_capacity: { class: 'retryable', summary: "The bounded queue is full; existing requests keep their place." },
   rate_limited: { class: 'retryable', summary: "The request was rate-limited; retry after the stated delay." },
   recovery_required: { class: 'host_only', summary: "An earlier write left state that must be inspected and recovered before new writes." },
@@ -349,6 +351,7 @@ export const NOTICE_CODES = {
   post_upgrade: { kind: 'safety', summary: 'gbrain was upgraded; behavior for scripts and agents changed — read the behavior table once.' },
   facts_drain_first_run: { kind: 'info', summary: 'The automatic facts drain is about to process its first backlog on this brain: the queued page count, the estimated spend, the caps and the opt-out.' },
   facts_drain_deferred: { kind: 'degraded', summary: 'The automatic facts drain left queued pages waiting (no key, a spend cap, an unpriced model under a user cap); the fix is the next step.' },
+  pinned_answer_stale: { kind: 'degraded', summary: 'A pinned answer has stale sentences (their evidence changed or was removed) or its refresh is blocked; stale sentences are flagged and withheld from context_pack, and the fix is the next step.' },
   held_files: { kind: 'degraded', summary: 'Sync holds files in the read scope it cannot import: held new files are missing and pages whose newer file is held are stale; the fix is the repair preview on the brain host.' },
   recovered_frontmatter: { kind: 'coaching', summary: 'Files imported only after quoting unquoted frontmatter values; the generator writing them should quote values (the fix is the repair preview).' },
 } as const satisfies Record<string, NoticeEntry>;

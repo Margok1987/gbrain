@@ -720,6 +720,9 @@ const context_pack: Operation = {
       ...(budgetTokens !== null
         ? { budget_tokens: budgetTokens, budget_used: budgetUsed, dropped_count: droppedCount }
         : {}),
+      // C4: optional pinned answers (fresh sentences) and the withheld count (src/core/questions/service.ts).
+      ...(await (await import('../questions/service.ts')).pinnedAnswersForPack(ctx, [...new Set([...(res.cards ?? []).map((c) => c.entity.slug), ...entities])])
+        .catch(() => null)),
     };
   },
 };

@@ -113,6 +113,7 @@ import { imageOperations } from './ops/image.ts';
 import { schemaPacksOperations } from './ops/schema-packs.ts';
 import { skilloptOperations } from './ops/skillopt.ts';
 import { loopsOperations } from './ops/loops.ts';
+import { questionsOperations } from './ops/questions.ts';
 import { chronicleOperations } from './ops/chronicle.ts';
 import { extractionOperations } from './ops/extraction.ts';
 import { entityIdentityOperations } from './ops/entity-identity.ts';
@@ -221,7 +222,7 @@ export const operations: Operation[] = [
   // v0.41.18.0 run_onboard + v0.41.20.0 run_skillopt — ops/skillopt.ts
   ...skilloptOperations,
   // v0.47: open-loop engine (who is waiting on you) — ops/loops.ts
-  ...loopsOperations, ...noticesOperations, // + agent contract v1 A6 mute_notice — ops/notices.ts
+  ...loopsOperations, ...questionsOperations, ...noticesOperations, // + agent contract v1 A6 mute_notice — ops/notices.ts
 ];
 
 // ---------------------------------------------------------------------------
@@ -307,6 +308,9 @@ const OP_AREAS: Record<string, string> = {
   entity_identity_list: 'entities',
   // v0.47 open-loop engine (google source kind)
   open_loops: 'loops', loops_close: 'loops', loops_mute: 'loops', loops_unmute: 'loops',
+  // C4 pinned questions (owner-private, full surface only)
+  questions_pin: 'questions', questions_list: 'questions', questions_status: 'questions',
+  questions_refresh: 'questions', questions_unpin: 'questions',
   // insight / signal reads
   get_recent_salience: 'insights', find_anomalies: 'insights',
   find_contradictions: 'insights', find_experts: 'insights',

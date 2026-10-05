@@ -706,6 +706,31 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
       budget_tokens: { type: 'integer', description: 'Present when budget_tokens was passed.' },
       budget_used: { type: 'integer' },
       dropped_count: { type: 'integer' },
+      // C4 pinned questions — additive optional, owner-capable callers only; outside `text` and the budget.
+      pinned_questions: {
+        type: 'array',
+        description: 'Fresh sentences of pinned answers scoped to a packed entity (owner-capable callers only).',
+        items: {
+          type: 'object',
+          required: ['id', 'question', 'answer', 'freshness'],
+          properties: {
+            id: { type: 'string' },
+            question: { type: 'string' },
+            answer: { type: 'array', items: { type: 'string' } },
+            freshness: { type: 'string', enum: ['fresh', 'stale'] },
+          },
+        },
+      },
+      withheld: {
+        type: 'object',
+        required: ['stale_sentences', 'question_ids', 'refresh_command'],
+        description: 'Pinned-answer sentences left out because their evidence changed or is unreadable.',
+        properties: {
+          stale_sentences: { type: 'integer' },
+          question_ids: { type: 'array', items: { type: 'string' } },
+          refresh_command: { type: 'string' },
+        },
+      },
     },
   },
   delta: {
