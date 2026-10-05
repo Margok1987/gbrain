@@ -34,6 +34,7 @@ import { sanitizeRemoteBody } from '../remote-body.ts';
 import { credentialSafeProjection } from '../credential-projection.ts';
 import { stripChunkHeader } from '../chunkers/code.ts';
 import { OperationError } from '../ops/contract.ts';
+import { evidenceDateHeaderEnabled, loadPageDateHeaders, pageDateHeader } from './evidence-date.ts';
 
 export const RETURN_UNITS = ['chunk', 'window', 'section', 'page', 'auto'] as const;
 export type ReturnUnit = typeof RETURN_UNITS[number];
@@ -96,6 +97,8 @@ export interface DeliveryMeta {
   dropped_reasons: Record<string, number>;
   fallbacks: string[];
   budget_clamped?: { requested: number; max: number };
+  /** Present (true) when every block starts with its one-line date header (`search.evidence_date_header`). */
+  date_header?: true;
 }
 
 export type DeliveredSearchResult = SearchResult & { delivered: DeliveredEvidence };
@@ -108,6 +111,8 @@ export interface EvidencePlan {
   /** return_unit came from the call, not config (snippet precedence). */
   explicitUnit: boolean;
   budgetClamped?: { requested: number; max: number };
+  /** `search.evidence_date_header` is on: each block starts with its date header line. */
+  dateHeader?: true;
 }
 
 export interface DeliveryScope extends PageReadScope {
@@ -226,6 +231,7 @@ export async function resolveEvidencePlan(engine: BrainEngine, input: ResolvePla
     budgetTokens: budget,
     explicitUnit: explicit !== undefined,
     ...(budgetClamped ? { budgetClamped } : {}),
+    ...(await evidenceDateHeaderEnabled(engine) ? { dateHeader: true as const } : {}),
   };
 }
 
@@ -479,6 +485,9 @@ interface Block {
   revision?: string;
   fallbackReason?: string;
   titleTok: number;
+  /** The date header line plus its newline ('' when off), counted in the block's floor. */
+  header: string;
+  headerTok: number;
   selected: Set<number>;
   cut: boolean;
   title: string;
@@ -487,7 +496,7 @@ interface Block {
   reason?: AutoReason;
 }
 
-type PlannedBlock = Omit<Block, 'titleTok' | 'title' | 'rank' | 'reason'>;
+type PlannedBlock = Omit<Block, 'titleTok' | 'title' | 'rank' | 'reason' | 'header' | 'headerTok'>;
 
 /**
  * The hit's text as it appears in the page: a fenced_code chunk carries the
@@ -684,7 +693,7 @@ function allocate(blocks: Block[], budget: number, tokenizer: 'cl100k' | 'heuris
   let droppedAny = false;
   for (const b of blocks) {
     const core = b.anchors[0]?.pieces ?? [];
-    const floor = b.titleTok + core.reduce((n, i) => n + tok(b, i, tokenizer), 0);
+    const floor = b.titleTok + b.headerTok + core.reduce((n, i) => n + tok(b, i, tokenizer), 0);
     const floorChars = core.reduce((n, i) => n + b.doc.pieces[i].text.length, 0);
     if (floor <= remaining && floorChars <= EVIDENCE_BLOCK_CHAR_CAP) {
       for (const i of core) b.selected.add(i);
@@ -695,6 +704,7 @@ function allocate(blocks: Block[], budget: number, tokenizer: 'cl100k' | 'heuris
     if (spill) { spill(b); continue; }
     if (kept.length === 0 && !droppedAny) {
       // Rank one alone exceeds the budget: cut it to fit (minKeep).
+      remaining = Math.max(0, remaining - b.headerTok);
       if (b.titleTok > remaining) {
         b.title = sliceToTokenCount(b.title, remaining, tokenizer);
         b.titleTok = countEvidenceTokens(b.title, tokenizer);
@@ -873,6 +883,19 @@ export async function deliverEvidence(
     }
   }
 
+  // C1 date headers: one line per block, read for every hit page (passthrough
+  // rows included) and paid for inside the budget like the title.
+  let dateHeaders: Map<number, string> | null = null;
+  if (plan.dateHeader) {
+    try {
+      dateHeaders = await loadPageDateHeaders(engine, hits.map(h => h.page_id));
+    } catch {
+      dateHeaders = new Map();
+      fallbacks.add('date_header_unavailable');
+    }
+  }
+  const headerFor = (hit: SearchResult): string => dateHeaders ? `${dateHeaders.get(hit.page_id) ?? pageDateHeader(null)}\n` : '';
+
   const planned: Block[] = [];
   for (const g of groups) {
     let b: PlannedBlock;
@@ -888,12 +911,13 @@ export async function deliverEvidence(
     }
     if (b.fallbackReason) fallbacks.add(b.fallbackReason);
     const title = b.hit.title ?? '';
-    planned.push({ ...b, title, titleTok: countEvidenceTokens(title, tokenizer), rank: g.rank, ...(g.reason ? { reason: g.reason } : {}) });
+    const header = headerFor(b.hit);
+    planned.push({ ...b, title, titleTok: countEvidenceTokens(title, tokenizer), header, headerTok: countEvidenceTokens(header, tokenizer), rank: g.rank, ...(g.reason ? { reason: g.reason } : {}) });
   }
 
   // Unchanged chunks are paid for first; conversations share the rest, and one
   // whose matching span no longer fits keeps its ranked chunks instead.
-  const reserved = passthrough.reduce((n, p) => n + countEvidenceTokens(p.hit.chunk_text ?? '', tokenizer) + countEvidenceTokens(p.hit.title ?? '', tokenizer), 0);
+  const reserved = passthrough.reduce((n, p) => n + countEvidenceTokens(headerFor(p.hit) + (p.hit.chunk_text ?? ''), tokenizer) + countEvidenceTokens(p.hit.title ?? '', tokenizer), 0);
   const kept = allocate(planned, Math.max(0, plan.budgetTokens - reserved), tokenizer, dropped, auto
     ? b => { for (const h of b.hits) passthrough.push({ rank: hits.indexOf(h), hit: h, reason: 'conversation_over_budget' }); }
     : undefined);
@@ -903,15 +927,15 @@ export async function deliverEvidence(
     const delivered: DeliveredEvidence = {
       unit: b.unit,
       chunk_ids: b.hits.map(h => h.chunk_id),
-      match_spans: out.spans,
-      tokens: out.tokens,
+      match_spans: out.spans.map(sp => ({ ...sp, start: sp.start + b.header.length, end: sp.end + b.header.length })),
+      tokens: out.tokens + b.headerTok,
       truncated,
       ...(b.revision ? { revision: b.revision } : {}),
       ...(out.unmapped.length > 0 ? { unmapped_chunk_ids: out.unmapped } : {}),
       ...(b.fallbackReason && b.unit === 'chunk' ? { fallback_reason: b.fallbackReason } : {}),
       ...(b.reason ? { reason: b.reason } : {}),
     };
-    return { ...b.hit, title: b.title, chunk_text: out.text, delivered };
+    return { ...b.hit, title: b.title, chunk_text: b.header + out.text, delivered };
   });
 
   // Budget after redaction: blocks pass through the same secret redaction as
@@ -944,11 +968,12 @@ export async function deliverEvidence(
   if (passthrough.length > 0) {
     const ranked = results.map((r, i) => ({ rank: kept[i].rank, r }));
     for (const p of passthrough) {
-      const text = p.hit.chunk_text ?? '';
-      ranked.push({ rank: p.rank, r: { ...p.hit, delivered: {
+      const header = headerFor(p.hit);
+      const text = header + (p.hit.chunk_text ?? '');
+      ranked.push({ rank: p.rank, r: { ...p.hit, chunk_text: text, delivered: {
         unit: 'chunk',
         chunk_ids: [p.hit.chunk_id],
-        match_spans: text.length > 0 ? [{ chunk_id: p.hit.chunk_id, start: 0, end: text.length }] : [],
+        match_spans: text.length > header.length ? [{ chunk_id: p.hit.chunk_id, start: header.length, end: text.length }] : [],
         tokens: countEvidenceTokens(text, tokenizer),
         truncated: false,
         reason: p.reason,
@@ -976,6 +1001,7 @@ export async function deliverEvidence(
       dropped_reasons: dropped,
       fallbacks: [...fallbacks].sort(),
       ...(plan.budgetClamped ? { budget_clamped: plan.budgetClamped } : {}),
+      ...(plan.dateHeader ? { date_header: true as const } : {}),
     },
   };
 }
