@@ -537,7 +537,7 @@ export interface FactRow {
   created_at: Date;
   /** Set only when the list call asked for `fingerprint` (#5888 hot-memory collapse). */
   fact_fingerprint?: string;
-  /** Who asserted the claim (migration v204); null when attribution is unavailable. */
+  /** Who asserted the claim (migration v205); null when attribution is unavailable. */
   attributed_to?: FactAttribution | null;
 }
 
@@ -592,7 +592,7 @@ export interface NewFact {
    * set this — leaving it undefined preserves pre-v0.40 behavior.
    */
   event_type?: string | null;
-  /** Speaker attribution (migration v204). Undefined/null → NULL (unavailable). */
+  /** Speaker attribution (migration v205). Undefined/null → NULL (unavailable). */
   attributed_to?: FactAttribution | null;
 }
 

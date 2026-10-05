@@ -954,7 +954,7 @@ const COLUMN_EXEMPTIONS = new Set<string>([
   // brains is invisible to them). Migration is column-only, no FK,
   // no index — bootstrap probe would be pure overhead.
   'facts.event_type',
-  // migration v204 — speaker attribution. The facts table is migration-created
+  // migration v205 — speaker attribution. The facts table is migration-created
   // (absent from PGLITE_SCHEMA_SQL), so no schema-blob forward reference can
   // exist; nullable column only, no index or FK.
   'facts.attributed_to',
