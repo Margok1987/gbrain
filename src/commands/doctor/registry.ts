@@ -85,6 +85,7 @@ import { syncFreshnessEntry, searchModeEntry } from './checks/sync-search.ts';
 import { autoChronicleEntry } from './checks/auto-chronicle.ts';
 import { factTakeVectorsEntry } from './checks/vector-coverage.ts';
 import { decideHealthEntry } from './checks/decide.ts';
+import { supersessionCalibrationEntry } from './checks/supersession-calibration.ts';
 import { unlinkedFactsEntry } from './checks/unlinked-facts.ts';
 import { plannerStatsEntry } from './checks/planner-stats.ts';
 import { harnessWiringDoctorEntry } from './checks/harness-wiring.ts';
@@ -125,6 +126,7 @@ export const DOCTOR_CHECK_REGISTRY: readonly DoctorEntry[] = [
   embeddingQueryPrefixEntry,
   embeddingColumnRegistryEntry,
   embeddingEnvOverrideEntry,
+  supersessionCalibrationEntry,
   graphCoverageEntry,
   orphanRatioEntry,
   staleMentionsEntry,

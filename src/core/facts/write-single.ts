@@ -4,8 +4,8 @@
  *
  * `runFactsPipeline` is extraction-first (LLM-gated in extract.ts) and cannot
  * back a verb whose fact arrives pre-formed. This module reuses the pipeline's
- * post-extraction stages directly: resolve → dedup (embedding cosine, same
- * 0.95 threshold) → fence-first write (markdown durability) with the same
+ * post-extraction stages directly: resolve → dedup (embedding cosine at the
+ * model's calibrated threshold, supersession-threshold.ts) → fence-first write (markdown durability) with the same
  * legacy DB-only fallbacks (thin-client, unparented, stub-guard).
  *
  * Supersession [X1, frozen as implementation-defined]: minimal deterministic
@@ -25,7 +25,6 @@
 
 import type { BrainEngine, FactInsertStatus, NewFact } from '../engine.ts';
 
-const DEDUP_THRESHOLD = 0.95;
 const DEDUP_CANDIDATE_LIMIT = 5;
 
 /**
@@ -157,8 +156,9 @@ export async function writeSingleFact(
         top = c;
       }
     }
-    if (top && topScore >= DEDUP_THRESHOLD) {
-      const textDiffers = collapse(top.fact) !== collapse(factText);
+    const { threshold } = await (await import('./supersession-threshold.ts')).readSupersessionThreshold(engine, embeddingModel, embedding.length);
+    const textDiffers = top !== null && collapse(top.fact) !== collapse(factText);
+    if (top && (!textDiffers || threshold !== null && topScore >= threshold)) {
       if (top.kind === kind && textDiffers) {
         supersedeId = top.id; // X1: near-duplicate with changed content = update
       } else {

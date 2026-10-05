@@ -20,6 +20,8 @@ beforeAll(async () => {
   engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
+  // Calibrate the synthetic model: an uncalibrated model never supersedes by cosine (supersession-threshold.ts).
+  await engine.setConfig('facts.supersession_thresholds', JSON.stringify({ [`${MODEL}@1536`]: 0.95 }));
 });
 
 afterAll(async () => {

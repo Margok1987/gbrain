@@ -327,6 +327,10 @@
       },
       {
         "category": "brain",
+        "name": "supersession_calibration"
+      },
+      {
+        "category": "brain",
         "name": "graph_coverage"
       },
       {

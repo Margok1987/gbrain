@@ -35,8 +35,6 @@ export const CAPTURE_LANES = ['hook:writeback', 'sweep:corpus', 'hook:compact'] 
 export const CAPTURE_DEDUP_WINDOW_MS = 15 * 60 * 1000;
 /** Shadow-mode near-duplicate threshold (measured, never a drop). */
 export const NEAR_DUPLICATE_THRESHOLD = 0.92;
-/** Explicit lanes keep their pre-#5888 cosine rule. */
-export const EXPLICIT_DUPLICATE_THRESHOLD = 0.95;
 const CAPTURE_DEDUP_SCAN_LIMIT = 50;
 
 export function isCaptureLane(source: string | null | undefined): boolean {
@@ -75,10 +73,13 @@ export type CosineVerdict = 'duplicate' | 'near_duplicate' | 'distinct';
 
 /**
  * The one cosine policy for every fact-write decision point. Capture lanes
- * never return `duplicate`; explicit lanes keep the 0.95 rule unchanged.
+ * never return `duplicate`. Explicit lanes return `duplicate` at or above
+ * `explicitThreshold`, the embedding model's calibrated supersession
+ * threshold (supersession-threshold.ts); null (an uncalibrated model) never
+ * returns `duplicate`.
  */
-export function cosineVerdict(source: string | null | undefined, score: number, claim: string, existing: string): CosineVerdict {
-  if (!isCaptureLane(source)) return score >= EXPLICIT_DUPLICATE_THRESHOLD ? 'duplicate' : 'distinct';
+export function cosineVerdict(source: string | null | undefined, score: number, claim: string, existing: string, explicitThreshold: number | null): CosineVerdict {
+  if (!isCaptureLane(source)) return explicitThreshold !== null && score >= explicitThreshold ? 'duplicate' : 'distinct';
   return score >= NEAR_DUPLICATE_THRESHOLD && !claimsDiverge(claim, existing) ? 'near_duplicate' : 'distinct';
 }
 
@@ -163,7 +164,7 @@ export async function findNearDuplicate(scope: CaptureScope, candidate: CaptureC
     const score = cosineSimilarity(candidate.embedding, row.embedding);
     if (!best || score > best.score) best = { id: row.id, score, fact: row.fact };
   }
-  return best && cosineVerdict(scope.lane, best.score, candidate.fact, best.fact) === 'near_duplicate' ? best.id : null;
+  return best && cosineVerdict(scope.lane, best.score, candidate.fact, best.fact, null) === 'near_duplicate' ? best.id : null;
 }
 
 export interface CaptureDedupResult<T> { kept: T[]; duplicateIds: number[]; nearDuplicates: number; }

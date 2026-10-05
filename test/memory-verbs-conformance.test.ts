@@ -682,6 +682,8 @@ describe('writeSingleFact — supersession rule [X1] + degraded dedup', () => {
 
   it('near-duplicate with changed text and same kind SUPERSEDES; identical text is a duplicate', async () => {
     installDeterministicEmbedder();
+    // Calibrate the deterministic test embedder: an uncalibrated model never supersedes by cosine (supersession-threshold.ts).
+    await engine.setConfig('facts.supersession_thresholds', JSON.stringify({ 'openai:text-embedding-3-small@1536': 0.95 }));
     const a = await writeSingleFact(engine, 'default', {
       fact: 'SUPERSEDE-PAIR alice works at acme-example',
       provenance: 'test', entity: 'people/supersede-test', kind: 'fact',

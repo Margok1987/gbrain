@@ -8,7 +8,7 @@ For the default model, `voyage:voyage-4`, the product's threshold of 0.95 is alr
 choice, so this finding proposes no change for it. The threshold does depend on the embedding model, though.
 With `openai:text-embedding-3-large`, no threshold meets the guard, and at 0.95 it replaces 54% of new
 coexisting claims. Even at its best setting on the default model, a cosine threshold alone leaves 47% of
-corrections inserted beside the old value. The verdict is `dev` and changes no default.
+corrections inserted beside the old value. The verdict is `dev`; the per-model table it led to is applied in this wave (see below).
 
 ## Results (rrf_free arm; interleave is the same from 0.90 up and one correction worse below)
 
@@ -57,9 +57,26 @@ On both models the two distributions overlap. Cosine alone can't tell "same clai
 similar claim about a different period". That's why about half of corrections stay unreplaced even at the
 best threshold on the default model.
 
-## Proposed fix (not applied; routed by the wave owner)
+## Applied in this wave
 
-1. **Calibrate per model.** Replace the single `EXPLICIT_DUPLICATE_THRESHOLD = 0.95` (`facts/capture-dedup.ts`,
+Fix 1 below is in the memory proof wave. Fix 2 is not.
+
+- **Calibration table.** `src/core/facts/supersession-threshold.ts` holds one table keyed `provider:model@dims`.
+  Its only entry is `voyage:voyage-4@1024` at 0.95, so voyage-4 decides exactly as before.
+- **Readers.** The fixed 0.95 constants in `capture-dedup.ts`, `write-single.ts` and the classify fast path now
+  read the table.
+- **Uncalibrated models,** including `openai:text-embedding-3-large`, never supersede or deduplicate by
+  cosine. Each new fact is inserted, and the `conflict` decide sweep judges the pair where it is on.
+  Exact-text duplicates still collapse: the fingerprint check in `decideSingleFact` and identical text in
+  `writeSingleFact`.
+- **Override.** `facts.supersession_thresholds` takes a JSON map `{"provider:model@dims": number | "off"}`, so an
+  operator can register a measured value without a release.
+- **Doctor.** `supersession_calibration` is an informational check. For an uncalibrated model it names the
+  model and returns the embed, sweep and register commands.
+
+## Proposed fix
+
+1. **Calibrate per model (applied, see above).** Replace the single `EXPLICIT_DUPLICATE_THRESHOLD = 0.95` (`facts/capture-dedup.ts`,
    also hard-coded in `facts/write-single.ts` and the classify fast path) with a per-embedding-model table.
    Keep `voyage:voyage-4` at 0.95. A model with no calibrated entry, such as `openai:text-embedding-3-large`,
    should not supersede by cosine. Its writes insert the new fact and leave the pair to the existing

@@ -28,8 +28,9 @@
  * preserved distinct claims (every claim ever established still has an
  * active row). The decision is decideSingleFact's rule (max cosine among
  * eligible candidates at or above the threshold) replayed at each threshold
- * in TAUS; at 0.95 (the product's explicit-lane threshold) the real
- * decideSingleFact runs beside it and must agree.
+ * in TAUS; each threshold is also registered as the model's
+ * `facts.supersession_thresholds` override, so the real decideSingleFact
+ * runs beside every replayed decision and must agree.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -38,7 +39,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import { cosineSimilarity } from '../src/core/facts/classify.ts';
-import { EXPLICIT_DUPLICATE_THRESHOLD } from '../src/core/facts/capture-dedup.ts';
+import { SUPERSESSION_THRESHOLDS_KEY, calibrationKey, resolveSupersessionThreshold } from '../src/core/facts/supersession-threshold.ts';
 import {
   CANDIDATE_FUSION_KEY, SUPERSESSION_CANDIDATE_K, decideSingleFact, listSupersessionCandidates, type CandidateFusion,
 } from '../src/core/facts/single-prepare.ts';
@@ -242,6 +243,8 @@ async function replay(engineDims: number, model: string, emb: (t: string) => Flo
   await engine.connect({});
   await engine.initSchema();
   await engine.setConfig(CANDIDATE_FUSION_KEY, mode);
+  // The product decides at this threshold too, so every replayed decision is checked against decideSingleFact.
+  await engine.setConfig(SUPERSESSION_THRESHOLDS_KEY, JSON.stringify({ [calibrationKey(model, engineDims)]: tau }));
   const keyOf = new Map<number, string>();
   const established = new Map<string, Set<string>>();
   const insert = async (c: Company, row: Row, supersedeId?: number) => {
@@ -275,7 +278,7 @@ async function replay(engineDims: number, model: string, emb: (t: string) => Flo
       if (exact) bestId = Number(exact.id);
       const status: ProbeOutcome['status'] = exact ? 'duplicate' : bestId !== null && score >= tau ? 'superseded' : 'inserted';
       const hitId = status === 'inserted' ? null : bestId;
-      if (tau === EXPLICIT_DUPLICATE_THRESHOLD) {
+      {
         const product = await decideSingleFact(engine, 'default', { fact: p.fact, kind: 'fact', visibility: p.visibility, entity_slug: c.slug }, e, model, SOURCE);
         if (product.status !== status || (product.candidate?.id ?? null) !== hitId) productMismatches++;
       }
@@ -417,7 +420,7 @@ async function run(embeddingsPath: string, outDir: string | null, taus: number[]
           const ps = arms[m].probes.filter(p => p.has_twin && p.dense === (slice === 'dense'));
           return [m, { with_twin: ps.length, twin_in_candidates: ps.filter(p => p.twin_in_candidates).length }];
         }))])),
-        product_decide_mismatches: tau === EXPLICIT_DUPLICATE_THRESHOLD ? { rrf_free: A.product_mismatches, interleave: B.product_mismatches } : null,
+        product_decide_mismatches: { rrf_free: A.product_mismatches, interleave: B.product_mismatches },
       },
     });
     summary[String(tau)] = Object.fromEntries(comparisons.map(c => [c.id, { a: round(c.stats.mean_a), b: round(c.stats.mean_b), delta: round(c.stats.delta), ci95: c.stats.ci95.map(round), status: c.status }]));
@@ -443,7 +446,7 @@ async function run(embeddingsPath: string, outDir: string | null, taus: number[]
     rule: 'lowest correction miss rate with false supersession <= 1% of probes and preserved distinct claims >= 99.5% (rrf_free arm); balanced = argmin(correction miss + coexisting false supersession)',
     guarded: pickMin(safe, r => num(r, 'correction_miss_rate')),
     balanced: pickMin(base, r => num(r, 'correction_miss_rate') + num(r, 'coexisting_false_supersession_rate')),
-    product: EXPLICIT_DUPLICATE_THRESHOLD,
+    product: resolveSupersessionThreshold(model, store.dims).threshold,
   };
   const decidedAt = new Date().toISOString();
   const verdictJson = {
