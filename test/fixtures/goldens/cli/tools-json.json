@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 198603,
-    "stdoutSha256": "7b5e35aa62ab4e12fbfa100da46f8e032101875370cb5a59a2348649c234689f",
+    "stdoutBytes": 203914,
+    "stdoutSha256": "0c6339dbdd71f604fbadf83e252cf8e6fe025934d80b01234bde121c26a79753",
     "toolNames": [
       "remember",
       "entity",
@@ -160,6 +160,11 @@
       "loops_close",
       "loops_mute",
       "loops_unmute",
+      "questions_pin",
+      "questions_list",
+      "questions_status",
+      "questions_refresh",
+      "questions_unpin",
       "mute_notice"
     ],
     "tools": [
@@ -6315,6 +6320,183 @@
           "required": [
             "kind",
             "value"
+          ],
+          "type": "object"
+        },
+        "scope": "write"
+      },
+      {
+        "description": "Pin a question: gbrain keeps a cited answer current from your notes and flags sentences whose evidence changed. Idempotent. Pins made over MCP stay inactive (paid refresh) until the owner activates them; returns the first answer when a key and consent exist, else awaiting_refresh with next_action.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": true,
+        "name": "questions_pin",
+        "parameters": {
+          "defer": "boolean?",
+          "id": "string?",
+          "publish": "boolean?",
+          "question": "string?",
+          "scope": "object?",
+          "wait_ms": "number?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "defer": {
+              "description": "Skip the first answer.",
+              "type": "boolean"
+            },
+            "id": {
+              "description": "Existing pin id: re-pin or (owner, on the host) activate it.",
+              "type": "string"
+            },
+            "publish": {
+              "description": "Owner only: publish a draft-only pin.",
+              "type": "boolean"
+            },
+            "question": {
+              "description": "The question (omit when passing id).",
+              "type": "string"
+            },
+            "scope": {
+              "additionalProperties": false,
+              "description": "Evidence scope; default: the current source.",
+              "properties": {
+                "entity": {
+                  "description": "Entity page slug the question is about.",
+                  "type": "string"
+                },
+                "slug_prefix": {
+                  "description": "Only pages under this prefix, e.g. projects/.",
+                  "type": "string"
+                },
+                "source": {
+                  "description": "Source id.",
+                  "type": "string"
+                }
+              },
+              "required": [],
+              "type": "object"
+            },
+            "wait_ms": {
+              "description": "Max ms to wait for the answer (pin default 30000, refresh 120000; max 300000).",
+              "type": "number"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "scope": "write"
+      },
+      {
+        "description": "List pinned questions with freshness, blocked reason and next action, plus fresh/stale/pending counts. Owner-capable connections only.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": false,
+        "name": "questions_list",
+        "parameters": {
+          "include_archived": "boolean?",
+          "source": "string?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "include_archived": {
+              "description": "Include unpinned (archived) questions.",
+              "type": "boolean"
+            },
+            "source": {
+              "description": "Only this source.",
+              "type": "string"
+            }
+          },
+          "required": [],
+          "type": "object"
+        },
+        "scope": "read"
+      },
+      {
+        "description": "One pinned question: the answer with per-sentence stale flags, evidence watermark, last refresh, blocked reason, next action and verify step. Owner-capable connections only.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": false,
+        "name": "questions_status",
+        "parameters": {
+          "id": "string",
+          "include_answer": "boolean?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "id": {
+              "description": "Source-qualified id from questions_list, e.g. default:questions/<slug>.",
+              "type": "string"
+            },
+            "include_answer": {
+              "description": "Include answer sentences (default true).",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "scope": "read"
+      },
+      {
+        "description": "Refresh a pinned answer now (a paid model call): re-retrieves current evidence and edits the answer, or recomputes with full or after deletions. A failed refresh keeps the previous answer with its stale flags.",
+        "idempotent": false,
+        "local_only": false,
+        "mutating": true,
+        "name": "questions_refresh",
+        "parameters": {
+          "full": "boolean?",
+          "id": "string",
+          "wait_ms": "number?"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "full": {
+              "description": "Recompute from scratch.",
+              "type": "boolean"
+            },
+            "id": {
+              "description": "Source-qualified id from questions_list, e.g. default:questions/<slug>.",
+              "type": "string"
+            },
+            "wait_ms": {
+              "description": "Max ms to wait for the answer (pin default 30000, refresh 120000; max 300000).",
+              "type": "number"
+            }
+          },
+          "required": [
+            "id"
+          ],
+          "type": "object"
+        },
+        "scope": "write"
+      },
+      {
+        "description": "Unpin a question: refreshes stop and its page is archived (your notes on it are kept). Idempotent.",
+        "idempotent": true,
+        "local_only": false,
+        "mutating": true,
+        "name": "questions_unpin",
+        "parameters": {
+          "id": "string"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "id": {
+              "description": "Source-qualified id from questions_list, e.g. default:questions/<slug>.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
           ],
           "type": "object"
         },
