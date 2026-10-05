@@ -1,5 +1,6 @@
 import { WRITE_REQUEST_PARAM } from '../persistence/params.ts';
 import { deliverEvidence, effectivePlan, resolveEvidencePlan, type DeliveryMeta, type EvidencePlan } from '../search/evidence-delivery.ts';
+import { withFactDateHeaders } from '../search/evidence-date.ts';
 import { randomUUID } from 'node:crypto';
 import { readHolders } from './context.ts';
 /**
@@ -515,7 +516,7 @@ const recall: Operation = {
       : undefined;
 
     return {
-      facts: packedFacts.map(r => ({
+      facts: await withFactDateHeaders(ctx.engine, packedFacts.map(r => ({
         id: r.id,
         fact: r.fact,
         kind: r.kind,
@@ -545,7 +546,7 @@ const recall: Operation = {
         // is the protocol name for the stored source attribution.
         fact_id: String(r.id),
         provenance: r.source,
-      })),
+      }))),
       total: packedFacts.length,
       ...(ambiguousEntity ? { ambiguous_entity: { candidates: ambiguousEntity, suggestion: AMBIGUOUS_ENTITY_SUGGESTION } } : {}),
       ...(pending_consolidation_count !== undefined ? { pending_consolidation_count } : {}),
