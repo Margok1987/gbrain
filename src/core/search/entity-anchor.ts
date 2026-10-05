@@ -145,6 +145,20 @@ export async function applyEntityAnchoring(engine: BrainEngine, query: string, r
   }
 }
 
+/**
+ * The `query` / `search` op seam: plain queries only (no offset, type, date,
+ * language or symbol filter), and only with `search.entity_anchoring` on. The
+ * op's `token_budget` is re-applied unless an evidence plan owns the budget.
+ */
+export async function anchorOpResults(engine: BrainEngine, p: Record<string, unknown>, query: string, results: SearchResult[],
+  scope: PageReadScope & { filtered: boolean; evidencePlan: boolean }): Promise<SearchResult[]> {
+  if (p.offset || scope.filtered || p.since || p.until || p.lang || p.symbol_kind || p.near_symbol || !await entityAnchoringEnabled(engine)) return results;
+  const tokenBudget = !scope.evidencePlan && typeof p.token_budget === 'number' ? p.token_budget : undefined;
+  return (await applyEntityAnchoring(engine, query, results, {
+    sourceId: scope.sourceId, sourceIds: scope.sourceIds, excludePrivate: scope.excludePrivate, requireSafeChunks: scope.requireSafeChunks, tokenBudget,
+  })).results;
+}
+
 /** `search.entity_anchoring` is on ('true' | 'on' | '1' | 'yes'); off by default and on any read error. */
 export async function entityAnchoringEnabled(engine: { getConfig(key: string): Promise<string | null> }): Promise<boolean> {
   try {

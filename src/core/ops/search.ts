@@ -11,7 +11,7 @@ import { readHolders } from './context.ts';
  */
 
 import { hybridSearchCached, stampContentFlags, stampUnverifiedExtractions } from '../search/hybrid.ts';
-import { applyEntityAnchoring, entityAnchoringEnabled } from '../search/entity-anchor.ts';
+import { anchorOpResults } from '../search/entity-anchor.ts';
 import { resolveSearchDateBounds } from '../search/date-bounds.ts';
 import { loadSearchModeConfig, resolveSearchMode, SOURCE_BOOSTS_KEY } from '../search/mode.ts';
 import { looksConceptShaped, classifyQueryShape } from '../search/query-intent.ts';
@@ -641,9 +641,7 @@ const search: Operation = {
     const declarations = new DeclarationMemo();
     let results = (await withDeclaredNameFanOut(primary, queryText, declarations,
       (alt, altLimit) => hybridSearchCached(ctx.engine, alt, { ...searchOpts, limit: altLimit, offset: 0 }))).map(r => ({ ...r }));
-    if (offset === 0 && !types && await entityAnchoringEnabled(ctx.engine)) {
-      results = (await applyEntityAnchoring(ctx.engine, queryText, results, { ...scope, excludePrivate, requireSafeChunks: ctx.remote !== false })).results;
-    }
+    results = await anchorOpResults(ctx.engine, p, queryText, results, { ...scope, excludePrivate, requireSafeChunks: ctx.remote !== false, filtered: !!types, evidencePlan: !!plan });
     stampDeepResearchIds(results);
     const latency_ms = Date.now() - startedAt;
     bumpLastRetrievedAt(ctx.engine, results.map((r) => r.page_id));
@@ -885,16 +883,10 @@ const query: Operation = {
       relationalRetrieval: typeof p.relational === 'boolean' ? (p.relational as boolean) : undefined,
     });
     const declarations = new DeclarationMemo();
-    results = await withDeclaredNameFanOut(results, queryText, declarations, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {
+    results = await anchorOpResults(ctx.engine, p, queryText, await withDeclaredNameFanOut(results, queryText, declarations, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {
       limit: altLimit, excludePrivate, requireSafeChunks: ctx.remote !== false, takesHoldersAllowList: readHolders(ctx),
       expansion: false, types, ...querySourceScope,
-    }));
-    if (!p.offset && !types && !p.since && !p.until && !p.lang && !p.symbol_kind && !p.near_symbol && await entityAnchoringEnabled(ctx.engine)) {
-      results = (await applyEntityAnchoring(ctx.engine, queryText, results, {
-        ...querySourceScope, excludePrivate, requireSafeChunks: ctx.remote !== false,
-        tokenBudget: !plan && typeof p.token_budget === 'number' ? (p.token_budget as number) : undefined,
-      })).results;
-    }
+    })), { ...querySourceScope, excludePrivate, requireSafeChunks: ctx.remote !== false, filtered: !!types, evidencePlan: !!plan });
     // #1663 — CRAG confidence gate. Grade what retrieval returned (zero-LLM;
     // reads the stamped honesty signals: evidence, exact_lookup, rerank
     // score), attach grade + query shape to the retrieval meta on EVERY call,

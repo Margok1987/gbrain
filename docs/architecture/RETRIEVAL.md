@@ -288,6 +288,16 @@ Two cross-cutting seams sit around the pipeline rather than inside it:
   `crag.ts`), so default-shape callers never pay a second expansion call for
   a near-identical candidate set. `search.crag_think=true` (local callers)
   escalates a still-weak result to `think`.
+- **Entity-anchored retrieval (default off).** With `search.entity_anchoring=true`,
+  a `query` or `search` that asks for a current state ("now", "currently",
+  "latest" and similar) and names exactly one readable entity page by title
+  gets that page first, then the pages that link to it or name it, newest
+  first (`src/core/search/entity-anchor.ts`). The function is shared with
+  pinned-question refresh. Detection is deterministic, with no model call.
+  Added rows are re-authorized through `getChunkWindows`. The row count and
+  token budget stay what the caller asked for, and anchored rows take at most
+  half the rows. It is skipped with `offset`, type, date, language or symbol
+  filters. Verdict and gates: `docs/eval/decisions/entity-anchoring-query/`.
 
 ### Use-attributed feedback
 
