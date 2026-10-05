@@ -129,7 +129,7 @@ Metered spend: $2.34 of the $40 cap.
 `test/helpers/pinned-questions-scenarios.ts` passes 33 of 33 scenarios on PGLite
 (`test/pinned-questions-safety.test.ts`) and 33 of 33 on live Postgres
 (`test/e2e/pinned-questions-postgres.test.ts`). The full `bun run ci:ubicloud` gate passes on the integrated
-tree. The suite covers:
+tree at c65a398f. The suite covers:
 
 - Zero leakage to restricted grants on search, query, list_pages, get_page, get_versions, context_pack and
   recall.

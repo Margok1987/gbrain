@@ -12,7 +12,7 @@
       "pglite": "33/33",
       "postgres": "33/33"
     },
-    "full_ci": "bun run ci:ubicloud: see the pushed integration head in README",
+    "full_ci": "bun run ci:ubicloud green on garrytan/gbrain@c65a398f (capy/mpw-integration): 3459 tests, 0 failed",
     "appended_workload_leakage": {
       "probes": 48,
       "leaks": 0,
