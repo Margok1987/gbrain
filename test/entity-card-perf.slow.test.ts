@@ -36,9 +36,13 @@
  * arms trips the card gate first.
  *
  * Entity recall: the `entity` verb's path (includeReferences: referenced_by
- * groups + coverage) has its own p99 gate on the same corpus, with a hub
- * page carrying 10,000 inbound mention links; the ambient gates below stay
- * on the reference-free path.
+ * groups + coverage) has two gates on the same corpus. Ordinary entities keep
+ * the p99 < 100ms budget. The hub page carries 10,000 inbound mention links, so
+ * its card necessarily enumerates 10,000 referrers; it is gated by a ratio to
+ * the irreducible enumeration (a distinct-referrer count over the same links)
+ * measured in the same process, which cancels runner speed and still trips on
+ * per-referrer work (a per-row subquery or hydrating every row reads as 10×+).
+ * The ambient gates below stay on the reference-free path.
  *
  * .slow.test.ts suffix keeps it out of the fast loop (`bun run test:slow`).
  */
@@ -79,6 +83,12 @@ const DELTA_CHANGED_FACTS = 100;
 const RATIO_CEILING = 100;
 const HUB_SLUG = 'companies/hub-company';
 const HUB_LINKS = 10_000;
+const HUB_SAMPLES = 30;
+// Hub card median ≤ 8× the distinct-referrer count's median (measured about 4× on 2026-10-05: hub card p50 ~59ms,
+// count p50 ~14ms on a 4-core cloud machine). Per-referrer regressions read as 10× or more.
+const HUB_RATIO_CEILING = 8;
+// Catastrophe backstop only; the ratio is the gate.
+const HUB_ABSOLUTE_CEILING_MS = 1000 * (Number(process.env.GBRAIN_TEST_PERF_BUDGET_MULTIPLIER) || 1);
 
 function percentile(sorted: number[], p: number): number {
   const idx = Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1);
@@ -234,29 +244,57 @@ describe('entity card p99 latency gate', () => {
 });
 
 describe('entity verb with referenced_by (entity recall)', () => {
-  it(`p99 < ${P99_BUDGET_MS}ms with referenced_by and coverage, including a ${HUB_LINKS}-link hub`, async () => {
+  const opts = { remote: true, includeReferences: true };
+
+  it(`ordinary entities: p99 < ${P99_BUDGET_MS}ms with referenced_by and coverage`, async () => {
     const names: string[] = [];
-    for (let i = 0; i < TARGET_ENTITIES; i++) names.push(`Target Person ${i}`, `tp${i}`, 'Hub Company', `zzz-absent-${i}`);
-    const opts = { remote: true, includeReferences: true };
+    for (let i = 0; i < TARGET_ENTITIES; i++) names.push(`Target Person ${i}`, `tp${i}`, `zzz-absent-${i}`);
     for (let i = 0; i < WARMUP; i++) await buildEntityCard(engine, 'default', names[i % names.length], opts);
     const samples: number[] = [];
-    let hubCard: Awaited<ReturnType<typeof buildEntityCard>>['card'];
     for (let i = 0; i < MEASURED; i++) {
-      const name = names[(i * 13) % names.length];
       const t0 = performance.now();
-      const res = await buildEntityCard(engine, 'default', name, opts);
+      await buildEntityCard(engine, 'default', names[(i * 13) % names.length], opts);
       samples.push(performance.now() - t0);
-      if (name === 'Hub Company') hubCard = res.card;
     }
     samples.sort((a, b) => a - b);
     const p50 = percentile(samples, 50);
     const p99 = percentile(samples, 99);
     // eslint-disable-next-line no-console
-    console.log(`[entity-recall-perf] hub=${HUB_LINKS} links entity+references p50=${p50.toFixed(2)}ms p99=${p99.toFixed(2)}ms | budget=${P99_BUDGET_MS}ms`);
+    console.log(`[entity-recall-perf] ordinary entity+references p50=${p50.toFixed(2)}ms p99=${p99.toFixed(2)}ms | budget=${P99_BUDGET_MS}ms`);
+    expect(p99).toBeLessThan(P99_BUDGET_MS);
+  }, 300_000);
+
+  it(`${HUB_LINKS}-link hub: card median ≤ ${HUB_RATIO_CEILING}× the distinct-referrer count`, async () => {
+    const countSql = `SELECT count(DISTINCT l.from_page_id)::int AS n FROM links l JOIN pages f ON f.id = l.from_page_id
+      WHERE l.to_page_id = (SELECT id FROM pages WHERE slug = $1 AND source_id = 'default') AND f.deleted_at IS NULL`;
+    for (let i = 0; i < 5; i++) {
+      await buildEntityCard(engine, 'default', 'Hub Company', opts);
+      await engine.executeRaw(countSql, [HUB_SLUG]);
+    }
+    // Interleave the two measurements so a burst of runner load lands on both.
+    const card: number[] = [];
+    const base: number[] = [];
+    let hubCard: Awaited<ReturnType<typeof buildEntityCard>>['card'];
+    for (let i = 0; i < HUB_SAMPLES; i++) {
+      let t0 = performance.now();
+      hubCard = (await buildEntityCard(engine, 'default', 'Hub Company', opts)).card;
+      card.push(performance.now() - t0);
+      t0 = performance.now();
+      await engine.executeRaw(countSql, [HUB_SLUG]);
+      base.push(performance.now() - t0);
+    }
+    card.sort((a, b) => a - b);
+    base.sort((a, b) => a - b);
+    const cardP50 = percentile(card, 50);
+    const baseP50 = Math.max(percentile(base, 50), 1);
+    // eslint-disable-next-line no-console
+    console.log(`[entity-recall-perf] hub=${HUB_LINKS} links card p50=${cardP50.toFixed(2)}ms p90=${percentile(card, 90).toFixed(2)}ms ` +
+      `| distinct-referrer count p50=${baseP50.toFixed(2)}ms | ratio=${(cardP50 / baseP50).toFixed(1)}x (ceiling ${HUB_RATIO_CEILING}x)`);
     // Real work: the hub card carries every referrer in its count and at most 50 rows.
     expect(hubCard?.referenced_by_count).toBe(HUB_LINKS);
     expect(hubCard!.referenced_by!.reduce((n, g) => n + g.rows.length, 0)).toBeLessThanOrEqual(50);
-    expect(p99).toBeLessThan(P99_BUDGET_MS);
+    expect(cardP50 / baseP50).toBeLessThanOrEqual(HUB_RATIO_CEILING);
+    expect(cardP50).toBeLessThan(HUB_ABSOLUTE_CEILING_MS);
   }, 300_000);
 });
 

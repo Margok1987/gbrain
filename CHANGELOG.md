@@ -10,6 +10,40 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.65.0] - 2026-10-05
+
+**Writes no longer stall when a source is added, claimed or archived at the same time.**
+
+On a Postgres brain, adding, claiming or archiving a source while agents were writing made the two wait on each other. One side waited out its 1-second lock timeout, writes were retried, and in many runs every write in flight came back "still pending" instead of committed. Both sides now take their database locks in the same order, so neither waits on the other.
+
+Measured on Postgres 16, directly and through transaction-mode PgBouncer (5 runs each way, 36 writes racing 36 source changes per run, plus 3 forced interleavings of one write against one source change per run):
+
+| | Before | Now |
+| --- | --- | --- |
+| Writes that came back "still pending" instead of committed | 208 of 360 | 0 of 360 |
+| Source changes that failed (11 refused with "retry", 10 claims or archives of a source whose add was refused) | 21 of 360 | 0 of 360 |
+| Lock timeouts (1 s) during the race | 94 | 0 |
+| Lock timeouts in the 30 forced interleavings | 21 | 0 |
+| Deadlocks reported by Postgres | 0 (the 1 s lock timeout fired first) | 0 |
+
+## To take advantage of v0.60.65.0
+
+`gbrain upgrade` does this automatically. There is nothing to configure.
+
+1. **Verify:** while an agent writes, run `gbrain sources add example-probe --path <empty dir> --force` and then `gbrain sources archive example-probe`; the writes commit and both source commands succeed on the first try.
+2. **If writes still come back pending,** run `gbrain sources writer status --json` to see what the owner is running and what is queued behind it.
+
+### Itemized changes
+
+#### Lock order
+- Every journal transaction now locks the brain row (`persistence_brain`) FOR SHARE first, then worktree rows, source rows, counters, requests and page keys. Worktree claims and source topology changes lock the brain row FOR UPDATE before the same rows, so the two orders agree. Before, a write locked its source and counters first and only reached the brain row through the request and effect protocol triggers, which inverted against a concurrent claim or topology change.
+- The lock is taken inside the protocol declaration (`declarePersistenceProtocol`, `declareDurablePersistence` in `src/core/persistence/protocol.ts`), in the same statement as its settings and under its lock timeout, so no transaction gains a round trip. That covers admission, publication, recovery reservation and clearing, completion, grouped publication and page batches.
+- `forget`, cancelling a write request, approving a connector retry, retrying an embedding effect, upgrading a withdrawal effect's targets and settling an embedding effect now declare before locking their source or effect row; shared-skill activation takes the brain row FOR UPDATE before declaring, so it never upgrades a shared lock.
+
+#### Tests
+- `test/e2e/persistence-publish-lock-order-postgres.test.ts` pauses a real topology change right after its brain lock, runs an ordinary write until it blocks, then lets the change continue; it also races writes against add, claim and archive. It fails on the previous order with lock timeouts and pending writes and passes now. It runs directly and through PgBouncer (`scripts/e2e-backend-matrix.txt`).
+- The crash robot's lock-order trace has a new rule, `brain_before_rows`: whenever a transaction locks the brain row and any worktree, source or counter row, the brain row comes first. A write to `persistence_requests` or `persistence_effects` counts as the brain-row read its trigger takes. On the previous order the robot reported it for admission, publication, recovery reservation and recovery clearing; with only the declaration changed it still caught `forget`, which locked its source before admission declared.
+
 ## [0.60.64.0] - 2026-10-05
 
 **An agent connected to a remote brain can now save a stack of long pages in under a minute, and gbrain tells it how.**

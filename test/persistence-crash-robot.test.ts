@@ -25,6 +25,7 @@ import { runSchedule } from '../scripts/persistence/crash-robot.ts';
 import { installLockOrderTrace, lockOrderReport } from '../scripts/persistence/lock-order.ts';
 import { prepareTopology } from '../scripts/persistence/history-fixture.ts';
 import { claimPersistenceEffect, releaseAbandonedClaims } from '../src/core/persistence/effect-journal.ts';
+import { LOCK_COUNTERS_SQL } from '../src/core/persistence/journal.ts';
 import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { isolatedSharedSkillsEngine } from './helpers/shared-skills-engine.ts';
 import { withEnv } from './helpers/with-env.ts';
@@ -114,6 +115,32 @@ describe('lock order', () => {
         await tx.executeRaw('SELECT id FROM persistence_worktrees WHERE id=$1::uuid FOR SHARE', ['00000000-0000-4000-8000-000000000000']);
       });
       expect(lockOrderReport().violations.slice(before).map(v => v.rule)).toEqual(['worktrees_before_sources', 'sources_in_id_order']);
+    });
+  }, 120_000);
+
+  test('real publications lock the brain row before worktrees, sources and counters; a later brain read is reported', async () => {
+    await robotBrain(async ({ world }) => {
+      installLockOrderTrace();
+      const before = lockOrderReport().violations.length;
+      await runSchedule(world, crossBoundarySequences(ROBOT_TOPOLOGY)[1]);
+      const clean = lockOrderReport();
+      expect(clean.violations.slice(before)).toEqual([]);
+      expect(clean.publications_reading_brain_for_share).toBeGreaterThan(0);
+      await world.engine.transaction(async tx => {
+        await tx.executeRaw('SELECT id FROM sources WHERE id=$1 FOR SHARE', ['robot-0']);
+        await tx.executeRaw('SELECT singleton FROM persistence_brain WHERE singleton=1 FOR SHARE');
+      });
+      await world.engine.transaction(async tx => {
+        await tx.executeRaw(LOCK_COUNTERS_SQL, [['brain']]);
+        await tx.executeRaw('UPDATE persistence_requests SET updated_at=updated_at WHERE false');
+      });
+      await world.engine.transaction(async tx => {
+        await tx.executeRaw('SELECT singleton FROM persistence_brain WHERE singleton=1 FOR UPDATE');
+        await tx.executeRaw('SELECT id FROM persistence_worktrees ORDER BY id FOR UPDATE');
+        await tx.executeRaw('SELECT id FROM sources WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE', [['robot-0', 'robot-1']]);
+        await tx.executeRaw(LOCK_COUNTERS_SQL, [['brain']]);
+      });
+      expect(lockOrderReport().violations.slice(before).map(v => v.rule)).toEqual(['brain_before_rows', 'brain_before_rows']);
     });
   }, 120_000);
 });

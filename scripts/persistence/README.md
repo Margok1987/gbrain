@@ -118,8 +118,11 @@ page fences; content rows carry write attribution; no orphan rows; every
 request and effect drains (within 20 s on PGLite, whose restarted owner
 releases a dead owner's claims, and within the 2-minute effect lease plus
 margin on Postgres); a fresh write still commits. `lock-order.ts` checks each
-transaction's row locks: worktrees before sources, sources in id order, and
-no exclusive brain-row lock inside a publication.
+transaction's row locks: worktrees before sources, sources in id order, no
+exclusive brain-row lock inside a publication, and the brain row before any
+worktree, source or counter row whenever one transaction locks both (a write
+to `persistence_requests` or `persistence_effects` counts as the brain-row
+FOR SHARE read its protocol trigger takes).
 
 Postgres runs connect through `GBRAIN_PGBOUNCER_URL` when it is set, with
 prepared statements off. A Postgres run with a budget under 300 s (the

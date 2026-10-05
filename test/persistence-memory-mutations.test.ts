@@ -212,6 +212,9 @@ describe('journaled memory publication, both engines', () => {
         const params = { fact: 'Left acme-example', provenance: 'test', entity: slug, request_id: randomUUID() };
         const next = await submitRememberMutation(context(engine, true), params, 30_000);
         expect(next.status).toBe('superseded');
+        await waitFor(async () => (await engine.executeRaw(`SELECT 1 FROM persistence_effects e JOIN persistence_requests r ON r.id=e.request_id
+          WHERE r.source_id=$1 AND r.slug=$2 AND e.state IN ('queued','running')`, [sourceId, slug])).length === 0,
+        { label: `${engine.kind}: ${slug} effects settled before the replay count` });
         const callsBeforeReplay = providerCalls;
         expect(await submitRememberMutation(context(engine, true), params)).toEqual(next);
         expect(providerCalls).toBe(callsBeforeReplay);
