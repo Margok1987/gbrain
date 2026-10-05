@@ -91,7 +91,8 @@ const priced = (model: string, input: number, output: number) => {
 };
 const tokens = (text: string) => Math.ceil(text.length / 4);
 const correctFor = (answer: string, gold: string) => answer.includes(gold);
-const staleFor = (answer: string, gold: string, past: Set<string>) => [...past].some(c => c !== gold && answer.includes(c));
+/** States a superseded value and not the current one (an answer that names both is counted correct, not stale). */
+const staleFor = (answer: string, gold: string, past: Set<string>) => !answer.includes(gold) && [...past].some(c => c !== gold && answer.includes(c));
 
 async function applyBatch(engine: BrainEngine, sourceId: string, batch: Workload['batches'][number]): Promise<void> {
   const ctx = { engine, config: { engine: engine.kind, embedding_disabled: true } as never, remote: false, sourceId, dryRun: false, logger: { info() {}, warn() {}, error() {} } };
@@ -188,6 +189,17 @@ export async function runGate(opts: GateOpts): Promise<GateReport> {
   }
 }
 
+/**
+ * Hard spend cap for --run: every paid call reports its dollars here, and the
+ * first call that would start past the cap throws instead of dispatching.
+ */
+export class SpendGuard {
+  spent = 0;
+  constructor(readonly capUsd: number) {}
+  before(): void { if (this.spent >= this.capUsd) throw new Error(`spend cap reached: $${this.spent.toFixed(4)} of $${this.capUsd.toFixed(2)}`); }
+  add(usd: number): void { this.spent += usd; }
+}
+
 /** Offline arms: stub models priced as the named real models, deterministic answers. */
 export function offlineArms(answerModel: string, readerModel: string): Pick<GateOpts, 'questionChat' | 'reader' | 'think'> {
   /** The city named in the sentence that mentions the asked-about entity (the question's subject). */
@@ -217,16 +229,27 @@ export function offlineArms(answerModel: string, readerModel: string): Pick<Gate
 }
 
 /** Paid arms through the gateway (metered by the caller's budget; never used by --offline or --plan). */
-export function paidArms(answerModel: string, readerModel: string): Pick<GateOpts, 'reader' | 'think'> {
+export function paidArms(answerModel: string, guard: SpendGuard): Pick<GateOpts, 'reader' | 'think' | 'questionChat'> {
   return {
+    questionChat: async (req) => {
+      guard.before();
+      const r = await gatewayChat({ model: normalizeModelId(req.model), system: req.system, messages: [{ role: 'user', content: req.user }], maxTokens: req.maxTokens, allowFallback: false, ...(req.signal ? { abortSignal: req.signal } : {}) });
+      guard.add(priced(r.model || req.model, r.usage.input_tokens, r.usage.output_tokens));
+      return { text: r.text, usage: { input_tokens: r.usage.input_tokens, output_tokens: r.usage.output_tokens }, model: r.model };
+    },
     reader: async (req) => {
+      guard.before();
       const r = await gatewayChat({ model: normalizeModelId(req.model), system: req.system, messages: [{ role: 'user', content: req.user }], maxTokens: req.maxTokens, allowFallback: false });
+      guard.add(priced(r.model || req.model, r.usage.input_tokens, r.usage.output_tokens));
       return { text: r.text, input_tokens: r.usage.input_tokens, output_tokens: r.usage.output_tokens, model: r.model };
     },
     think: async (q, engine, sourceId) => {
+      guard.before();
       const { runThink } = await import('../../src/core/think/index.ts');
-      const r = await runThink(engine, { question: q, model: answerModel, modelExplicit: true, allowFallback: false, remote: false, sourceId });
-      return { answer: r.answer, usd: r.cost_usd ?? 0 };
+      const r = await runThink(engine, { question: q, model: answerModel, modelExplicit: true, allowFallback: false, remote: false, sourceId, withTrajectory: false });
+      const usd = r.cost_usd ?? (r.usage ? priced(answerModel, r.usage.input_tokens, r.usage.output_tokens) : 0);
+      guard.add(usd);
+      return { answer: r.answer, usd };
     },
   };
 }
@@ -245,7 +268,8 @@ if (import.meta.main) {
   const args = process.argv.slice(2);
   const flag = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
   const seed = Number(flag('--seed') ?? 42);
-  const answerModel = flag('--answer-model') ?? 'anthropic:claude-sonnet-5-5';
+  const { resolveModel } = await import('../../src/core/model-config.ts');
+  const answerModel = flag('--answer-model') ?? await resolveModel(null, { configKey: 'models.standing_questions', tier: 'deep', fallback: 'opus' });
   const readerModel = flag('--reader-model') ?? 'anthropic:claude-sonnet-5-5';
   const workload = generateWorkload(seed, Number(flag('--entities') ?? 4), Number(flag('--batches') ?? 3));
   const json = args.includes('--json');
@@ -263,20 +287,18 @@ if (import.meta.main) {
     }
   }
   const reports: GateReport[] = [];
+  const guard = new SpendGuard(args.includes('--run') ? Number(flag('--max-usd')) : Infinity);
+  if (args.includes('--run')) {
+    const { configureGateway } = await import('../../src/core/ai/gateway.ts');
+    configureGateway({ chat_model: normalizeModelId(answerModel), env: { ...process.env } as Record<string, string> });
+  }
   for (const rpw of READS_PER_WRITE) {
-    const arms = args.includes('--run')
-      ? { ...paidArms(answerModel, readerModel), questionChat: undefined as unknown as QuestionChatFn }
-      : offlineArms(answerModel, readerModel);
-    if (args.includes('--run')) {
-      const { chat } = await import('../../src/core/ai/gateway.ts');
-      arms.questionChat = async (req) => {
-        const r = await chat({ model: normalizeModelId(req.model), system: req.system, messages: [{ role: 'user', content: req.user }], maxTokens: req.maxTokens, allowFallback: false });
-        return { text: r.text, usage: { input_tokens: r.usage.input_tokens, output_tokens: r.usage.output_tokens }, model: r.model };
-      };
-    }
+    const arms = args.includes('--run') ? paidArms(answerModel, guard) : offlineArms(answerModel, readerModel);
     const report = await runGate({ workload, readsPerWrite: rpw, answerModel, readerModel, ...arms });
     reports.push({ ...report, plumbing_only: !args.includes('--run') });
+    if (!json) console.error(`[benefit-gate] reads_per_write=${rpw} done; metered spend $${guard.spent.toFixed(4)}`);
   }
-  const out = { mode: args.includes('--run') ? 'run' : 'offline', workload_hash: workloadHash(workload), seed, answer_model: answerModel, reader_model: readerModel, reports };
+  const out = { mode: args.includes('--run') ? 'run' : 'offline', workload_hash: workloadHash(workload), seed, entities: workload.entities.length, batches: workload.batches.length,
+    answer_model: answerModel, reader_model: readerModel, metered_spend_usd: Number.isFinite(guard.spent) ? guard.spent : null, reports };
   console.log(json ? JSON.stringify(out, null, 2) : JSON.stringify(out));
 }
