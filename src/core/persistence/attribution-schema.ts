@@ -40,7 +40,7 @@ export const WRITE_ATTRIBUTION_CONTENT_COLUMNS: Record<AttributedTable, readonly
   facts: ['id', 'source_id', 'entity_slug', 'fact', 'kind', 'visibility', 'notability', 'context', 'valid_from',
     'valid_until', 'expired_at', 'superseded_by', 'consolidated_at', 'consolidated_into', 'source', 'source_session',
     'confidence', 'created_at', 'row_num', 'source_markdown_slug', 'claim_metric', 'claim_value', 'claim_unit',
-    'claim_period', 'event_type', 'dimension', 'value', 'value_hash', 'dim_status'],
+    'claim_period', 'event_type', 'dimension', 'value', 'value_hash', 'dim_status', 'attributed_to'],
   takes: ['id', 'page_id', 'row_num', 'claim', 'kind', 'holder', 'weight', 'since_date', 'until_date', 'source',
     'superseded_by', 'active', 'resolved_at', 'resolved_outcome', 'resolved_value', 'resolved_unit', 'resolved_source',
     'resolved_by', 'created_at', 'resolved_quality'],

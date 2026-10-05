@@ -207,7 +207,7 @@ export async function readFacts(engine: BrainEngine, sourceId: string, ids: numb
       'consolidated_at',f.consolidated_at,'consolidated_into',f.consolidated_into,
       'source',f.source,'source_session',f.source_session,'confidence',f.confidence,
       'claim_metric',f.claim_metric,'claim_value',f.claim_value,'claim_unit',f.claim_unit,'claim_period',f.claim_period,
-      'event_type',f.event_type,'dimension',f.dimension,'value',f.value,'dim_status',f.dim_status
+      'event_type',f.event_type,'dimension',f.dimension,'value',f.value,'dim_status',f.dim_status,'attributed_to',f.attributed_to
     ) AS value FROM facts f
     WHERE f.source_id=$1 AND f.id=ANY($2::integer[]) ORDER BY f.id${lock ? ' FOR UPDATE' : ''}`, [sourceId, ids]);
   return rows.map(row => ({ ...row, id: Number(row.id) }));

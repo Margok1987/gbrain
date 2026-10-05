@@ -286,11 +286,11 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
         WHERE n.row_num=f.row_num AND n.fact=f.fact AND n.visibility=f.visibility)`, [sourceId, slug, incoming]);
     const factFields = factRows.map(fact => () => tx.executeRaw(`UPDATE facts SET kind=$4,notability=$5,context=$6,
         valid_from=COALESCE($7::timestamptz,valid_from),valid_until=$8::timestamptz,expired_at=$9::timestamptz,
-        source=$10,confidence=$11,claim_metric=$12,claim_value=$13,claim_unit=$14,claim_period=$15
+        source=$10,confidence=$11,claim_metric=$12,claim_value=$13,claim_unit=$14,claim_period=$15,attributed_to=$16
         WHERE source_id=$1 AND source_markdown_slug=$2 AND row_num=$3`,
       [sourceId, slug, fact.row_num, fact.kind, fact.notability, fact.context, fact.valid_from?.toISOString() ?? null,
         fact.valid_until?.toISOString() ?? null, fact.expired_at?.toISOString() ?? null, fact.source, fact.confidence,
-        fact.claim_metric ?? null, fact.claim_value ?? null, fact.claim_unit ?? null, fact.claim_period ?? null]));
+        fact.claim_metric ?? null, fact.claim_value ?? null, fact.claim_unit ?? null, fact.claim_period ?? null, fact.attributed_to ?? null]));
     const checkTakes = async () => { if (await collides(tx, id)) throw takeCollision(); };
     const dropTakes = () => tx.executeRaw('DELETE FROM takes WHERE page_id=$1 AND row_num=ANY($2::integer[])', [id, takeRowsGone]);
     // Full canonical versions include resolution fields; a revert restores those
