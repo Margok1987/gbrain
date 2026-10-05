@@ -68,13 +68,13 @@ const remember: Operation = {
     fact: { type: 'string', description: 'One claim.' },
     items: {
       type: 'array',
-      description: 'Up to 20 facts in one call (e.g. before compaction) instead of fact: [{fact, entity?, kind?, ttl?, provenance?}].',
+      description: 'Up to 20 facts at once (e.g. before compaction): [{fact, entity?, kind?, ttl?, provenance?}]',
       items: { type: 'object' },
     },
     provenance: {
       type: 'string',
-      required: true,
-      description: 'Where the fact came from (max 500 chars).',
+      // Required for a single fact (the handler refuses with provenance_required); with items it may be given per item.
+      description: 'Where the fact came from (max 500 chars); per item with items.',
     },
     ttl: {
       type: 'string',
@@ -114,6 +114,14 @@ const remember: Operation = {
         'invalid_params',
         'fact must be a non-empty string.',
         'Pass the claim to remember, e.g. fact: "picked Stripe over Adyen — onboarding speed".',
+      );
+    }
+    // v1 contract: an absent provenance is a missing required parameter (invalid_params), an empty one is provenance_required.
+    if (p.provenance === undefined) {
+      throw verbError(
+        'invalid_params',
+        'Missing required parameter: provenance',
+        'Pass `provenance` as a string (where the fact came from), e.g. provenance: "user told me, 2026-06-12". With items, provenance may be given per item instead.',
       );
     }
     const provenance = typeof p.provenance === 'string' ? p.provenance.trim() : '';
@@ -552,11 +560,16 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
                 direction: { type: 'string', enum: ['out', 'in'] },
                 slug: { type: 'string' },
                 context: { type: ['string', 'null'] },
+                // Temporal typed edges — ADDITIVE OPTIONAL (frozen-v1 legal).
+                status: { type: 'string' },
+                since: { type: ['string', 'null'] },
+                until: { type: ['string', 'null'] },
               },
             },
           },
           backlink_count: { type: 'integer' },
           active_fact_count: { type: 'integer' },
+          relationship_note: { type: 'string' },
         },
       },
       suggestions: {
@@ -662,10 +675,14 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
                   direction: { type: 'string', enum: ['out', 'in'] },
                   slug: { type: 'string' },
                   context: { type: ['string', 'null'] },
+                  status: { type: 'string' },
+                  since: { type: ['string', 'null'] },
+                  until: { type: ['string', 'null'] },
                 },
               },
             },
             backlink_count: { type: 'integer' },
+            relationship_note: { type: 'string' },
           },
         },
       },
