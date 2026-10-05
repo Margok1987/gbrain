@@ -101,7 +101,7 @@ async function resolvePin(ctx: OperationContext, access: CallerAccess, rawId: un
   if (typeof rawId !== 'string' || !rawId.trim()) throw invalidParam(ctx, op, 'id', `${op}: id is required.`, { example: 'default:questions/who-leads-acme-example-1a2b3c4d' });
   const parsed = parseQuestionId(rawId, defaultSource(ctx));
   const notFound = () => opError('question_not_found', `${op}: no pinned question ${rawId} in this connection's scope.`,
-    'Pass an id from questions_list (source-qualified, e.g. default:questions/<slug>).',
+    'Pass an id from questions_list; ids are source-qualified, like default:questions/who-leads-acme-example-1a2b3c4d.',
     { fix: readFix('Lists the pinned questions this connection can read, with their ids.', { argv: ['gbrain', 'questions', 'list', '--json'], mcp: { tool: 'questions_list', arguments: {} } }) });
   if (!parsed) throw notFound();
   if (access.readableSources && !access.readableSources.includes(parsed.sourceId)) throw notFound();
@@ -143,18 +143,18 @@ async function receiptFor(ctx: OperationContext, access: CallerAccess, sourceId:
       why: receipt.blocked_reason
         ? `Pinned question ${receipt.id} is ${receipt.freshness} and blocked (${receipt.blocked_reason}); its stale sentences are flagged here and withheld from context_pack.`
         : `Pinned question ${receipt.id} has ${receipt.sentences.stale} stale sentence(s): their evidence changed or was removed. They are flagged here and withheld from context_pack until a refresh.`,
-      ...(receipt.next_action ? { fix: receipt.next_action } : {}),
+      ...(receipt.fix ? { fix: receipt.fix } : {}),
     });
   }
   return receipt;
 }
 
 export async function pinQuestion(ctx: OperationContext, p: Record<string, unknown>, deps: QuestionsDeps = {}): Promise<{ created: boolean; activated: boolean; receipt: QuestionReceipt }> {
-  const access = await requireOwnerCapable(ctx, 'questions_pin', ['gbrain', 'questions', 'pin', typeof p.question === 'string' ? p.question : '<question>']);
+  const access = await requireOwnerCapable(ctx, 'questions_pin', typeof p.question === 'string' ? ['gbrain', 'questions', 'pin', p.question] : ['gbrain', 'questions', 'list']);
   const local = ctx.remote === false;
   if (p.publish !== undefined && !local) {
     throw hostOnlyError(ctx, 'question_owner_only', 'questions_pin: publish (draft -> published answers) is set by the owner on the brain host.',
-      ['gbrain', 'questions', 'pin', '--id', typeof p.id === 'string' ? p.id : '<id>', '--publish'], 'Publishing a draft-only pin changes what context_pack serves, so only the owner decides it.');
+      typeof p.id === 'string' ? ['gbrain', 'questions', 'pin', '--id', p.id, '--publish'] : ['gbrain', 'questions', 'list'], 'Publishing a draft-only pin changes what context_pack serves, so only the owner decides it.');
   }
   const preapproved = readConsentPreapprovals().paid !== undefined;
   const desired = local || preapproved ? { state: 'active' as const, inactiveReason: null } : { state: 'inactive' as const, inactiveReason: 'awaiting_consent' as const };
@@ -218,13 +218,13 @@ export async function listQuestions(ctx: OperationContext, p: Record<string, unk
 }
 
 export async function questionStatus(ctx: OperationContext, p: Record<string, unknown>): Promise<QuestionReceipt> {
-  const access = await requireOwnerCapable(ctx, 'questions_status', ['gbrain', 'questions', 'status', typeof p.id === 'string' ? p.id : '<id>']);
+  const access = await requireOwnerCapable(ctx, 'questions_status', typeof p.id === 'string' ? ['gbrain', 'questions', 'status', p.id] : ['gbrain', 'questions', 'list']);
   const pin = await resolvePin(ctx, access, p.id, 'questions_status');
   return receiptFor(ctx, access, pin.source_id, pin.slug, p.include_answer !== false);
 }
 
 export async function refreshQuestion(ctx: OperationContext, p: Record<string, unknown>, deps: QuestionsDeps = {}): Promise<QuestionReceipt> {
-  const access = await requireOwnerCapable(ctx, 'questions_refresh', ['gbrain', 'questions', 'refresh', typeof p.id === 'string' ? p.id : '<id>']);
+  const access = await requireOwnerCapable(ctx, 'questions_refresh', typeof p.id === 'string' ? ['gbrain', 'questions', 'refresh', p.id] : ['gbrain', 'questions', 'list']);
   let pin = await resolvePin(ctx, access, p.id, 'questions_refresh');
   if (ctx.remote !== false) assertSourceInCallerWriteScope(ctx, pin.source_id);
   if (pin.state !== 'archived') await syncQuestionPage(ctx, pin);
@@ -236,7 +236,7 @@ export async function refreshQuestion(ctx: OperationContext, p: Record<string, u
 }
 
 export async function unpinQuestion(ctx: OperationContext, p: Record<string, unknown>): Promise<{ unpinned: boolean; receipt: QuestionReceipt }> {
-  const access = await requireOwnerCapable(ctx, 'questions_unpin', ['gbrain', 'questions', 'unpin', typeof p.id === 'string' ? p.id : '<id>']);
+  const access = await requireOwnerCapable(ctx, 'questions_unpin', typeof p.id === 'string' ? ['gbrain', 'questions', 'unpin', p.id] : ['gbrain', 'questions', 'list']);
   let pin = await resolvePin(ctx, access, p.id, 'questions_unpin');
   if (ctx.remote !== false) assertSourceInCallerWriteScope(ctx, pin.source_id);
   const unpinned = pin.state !== 'archived';

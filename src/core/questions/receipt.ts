@@ -41,7 +41,7 @@ export interface QuestionReceipt {
   last_attempt_at: string | null;
   last_error: string | null;
   blocked_reason: BlockedReason | null;
-  next_action: Action | null;
+  fix: Action | null;
   verify: { argv: string[]; mcp: McpCall };
   spend_usd: number;
   refresh_attempts: number;
@@ -75,7 +75,7 @@ function lastAttemptFailed(pin: PinRow, prefix: string): boolean {
   return !pin.last_refresh_at || pin.last_attempt_at.getTime() >= pin.last_refresh_at.getTime();
 }
 
-export function nextActionFor(pin: PinRow, blocked: BlockedReason | null, freshness: Freshness, remote: boolean): Action | null {
+export function fixFor(pin: PinRow, blocked: BlockedReason | null, freshness: Freshness, remote: boolean): Action | null {
   const id = pinId(pin);
   switch (blocked) {
     case 'awaiting_consent':
@@ -143,7 +143,7 @@ export async function buildReceipt(engine: BrainEngine, pin: PinRow, view: {
     last_attempt_at: pin.last_attempt_at?.toISOString() ?? null,
     last_error: pin.last_error,
     blocked_reason: blocked,
-    next_action: nextActionFor(pin, blocked, freshness, view.remote),
+    fix: fixFor(pin, blocked, freshness, view.remote),
     verify: verifyStep(id),
     spend_usd: Number(pin.spend_usd.toFixed(6)),
     refresh_attempts: pin.refresh_attempts,

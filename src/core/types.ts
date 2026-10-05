@@ -64,10 +64,7 @@ export const ALL_PAGE_TYPES: readonly string[] = [
   // extractable:false (events are one-line atoms; diary is private interiority
   // never mined into the facts table). Pack entries in gbrain-base.yaml.
   'event', 'diary',
-  // C4 — `question` = a pinned question's page (question + owner notes; the
-  // answer lives in pinned_questions). Owner-private, never evidence, set
-  // explicitly via frontmatter (no path prefix). Pack entry in gbrain-base.yaml.
-  'question',
+  'question', // C4 pinned-question page (question + owner notes; owner-private, never evidence; src/core/questions/pages.ts)
 ] as const;
 
 /**

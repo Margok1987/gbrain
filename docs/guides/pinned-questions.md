@@ -68,7 +68,7 @@ Every pin, list, status and refresh returns the same fields:
 | `new_evidence_since_watermark` | Pages or facts in scope changed after the answer; the next cycle refreshes it |
 | `last_refresh_at` | The last successful refresh |
 | `blocked_reason` | Why the answer cannot be refreshed right now (below), or null |
-| `next_action` | The step that fixes it: `argv`, `mcp`, `consent`, `actor`, `why` and a read-only `verify` |
+| `fix` | The step that fixes it: `argv`, `mcp`, `consent`, `actor`, `why` and a read-only `verify` |
 | `verify` | `gbrain questions status <id> --json` / `questions_status {id}` |
 
 | `blocked_reason` | Meaning | Next action |

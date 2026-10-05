@@ -73,9 +73,9 @@ function renderReceipt(r: QuestionReceipt, withAnswer: boolean): string {
   }
   lines.push(`  sentences: ${r.sentences.fresh} fresh, ${r.sentences.stale} stale${r.sentences.withheld ? `, ${r.sentences.withheld} withheld` : ''}; last refresh: ${r.last_refresh_at ?? 'never'}`);
   if (r.blocked_reason) lines.push(`  blocked: ${r.blocked_reason}`);
-  if (r.next_action) {
-    const cmd = r.next_action.argv ? shellQuote(r.next_action.argv) : r.next_action.mcp?.tool;
-    lines.push(`  next: ${cmd}`, `        ${r.next_action.why}`);
+  if (r.fix) {
+    const cmd = r.fix.argv ? shellQuote(r.fix.argv) : r.fix.mcp?.tool;
+    lines.push(`  next: ${cmd}`, `        ${r.fix.why}`);
   }
   return lines.join('\n');
 }

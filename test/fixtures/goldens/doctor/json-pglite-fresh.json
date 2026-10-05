@@ -510,13 +510,13 @@
         },
         {
           "category": "meta",
-          "message": "Version 204 (latest: 204)",
+          "message": "Version 205 (latest: 205)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "901 column(s) verified against live schema",
+          "message": "945 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -1683,7 +1683,7 @@
         },
         {
           "category": "brain",
-          "message": "No retrieval-affecting files changed in working tree.",
+          "message": "1 retrieval-affecting file(s) changed since HEAD: src/core/operations.ts. Re-run `gbrain eval run-all` after committing these changes.",
           "name": "eval_drift",
           "status": "ok"
         },
@@ -1793,7 +1793,7 @@
           "category": "meta",
           "details": {
             "counts": {
-              "global": 12,
+              "global": 13,
               "mixed": 2,
               "source": 12
             },
@@ -1821,12 +1821,13 @@
               "resolve_symbol_edges": "global",
               "schema-suggest": "source",
               "skillopt": "global",
+              "standing_questions": "global",
               "sync": "source",
               "synthesize": "mixed",
               "synthesize_concepts": "global"
             }
           },
-          "message": "Phase taxonomy: 12 source-scoped, 12 brain-global, 2 mixed. Source-safe: [lint, backlinks, sync, extract, extract_facts, extract_atoms, recompute_emotional_weight, consolidate, propose_takes, conversation_facts_backfill, enrich_thin, schema-suggest]. Brain-global: [resolve_symbol_edges, synthesize_concepts, grade_takes, calibration_profile, edge_contradictions, drift, chronicle, facts_drain, skillopt, embed, orphans, purge]. Mixed: [synthesize, patterns].",
+          "message": "Phase taxonomy: 12 source-scoped, 13 brain-global, 2 mixed. Source-safe: [lint, backlinks, sync, extract, extract_facts, extract_atoms, recompute_emotional_weight, consolidate, propose_takes, conversation_facts_backfill, enrich_thin, schema-suggest]. Brain-global: [resolve_symbol_edges, synthesize_concepts, grade_takes, calibration_profile, edge_contradictions, drift, standing_questions, chronicle, facts_drain, skillopt, embed, orphans, purge]. Mixed: [synthesize, patterns].",
           "name": "cycle_phase_scope",
           "status": "ok"
         },

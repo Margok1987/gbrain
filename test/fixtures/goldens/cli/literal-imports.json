@@ -127,6 +127,9 @@
       "quarantine": [
         "./commands/quarantine.ts"
       ],
+      "questions": [
+        "./commands/questions.ts"
+      ],
       "recall": [
         "./commands/recall.ts"
       ],

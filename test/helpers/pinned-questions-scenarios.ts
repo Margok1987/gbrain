@@ -113,7 +113,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
         const { body } = await mcp(engine, 'questions_pin', { question: QUESTION, scope: { entity: ENTITY } }, { scopes: ['read', 'write'], sourceId: s.sourceId });
         const receipt = (body as unknown as Pinned).receipt;
         expect(receipt).toMatchObject({ state: 'inactive', inactive_reason: 'awaiting_consent', freshness: 'awaiting_refresh', blocked_reason: 'awaiting_consent', page_materialized: false });
-        expect(receipt.next_action).toMatchObject({ argv: ['gbrain', 'questions', 'pin', '--id', receipt.id], consent: ['paid'], actor: 'user' });
+        expect(receipt.fix).toMatchObject({ argv: ['gbrain', 'questions', 'pin', '--id', receipt.id], consent: ['paid'], actor: 'user' });
         const refreshed = await mcp(engine, 'questions_refresh', { id: receipt.id }, { scopes: ['read', 'write'], sourceId: s.sourceId });
         expect(refreshed.body).toMatchObject({ blocked_reason: 'awaiting_consent', refresh: { status: 'blocked', blocked_reason: 'awaiting_consent' } });
         expect(calls.calls).toBe(0);
@@ -132,7 +132,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
       const snap = await engine.readPageSnapshot(slug, { sourceId: s.sourceId });
       await putPage(engine, s.sourceId, slug, `---\n${Object.entries(snap!.page.frontmatter as Record<string, unknown>).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n')}\ntitle: ${JSON.stringify(snap!.page.title)}\ntype: question\n---\n${snap!.page.compiled_truth}\nMy own note about acme.\n`, snap!.revision);
       const out = await unpinQuestion(localCtx(engine, s.sourceId), { id: pinned.receipt.id });
-      expect(out).toMatchObject({ unpinned: true, receipt: { state: 'archived', freshness: 'archived', blocked_reason: null, next_action: null } });
+      expect(out).toMatchObject({ unpinned: true, receipt: { state: 'archived', freshness: 'archived', blocked_reason: null, fix: null } });
       const [row] = await engine.executeRaw<{ status: string; body: string }>(`SELECT frontmatter->>'status' AS status, compiled_truth AS body FROM pages WHERE source_id = $1 AND slug = $2`, [s.sourceId, slug]);
       expect(row).toMatchObject({ status: 'archived' });
       expect(row!.body).toContain('My own note about acme.');
@@ -243,7 +243,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
         expect(after.freshness).toBe('stale');
         expect(notices).toMatchObject([{ code: 'pinned_answer_stale', kind: 'degraded' }]);
         expect(sentence(after, c.needle)).toMatchObject({ stale: true, reasons: [c.reason] });
-        expect(after.next_action?.mcp?.tool).toBe('questions_refresh');
+        expect(after.fix?.mcp?.tool).toBe('questions_refresh');
         const pack = await (await import('../../src/core/questions/service.ts')).pinnedAnswersForPack(localCtx(engine, s.sourceId), [ENTITY]);
         expect(pack?.withheld?.stale_sentences).toBe(after.sentences.stale);
         expect(JSON.stringify(pack?.pinned_questions ?? [])).not.toContain(before!.text);
@@ -335,7 +335,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
       expect(ev!.n).toBeGreaterThan(0);
       const r = await status(engine, s, pinned.receipt.id);
       expect(r).toMatchObject({ freshness: 'fresh', blocked_reason: 'refresh_failed' });
-      expect(r.next_action?.mcp).toEqual({ tool: 'questions_refresh', arguments: { id: pinned.receipt.id, full: true } });
+      expect(r.fix?.mcp).toEqual({ tool: 'questions_refresh', arguments: { id: pinned.receipt.id, full: true } });
     });
 
     run("a crashed worker's lease is taken over only after it expires", async (engine) => {
@@ -384,7 +384,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
       const slowFn: typeof chat.fn = (req) => Promise.race([chat.fn(req), new Promise<never>((_, rej) => req.signal?.addEventListener('abort', () => rej(new Error('aborted'))))]);
       const out = await pinQuestion(localCtx(engine, s.sourceId), { question: QUESTION, scope: { entity: ENTITY }, wait_ms: 200 }, { chat: slowFn });
       expect(out.receipt).toMatchObject({ freshness: 'awaiting_refresh', refresh: { status: 'timeout' } });
-      expect(out.receipt.next_action?.mcp?.tool).toBe('questions_refresh');
+      expect(out.receipt.fix?.mcp?.tool).toBe('questions_refresh');
       expect((await getPin(engine, s.sourceId, out.receipt.slug))!.lease_token).toBeNull();
     });
   });
@@ -395,8 +395,8 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
       await withEnv({ ANTHROPIC_API_KEY: undefined, GBRAIN_HOME: mkdtempSync(join(tmpdir(), 'pq-keyless-')) }, async () => {
         const out = await pinQuestion(localCtx(engine, s.sourceId), { question: QUESTION, scope: { entity: ENTITY } });
         expect(out.receipt).toMatchObject({ state: 'active', freshness: 'awaiting_refresh', blocked_reason: 'no_model_key', refresh: { status: 'blocked', blocked_reason: 'no_model_key' } });
-        expect(out.receipt.next_action).toMatchObject({ argv: ['gbrain', 'providers', 'list'], actor: 'user', consent: ['credentials', 'paid'] });
-        expect(out.receipt.next_action?.verify?.mcp).toEqual({ tool: 'questions_status', arguments: { id: out.receipt.id } });
+        expect(out.receipt.fix).toMatchObject({ argv: ['gbrain', 'providers', 'list'], actor: 'user', consent: ['credentials', 'paid'] });
+        expect(out.receipt.fix?.verify?.mcp).toEqual({ tool: 'questions_status', arguments: { id: out.receipt.id } });
       });
     });
 
@@ -407,7 +407,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
         const chat = stubChat();
         const out = await pin(engine, s, chat);
         expect(out.receipt).toMatchObject({ freshness: 'awaiting_refresh', blocked_reason: 'budget_exhausted' });
-        expect(out.receipt.next_action?.argv).toEqual(['gbrain', 'config', 'set', 'cycle.standing_questions.budget_usd', '<usd>']);
+        expect(out.receipt.fix?.argv).toEqual(['gbrain', 'config', 'set', 'cycle.standing_questions.budget_usd', '<usd>']);
         expect(chat.calls).toHaveLength(0);
       } finally { await engine.executeRaw("DELETE FROM config WHERE key = 'cycle.standing_questions.budget_usd'"); }
     });
@@ -420,7 +420,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
         await putPage(engine, s.sourceId, 'notes/widget-plan', page('note', 'Widget plan', 'The widget plan ships in August.'), await revisionOf(engine, s.sourceId, 'notes/widget-plan'));
         const stale = await status(engine, s, pinned.receipt.id);
         expect(stale).toMatchObject({ freshness: 'stale', blocked_reason: 'no_worker' });
-        expect(stale.next_action?.why).toContain('autopilot');
+        expect(stale.fix?.why).toContain('autopilot');
         await engine.executeRaw("UPDATE pinned_questions SET cooldown_days = 0 WHERE source_id = $1", [s.sourceId]);
         const phase = await runPhaseStandingQuestions(engine, { dryRun: false, chat: stubChat().fn });
         expect((phase.details as { refreshed: number }).refreshed).toBeGreaterThanOrEqual(1);
@@ -495,7 +495,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
       } finally { await setRemotePrivate(engine, false); }
     });
 
-    run('a failed refresh is recovered over MCP by running its next_action', async (engine) => {
+    run('a failed refresh is recovered over MCP by running its fix', async (engine) => {
       const s = await seedBrain(engine);
       const pinned = await pin(engine, s);
       await setRemotePrivate(engine, true);
@@ -507,7 +507,7 @@ export function registerPinnedQuestionSuite(label: string, getEngine: () => Brai
         const failed = (await mcp(engine, 'questions_refresh', { id: pinned.receipt.id }, grant)).body as unknown as QuestionReceipt;
         expect(failed).toMatchObject({ blocked_reason: 'refresh_failed', freshness: 'stale' });
         calls.fail = false;
-        const next = failed.next_action!.mcp!;
+        const next = failed.fix!.mcp!;
         const recovered = (await mcp(engine, next.tool, next.arguments, grant)).body as unknown as QuestionReceipt;
         expect(recovered).toMatchObject({ freshness: 'fresh', blocked_reason: null, refresh: { status: 'published', mode: 'full' } });
       } finally {
