@@ -1,7 +1,7 @@
 <!-- /autoplan restore point: "/home/user/.gstack/projects/garrytan-gbrain/plan-memory-proof-wave-autoplan-restore-20261005-005821.md" -->
 # Memory proof wave: matched receipts against extract-first memory servers
 
-Status: plan for approval (October 5, 2026), revised after the CEO, DX and engineering reviews. Covers garrytan/gbrain and garrytan/gbrain-evals.
+Status: approved October 5, 2026 (as written, with a $2,500 spend cap). Revised after the CEO, DX and engineering reviews. Covers garrytan/gbrain and garrytan/gbrain-evals.
 
 ## Implementation plan
 
@@ -175,18 +175,17 @@ A6. **Cost formula.** Preregistered: ingest LLM dollars + embedding dollars + CP
 stated rate + read-time context and answer dollars, amortized at a stated reads-per-write
 ratio, with sensitivity at 1× and 10× reads. Wall-clock ingest is reported, not headlined.
 
-A7. **Agent modes and the coding-agent spike.** `agentic-rag` and `agent` on the dev slices of
+A7. **Agent modes and the coding-agent benchmark.** `agentic-rag` and `agent` on the dev slices of
 LongMemEval-S, LoCoMo10 and LifeBench (exploratory). A spike runs the harness's coding-agent
-memory benchmark (61 tasks) with gbrain as the memory; the full run waits for the spike and the
-ledger.
+memory benchmark (61 tasks) with gbrain as the memory; the full run (budget line 6) follows a
+positive spike.
 
 A8. **Baselines.** The harness's hybrid-search baseline and a full-context reader where the
 history fits, on every primary cell.
 
 A9. **PrecisionMemBench and scale.** PrecisionMemBench in `retrieval` mode, reporting active
 passes, precision and recall with denominators. gbrain uses its zero-LLM write path and does not
-claim `supports_filters`; a structural gap is reported, not chased. BEAM 10M and LongMemEval-M
-run only from unspent reserve.
+claim `supports_filters`; a structural gap is reported, not chased. BEAM 10M runs for both systems (budget line 7); LongMemEval-M runs from line 8.
 
 ### Workstream B (gbrain-evals): workload suites
 
@@ -303,14 +302,18 @@ C4 is default-on only if it passes both gates; otherwise opt-in (safety passed) 
 
 ### Budget
 
-Paid spend through the metering proxy, cap $1,500, bought in this order:
+Paid spend through the metering proxy, cap $2,500 (approved), bought in this order:
 1. A0 paid smoke and the primary comparison on BEAM 500k + 1M, both systems, sealed and
    validation: about $500.
 2. Secondary datasets and matched public benchmarks at the preregistered target: about $350.
 3. Dev sweeps, lanes, agent modes and fallback-model overlap: about $300.
 4. B suites (one fixed reader plus the frontier subset) and B5: about $200.
-5. Fix-lane validation reruns: about $100. Reserve: $50.
-The paid smoke rebuilds these lines from measured usage; if they exceed $1,500 the plan comes
+5. Fix-lane validation reruns: about $100.
+6. The full coding-agent memory benchmark run (if the A7 spike is positive): about $400.
+7. BEAM 10M for both systems: about $350.
+8. Extra frontier points on sealed and LongMemEval-M: about $200.
+9. Reserve: $100.
+The paid smoke rebuilds these lines from measured usage; if they exceed $2,500 the plan comes
 back for approval.
 
 ### Not in scope
@@ -542,7 +545,7 @@ Decision Audit Trail (continued):
 
 - A continuously re-run public lane on every gbrain release (pinned subset, cheap).
 - Sentence-level privacy projection so pinned questions can be shared with restricted grants.
-- Full coding-agent memory benchmark run, if the A7 spike is positive and the ledger allows.
+
 
 ### Implementation tasks
 
@@ -558,3 +561,11 @@ Decision Audit Trail (continued):
 10. (P2, C1–C3) Date headers, interleaved candidates, fix lane.
 11. (P2, C4 + B5) Pinned questions with lifecycle, privacy, consent and migration; safety and benefit gates.
 12. (P3) Reports, README, receipts, ledger, decision folders, CHANGELOG.
+
+### Approval (Phase 4)
+
+Garry, October 5, 2026:
+- Plan: approved as written, pinned questions included behind the B5 safety gate.
+- Spend cap: $2,500 (adds the full coding-agent run, BEAM 10M and more frontier points).
+- Publication: in gbrain-evals, naming the public benchmark and datasets, not the competitor.
+- The existing dated citation row in gbrain-evals `docs/comparison-systems.md` stays as is.
