@@ -13,7 +13,7 @@ import { getFtsLanguage } from '../fts-language.ts';
 import { getEmbeddingModel } from '../ai/gateway.ts';
 import { refreshProjectionStatistics } from '../search/projection-statistics.ts';
 import { belowSafeChunkFence } from '../search/safe-chunks.ts';
-import { acceptedEmbeddingInputHashes, embeddingInputHash, isContextualMode, plainEmbeddingTier, synopsisBodyHash,
+import { acceptedEmbeddingInputHashes, embeddingInputHash, plainEmbeddingTier, synopsisBodyHash,
   type EmbeddingInputContext, type EmbeddingTier } from '../embedding-input-hash.ts';
 
 /**
@@ -158,13 +158,15 @@ export async function installPageProjection(engine: BrainEngine, prepared: Proje
       await tx.executeRaw(`DELETE FROM content_chunks WHERE page_id=$1 AND NOT(id=ANY($2::int[]))`, [snapshot.page.id, matching]);
       // #5553: keep a vector only when its recorded embedding input equals the
       // input the current page would produce. A chunk with no record is kept
-      // only where that input is its raw text; on a contextual page it is
+      // only in the pre-contextual NULL mode; explicit none may have inherited
+      // an old title vector, so its missing proof cannot authorize retention.
+      // On a contextual page it is
       // nulled once and stamped by its re-embed.
       const mode = current!.page.contextual_retrieval_mode;
       const provenance = embeddingInputContext(context, current!.page.title, context.corpusGeneration, chunks);
       const recorded = await tx.executeRaw<{ id: number; chunk_index: number; embedding_input_hash: string | null }>(
         'SELECT id,chunk_index,embedding_input_hash FROM content_chunks WHERE page_id=$1', [snapshot.page.id]);
-      const currentInput = recorded.filter(row => row.embedding_input_hash === null ? !isContextualMode(mode)
+      const currentInput = recorded.filter(row => row.embedding_input_hash === null ? mode == null
         : acceptedEmbeddingInputHashes(provenance, mode, byIndex.get(Number(row.chunk_index))!).includes(row.embedding_input_hash)).map(row => Number(row.id));
       await tx.executeRaw(`UPDATE content_chunks SET ${quoteIdentifier(context.column.name)}=NULL,
         embedded_at=NULL,embedded_text_hash=NULL,embedding_input_hash=NULL WHERE page_id=$1 AND

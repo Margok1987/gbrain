@@ -250,7 +250,7 @@ async function processFault(config: RobotConfig, world: World, model: ReferenceM
     await runSteps(world, model, config.schedule);
     const deadline = Date.now() + 30_000;
     let stuck = await gitEffects();
-    while (Date.now() < deadline && stuck.some(e => e.state === 'running' || !e.error_code)) { await Bun.sleep(250); stuck = await gitEffects(); }
+    while (Date.now() < deadline && stuck.some(e => e.state === 'running' || !typedGitErrors.has(e.error_code ?? ''))) { await Bun.sleep(250); stuck = await gitEffects(); }
     for (const e of stuck) if (!e.error_code || !typedGitErrors.has(e.error_code)) {
       model.violate({ class: 'wedge', detail: `stale index.lock: git effect ${e.id} is ${e.state} without a typed error (${e.error_code})` });
     }

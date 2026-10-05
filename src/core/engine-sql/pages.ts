@@ -28,6 +28,7 @@ import type { LegacyUnscopedRead, ScopedRead } from './brands.ts';
 import type { ScopedReadRunner } from './cjk-search.ts';
 import { compileRowNormalizer } from './normalize.ts';
 import { renderFragment, sqlFragment, trustedSql } from './fragment.ts';
+import { quoteIdentifier, resolveWriteColumnFromConfigRows } from '../search/embedding-column.ts';
 
 /**
  * PGLite can return zero rows from `INSERT ... ON CONFLICT DO UPDATE ...
@@ -314,6 +315,35 @@ export async function updatePageContextualRetrievalState(
   mode: string,
   corpusGeneration: string | null,
 ): Promise<void> {
+    if (mode === 'none') {
+      const { rows: config } = await exec.run<{ key: string; value: string }>(sqlFragment`
+        SELECT key,value FROM config WHERE key IN ('search_embedding_column','embedding_columns')`);
+      const column = resolveWriteColumnFromConfigRows({
+        searchEmbeddingColumn: config.find(row => row.key === 'search_embedding_column')?.value ?? null,
+        embeddingColumnsJson: config.find(row => row.key === 'embedding_columns')?.value ?? null,
+      });
+      const vector = trustedSql(quoteIdentifier(column.name));
+      await exec.run(sqlFragment`
+        WITH previous AS MATERIALIZED (
+          SELECT id, contextual_retrieval_mode AS old_mode,
+            COALESCE(frontmatter, '{}'::jsonb) ? 'embed_skip' AS skipped
+          FROM pages WHERE source_id=${sourceId} AND slug=${slug} AND deleted_at IS NULL
+          FOR UPDATE
+        ), changed AS (
+          UPDATE pages p SET contextual_retrieval_mode=${mode}, corpus_generation=${corpusGeneration},
+            updated_at=now(), embedding_signature=CASE
+              WHEN previous.old_mode IN ('title','per_chunk_synopsis') AND NOT previous.skipped
+              THEN NULL ELSE p.embedding_signature END
+          FROM previous WHERE p.id=previous.id
+          RETURNING p.id, previous.old_mode, previous.skipped
+        )
+        UPDATE content_chunks cc SET ${vector}=NULL, embedded_at=NULL,
+          embedded_text_hash=NULL, embedding_input_hash=NULL
+        FROM changed WHERE cc.page_id=changed.id
+          AND changed.old_mode IN ('title','per_chunk_synopsis') AND NOT changed.skipped
+          AND cc.${vector} IS NOT NULL`);
+      return;
+    }
     // Narrow UPDATE — bumps updated_at as a side effect so the autopilot
     // sweep doesn't think the page hasn't changed since last touch. Skips
     // soft-deleted rows. corpus_generation nullable (caller passes NULL

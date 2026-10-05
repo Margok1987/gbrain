@@ -555,7 +555,11 @@ Never merge external PRs directly into master. Instead, use the "fix wave" workf
    this. It is a net, not a proof — a human still reads the diffs.
 6. **Close with context** — every closed PR gets a comment explaining why and what (if
    anything) supersedes it. Contributors did real work; respect that with clear communication
-   and thank them.
+   and thank them. In the wave PR body, put each folded-in contributor PR on a
+   `Supersedes #N` line and each fixed issue on a `Fixes #N` line: when the wave merges,
+   the [fix-wave closeout](#fix-wave-closeout) closes those PRs with a thank-you comment and
+   GitHub closes the issues. Write `Addresses #N` or `Refs #N` for anything only partly
+   done, so it stays open. Close declined or duplicate PRs by hand, with the reason.
 7. **Ship as one PR** — single PR to master with all attributions preserved via
    `Co-Authored-By:` trailers. Include a summary of what merged and what closed.
 
@@ -603,6 +607,31 @@ run once on any PR before GitHub offers it in the picker.
 **Residual risk.** A same-repo branch (`capy/*` or `garrytan/*`) that carries
 contributor commits passes by design. Keeping contributor work inside a revised fix
 wave on those branches stays a policy rule, enforced by review, not by this check.
+
+### Fix-wave closeout
+
+`.github/workflows/fix-wave-closeout.yml` (job `close-superseded`) runs when a PR
+into master closes. If it merged and its head repository is `garrytan/gbrain`,
+`scripts/fix-wave-closeout.ts` reads the merged PR's body and closes every open pull
+request named on a `Supersedes #N` line (`Supersedes #5085`, `- Supersedes #5089,
+#5096 and #5107`, `**Supersedes:** #5113`). Only the list right after the keyword
+counts, so `Supersedes #5140, which conflicts with #5000` closes #5140 alone. Each
+closed PR gets one comment, keyed by `<!-- fix-wave-closeout -->`, that thanks the
+contributor, links the wave, and says the work landed with credit when the wave body
+contains `Contributed by @<their handle>`. Numbers that are issues or already-closed
+PRs are skipped. A failed close is a warning in the run log, and the step summary
+lists every number with what happened to it. One run closes at most 50 PRs.
+
+Issues need nothing extra: `Fixes #N` in the same body closes them through GitHub.
+Before this workflow, contributor PRs stayed open after their wave merged, which is
+most of why the open-PR count grew. To preview a body locally without writing
+anything, save the event payload and run
+`bun scripts/fix-wave-closeout.ts --event <payload.json> --dry-run`.
+
+Like the gate, it uses `pull_request_target`: the workflow and script come from the
+default branch, it sparse-checks-out only the script, and it never checks out or
+runs PR code. Permissions are `{}` at the top and `contents: read` plus
+`pull-requests: write` for the one job.
 
 ## Checking out PRs from garrytan-agents
 

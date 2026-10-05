@@ -54,6 +54,16 @@ describe('Hangul mention boundaries', () => {
     expect(mentions(body)).toEqual(['people/jiwon']);
   });
 
+  test.each(['지원씨는 왔다', '지원님께 드렸다', '지원에게서 받았다', '지원이었다', '지원아 가자', '지원 대표가 말했다', '지원대표가 말했다'])
+  ('keeps attached honorifics, titles and copula forms: %s', body => {
+    expect(mentions(body)).toEqual(['people/jiwon']);
+  });
+
+  test.each(['지원하는 방법', '지원금 신청', '지원군을 보냈다', '장인정신', '인하여 늦었다'])
+  ('rejects a name that only starts a longer word: %s', body => {
+    expect(mentions(body)).toEqual([]);
+  });
+
   test('matches an alias using alias spelling, not its canonical Latin title', () => {
     const body = '😀 아내와 만났다';
     const found = findMentionedEntities(body, gazetteer, opts);

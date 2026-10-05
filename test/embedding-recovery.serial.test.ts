@@ -78,7 +78,10 @@ for (const kind of backends) {
       await runSchemaTransition(engine, originalDimensions);
       await engine.executeRaw("DELETE FROM config WHERE key IN ('embedding_model','embedding_dimensions')");
       for (const row of originalIdentity) await engine.setConfig(row.key, row.value);
-      if (kind === 'postgres') await teardownDB(); else await engine.disconnect();
+      if (kind === 'postgres') {
+        await engine.executeRaw("DELETE FROM config WHERE key LIKE 'embedding_migration.%'");
+        await teardownDB();
+      } else await engine.disconnect();
     });
     async function seedArchivedEligibility(scenario: string) {
       const sourceId = 'synthetic-cycle6-archive';

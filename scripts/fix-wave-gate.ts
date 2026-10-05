@@ -58,7 +58,7 @@ export function gateMessage(handle: string): string {
     COMMENT_MARKER,
     `Thanks for this pull request, @${handle}. The work is welcome, and this PR stays open.`,
     '',
-    'gbrain does not merge contributor pull requests into master directly. A maintainer folds the change into a fix-wave PR, revises it there (tests, agent-facing errors, conventions), and lands it with credit to you: the commit says `Contributed by @' + handle + '` and carries a `Co-Authored-By:` trailer with your name.',
+    'gbrain does not merge contributor pull requests into master directly. A maintainer folds the change into a fix-wave PR, revises it there (tests, agent-facing errors, conventions), and lands it with credit to you: the commit says `Contributed by @' + handle + '` and carries a `Co-Authored-By:` trailer with your name. When that fix wave merges, this PR is closed with a comment that links it.',
     '',
     `You don't need to do anything else. To see where a change belongs and what the fix wave checks, read CONTRIBUTING.md, "Where does my change go?": ${CONTRIBUTING_URL}`,
     '',

@@ -680,7 +680,8 @@ accepted contribution is credited in `CHANGELOG.md`.
 Contributor PRs are never merged into master as-is. A maintainer folds the
 change into a fix-wave PR, revises it there (tests, agent-facing errors,
 conventions) and lands it with credit: the commit says `Contributed by @handle`
-and carries a `Co-Authored-By:` trailer. Your PR stays open until then.
+and carries a `Co-Authored-By:` trailer. Your PR stays open until then. When
+the fix wave merges, a workflow closes your PR with a comment that links the wave.
 
 The **Fix-wave gate** check enforces this. It fails every PR into master whose
 head branch is not in `garrytan/gbrain` itself, and posts one comment saying

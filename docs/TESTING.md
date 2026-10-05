@@ -450,6 +450,18 @@ too; build the admin app on the host when updating its committed bundle.
 from one heaviest-first work queue; every VM is destroyed on exit. VM setup, scheduling, weights, quota
 and flags are in [scripts/ubicloud/README.md](../scripts/ubicloud/README.md).
 
+VMs are named `ubirun-<owner>-<epoch>-<suffix>`; set `UBI_OWNER` to your thread
+code. Teardown destroys every VM the run asked for, including creates still in
+flight, and stale-VM sweeps run only with `UBI_GC_HOURS` set and only on your
+own VMs. `scripts/ubicloud/ubi-runner.sh usage` shows vCPUs by owner.
+A sleeping machine kills the run with no signal, so teardown never runs: on Capy, run
+`ci:ubicloud` as a watched background operation. After any interrupted run, check
+`ubi-runner.sh list --mine` and reap leftovers with `down NAME` (or `gc HOURS`, own VMs only).
+
+The project quota is 256 vCPUs, shared with PR CI, and one full gate takes 64.
+In a multi-lane wave, lanes run `ci:ubicloud:diff` or targeted suites (`bun
+test <files>`, `--lanes`); only the integrator runs the full gate.
+
 ### E2E backend matrix
 
 `scripts/e2e-backend-matrix.txt` lists the E2E files that must pass on direct
