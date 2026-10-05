@@ -5,6 +5,7 @@ import { cosineSimilarity } from './classify.ts';
 import { isFactWithdrawn } from './withdrawal.ts';
 import { cosineVerdict } from './capture-dedup.ts';
 import { interleaveFusion } from '../search/fusion-lists.ts';
+import { readSupersessionThreshold } from './supersession-threshold.ts';
 
 export type FactCandidate = FactRow & { source_markdown_slug: string | null; row_num: number | null };
 export interface FactDecision { status: 'inserted' | 'duplicate' | 'superseded'; candidate: FactCandidate | null; }
@@ -85,7 +86,7 @@ export async function decideSingleFact(engine: BrainEngine, sourceId: string, in
       const next = cosineSimilarity(embedding, c.embedding);
       if (next > score) { score = next; candidate = c; }
     }
-    if (candidate && cosineVerdict(lane, score, input.fact, candidate.fact) === 'duplicate') return {
+    if (candidate && cosineVerdict(lane, score, input.fact, candidate.fact, (await readSupersessionThreshold(engine, embeddingModel, embedding.length)).threshold) === 'duplicate') return {
       status: candidate.kind === input.kind ? 'superseded' : 'duplicate', candidate,
     };
   }

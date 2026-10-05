@@ -28,8 +28,9 @@
  * preserved distinct claims (every claim ever established still has an
  * active row). The decision is decideSingleFact's rule (max cosine among
  * eligible candidates at or above the threshold) replayed at each threshold
- * in TAUS; at 0.95 (the product's explicit-lane threshold) the real
- * decideSingleFact runs beside it and must agree.
+ * in TAUS; each threshold is also registered as the model's
+ * `facts.supersession_thresholds` override, so the real decideSingleFact
+ * runs beside every replayed decision and must agree.
  */
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -38,7 +39,7 @@ import { gunzipSync, gzipSync } from 'node:zlib';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import { cosineSimilarity } from '../src/core/facts/classify.ts';
-import { EXPLICIT_DUPLICATE_THRESHOLD } from '../src/core/facts/capture-dedup.ts';
+import { SUPERSESSION_THRESHOLDS_KEY, calibrationKey, resolveSupersessionThreshold } from '../src/core/facts/supersession-threshold.ts';
 import {
   CANDIDATE_FUSION_KEY, SUPERSESSION_CANDIDATE_K, decideSingleFact, listSupersessionCandidates, type CandidateFusion,
 } from '../src/core/facts/single-prepare.ts';
@@ -206,7 +207,7 @@ function loadEmbeddings(path: string, texts: string[]): { model: string; dims: n
  * 24K tokens. Vectors are stored as float32 so cosines near the threshold
  * are exact.
  */
-async function embedWithGateway(model: string, dims: number, outPath: string): Promise<void> {
+async function embedWithGateway(model: string, dims: number, outPath: string): Promise<Record<string, unknown>> {
   const { embed } = await import('../src/core/ai/gateway.ts');
   const { estimateTokens } = await import('../src/core/chunkers/token-estimate.ts');
   const texts = fixtureTexts(buildFixture());
@@ -223,7 +224,7 @@ async function embedWithGateway(model: string, dims: number, outPath: string): P
   }
   const tokens = texts.reduce((n, t) => n + estimateTokens(t), 0);
   writeFileSync(outPath, gzipSync(JSON.stringify({ model, dims, texts_sha256: sha256(JSON.stringify(texts)), vectors })));
-  console.log(JSON.stringify({ model, dims, texts: texts.length, approx_cl100k_tokens: tokens, out: outPath }));
+  return { model, dims, texts: texts.length, approx_cl100k_tokens: tokens, out: outPath };
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +243,8 @@ async function replay(engineDims: number, model: string, emb: (t: string) => Flo
   await engine.connect({});
   await engine.initSchema();
   await engine.setConfig(CANDIDATE_FUSION_KEY, mode);
+  // The product decides at this threshold too, so every replayed decision is checked against decideSingleFact.
+  await engine.setConfig(SUPERSESSION_THRESHOLDS_KEY, JSON.stringify({ [calibrationKey(model, engineDims)]: tau }));
   const keyOf = new Map<number, string>();
   const established = new Map<string, Set<string>>();
   const insert = async (c: Company, row: Row, supersedeId?: number) => {
@@ -275,7 +278,7 @@ async function replay(engineDims: number, model: string, emb: (t: string) => Flo
       if (exact) bestId = Number(exact.id);
       const status: ProbeOutcome['status'] = exact ? 'duplicate' : bestId !== null && score >= tau ? 'superseded' : 'inserted';
       const hitId = status === 'inserted' ? null : bestId;
-      if (tau === EXPLICIT_DUPLICATE_THRESHOLD) {
+      {
         const product = await decideSingleFact(engine, 'default', { fact: p.fact, kind: 'fact', visibility: p.visibility, entity_slug: c.slug }, e, model, SOURCE);
         if (product.status !== status || (product.candidate?.id ?? null) !== hitId) productMismatches++;
       }
@@ -386,24 +389,7 @@ async function run(embeddingsPath: string, outDir: string | null, taus: number[]
       }
       return counts;
     };
-    for (const mode of MODES) {
-      const ps = arms[mode].probes;
-      const rate = (num: number, den: number) => den === 0 ? null : round(num / den);
-      const corr = ps.filter(p => p.has_twin && (p.kind === 'correction' || p.kind === 'concurrent' || p.kind === 'private_correction'));
-      const rest = ps.filter(p => p.has_twin && p.kind === 'restatement');
-      const coex = ps.filter(p => p.kind === 'coexisting');
-      const kept = Object.values(arms[mode].preserved);
-      sweep.push({
-        threshold: tau, arm: mode,
-        correction_miss_rate: rate(corr.filter(p => p.outcome === 'missed').length, corr.length),
-        restatement_miss_rate: rate(rest.filter(p => p.outcome === 'missed').length, rest.length),
-        coexisting_false_supersession_rate: rate(coex.filter(p => p.outcome === 'false_supersession').length, coex.length),
-        false_supersession_rate: rate(ps.filter(p => p.outcome === 'false_supersession').length, ps.length),
-        preserved_distinct_share: rate(kept.reduce((n, k) => n + k.preserved, 0), kept.reduce((n, k) => n + k.claims, 0)),
-        correct_decision_rate: rate(ps.filter(p => p.outcome === 'correct').length, ps.length),
-        stale_single_value_claims_at_end: arms[mode].stale_claims,
-      });
-    }
+    for (const mode of MODES) sweep.push(sweepRow(arms[mode], tau, mode));
     sources.push({
       source: `c2-twin-fixture-tau-${tau}`, verdict, threshold: tau,
       arms: { baseline: { config: { [CANDIDATE_FUSION_KEY]: 'rrf_free' } }, candidate: { config: { [CANDIDATE_FUSION_KEY]: 'interleave' } } },
@@ -417,7 +403,7 @@ async function run(embeddingsPath: string, outDir: string | null, taus: number[]
           const ps = arms[m].probes.filter(p => p.has_twin && p.dense === (slice === 'dense'));
           return [m, { with_twin: ps.length, twin_in_candidates: ps.filter(p => p.twin_in_candidates).length }];
         }))])),
-        product_decide_mismatches: tau === EXPLICIT_DUPLICATE_THRESHOLD ? { rrf_free: A.product_mismatches, interleave: B.product_mismatches } : null,
+        product_decide_mismatches: { rrf_free: A.product_mismatches, interleave: B.product_mismatches },
       },
     });
     summary[String(tau)] = Object.fromEntries(comparisons.map(c => [c.id, { a: round(c.stats.mean_a), b: round(c.stats.mean_b), delta: round(c.stats.delta), ci95: c.stats.ci95.map(round), status: c.status }]));
@@ -434,17 +420,7 @@ async function run(embeddingsPath: string, outDir: string | null, taus: number[]
   // rate whose false supersession stays at or under 1% of probes and whose
   // preserved distinct claims stay at or over 99.5%; plus the equal-weight
   // balance (correction miss + coexisting false supersession).
-  const base = sweep.filter(r => r.arm === 'rrf_free');
-  const num = (r: Record<string, unknown>, k: string) => Number(r[k] ?? 0);
-  const safe = base.filter(r => num(r, 'false_supersession_rate') <= 0.01 && num(r, 'preserved_distinct_share') >= 0.995);
-  const pickMin = (rows: Array<Record<string, unknown>>, f: (r: Record<string, unknown>) => number) =>
-    rows.length === 0 ? null : rows.reduce((a, b) => f(b) < f(a) ? b : a).threshold;
-  const thresholdPick = {
-    rule: 'lowest correction miss rate with false supersession <= 1% of probes and preserved distinct claims >= 99.5% (rrf_free arm); balanced = argmin(correction miss + coexisting false supersession)',
-    guarded: pickMin(safe, r => num(r, 'correction_miss_rate')),
-    balanced: pickMin(base, r => num(r, 'correction_miss_rate') + num(r, 'coexisting_false_supersession_rate')),
-    product: EXPLICIT_DUPLICATE_THRESHOLD,
-  };
+  const thresholdPick = { ...pickThreshold(sweep.filter(r => r.arm === 'rrf_free')), product: resolveSupersessionThreshold(model, store.dims).threshold };
   const decidedAt = new Date().toISOString();
   const verdictJson = {
     decision_id: decisionId, plan: 'MEMORY_PROOF_WAVE C2', stage: 'dev', eligible_for_default: false,
@@ -458,6 +434,62 @@ async function run(embeddingsPath: string, outDir: string | null, taus: number[]
 }
 
 const round = (x: number) => Math.round(x * 10_000) / 10_000;
+
+type SweepRow = Record<string, unknown> & { threshold: number };
+
+function sweepRow(arm: ArmResult, tau: number, mode: CandidateFusion): SweepRow {
+  const ps = arm.probes;
+  const rate = (num: number, den: number) => den === 0 ? null : round(num / den);
+  const corr = ps.filter(p => p.has_twin && (p.kind === 'correction' || p.kind === 'concurrent' || p.kind === 'private_correction'));
+  const rest = ps.filter(p => p.has_twin && p.kind === 'restatement');
+  const coex = ps.filter(p => p.kind === 'coexisting');
+  const kept = Object.values(arm.preserved);
+  return {
+    threshold: tau, arm: mode,
+    correction_miss_rate: rate(corr.filter(p => p.outcome === 'missed').length, corr.length),
+    restatement_miss_rate: rate(rest.filter(p => p.outcome === 'missed').length, rest.length),
+    coexisting_false_supersession_rate: rate(coex.filter(p => p.outcome === 'false_supersession').length, coex.length),
+    false_supersession_rate: rate(ps.filter(p => p.outcome === 'false_supersession').length, ps.length),
+    preserved_distinct_share: rate(kept.reduce((n, k) => n + k.preserved, 0), kept.reduce((n, k) => n + k.claims, 0)),
+    correct_decision_rate: rate(ps.filter(p => p.outcome === 'correct').length, ps.length),
+    stale_single_value_claims_at_end: arm.stale_claims,
+  };
+}
+
+/**
+ * Preregistered pick over the rrf_free (default) rows: the lowest correction
+ * miss rate whose false supersession stays at or under 1% of probes and whose
+ * preserved distinct claims stay at or over 99.5%; plus the equal-weight
+ * balance (correction miss + coexisting false supersession).
+ */
+function pickThreshold(rows: SweepRow[]) {
+  const num = (r: SweepRow, k: string) => Number(r[k] ?? 0);
+  const safe = rows.filter(r => num(r, 'false_supersession_rate') <= 0.01 && num(r, 'preserved_distinct_share') >= 0.995);
+  const pickMin = (xs: SweepRow[], f: (r: SweepRow) => number) => xs.length === 0 ? null : xs.reduce((a, b) => f(b) < f(a) ? b : a).threshold;
+  return {
+    rule: 'lowest correction miss rate with false supersession <= 1% of probes and preserved distinct claims >= 99.5% (rrf_free arm); balanced = argmin(correction miss + coexisting false supersession)',
+    guarded: pickMin(safe, r => num(r, 'correction_miss_rate')),
+    balanced: pickMin(rows, r => num(r, 'correction_miss_rate') + num(r, 'coexisting_false_supersession_rate')),
+  };
+}
+
+/**
+ * One-shot calibration for `gbrain doctor`'s supersession_calibration fix:
+ * embed the fixture with the brain's model (paid, about a cent), sweep the
+ * default arm over 0.80-0.97, print the key, the rows and the guarded pick.
+ */
+async function calibrate(model: string, dims: number, outPath: string): Promise<void> {
+  await embedWithGateway(model, dims, outPath);
+  const companies = buildFixture();
+  const store = loadEmbeddings(outPath, fixtureTexts(companies));
+  resetGateway();
+  configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: dims, env: { OPENAI_API_KEY: 'sk-offline-c2-eval-no-network' } });
+  const rows: SweepRow[] = [];
+  for (const tau of thresholdRange('0.80:0.97:0.01')) rows.push(sweepRow(await replay(dims, model, t => store.get(t), companies, 'rrf_free', tau), tau, 'rrf_free'));
+  const pick = pickThreshold(rows);
+  console.log(JSON.stringify({ key: calibrationKey(model, dims), threshold_pick: pick, threshold_sweep: rows,
+    register: pick.guarded === null ? null : `gbrain config set ${SUPERSESSION_THRESHOLDS_KEY} '{"${calibrationKey(model, dims)}": ${pick.guarded}}'` }, null, 2));
+}
 
 /** `0.80:0.97:0.01` (inclusive range) or `0.85,0.9,0.95`. */
 function thresholdRange(spec: string): number[] {
@@ -480,13 +512,17 @@ if (import.meta.main) {
     const range = arg('--taus');
     const taus = range ? thresholdRange(range) : TAUS;
     await run(embeddings, arg('--out'), taus, arg('--decision-id') ?? 'c2-interleave-dev');
+  } else if (cmd === 'calibrate') {
+    const [model, dims, out] = rest;
+    if (!model || !Number.isInteger(Number(dims)) || !out) { console.error('calibrate needs <provider:model> <dims> <out-file> (paid provider calls, about a cent)'); process.exit(2); }
+    await calibrate(model, Number(dims), out);
   } else if (cmd === 'embed') {
     const arg = (flag: string) => { const i = rest.indexOf(flag); return i >= 0 ? rest[i + 1] : null; };
     const model = arg('--model'); const dims = Number(arg('--dims')); const out = arg('--out');
     if (!model || !Number.isInteger(dims) || !out) { console.error('embed needs --model <provider:model> --dims <n> --out <file> (paid provider calls)'); process.exit(2); }
-    await embedWithGateway(model, dims, out);
+    console.log(JSON.stringify(await embedWithGateway(model, dims, out)));
   } else {
-    console.error('usage: bun scripts/eval-c2-candidate-fusion.ts texts | embed --model m --dims n --out f | run --embeddings <file> [--taus 0.80:0.97:0.01] [--decision-id id] [--out <dir>]');
+    console.error('usage: bun scripts/eval-c2-candidate-fusion.ts texts | calibrate <model> <dims> <out> | embed --model m --dims n --out f | run --embeddings <file> [--taus 0.80:0.97:0.01] [--decision-id id] [--out <dir>]');
     process.exit(2);
   }
 }

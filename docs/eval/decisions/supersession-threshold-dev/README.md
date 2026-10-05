@@ -8,7 +8,7 @@ For the default model, `voyage:voyage-4`, the product's threshold of 0.95 is alr
 choice, so this finding proposes no change for it. The threshold does depend on the embedding model, though.
 With `openai:text-embedding-3-large`, no threshold meets the guard, and at 0.95 it replaces 54% of new
 coexisting claims. Even at its best setting on the default model, a cosine threshold alone leaves 47% of
-corrections inserted beside the old value. The verdict is `dev` and changes no default.
+corrections inserted beside the old value. The verdict is `dev`; the per-model table it led to is applied in this wave (see below).
 
 ## Results (rrf_free arm; interleave is the same from 0.90 up and one correction worse below)
 
@@ -57,16 +57,36 @@ On both models the two distributions overlap. Cosine alone can't tell "same clai
 similar claim about a different period". That's why about half of corrections stay unreplaced even at the
 best threshold on the default model.
 
-## Proposed fix (not applied; routed by the wave owner)
+## Applied in this wave
 
-1. **Calibrate per model.** Replace the single `EXPLICIT_DUPLICATE_THRESHOLD = 0.95` (`facts/capture-dedup.ts`,
+Fix 1 below is in the memory proof wave. Fix 2 is not.
+
+- **Calibration table.** `src/core/facts/supersession-threshold.ts` holds one table keyed `provider:model@dims`.
+  Its only entry is `voyage:voyage-4@1024` at 0.95, so voyage-4 decides exactly as before.
+- **Readers.** The fixed 0.95 constants in `capture-dedup.ts`, `write-single.ts` and the classify fast path now
+  read the table.
+- **Uncalibrated models,** including `openai:text-embedding-3-large`, never supersede or deduplicate by
+  cosine. Each new fact is inserted, and the `conflict` decide sweep judges the pair where it is on.
+  Exact-text duplicates still collapse: the fingerprint check in `decideSingleFact` and identical text in
+  `writeSingleFact`.
+- **Override.** `facts.supersession_thresholds` takes a JSON map `{"provider:model@dims": number | "off"}`, so an
+  operator can register a measured value without a release.
+- **Doctor.** `supersession_calibration` is an informational check. For an uncalibrated model it names the
+  model and returns two commands, which need consent because the first one costs money:
+  `bun scripts/eval-c2-candidate-fusion.ts calibrate <provider:model> <dims> <out>` embeds the fixture (about a
+  cent), sweeps 0.80 to 0.97 and prints `threshold_pick.guarded`; then
+  `gbrain config set facts.supersession_thresholds` registers the result.
+
+## Proposed fix
+
+1. **Calibrate per model (applied, see above).** Replace the single `EXPLICIT_DUPLICATE_THRESHOLD = 0.95` (`facts/capture-dedup.ts`,
    also hard-coded in `facts/write-single.ts` and the classify fast path) with a per-embedding-model table.
    Keep `voyage:voyage-4` at 0.95. A model with no calibrated entry, such as `openai:text-embedding-3-large`,
    should not supersede by cosine. Its writes insert the new fact and leave the pair to the existing
    conflict review where that is enabled. At 0.95 on 3-large, that gives up the 37% of corrections it
-   catches today and removes the 54% of wrong replacements. `gbrain doctor` could flag a brain whose embedding model has
-   no calibrated threshold. This fixture calibrates a new model for about a cent:
-   `bun scripts/eval-c2-candidate-fusion.ts embed …` then `run … --taus 0.80:0.97:0.01`.
+   catches today and removes the 54% of wrong replacements. `gbrain doctor` flags a brain whose embedding model has
+   no calibrated threshold. This fixture calibrates a new model for about a cent with
+   `bun scripts/eval-c2-candidate-fusion.ts calibrate <provider:model> <dims> <out>`.
 2. **Make supersession slot-aware.** The remaining misses need more than a threshold. Supersession can use
    the claim slot: the typed `claim_metric` and `claim_period` columns when both rows carry them, or the
    caller-named target from `remember.replaces` (#6027). Then cosine only nominates candidates, and the slot

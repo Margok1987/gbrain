@@ -86,6 +86,7 @@ import { autoChronicleEntry } from './checks/auto-chronicle.ts';
 import { factsDrainEntry } from './checks/facts-drain.ts';
 import { factTakeVectorsEntry } from './checks/vector-coverage.ts';
 import { decideHealthEntry } from './checks/decide.ts';
+import { supersessionCalibrationEntry } from './checks/supersession-calibration.ts';
 import { unlinkedFactsEntry } from './checks/unlinked-facts.ts';
 import { edgeValidityEntry } from './checks/edge-validity.ts';
 import { plannerStatsEntry } from './checks/planner-stats.ts';
@@ -128,6 +129,7 @@ export const DOCTOR_CHECK_REGISTRY: readonly DoctorEntry[] = [
   embeddingQueryPrefixEntry,
   embeddingColumnRegistryEntry,
   embeddingEnvOverrideEntry,
+  supersessionCalibrationEntry,
   graphCoverageEntry,
   orphanRatioEntry,
   staleMentionsEntry,
