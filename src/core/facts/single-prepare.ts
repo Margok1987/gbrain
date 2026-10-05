@@ -4,6 +4,7 @@ import { isAvailable, embedOne, getEmbeddingModel } from '../ai/gateway.ts';
 import { cosineSimilarity } from './classify.ts';
 import { isFactWithdrawn } from './withdrawal.ts';
 import { cosineVerdict } from './capture-dedup.ts';
+import { interleaveFusion } from '../search/fusion-lists.ts';
 
 export type FactCandidate = FactRow & { source_markdown_slug: string | null; row_num: number | null };
 export interface FactDecision { status: 'inserted' | 'duplicate' | 'superseded'; candidate: FactCandidate | null; }
@@ -27,6 +28,34 @@ export async function assertFactNotWithdrawn(engine: BrainEngine, sourceId: stri
       'Remember a corrected claim. Repeating the old claim does not restore withdrawn memory.');
   }
 }
+export const CANDIDATE_FUSION_KEY = 'facts.candidate_fusion';
+export type CandidateFusion = 'rrf_free' | 'interleave';
+/** Candidates the supersession decision scores; the cap bounds the blast radius. */
+export const SUPERSESSION_CANDIDATE_K = 5;
+
+/** `facts.candidate_fusion`: `rrf_free` (default) is the single cosine arm; unknown values read as the default. */
+export async function readCandidateFusion(engine: BrainEngine): Promise<CandidateFusion> {
+  try {
+    const raw = (await engine.getConfig(CANDIDATE_FUSION_KEY))?.trim();
+    return raw === 'interleave' ? 'interleave' : 'rrf_free';
+  } catch {
+    return 'rrf_free';
+  }
+}
+
+/**
+ * The supersession candidate set for one claim: the cosine arm's top k, or
+ * under `interleave` the cosine and keyword arms merged round-robin by fact id
+ * and cut to the same k, so the decision still scores at most k rows.
+ */
+export async function listSupersessionCandidates(engine: BrainEngine, sourceId: string, entitySlug: string, fact: string, embedding: Float32Array, embeddingModel?: string | null, fusion?: CandidateFusion): Promise<FactRow[]> {
+  const k = SUPERSESSION_CANDIDATE_K;
+  const cosine = await engine.findCandidateDuplicates(sourceId, entitySlug, fact, { embedding, embeddingModel, k });
+  if ((fusion ?? await readCandidateFusion(engine)) !== 'interleave') return cosine;
+  const keyword = await engine.findCandidateDuplicates(sourceId, entitySlug, fact, { embedding, embeddingModel, k, arm: 'keyword' });
+  return interleaveFusion([cosine, keyword], row => row.id, k);
+}
+
 /**
  * SQL-only, so publication can verify the semantic decision under its guard.
  * `lane` is the writer's `facts.source`: capture lanes never drop by cosine (#5888).
@@ -38,7 +67,7 @@ export async function decideSingleFact(engine: BrainEngine, sourceId: string, in
     ORDER BY id LIMIT 1`, [sourceId, input.entity_slug, input.visibility, input.fact]);
   if (exact) return { status: 'duplicate', candidate: { ...exact, id: Number(exact.id) } };
   if (embedding && input.entity_slug) {
-    const candidates = await engine.findCandidateDuplicates(sourceId, input.entity_slug, input.fact, { embedding, embeddingModel, k: 5 });
+    const candidates = await listSupersessionCandidates(engine, sourceId, input.entity_slug, input.fact, embedding, embeddingModel);
     const metadata = await engine.executeRaw<{ id: number; source_markdown_slug: string | null; row_num: number | null }>(
       'SELECT id,source_markdown_slug,row_num FROM facts WHERE source_id=$1 AND id=ANY($2::int[])',
       [sourceId, candidates.map(c => c.id)]);

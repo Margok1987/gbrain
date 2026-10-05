@@ -40,6 +40,7 @@ const DIRECTLY_READ_SINGLETONS = [
   'search.return_budget_default',
   'search.return_budget_conversation',
   'search.return_budget_max_remote',
+  'search.evidence_date_header',             // search/evidence-delivery.ts (C1)
 ];
 
 describe('KNOWN_CONFIG_KEYS search.* rows mirror what the code reads (#4605)', () => {
