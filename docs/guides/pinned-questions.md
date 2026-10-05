@@ -105,7 +105,10 @@ previous answer. After a deletion, a withdrawal, a conflicting correction, or
 for a question about the latest or current state, it recomputes the answer
 from scratch. A refresh publishes only if nothing it cited changed while it
 ran; otherwise the previous answer stays, still flagged, and the next refresh
-tries again. A failed refresh never removes the previous answer.
+tries again. A model reply with no parseable answer is retried once with a
+JSON-only reminder (both calls count toward spend); if that also fails, the
+refresh fails with `refresh_failed:model_output_not_json`. A failed refresh
+never removes the previous answer.
 
 Question pages, synthesis pages and pages that copy a published answer are
 never used as evidence.
