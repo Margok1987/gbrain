@@ -10,6 +10,9 @@
  *    deterministic child request_id derived from the caller's request_id and
  *    the item index, so replaying the same request_id replays each child
  *    (committed children return their receipt, nothing is written twice);
+ *  - each item's receipt is compact (status, fact id, entity, warnings, and
+ *    the write state only when it is not committed); repeated hints appear
+ *    once at the top level;
  *  - publication is per item: the response reports each item's status and
  *    `partial: true` when some failed. Replaying the same request_id returns
  *    the same per-item outcomes; failed items are resubmitted in a new call
@@ -52,6 +55,8 @@ export async function runRememberBatch(ctx: OperationContext, p: Record<string, 
   const shared: Record<string, unknown> = {};
   for (const key of ['provenance', 'source_id', 'kind', 'ttl', 'visibility', 'infer_entity']) if (p[key] !== undefined) shared[key] = p[key];
   const normalized = items.map((raw, index) => {
+    // A bare string is the common shorthand for one fact.
+    if (typeof raw === 'string') return { ...shared, fact: raw };
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       throw verbError('invalid_params', `items[${index}] must be an object.`, 'Each item is { "fact": "...", optional entity, kind, ttl, visibility, provenance }.');
     }
@@ -69,11 +74,21 @@ export async function runRememberBatch(ctx: OperationContext, p: Record<string, 
   if (ctx.dryRun) return { dry_run: true, action: 'remember', items: normalized.length, protocol_version: 1 };
   const requestId = typeof p.request_id === 'string' && p.request_id ? p.request_id : randomUUID();
   const results: BatchItemResult[] = [];
+  const hints = new Set<string>();
   for (const [index, item] of normalized.entries()) {
     const child = childRequestId(requestId, index);
     try {
       const out = await single(ctx, { ...item, request_id: child }) as Record<string, unknown>;
-      results.push({ ...out, index, request_id: child, status: String(out?.status ?? 'saved') });
+      // Compact per-item receipt: a batch lands in the agent's context, so it carries what the agent acts on, not the full single-fact envelope.
+      if (typeof out?.hint === 'string') hints.add(out.hint);
+      results.push({
+        index, request_id: child, status: String(out?.status ?? 'saved'),
+        ...(out?.id !== undefined ? { id: out.id } : {}),
+        ...(out?.entity_slug !== undefined ? { entity_slug: out.entity_slug } : {}),
+        ...(Array.isArray(out?.warnings) && out.warnings.length ? { warnings: out.warnings } : {}),
+        ...(out?.valid_until ? { valid_until: out.valid_until } : {}),
+        ...(typeof out?.state === 'string' && out.state !== 'committed' ? { state: out.state, retry_after_ms: out.retry_after_ms ?? null } : {}),
+      });
     } catch (e) {
       if (!(e instanceof OperationError)) throw e;
       results.push({ index, request_id: child, status: 'failed', error: { code: e.code, message: e.message, ...(e.detail ? { detail: e.detail } : {}) } });
@@ -87,6 +102,7 @@ export async function runRememberBatch(ctx: OperationContext, p: Record<string, 
     saved: results.length - failed,
     failed,
     partial: failed > 0 && failed < results.length,
+    ...(hints.size ? { hints: [...hints] } : {}),
     ...(failed > 0 ? { next: 'Fix each failed item as its error says, then send only the failed items in a new remember call with a new request_id; the saved items are already stored.' } : {}),
   };
 }
