@@ -58,9 +58,9 @@ describe('gbrain questions', () => {
   });
 
   test('--help answers without a brain', async () => {
-    const r = await runCli(['questions', '--help'], { home: emptyHome(), timeoutMs: 30_000 });
+    const r = await runCli(['questions', '--help'], { home: emptyHome() });
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('pin "<question>"');
     expect(r.stdout).toContain('docs/guides/pinned-questions.md');
-  }, 40_000);
+  });
 });
