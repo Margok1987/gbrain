@@ -11,7 +11,7 @@ import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { __resetPrivateVisibilityCacheForTests } from '../src/core/search/private-visibility.ts';
-import { applyEventsForTest, appendedHash, generateAppendedWorkload, leakageProbe, runAppended, summarize } from '../evals/pinned-questions/appended-gate.ts';
+import { aggregate, applyEventsForTest, appendedHash, decide, generateAppendedWorkload, leakageProbe, runAppended, summarize } from '../evals/pinned-questions/appended-gate.ts';
 import { retrieveEvidence } from '../src/core/questions/refresh.ts';
 import { insertPin } from '../src/core/questions/store.ts';
 import { questionSlug } from '../src/core/questions/identity.ts';
@@ -40,7 +40,7 @@ describe('appended-corrections benefit gate (offline plumbing)', () => {
   test('an offline run reports every arm, no leaks, and fixed lifecycle cost across read ratios', async () => {
     const w = generateAppendedWorkload(7, 2);
     const out = await runAppended({ workload: w, readerModel: MODEL, refreshModel: MODEL, withBaselines: true, arms: offlineArms(MODEL, MODEL) });
-    expect(out.arms.map(a => a.arm)).toEqual(['pinned', 'query_reader', 'think']);
+    expect(out.arms.map(a => a.arm)).toEqual(['pinned', 'query_reader', 'query_reader_full', 'anchored_reader', 'anchored_reader_full', 'think']);
     for (const a of out.arms) expect(a.reads).toHaveLength(24);
     expect(out.leakage.probes).toBe(2 * 2 * 4);
     expect(out.leakage.leaks).toEqual([]);
@@ -53,6 +53,22 @@ describe('appended-corrections benefit gate (offline plumbing)', () => {
     expect(at100.read_usd).toBeCloseTo(at1.read_usd * 100, 9);
     expect(at1.freshness.changes).toBeGreaterThan(0);
   }, 180_000);
+
+  test('the preregistered rule: pinned must beat the anchored control in every seed on accuracy or freshness, with zero leaks', () => {
+    const w = generateAppendedWorkload(1, 1);
+    const reads = (correct: (b: number) => boolean) => Array.from({ length: 12 }, (_, b) => ({ entity: w.entities[0]!.slug, batch: b, gold: w.gold[w.entities[0]!.slug]![b]!, correct: correct(b), stale: false, usd: 0.001 }));
+    const run = (arm: string, correct: (b: number) => boolean, refresh_model?: string) => ({ arm, ...(refresh_model ? { refresh_model } : {}), reads: reads(correct), lifecycle_usd: 0, refresh_attempts: 0 });
+    const seed = (seedNo: number, pinnedOk: (b: number) => boolean, controlOk: (b: number) => boolean, leaks = 0) => ({
+      seed: seedNo, leaks, summary: [summarize(run('pinned', pinnedOk, MODEL), w, 1, null), summarize(run('anchored_reader', controlOk), w, 1, null)] });
+    const all = () => true;
+    const missFirst = (b: number) => b !== 1 && b !== 4;
+    expect(decide([seed(1, all, missFirst), seed(2, all, missFirst)], MODEL).outcome).toBe('pinned_beats_control');
+    expect(decide([seed(1, all, missFirst), seed(2, all, all)], MODEL).outcome).toBe('tie_anchored_retrieval_wins');
+    expect(decide([seed(1, all, missFirst, 1), seed(2, all, missFirst)], MODEL).outcome).toBe('opt_in_leak');
+    const agg = aggregate([[summarize(run('pinned', all, MODEL), w, 1, null)], [summarize(run('pinned', missFirst, MODEL), w, 1, null)]]);
+    expect(agg).toHaveLength(1);
+    expect(agg[0]).toMatchObject({ arm: 'pinned', seeds: 2, accuracy: { min: 10 / 12, max: 1 } });
+  });
 
   describe('on a PGLite brain', () => {
     let engine: PGLiteEngine;

@@ -256,6 +256,8 @@ const SYSTEM_PROMPT = [
   'If the evidence does not answer the question, return no sentences and name the gap.',
 ].join('\n');
 
+const JSON_RETRY_NOTE = 'Your previous reply could not be parsed. Reply with only the JSON object described above, with no other text.';
+
 export function buildPrompt(pin: PinRow, items: EvidenceItem[], owner: string[], previous: AnswerSentence[] | null): string {
   const lines = [`Question: ${pin.question}`];
   if (pin.scope_slug_prefix || pin.scope_entity) {
@@ -270,12 +272,46 @@ export function buildPrompt(pin: PinRow, items: EvidenceItem[], owner: string[],
   return lines.join('\n');
 }
 
-export function parseModelAnswer(text: string, items: EvidenceItem[]): { sentences: Array<{ text: string; cites: EvidenceItem[] }>; dropped: number; gaps: string[] } {
+type AnswerObject = { sentences?: unknown; gaps?: unknown };
+const isAnswerObject = (v: unknown): v is AnswerObject => !!v && typeof v === 'object' && !Array.isArray(v) && ('sentences' in v || 'gaps' in v);
+
+/**
+ * The answer object in a model reply. Fast path: the span from the first `{`
+ * to the last `}`. Otherwise every balanced top-level object (string-aware) is
+ * tried and the last one shaped like an answer wins, so prose with braces
+ * around the JSON, a fenced block followed by notes, or a draft object
+ * followed by a corrected one still parse.
+ */
+function answerObject(text: string): AnswerObject | null {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error('model_output_not_json');
-  let parsed: { sentences?: unknown; gaps?: unknown };
-  try { parsed = JSON.parse(text.slice(start, end + 1)); } catch { throw new Error('model_output_not_json'); }
+  if (start < 0 || end <= start) return null;
+  try {
+    const whole: unknown = JSON.parse(text.slice(start, end + 1));
+    if (isAnswerObject(whole)) return whole;
+  } catch { /* fall through to the balanced scan */ }
+  let found: AnswerObject | null = null;
+  for (let i = start; i >= 0 && i <= end; i = text.indexOf('{', i + 1)) {
+    let depth = 0, inString = false, escaped = false, close = -1;
+    for (let j = i; j <= end && close < 0; j++) {
+      const ch = text[j];
+      if (inString) { if (escaped) escaped = false; else if (ch === '\\') escaped = true; else if (ch === '"') inString = false; }
+      else if (ch === '"') inString = true;
+      else if (ch === '{') depth++;
+      else if (ch === '}' && --depth === 0) close = j;
+    }
+    if (close < 0) continue;
+    try {
+      const candidate: unknown = JSON.parse(text.slice(i, close + 1));
+      if (isAnswerObject(candidate)) { found = candidate; i = close; }
+    } catch { /* not JSON; try the next brace */ }
+  }
+  return found;
+}
+
+export function parseModelAnswer(text: string, items: EvidenceItem[]): { sentences: Array<{ text: string; cites: EvidenceItem[] }>; dropped: number; gaps: string[] } {
+  const parsed = answerObject(text);
+  if (!parsed) throw new Error('model_output_not_json');
   const byRef = new Map(items.map(i => [i.ref, i]));
   const out: Array<{ text: string; cites: EvidenceItem[] }> = [];
   const seen = new Set<string>();
@@ -365,12 +401,24 @@ export async function refreshPin(engine: BrainEngine, sourceId: string, slug: st
     const full = opts.full === true || previous.length === 0 || evaluation.needsFull || NON_MONOTONIC.test(leased.question);
     opts.signal?.throwIfAborted();
     stage = 'model';
-    const response = await (opts.chat ?? gatewayQuestionChat)({
-      model, system: SYSTEM_PROMPT, user: buildPrompt(leased, items, owner, full ? null : previous), maxTokens: MAX_OUTPUT_TOKENS, signal: opts.signal,
-    });
+    const chat = opts.chat ?? gatewayQuestionChat;
+    const request = { model, system: SYSTEM_PROMPT, user: buildPrompt(leased, items, owner, full ? null : previous), maxTokens: MAX_OUTPUT_TOKENS, signal: opts.signal };
+    let response = await chat(request);
     spend = costUsd(response.model || model, response.usage);
     stage = 'parse';
-    const parsed = parseModelAnswer(response.text, items);
+    let parsed: ReturnType<typeof parseModelAnswer>;
+    try {
+      parsed = parseModelAnswer(response.text, items);
+    } catch (e) {
+      if (!(e instanceof Error && e.message === 'model_output_not_json')) throw e;
+      if (opts.meter && !opts.meter.check({ modelId: model, estimatedInputTokens: EST_INPUT_TOKENS, maxOutputTokens: MAX_OUTPUT_TOKENS, label: `standing_questions:${pinId(pin)}:retry` }).allowed) throw e;
+      opts.signal?.throwIfAborted();
+      stage = 'model';
+      response = await chat({ ...request, user: `${request.user}\n\n${JSON_RETRY_NOTE}` });
+      spend += costUsd(response.model || model, response.usage);
+      stage = 'parse';
+      parsed = parseModelAnswer(response.text, items);
+    }
     const ownerSentences: AnswerSentence[] = owner.map(text => ({ id: sentenceId(`owner:${text}`), text, origin: 'owner' }));
     const modelSentences: AnswerSentence[] = parsed.sentences.map(s => ({ id: sentenceId(s.text), text: s.text, origin: 'model' }));
     const evidence: EvidenceRow[] = [

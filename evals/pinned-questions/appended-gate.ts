@@ -11,8 +11,10 @@
  *   others    one dated update note each
  *
  * The gold answer after each batch is the newest value that is still standing.
- * Arms: pinned (one per refresh model), query + reader at the pinned answer's
- * delivered-token budget, and on-demand think. Each arm reads once per state
+ * Arms: pinned (one per refresh model); query + reader and anchored retrieval +
+ * reader (the exact evidence pinned refresh retrieves, no maintained answer),
+ * each at the pinned answer's delivered-token budget and at full evidence; and
+ * on-demand think. Each arm reads once per state
  * (entity x batch). A read is deterministic in cost for a given state, so reads
  * per write of 1, 10 and 100 weight those measured reads, while the pinned
  * refresh schedule (the standing_questions phase after every batch) does not
@@ -23,8 +25,13 @@
  *   bun evals/pinned-questions/appended-gate.ts --offline --json
  *   bun evals/pinned-questions/appended-gate.ts --run --yes --max-usd 10 --reader-model anthropic:claude-sonnet-5-5 \
  *     --refresh-models anthropic:claude-opus-4-7,anthropic:claude-sonnet-5-5 --json
+ *
+ * Run 3 adds --seeds 42,7,1234, --embeddings voyage:voyage-4 (embed after every batch) and --partial <file>
+ * (per-seed results written as each seed finishes); every run reports the anchored-retrieval and
+ * full-evidence reader arms and the preregistered decision.
  */
 import { createHash } from 'node:crypto';
+import { writeFileSync } from 'node:fs';
 import type { BrainEngine } from '../../src/core/engine.ts';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import { submitPageMutation } from '../../src/core/persistence/page-mutations.ts';
@@ -33,6 +40,8 @@ import { dispatchToolCall } from '../../src/mcp/dispatch.ts';
 import { normalizeModelId } from '../../src/core/model-id.ts';
 import { pinQuestion, pinnedAnswersForPack } from '../../src/core/questions/service.ts';
 import { runPhaseStandingQuestions } from '../../src/core/questions/phase.ts';
+import { retrieveEvidence } from '../../src/core/questions/refresh.ts';
+import { listPins } from '../../src/core/questions/store.ts';
 import { CITIES, SpendGuard, correctFor, offlineArms, paidArms, priced, readerAnswer, staleFor, tokens, type GateOpts } from './benefit-gate.ts';
 
 export const RATIOS = [1, 10, 100] as const;
@@ -159,23 +168,40 @@ export async function leakageProbe(engine: BrainEngine, w: AppendedWorkload, ans
 export interface StateRead { entity: string; batch: number; gold: string; correct: boolean; stale: boolean; usd: number }
 export interface ArmRun { arm: string; refresh_model?: string; reads: StateRead[]; lifecycle_usd: number; refresh_attempts: number }
 
+/** Arms that read the brain directly (no maintained answer). `_full` variants get every retrieved item; the others the pinned answer's token budget. */
+export const READER_ARMS = ['query_reader', 'query_reader_full', 'anchored_reader', 'anchored_reader_full'] as const;
+const FULL_QUERY_HITS = 16;
+
 export interface AppendedOpts {
   workload: AppendedWorkload;
   readerModel: string;
-  /** Refresh model for the pinned arm; the first pinned arm also runs query + reader, think and the leakage probe. */
+  /** Refresh model for the pinned arm; the first pinned arm also runs the reader arms, think and the leakage probe. */
   refreshModel: string;
   withBaselines: boolean;
+  /** Embed stale chunks after every write batch (needs an embedding model configured on the gateway). */
+  embed?: boolean;
   arms: Pick<GateOpts, 'questionChat' | 'reader' | 'think'>;
 }
+
+const fit = (parts: string[], budget: number) => {
+  let context = '';
+  for (const part of parts) {
+    const next = `${context}\n${part}`;
+    if (tokens(next) > budget) break;
+    context = next;
+  }
+  return context.trim();
+};
 
 export async function runAppended(opts: AppendedOpts): Promise<{ arms: ArmRun[]; leakage: { probes: number; leaks: string[] } }> {
   const w = opts.workload;
   const engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
-  const pinned: ArmRun = { arm: `pinned`, refresh_model: opts.refreshModel, reads: [], lifecycle_usd: 0, refresh_attempts: 0 };
-  const query: ArmRun = { arm: 'query_reader', reads: [], lifecycle_usd: 0, refresh_attempts: 0 };
-  const think: ArmRun = { arm: 'think', reads: [], lifecycle_usd: 0, refresh_attempts: 0 };
+  const newArm = (arm: string, refresh_model?: string): ArmRun => ({ arm, ...(refresh_model ? { refresh_model } : {}), reads: [], lifecycle_usd: 0, refresh_attempts: 0 });
+  const pinned = newArm('pinned', opts.refreshModel);
+  const readers = Object.fromEntries(READER_ARMS.map(a => [a, newArm(a)])) as Record<typeof READER_ARMS[number], ArmRun>;
+  const think = newArm('think');
   const leakage = { probes: 0, leaks: [] as string[] };
   const remembered = new Map<string, string>();
   try {
@@ -184,35 +210,43 @@ export async function runAppended(opts: AppendedOpts): Promise<{ arms: ArmRun[];
     await engine.setConfig('cycle.standing_questions.max_per_cycle', String(w.entities.length));
     await engine.setConfig('cycle.standing_questions.budget_usd', '1000');
     await engine.setConfig('cycle.standing_questions.last_run_at', new Date().toISOString());
-    const ctx = { engine, config: { engine: engine.kind, embedding_disabled: true } as never, remote: false as const, sourceId: 'default', dryRun: false, logger: { info() {}, warn() {}, error() {} } };
+    const ctx = { engine, config: { engine: engine.kind, embedding_disabled: !opts.embed } as never, remote: false as const, sourceId: 'default', dryRun: false, logger: { info() {}, warn() {}, error() {} } };
     const { hybridSearch } = await import('../../src/core/search/hybrid.ts');
+    const { runEmbedCore } = await import('../../src/commands/embed.ts');
     for (let b = 0; b < BATCHES; b++) {
       await applyEvents(engine, w.batches[b]!, remembered);
+      if (opts.embed) {
+        const r = await runEmbedCore(engine, { stale: true, sourceId: 'default', quiet: true });
+        if (r.failures > 0) throw new Error(`embedding failed for ${r.failures} page(s): ${JSON.stringify(r.failure_samples)}`);
+      }
       if (b === 0) {
         for (const e of w.entities) await pinQuestion(ctx, { question: question(e.name), scope: { entity: e.slug } }, { chat: opts.arms.questionChat });
       } else {
         await runPhaseStandingQuestions(engine, { dryRun: false, chat: opts.arms.questionChat });
       }
+      const pins = await listPins(engine, { sourceIds: ['default'] });
       const answerTexts: string[] = [];
       for (const e of w.entities) {
         const gold = w.gold[e.slug]![b]!;
         const past = new Set(w.history[e.slug]!);
         const q = question(e.name);
+        const read = async (arm: ArmRun, context: string) => {
+          const r = await readerAnswer(opts.arms.reader, opts.readerModel, q, context);
+          arm.reads.push({ entity: e.slug, batch: b, gold, correct: correctFor(r.text, gold), stale: staleFor(r.text, gold, past), usd: priced(r.model, r.input_tokens, r.output_tokens) });
+        };
         const pack = await pinnedAnswersForPack(ctx, [e.slug]);
         const pinnedText = (pack?.pinned_questions ?? []).flatMap(p => p.answer).join(' ');
         answerTexts.push(...(pack?.pinned_questions ?? []).flatMap(p => p.answer));
-        const pr = await readerAnswer(opts.arms.reader, opts.readerModel, q, pinnedText);
-        pinned.reads.push({ entity: e.slug, batch: b, gold, correct: correctFor(pr.text, gold), stale: staleFor(pr.text, gold, past), usd: priced(pr.model, pr.input_tokens, pr.output_tokens) });
+        await read(pinned, pinnedText);
         if (!opts.withBaselines) continue;
         const budget = Math.max(tokens(pinnedText), 200);
-        let context = '';
-        for (const h of await hybridSearch(engine, q, { sourceId: 'default', limit: 8 })) {
-          const next = `${context}\n[${h.slug}] ${h.chunk_text}`;
-          if (tokens(next) > budget) break;
-          context = next;
-        }
-        const qr = await readerAnswer(opts.arms.reader, opts.readerModel, q, context.trim());
-        query.reads.push({ entity: e.slug, batch: b, gold, correct: correctFor(qr.text, gold), stale: staleFor(qr.text, gold, past), usd: priced(qr.model, qr.input_tokens, qr.output_tokens) });
+        const hits = (await hybridSearch(engine, q, { sourceId: 'default', limit: FULL_QUERY_HITS })).map(h => `[${h.slug}] ${h.chunk_text}`);
+        const pin = pins.find(p => p.scope_entity === e.slug);
+        const anchored = pin ? (await retrieveEvidence(engine, pin)).map(i => i.text) : [];
+        await read(readers.query_reader, fit(hits, budget));
+        await read(readers.query_reader_full, hits.join('\n'));
+        await read(readers.anchored_reader, fit(anchored, budget));
+        await read(readers.anchored_reader_full, anchored.join('\n'));
         const t = await opts.arms.think(q, engine, 'default');
         think.reads.push({ entity: e.slug, batch: b, gold, correct: correctFor(t.answer, gold), stale: staleFor(t.answer, gold, past), usd: t.usd });
       }
@@ -227,7 +261,7 @@ export async function runAppended(opts: AppendedOpts): Promise<{ arms: ArmRun[];
   } finally {
     await engine.disconnect();
   }
-  return { arms: opts.withBaselines ? [pinned, query, think] : [pinned], leakage };
+  return { arms: opts.withBaselines ? [pinned, ...Object.values(readers), think] : [pinned], leakage };
 }
 
 /** Batches until an arm is correct again after the gold value changes (censored at the end of the run). */
@@ -263,21 +297,63 @@ export function summarize(arm: ArmRun, w: AppendedWorkload, ratio: number, query
   };
 }
 
+type Summary = ReturnType<typeof summarize>;
+const spread = (xs: number[]) => ({ mean: xs.reduce((a, b) => a + b, 0) / xs.length, min: Math.min(...xs), max: Math.max(...xs) });
+
+/** Mean and spread across seeds of each arm's per-seed summary at one reads-per-write ratio. */
+export function aggregate(perSeed: Summary[][]): Array<Record<string, unknown>> {
+  const key = (s: Summary) => `${s.reads_per_write}|${s.arm}|${s.refresh_model ?? ''}`;
+  const groups = new Map<string, Summary[]>();
+  for (const s of perSeed.flat()) groups.set(key(s), [...(groups.get(key(s)) ?? []), s]);
+  return [...groups.values()].map(g => ({
+    reads_per_write: g[0]!.reads_per_write, arm: g[0]!.arm, ...(g[0]!.refresh_model ? { refresh_model: g[0]!.refresh_model } : {}), seeds: g.length,
+    accuracy: spread(g.map(s => s.accuracy)), stale_wrong_rate: spread(g.map(s => s.stale_wrong_rate)),
+    mean_lag_batches: spread(g.map(s => s.freshness.mean_lag_batches)), correct_at_change: spread(g.map(s => s.freshness.correct_at_change)),
+    lifecycle_usd: spread(g.map(s => s.lifecycle_usd)), usd_per_correct: spread(g.map(s => s.usd_per_correct ?? Infinity)),
+  }));
+}
+
+/**
+ * Run-3 preregistered rule: pinned (default refresh model) beats the anchored
+ * control when, in every seed, its accuracy is higher or its freshness lag is
+ * lower, with zero leaks across seeds. A leak means opt-in; otherwise a miss is a tie.
+ */
+export function decide(perSeed: Array<{ seed: number; summary: Summary[]; leaks: number }>, defaultModel: string, control = 'anchored_reader') {
+  const seeds = perSeed.map(({ seed, summary, leaks }) => {
+    const at1 = summary.filter(s => s.reads_per_write === 1);
+    const p = at1.find(s => s.arm === 'pinned' && s.refresh_model === defaultModel)!;
+    const c = at1.find(s => s.arm === control)!;
+    const accuracy = p.accuracy > c.accuracy;
+    const freshness = p.freshness.mean_lag_batches < c.freshness.mean_lag_batches;
+    return { seed, leaks, pinned_accuracy: p.accuracy, control_accuracy: c.accuracy, pinned_lag: p.freshness.mean_lag_batches, control_lag: c.freshness.mean_lag_batches, beats_accuracy: accuracy, beats_freshness: freshness, beats: accuracy || freshness };
+  });
+  const leaks = seeds.reduce((n, s) => n + s.leaks, 0);
+  const outcome = leaks > 0 ? 'opt_in_leak' : seeds.every(s => s.beats) ? 'pinned_beats_control' : 'tie_anchored_retrieval_wins';
+  return { control, refresh_model: defaultModel, seeds, leaks, outcome };
+}
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const flag = (n: string) => { const i = args.indexOf(n); return i >= 0 ? args[i + 1] : undefined; };
   const json = args.includes('--json');
-  const seed = Number(flag('--seed') ?? 42);
+  const seeds = (flag('--seeds') ?? flag('--seed') ?? '42').split(',').map(Number);
   const readerModel = flag('--reader-model') ?? 'anthropic:claude-sonnet-5-5';
+  const embeddingModel = flag('--embeddings');
   const { resolveModel } = await import('../../src/core/model-config.ts');
   const defaultModel = await resolveModel(null, { configKey: 'models.standing_questions', tier: 'deep', fallback: 'opus' });
   const refreshModels = (flag('--refresh-models') ?? defaultModel).split(',').map(s => s.trim()).filter(Boolean);
-  const workload = generateAppendedWorkload(seed, Number(flag('--entities') ?? 6));
-  const states = workload.entities.length * BATCHES;
-  // Estimate from run 2's measured per-state sizes x1.5 (refresh ~1.5k in / 250 out, think ~3.5k in / 700 out); the SpendGuard enforces the cap.
-  const estimate = refreshModels.reduce((s, m) => s + states * priced(m, 1_500, 250), 0) + states * (2 * priced(readerModel, 800, 60) + priced(defaultModel, 3_500, 700));
+  const entities = Number(flag('--entities') ?? 6);
+  const workloads = seeds.map(seed => generateAppendedWorkload(seed, entities));
+  const states = entities * BATCHES;
+  // Per state, at run 2's measured sizes x1.25 (full-evidence reads are new and sized generously): each refresh model's refresh
+  // (1.25k in / 200 out) plus its pinned read, two budgeted reader arms (650 in / 50 out), two full-evidence reader arms
+  // (2k in / 50 out) and think (3k in / 550 out). The SpendGuard enforces the cap; embedding calls are not metered.
+  const perState = refreshModels.reduce((s, m) => s + priced(m, 1_250, 200) + priced(readerModel, 650, 50), 0)
+    + 2 * priced(readerModel, 650, 50) + 2 * priced(readerModel, 2_000, 50) + priced(defaultModel, 3_000, 550);
+  const estimate = seeds.length * states * perState;
+  const plan = { mode: 'plan', seeds, workload_hashes: workloads.map(appendedHash), states_per_seed: states, refresh_models: refreshModels, reader_model: readerModel, embedding_model: embeddingModel ?? null, est_usd: estimate };
   if (args.includes('--plan') || (!args.includes('--offline') && !args.includes('--run'))) {
-    console.log(JSON.stringify({ mode: 'plan', workload_hash: appendedHash(workload), states, refresh_models: refreshModels, reader_model: readerModel, est_usd: estimate }, null, 2));
+    console.log(JSON.stringify(plan, null, 2));
     process.exit(0);
   }
   const paid = args.includes('--run');
@@ -286,25 +362,38 @@ if (import.meta.main) {
     console.error(`Refusing a paid run: pass --yes and --max-usd >= the estimate ($${estimate.toFixed(2)}).`);
     process.exit(3);
   }
+  if (embeddingModel && !paid) {
+    console.error('--embeddings needs --run (offline mode makes no network calls).');
+    process.exit(2);
+  }
   const guard = new SpendGuard(paid ? cap : Infinity);
   if (paid) {
     const { configureGateway } = await import('../../src/core/ai/gateway.ts');
-    configureGateway({ chat_model: normalizeModelId(defaultModel), env: { ...process.env } as Record<string, string> });
+    configureGateway({ chat_model: normalizeModelId(defaultModel), ...(embeddingModel ? { embedding_model: embeddingModel, embedding_dimensions: 1024 } : {}), env: { ...process.env } as Record<string, string> });
   }
-  const runs: ArmRun[] = [];
-  let leakage = { probes: 0, leaks: [] as string[] };
-  for (const [i, model] of refreshModels.entries()) {
-    const arms = paid ? paidArms(defaultModel, guard) : offlineArms(model, readerModel);
-    const out = await runAppended({ workload, readerModel, refreshModel: model, withBaselines: i === 0, arms });
-    runs.push(...out.arms);
-    if (i === 0) leakage = out.leakage;
-    if (!json) console.error(`[appended-gate] refresh model ${model} done; metered spend $${guard.spent.toFixed(4)}`);
+  const perSeed: Array<{ seed: number; workload_hash: string; leakage: { probes: number; leaks: string[] }; summary: Summary[]; reads: unknown[] }> = [];
+  for (const workload of workloads) {
+    const runs: ArmRun[] = [];
+    let leakage = { probes: 0, leaks: [] as string[] };
+    for (const [i, model] of refreshModels.entries()) {
+      const arms = paid ? paidArms(defaultModel, guard) : offlineArms(model, readerModel);
+      const out = await runAppended({ workload, readerModel, refreshModel: model, withBaselines: i === 0, embed: !!embeddingModel, arms });
+      runs.push(...out.arms);
+      if (i === 0) leakage = out.leakage;
+      if (!json) console.error(`[appended-gate] seed ${workload.seed}, refresh model ${model} done; metered spend $${guard.spent.toFixed(4)}`);
+    }
+    const queryRun = runs.find(r => r.arm === 'query_reader');
+    const queryPerRead = queryRun && queryRun.reads.length ? queryRun.reads.reduce((s, r) => s + r.usd, 0) / queryRun.reads.length : null;
+    perSeed.push({ seed: workload.seed, workload_hash: appendedHash(workload), leakage, summary: RATIOS.flatMap(ratio => runs.map(r => summarize(r, workload, ratio, queryPerRead))),
+      reads: runs.map(r => ({ arm: r.arm, refresh_model: r.refresh_model ?? null, lifecycle_usd: r.lifecycle_usd, refresh_attempts: r.refresh_attempts, reads: r.reads })) });
+    const partial = flag('--partial');
+    if (partial) writeFileSync(partial, JSON.stringify({ metered_spend_usd: guard.spent, per_seed: perSeed }, null, 2));
   }
-  const queryRun = runs.find(r => r.arm === 'query_reader');
-  const queryPerRead = queryRun && queryRun.reads.length ? queryRun.reads.reduce((s, r) => s + r.usd, 0) / queryRun.reads.length : null;
-  const summary = RATIOS.flatMap(ratio => runs.map(r => summarize(r, workload, ratio, queryPerRead)));
-  const out = { mode: paid ? 'run' : 'offline', plumbing_only: !paid, workload: 'appended', workload_hash: appendedHash(workload), seed, entities: workload.entities.length, batches: BATCHES,
-    states, reader_model: readerModel, think_model: defaultModel, refresh_models: refreshModels, metered_spend_usd: Number.isFinite(guard.spent) ? guard.spent : null,
-    leakage, summary, reads: runs.map(r => ({ arm: r.arm, refresh_model: r.refresh_model ?? null, lifecycle_usd: r.lifecycle_usd, refresh_attempts: r.refresh_attempts, reads: r.reads })) };
+  const out = { mode: paid ? 'run' : 'offline', plumbing_only: !paid, workload: 'appended', seeds, entities, batches: BATCHES, states_per_seed: states,
+    reader_model: readerModel, think_model: defaultModel, refresh_models: refreshModels, embedding_model: embeddingModel ?? null,
+    metered_spend_usd: Number.isFinite(guard.spent) ? guard.spent : null,
+    leakage: { probes: perSeed.reduce((n, s) => n + s.leakage.probes, 0), leaks: perSeed.flatMap(s => s.leakage.leaks.map(l => `seed ${s.seed}:${l}`)) },
+    decision: decide(perSeed.map(s => ({ seed: s.seed, summary: s.summary, leaks: s.leakage.leaks.length })), refreshModels.includes(defaultModel) ? defaultModel : refreshModels[0]!),
+    aggregate: aggregate(perSeed.map(s => s.summary)), per_seed: perSeed };
   console.log(json ? JSON.stringify(out, null, 2) : JSON.stringify(out));
 }
