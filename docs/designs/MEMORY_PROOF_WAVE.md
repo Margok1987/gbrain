@@ -1,7 +1,7 @@
 <!-- /autoplan restore point: "/home/user/.gstack/projects/garrytan-gbrain/plan-memory-proof-wave-autoplan-restore-20261005-005821.md" -->
 # Memory proof wave: matched receipts against extract-first memory servers
 
-Status: approved October 5, 2026 (as written, with a $2,500 spend cap). Revised after the CEO, DX and engineering reviews. Covers garrytan/gbrain and garrytan/gbrain-evals.
+Status: approved October 5, 2026 (as written; spend cap later raised to $2,800, margin set to 3.0 points). Revised after the CEO, DX and engineering reviews. Covers garrytan/gbrain and garrytan/gbrain-evals.
 
 ## Implementation plan
 
@@ -569,3 +569,11 @@ Garry, October 5, 2026:
 - Spend cap: $2,500 (adds the full coding-agent run, BEAM 10M and more frontier points).
 - Publication: in gbrain-evals, naming the public benchmark and datasets, not the competitor.
 - The existing dated citation row in gbrain-evals `docs/comparison-systems.md` stays as is.
+
+### Decisions after the power simulation and the measured ledger (October 5, 2026)
+
+Garry approved:
+- **Margin 3.0 points**, with the BEAM 100k reserve added to the primary endpoint: BEAM 100k + 500k + 1M, split by conversation (100k 4/4/12, 500k 7/7/21, 1M 7/7/21), so 54 sealed conversations. Simulated power at a true difference of 0 is 87% (central assumptions). The restricted wild cluster bootstrap-t with Webb weights is the primary method; CR1 t and cluster bootstrap-t are reported beside it. LifeBench and PersonaMem are descriptive rows only.
+- **Spend cap $2,800** (rebuilt ledger $2,720 at a 25% frontier sweep in the B suites).
+- **Answer model for every A cell: `gemini-3.8-flash`**, identical for both systems; judge `gemini-3.5-flash` (BEAM's harness judge) and the dataset's own judge elsewhere, in one joint blinded re-judge.
+- Agent mode runs on an OpenAI model until gbrain's native Google chat path accepts a base-URL override (added in this wave so it can be metered).
