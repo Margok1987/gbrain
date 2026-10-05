@@ -19,7 +19,38 @@ Measured build: gbrain baadfc04 (the `capy/mpw-integration` branch). Stage: dev.
 The decision rule was set before run 2: if pinned beats query plus a reader on accuracy or freshness without
 leakage, it ships default-on; otherwise opt-in stands. Pinned beats it on both.
 
-### Run 2: corrections appended as new evidence (deciding run)
+### Run 3: maintained answer against anchored retrieval (preregistered 2026-10-05, before any run-3 cell)
+
+Run 2 left one open question. Pinned refresh retrieves evidence anchored on the pin's entity, newest first, and
+the other arms did not, so run 2 cannot say whether the win comes from the maintained answer or from that
+retrieval. Run 3 is designed to separate the two. It reuses run 2's workload generator unchanged.
+
+- **Control arm, anchored retrieval + reader.** For each state it calls the exact retrieval pinned refresh uses
+  (`retrieveEvidence` in `src/core/questions/refresh.ts`: the entity page, then pages that link to it or name
+  it, newest first, then hybrid hits, facts, timeline and takes). It hands that evidence to the same reader
+  (`anthropic:claude-sonnet-5-5`) at the same token budget as query + reader: the pinned answer's delivered
+  tokens, with a floor of 200. No answer is maintained between batches.
+- **Sensitivity arms, reported but not decisive.** The anchored control and query + reader each also run at
+  full evidence: every item pinned refresh sees, or the top 16 hybrid hits, with no token budget.
+- **Embeddings on for every arm.** Pages are embedded with `voyage:voyage-4` (1024 dimensions, gbrain's default)
+  after every write batch, and search runs in gbrain's default mode (balanced: hybrid keyword + vector with the
+  default reranker). Pinned refresh, query + reader, the anchored control and `think` all search the same
+  embedded brain.
+- **Three seeds:** 42, 7 and 1234. Results report each seed, the mean and the spread (min and max).
+- **Arms otherwise as run 2:** pinned with the default refresh model (`anthropic:claude-opus-4-7`), pinned with
+  `anthropic:claude-sonnet-5-5` refresh (model-matched to the reader), query + reader and `think`. Reads per
+  write are 1, 10 and 100. Leakage is probed for every seed. The cap is $15.
+
+**Decision rule.** Pinned with the default model beats the anchored control if, in every seed, either its
+accuracy is higher or its mean freshness lag is lower, and if there are zero leaks across all seeds.
+
+- If pinned beats the control, pinned questions stay default-on.
+- If pinned only ties the control (the rule above fails without a leak), the anchored retrieval is the win. It
+  ships, along with a recommendation for where else it applies (such as query for entity-scoped questions),
+  and pinned questions go back to opt-in.
+- Any leak means opt-in, whatever the accuracy.
+
+### Run 2: corrections appended as new evidence
 
 The workload is seeded (seed 42) and has 6 entities and 12 write batches, which is 13 writes per entity. Each
 entity has a widget-factory city, and corrections arrive as dated notes while the older notes stay as written.
