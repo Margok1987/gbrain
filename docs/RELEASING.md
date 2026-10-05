@@ -537,7 +537,13 @@ Never merge external PRs directly into master. Instead, use the "fix wave" workf
    or manually re-implement the best fixes from each PR. Do NOT merge PR branches directly —
    read the diff, understand the fix, and write it yourself if needed.
 4. **Test the wave** — verify with `bun test && bun run test:e2e` (full E2E lifecycle).
-   Every fix in the wave must have test coverage.
+   Every fix in the wave must have test coverage. Run
+   `bun run audit:contributors <base>..<collector-head> --prs <manifest>` to re-prove,
+   per merged change and per open PR (trial-merged), that its tests fail with its product
+   hunks reversed; the tool pins the PR heads into `prs.pinned.json` so a rerun tests the
+   same code, and its Markdown table keeps mechanical results apart from your verdicts
+   (see [Contributor audit](TESTING.md#contributor-audit)). Paste the table into the wave
+   PR body.
 5. **Security review** — run `bun run wave-security-scan <base>..<collector-head>` over the
    collector branch (the repeatable mechanical sweep). It ALARMS on newly-introduced
    obfuscation/eval in code, secrets found by gitleaks **with the test/skills allowlist
@@ -558,6 +564,45 @@ Never merge external PRs directly into master. Instead, use the "fix wave" workf
   promotional material (README intro, CHANGELOG voice, skill templates).
 - Never auto-merge PRs that remove YC references or "neutralize" the founder perspective.
 - Preserve contributor attribution in commit messages.
+
+### Fix-wave gate
+
+`.github/workflows/fix-wave-gate.yml` (job `contributor-gate`) fails every PR into
+master unless its head repository is `garrytan/gbrain` or the `maintainer-override`
+label counts. Only maintainers can push to `garrytan/gbrain`, so GBRA thread PRs
+(`capy/*`) and `garrytan/*` branches pass; fork PRs fail whatever their branch is
+called. When a contributor PR opens, a second job posts one comment with the same
+text as the failure: the work is welcome and the PR stays open, it lands through a
+fix wave with credit (`Contributed by @handle` plus a `Co-Authored-By:` trailer), and
+CONTRIBUTING.md "Where does my change go?" explains where changes belong.
+
+The workflow uses `pull_request_target`, so the workflow and
+`scripts/fix-wave-gate.ts` always come from the default branch: a PR that edits
+either cannot change its own result. It reads only the event payload and the PR
+timeline, never PR code, with `permissions: {}` at the top, `pull-requests: read`
+for the gate and `pull-requests: write` only for the comment job. A null head
+repository (deleted fork) fails closed. The check re-runs on `opened`, `edited`,
+`reopened`, `synchronize`, `labeled` and `unlabeled`.
+
+**`maintainer-override` label.** Who: a human on `MAINTAINERS` in
+`scripts/fix-wave-gate.ts` (starts as `garrytan`; changing it is a reviewed PR to
+master). When: only for a PR a maintainer has decided may land from its fork, such as
+a fix wave a maintainer opened from a fork; record the reason in a PR comment. How it
+is checked: the label counts only when the most recent `labeled` timeline event for it
+was made by an allowlisted `User`; bots (`capy-ai[bot]`, `github-actions[bot]`, any
+`[bot]` login) never qualify, and removing the label fails the PR again. Audit: the run
+log prints a `notice` naming who applied the label, when, and the timeline event id,
+and the step summary repeats it.
+
+**Turning it on (repository settings, maintainer only).** The guard is active only
+after this step; until then the check is advisory. Settings → Rules → Rulesets (or
+Settings → Branches → the `master` protection rule) → Require status checks to pass →
+add `contributor-gate` with GitHub Actions as the source → save. The check must have
+run once on any PR before GitHub offers it in the picker.
+
+**Residual risk.** A same-repo branch (`capy/*` or `garrytan/*`) that carries
+contributor commits passes by design. Keeping contributor work inside a revised fix
+wave on those branches stays a policy rule, enforced by review, not by this check.
 
 ## Checking out PRs from garrytan-agents
 

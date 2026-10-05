@@ -10,6 +10,147 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.68.0] - 2026-10-05
+
+**`delta` no longer skips changes after a failed read, and the 21 contributor fixes merged on 2026-10-05 are brought up to the house bar.**
+
+When `delta`'s pages or facts read failed, the session cursor still moved forward, so the changes in that window never reached the agent. Facts and pages also shared one cursor, so a burst of more than 50 facts, a budget that dropped some facts, or a fact read that failed while pages succeeded lost facts the same way. `delta` now keeps a cursor per arm and moves each one only through what it delivered.
+
+Measured on PGLite and Postgres (directly and through transaction-mode PgBouncer):
+
+| | Before | Now |
+| --- | --- | --- |
+| A page changed 2.6 s before a failed pages read | never delivered | delivered on the next wake |
+| 120 facts recorded since the last wake | 50 delivered, 70 lost, `has_more: false` | 120 delivered in 3 wakes |
+| A fact read fails while pages are delivered | the facts in that window are skipped | the pages advance, the facts arrive on the next wake |
+| A session whose cursor cannot be read | silently restarted at now | refused with `unavailable`; the checkpoint is kept |
+| More than 50 pages changed inside one millisecond, on Postgres | the last page re-delivered every wake; the cluster never drained | drains, nothing re-delivered |
+| Managed lint with one hand-edited, unsynced file | the whole lint run fails | that file is reported pending with the coordinator's own fix; the others are repaired |
+| `get_page content_only` on a multi-source brain | no `source_id`; a write-back that drops it is refused with no hint | `source_id` returned; the refusal names the source the revision came from, when the caller can read it |
+| #5783's smaller transcript parts, on a 1 MB session | not measured | 4 → 27 part pages (×6.75), 380 → 424 chunks (×1.116), 199,614 → 217,057 embedding tokens (×1.087), one re-embed |
+| Starter MCP tool list with `delta`'s new `cursor` param | 26,671 of 26,700 characters | 26,679 of 26,700 (delta's own descriptions trimmed to pay for it) |
+
+## To take advantage of v0.60.68.0
+
+`gbrain upgrade` does this automatically (schema migration v208). Upgraded brains show a one-time notice listing the behavior changes below; `gbrain doctor --only behavior_changes` shows it again.
+
+1. **Agents calling `delta` statelessly:** pass `next_cursor.cursor` back as `cursor`. `since` + `since_slug` still work and never skip facts.
+2. **If a response carries `degraded_reason`:** nothing was skipped. Retry the same call in about 30 seconds, or replay statelessly from that response's `since` ([recipe](docs/guides/ambient-recall.md#replay-after-a-degraded-wake)).
+3. **Check your fallback chain:** `gbrain doctor --only chat_fallback_chain` names the chain, the plane it comes from and the providers that receive traffic. To keep outage fallback but never send refused content to another provider: `gbrain config set chat_fallback_on_refusal false`.
+4. **Managed brains:** to make autopilot's lint report-only, `gbrain config set cycle.lint_fix false`.
+5. **Verify:** `gbrain delta --since 2026-10-01T00:00:00Z --json` returns `next_cursor.cursor`; `gbrain doctor --json` lists `chat_fallback_chain` and `behavior_changes`.
+
+### Behavior changes for scripts and agents
+
+| Area | Before | Now | What to change |
+| --- | --- | --- | --- |
+| `chat_fallback_chain` (#6012) | inert until this cycle; doctor warned it did nothing | walked on every non-pinned `chat()` call, on errors and on refusals; one-time upgrade notice; doctor check `chat_fallback_chain`; the first hop in a process emits a `chat_fallback_hop` notice | nothing to keep it; `gbrain config unset chat_fallback_chain` (ask the user first) to remove, or `chat_fallback_on_refusal=false` to stop refusal fallback |
+| Managed-brain autopilot lint (#5440) | reported only | writes its repairs through the coordinator; a diverged file is a pending issue (`code: managed_write_pending`, `reason`, the coordinator's `fix`), phase `warn` | `gbrain config set cycle.lint_fix false` for report-only |
+| Transcript re-ingest (#5783) | 300,000-byte parts | 45,000-byte parts: ×6.75 part pages, ×1.087 embedding tokens, one re-embed per re-ingested transcript | none |
+| Mention linker (#5960) | resume state keyed on the old gazetteer hash | rebuilds its resume state once, so the first mention-extraction run rescans | none |
+| `delta` cursor | one time cursor for pages and facts; advanced after a failed read | per-arm cursor; the opaque `cursor` param; `next_cursor.cursor`; facts carry `id`; `cursor_arms` reports each arm's start and next keyset | pass `cursor` |
+| `delta` `next_cursor.since` | the last delivered page, or unchanged | holds while any arm failed; stays strictly before the oldest undelivered fact (slug resets to `''` when it clamps); on a page-less wake moves to the newest delivered fact | none |
+| `delta` failure signal | `degraded_reason` only | `degraded_reason` (`deadline`, `pages`, `facts`, `threads`, `session_state`) plus a `delta_incomplete` notice: `next: wait`, `report` on the third consecutive incomplete wake of a session | follow `fix.next` |
+| `delta` with an unreadable session row | restarted the cursor at now | refuses with `unavailable` (`reason: session_state`), retryable | retry, or replay with `since` |
+| `delta` legacy caller at a same-timestamp boundary with more facts than the fetch limit | delivered the same 50 facts forever | `delta_cursor_upgrade_required`, whose fix is the same call with `cursor` | pass `cursor` |
+| `delta` rows changed in the last 2 s | cursor advanced past them | may be delivered once more on the next wake (no cursor passes `now() - 2 s`) | dedupe by slug and fact id |
+| `delta` `since` | years 0000 and 10000+ reached Postgres | `invalid_params` outside 0001-9999 on the parsed UTC value | none |
+| `get_page content_only` (#5615) | `slug, type, title, revision, tags, content` | adds `source_id` | pass `source_id` back to `put_page` |
+| `gbrain connectors sync` / `gbrain recall --limit` usage errors (#5942, #6002) | bare usage line, exit 1 / plain stderr line | `invalid_params` envelope with `why` and a runnable `fix`, exit 2 | read the envelope |
+| `gbrain auth clients` (#6008) | operations column blank for unbounded clients | `operations: "all"` + `includes_future_operations: true` with the re-pin fix; `none`, explicit list, `unavailable` and `revoked` states | none |
+| `config.shared_skills=false` (#5633) | raw SQL only | `gbrain sources shared-skills <id> on\|off\|status [--json]`; an oversized skill pack parks its source instead of wedging the 0.53.0 migration; limits configurable under `shared_skills.inventory.*` | none |
+| Contributor PRs into master | could be merged directly | the `Fix-wave gate` check fails unless the head repo is garrytan/gbrain or a maintainer applied `maintainer-override` (advisory until a maintainer makes it required) | none |
+
+### Itemized changes
+
+#### delta (P0)
+- The containment ships first: no session or stateless cursor moves when any arm failed or the deadline fired.
+- Per-arm cursor: pages page by `(updated_at, slug)`, facts by `(created_at, id)`, both at column precision. Each arm advances through the prefix it delivered and never past `now() - 2 s`; an arm whose read threw or did not finish before a deadline holds. Per-arm completion is captured in the same snapshot as the arrays.
+- New engine method `listFactsKeyset` (both engines, `src/core/engine-sql/facts.ts`): ascending `(created_at, id)` after a keyset with a limit+1 probe. recall's newest-first `listFactsSince` is unchanged.
+- Duplicate facts still collapse to their newest row; the facts cursor is computed from the raw rows, so a duplicate cluster split by a budget cut loses nothing.
+- Session state distinguishes absent, loaded and unavailable. Write failures surface as `session_state` with the stateless continuation in `next_cursor`. The consecutive incomplete-wake counter increments atomically in SQL, resets on a clean wake and falls back to an in-process count when the store is down. Every first wake (including a garbage-collected session) emits an `empty_retrieval` info notice with the replay step.
+- A `budget_tokens` too small for one waiting item emits `delta_incomplete` naming the budget that fits, instead of returning `has_more: true` forever.
+- Migration v208 adds `facts_cursor_at`, `facts_cursor_id` and `degraded_wakes` to `session_context_state`; existing rows start their facts cursor at `last_wake_at`.
+- Postgres keyset timestamps bind as `::text::timestamptz`: postgres.js serialized string params through a JS Date and truncated them to milliseconds. This also fixes `list_pages` keyset pagination.
+- New error code `delta_cursor_upgrade_required`; new notice code `delta_incomplete`.
+- The commit-visibility bound is stated and tested: a transaction that commits more than 2 s after it started can be passed by an empty wake. A watermark is in TODOS.md.
+
+#### Contributor follow-ups
+- Managed lint (#5440): the repair is bound to what lint scanned (revision read first, then the file, checked with the coordinator's exported `fileMatchesSnapshot`), so a publication between scan and submit is refused instead of overwritten. The coordinator's own refusal is carried into the pending issue; lint never prescribes `sync`. The drift refusal now carries `gbrain sources reconcile <src> <slug> --brain host --preview`. `cycle.lint_fix` (default true) is the opt-out. Lint stays before sync.
+- `get_page content_only` (#5615) keeps `source_id`; the `put_page` op names another source only when `expected_revision` equals that source's current revision and the caller's grant and page visibility allow reading it.
+- `chat_fallback_chain` (#6012): doctor check `chat_fallback_chain` (local, remote and `--only`) reports the winning plane (env > config.json > DB), shadowed values, providers and per-plane removal guidance (`ask_user`, never `run`); malformed entries, missing credentials and unpriced models under a user cap get cause-specific warnings, checked by presence only. `chat_fallback_on_refusal` (default true) is plumbed through config, the DB plane, the gateway config and `chat()`. Remote callers see only "a chain is configured". Guide: `docs/guides/chat-fallback.md`.
+- One-time `behavior_changes` safety notice: once per brain on the CLI and the first stdio MCP session, once per authenticated client over HTTP (a bounded `config` row, no migration). Fresh installs never see it; it is not silenced by `GBRAIN_NO_ONBOARD_NUDGE`.
+- `gbrain sources shared-skills <id> on|off|status` (#5633). `off` writes `config.shared_skills=false`, `on` deletes the key (and releases a parked source); every form prints the effective mode and its reason. Trusted local CLI only. Doctor's `shared_skills_sources` lists opted-out and parked sources. An over-limit skill pack parks its source in the per-source migration record so the 0.53.0 orchestrator completes; already-wedged installs resume with `gbrain apply-migrations --force-retry 0.53.0` then `--migration 0.53.0 --yes`.
+- `connectors sync` and `recall --limit` usage errors are `invalid_params` envelopes (exit 2). `connectors sync --help` prints usage and exits 0.
+- `gbrain auth clients` reports the four operation-snapshot states plus revoked clients; `--allowed-operations all` and `--operations all` are documented as aliases.
+- #5961: the managed-connector contract gains `cycle_extract_loops_race`, which pins the staleness bound (a page republished by a queued `loops_extract` is re-extracted by the next cycle).
+- #5960: the Hangul fixtures use placeholder names.
+
+#### Process and tooling
+- `bun run audit:contributors <base>..<head>` (`scripts/contributor-audit.ts`): reverses exactly each merge's product hunks in an isolated worktree after a green baseline, re-verifies green, classifies `discriminates` / `does_not_discriminate` / `vacuous_failure` / `setup_failed` / `conflict` / `not_audited`, runs `check:postgres-lanes` and `wave-security-scan`, and runs untrusted code under `env -i` with temporary homes and no database URLs.
+- `.github/workflows/fix-wave-gate.yml` (`pull_request_target`, metadata only, never checks out PR code): the `contributor-gate` check passes same-repo heads and a `maintainer-override` label applied by a human on the allowlist; bots never qualify; a null head fails closed. It is advisory until a maintainer makes it a required check (`docs/RELEASING.md#fix-wave-gate`).
+
+#### Tests
+- `test/delta-cursor-integrity.test.ts` (PGLite, direct Postgres, PgBouncer): every no-advance path, the 120-fact drain, legacy safety, the unpageable boundary, replay, cursor validation, migration init, the escalation rendered on CLI, stdio and HTTP, and the commit-visibility bound. With every P0 source hunk reverted, 39 of the 45 P0 tests (this file and the keyset file) fail.
+- `test/engine-sql-facts-keyset.test.ts`, `test/managed-lint.test.ts` (7 pass / 8 fail on master, 15/15 now), `test/get-page-content-roundtrip-2225.test.ts` (7/5 → 12/12), `test/shared-skills-inventory-park.serial.test.ts` (0/3 → 3/3), chat-fallback, behavior-notice, auth-clients, connectors and recall envelope suites, the fix-wave gate and contributor-audit suites.
+- Goldens regenerated on purpose: doctor JSON and registries (schema v208, two new checks), schema catalogs and the PGLite upgrade replay (v208 columns), tools-json and the tool catalog (delta descriptions and `cursor`), SQL-text, gauge and RLS inventories (`listFactsKeyset`).
+
+### Contributors
+
+These merged contributions are kept, credited and completed by this release:
+
+- Managed brains publish lint repairs through the persistence coordinator (#5440). Contributed by @howardpark.
+- Unicode-aware entity slugs and name detection without duplicating legacy pages (#5496). Contributed by @Masashi-Ono0611.
+- `get_page` `content_only` for the get→edit→put round trip (#5615). Contributed by @howardpark.
+- A source can opt out of shared-skills catalog adoption (#5633). Contributed by @dovstern.
+- The transcript part target stays under the content-sanity warn line (#5783). Contributed by @RerankerGuo.
+- `waiting` warns when only some Google sources are stale (#5923). Contributed by @Masashi-Ono0611.
+- `delta` rejects calendar-invalid `since` timestamps in every ISO shape (#5925). Contributed by @Masashi-Ono0611.
+- `delta` reports a failed pages or facts read in `degraded_reason` (#5926). Contributed by @Masashi-Ono0611.
+- `connectors sync` rejects a missing `--source` value (#5942). Contributed by @Masashi-Ono0611.
+- A pack-inferred subtype no longer reads as drift in the canonical file check (#5943). Contributed by @andreineacsu.
+- Hangul name boundaries and spacing in the mention linker (#5960). Contributed by @javieraldape.
+- The managed-connector contract no longer races the sweep's queued `loops_extract` (#5961). Contributed by @rokas-tarasevicius.
+- Timeline dates in years 0001-0099 (#5978). Contributed by @Masashi-Ono0611.
+- Calendar-invalid date-only TTL values are rejected (#5979). Contributed by @Masashi-Ono0611.
+- An in-flight model refresh is not shared across account identities (#5986). Contributed by @Masashi-Ono0611.
+- `think` rejects calendar-invalid `effective_date` strings (#5997). Contributed by @Masashi-Ono0611.
+- `sources refresh` refuses fetch timeouts above the timer limit (#5999). Contributed by @Masashi-Ono0611.
+- `recall` refuses a malformed `--limit` (#6002). Contributed by @Masashi-Ono0611.
+- Superseded embedding effects settle when current vectors verify (#6004). Contributed by @javieraldape.
+- `auth rescope --client --operations all` drops the operation snapshot (#6008). Contributed by @howardpark.
+- `chat()` walks `chat_fallback_chain`, so a claude-cli subscription limit falls back to an API model (#6012). Contributed by @andreineacsu.
+
+## [0.60.67.0] - 2026-10-05
+
+**The crash robot no longer reports a lost write when a connector republish lands after an agent's write to the same page; no write was lost.**
+
+The Postgres crash robot failed one CI run with `lost_write` on `sync_and_connector_race_direct_write` (seed 5105, no crash injected). In that race an agent's `put_page` committed first, then the GitHub connector republished the newer upstream issue over it. The page ended at the connector's revision, and the agent's revision is in the page history. That is the serial order put-then-connector, which the robot already accepts when the two run one after the other. Its concurrent-group check only knew the revisions writers returned, and a connector publish (like a sync) returns none, so it called the legal final state lost.
+
+Measured on Postgres 16 with 6 replays at a time on 4 CPUs:
+
+| | Runs | Robot reported `lost_write` | All of them: put committed, connector committed after it, page carries the connector's write, put's revision in history |
+| --- | --- | --- | --- |
+| Before the lock-order change (214211929), direct | 150 | 2 | yes |
+| Before, through PgBouncer | 150 | 3 | yes |
+| After it (8c9a8e9a4), direct | 150 | 5 | yes |
+| After it, through PgBouncer | 200 | 2 | yes |
+| Connector forced to run after the put, before and after | 6 | 6 | yes |
+| Same forced order, with this release | 10 | 0 | n/a |
+
+The race and the false report predate v0.60.65.0 at a similar rate; the lock-order change did not introduce them.
+
+## To take advantage of v0.60.67.0
+
+Nothing to do: this release changes the persistence validation robot only. `bun --no-env-file scripts/persistence/validate.ts --engine=postgres --replay=<manifest>` replays a failing run.
+
+### Itemized changes
+
+#### Crash robot
+- After a concurrent group, a page may end at the write of a committed sync or connector publish (which return no revision) only when the page carries that member's marker; every receipted revision a later member replaced must still be in the page history. A revision no member explains is still `lost_write`.
+- `test/e2e/persistence-publish-lock-order-postgres.test.ts` (from v0.60.65.0) asserted no lock timeout at all and failed once in CI when a slow runner kept a write waiting more than 1 s behind the deliberately paused topology change. It now asserts the inversion itself: once resumed, the topology change never waits on another session, and the race samples `pg_blocking_pids` for two sessions waiting on each other. On the pre-v0.60.65.0 order both still fail (the change waits on the write's counters; the race finds write/topology cycles every run); on the current order they passed 24 of 24 runs with four CPU-burning processes on a 4-CPU machine, direct and through PgBouncer.
+- `test/persistence-crash-robot.test.ts` runs the put, then the connector republish, through the real handlers and settles them as one group: the previous oracle reported `lost_write` and this one passes; an extra write nobody in the group returned still reports `lost_write`.
+
 ## [0.60.65.0] - 2026-10-05
 
 **Writes no longer stall when a source is added, claimed or archived at the same time.**

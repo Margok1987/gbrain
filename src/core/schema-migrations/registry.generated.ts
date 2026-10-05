@@ -208,7 +208,8 @@ import { v204 } from './v204-links-temporal-state.ts';
 import { v205 } from './v205-minion-spend-authorization.ts';
 import { v206 } from './v206-entity-mention-index.ts';
 import { v207 } from './v207-retrieval-feedback.ts';
-import { v208 } from './v208-pinned-questions.ts';
+import { v208 } from './v208-delta-per-arm-cursor.ts';
+import { v209 } from './v209-pinned-questions.ts';
 
 // Array order is historical (see HISTORICAL_ARRAY_ORDER in the generator); the
 // runner sorts by version before applying.
@@ -416,4 +417,5 @@ export const MIGRATIONS: Migration[] = [
   v206,
   v207,
   v208,
+  v209,
 ];

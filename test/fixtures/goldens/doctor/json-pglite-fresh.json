@@ -510,13 +510,13 @@
         },
         {
           "category": "meta",
-          "message": "Version 208 (latest: 208)",
+          "message": "Version 209 (latest: 209)",
           "name": "schema_version",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "976 column(s) verified against live schema",
+          "message": "979 column(s) verified against live schema",
           "name": "schema_columns",
           "status": "ok"
         },
@@ -648,6 +648,18 @@
           "name": "supersession_calibration",
           "readiness_state": "not_applicable",
           "severity": "info",
+          "status": "ok"
+        },
+        {
+          "category": "ops",
+          "message": "No chat_fallback_chain is set: every chat call uses only its own model.",
+          "name": "chat_fallback_chain",
+          "status": "ok"
+        },
+        {
+          "category": "meta",
+          "message": "Nothing to disclose: this brain is a fresh install at v<version> or later, so the one-time behavior-change notice does not apply.",
+          "name": "behavior_changes",
           "status": "ok"
         },
         {

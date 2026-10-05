@@ -110,7 +110,11 @@ exactly once.
 
 The reference model (`model.ts`) checks: a committed receipt is visible at
 once and later revisions move only through committed ops; a late receipt
-names a revision the page really had; a refused write never becomes visible;
+names a revision the page really had; after a concurrent group a page ends
+at a revision a committed member returned, or at the write of a committed sync
+or connector publish (which return no revision) whose marker it carries, and
+every receipted revision a later member replaced is in the page's history; a
+refused write never becomes visible;
 a withdrawn fact never returns through recall, `get_page` or the facts table;
 a write never lands in another source; another principal reusing a request
 id never receives the original receipt; takes and facts rows equal their

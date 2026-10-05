@@ -1728,8 +1728,10 @@
             "unconditionalFor": []
           }
         ],
-        "thinClient": "refuse",
-        "thinClientRoutedSubcommands": []
+        "thinClient": "route-then-refuse",
+        "thinClientRoutedSubcommands": [
+          "shared-skills"
+        ]
       },
       "status": {
         "hasSwitchCase": true,
@@ -2136,6 +2138,9 @@
         "modes",
         "stats",
         "tune"
+      ],
+      "sources": [
+        "shared-skills"
       ],
       "takes": [
         "list",

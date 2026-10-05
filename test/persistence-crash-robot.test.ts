@@ -18,10 +18,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { descriptor, executeOp, parseDescriptor } from '../scripts/persistence/ops.ts';
+import { ReferenceModel } from '../scripts/persistence/model.ts';
 import { crossBoundarySequences, randomSchedule } from '../scripts/persistence/generator.ts';
 import { ROBOT_TOPOLOGY, restrict } from '../scripts/persistence/robot-driver.ts';
 import { shrinkRun } from '../scripts/persistence/shrink.ts';
-import { runSchedule } from '../scripts/persistence/crash-robot.ts';
+import { runSchedule, runSteps } from '../scripts/persistence/crash-robot.ts';
 import { installLockOrderTrace, lockOrderReport } from '../scripts/persistence/lock-order.ts';
 import { prepareTopology } from '../scripts/persistence/history-fixture.ts';
 import { claimPersistenceEffect, releaseAbandonedClaims } from '../src/core/persistence/effect-journal.ts';
@@ -98,6 +99,36 @@ describe('reference model on master behavior', () => {
       expect({ label: schedule.label, violations: result.violations }).toEqual({ label: schedule.label, violations: [] });
     }
   }, 180_000);
+});
+
+describe('concurrent connector publish and direct write', () => {
+  // CI run 37322995874: the direct put committed first, then the connector republish imported the newer
+  // item over it. The group check knew only the put's revision; the connector reports none.
+  test('the connector republishing after a receipted put is a legal final state; an unexplained revision is still lost', async () => {
+    await robotBrain(async ({ world }) => {
+      const schedule = crossBoundarySequences(ROBOT_TOPOLOGY).find(s => s.label === 'sync_and_connector_race_direct_write')!;
+      const [again, racing] = schedule.groups.find(g => g.length === 2 && schedule.ops.some(d => d.id === g[0] && d.kind === 'connector_publish'))!
+        .map(id => schedule.ops.find(d => d.id === id)!);
+      const model = new ReferenceModel(world);
+      world.descriptors = new Map(schedule.ops.map(d => [d.id, d]));
+      await runSteps(world, model, { ...schedule, ops: schedule.ops.filter(d => d !== again && d !== racing), groups: schedule.groups.filter(g => !g.includes(again.id)) });
+      expect(model.violations).toEqual([]);
+      const put = await executeOp(world, racing);
+      const connector = await executeOp(world, again);
+      expect([put.status, connector.status]).toEqual(['committed', 'committed']);
+      model.beginStep(true);
+      await model.observe(again, connector); await model.observe(racing, put);
+      await model.settleGroup([again, racing], [connector, put]);
+      expect(model.violations).toEqual([]);
+
+      // A write no group member returned moves the page to the put's content at a revision nobody receipted.
+      const unseen = await executeOp(world, { ...racing, id: `${racing.id}-unseen`, requestId: crypto.randomUUID() });
+      expect(unseen.status).toBe('committed');
+      model.beginStep(true);
+      await model.settleGroup([again, racing], [connector, put]);
+      expect(model.violations.map(v => v.class)).toEqual(['lost_write']);
+    });
+  }, 120_000);
 });
 
 describe('lock order', () => {
