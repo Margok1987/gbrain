@@ -9,7 +9,9 @@ import { coordinatedManualLinkWrite } from '../persistence/manual-links.ts';
  */
 
 import { opError, type Operation } from './contract.ts';
-import { paramUse } from './op-fix.ts';
+import type { Action } from '../agent-output.ts';
+import { presentEdgeContext, resolveChainAnchors, runRelationalChain, validateChainHops, type ChainEvidenceEdge, type ChainPlan } from '../search/relational-chain.ts';
+import { paramUse, readFix } from './op-fix.ts';
 import {
   assertExplicitSourceLive,
   enforceClientSlugFence,
@@ -445,6 +447,63 @@ const TRAVERSE_DEPTH_CAP = 10;
 const REMOTE_BIDIRECTIONAL_DEFAULT_DEPTH = 2;
 const DEFAULT_TRAVERSE_DEPTH = 5;
 
+/**
+ * traverse_graph with `hops`: an agent-structured typed chain over the same
+ * executor the search planner uses. Returns answers with the evidence edges of
+ * each best path and per-hop diagnostics; a chain that finds nothing is a
+ * successful result carrying a `relational_chain` notice with the next call.
+ */
+async function traverseChain(ctx: OperationContext, p: Record<string, unknown>, slug: string) {
+  const conflicts = (['depth', 'link_type', 'direction'] as const).filter(k => p[k] !== undefined);
+  if (conflicts.length) {
+    throw opError('invalid_params', `traverse_graph: hops cannot be combined with ${conflicts.join(', ')}.`,
+      `Drop ${conflicts.map(k => paramUse(ctx, k)).join(' and ')}: each hop already names its link type and direction (toward), and the chain length is the number of hops.`);
+  }
+  const parsed = validateChainHops(p.hops);
+  if (!parsed.ok) {
+    throw opError('invalid_params', `traverse_graph: ${parsed.path}: ${parsed.problem}.`,
+      `Fix ${parsed.path} and retry; omit hops to walk the graph without a chain.`);
+  }
+  const { policy } = await resolveLinkReadScope(ctx, p, 'traverse_graph');
+  const temporal = await resolveEdgeTemporal(ctx, p, 'traverse_graph');
+  reportTemporal(ctx, 'traverse_graph', p, temporal, null);
+  const anchors = await resolveChainAnchors(ctx.engine, slug, policy);
+  const plan: ChainPlan = { hops: parsed.hops, excludeAnchor: false };
+  const { rows, diagnostics } = await runRelationalChain(ctx.engine, anchors, plan, temporal.disabled ? policy : { ...policy, temporal });
+  const remote = ctx.remote !== false;
+  const edge = (e: ChainEvidenceEdge) => ({ ...e, context: presentEdgeContext(e.context, remote) });
+  const answers = rows.filter(r => r.role === 'answer');
+  const rawHops = p.hops as Array<Record<string, unknown>>;
+  const status = diagnostics.status;
+  const fix = chainFix(slug, status, rawHops, diagnostics.empty_hop);
+  if (status !== 'fired' && fix) ctx.emitNotice?.({ code: 'relational_chain', kind: 'degraded', why: fix.why, fix });
+  return {
+    anchor: slug,
+    answers: answers.map(r => ({ slug: r.slug, source_id: r.source_id, path_count: r.path_count, score: r.score })),
+    paths: answers.map(r => ({ nodes: r.best_path.nodes, edges: r.best_path.edges.map(edge) })),
+    diagnostics,
+  };
+}
+
+/** A CLI flag token built at runtime (the flag-registry generator scans literal flag strings per command). */
+const cliFlag = (name: string) => `--${name}`;
+
+function chainFix(slug: string, status: string, hops: Array<Record<string, unknown>>, emptyHop?: number): Action | undefined {
+  const hopArgs = (hs: Array<Record<string, unknown>>) => hs.flatMap(h => [cliFlag('hop'), `${String(h.link_type)}:${String(h.toward)}`]);
+  if (status === 'anchor_not_found') return readFix(`No page "${slug}" is visible in the searched sources; search for the entity to find its exact slug, then retry the chain with that slug.`,
+    { argv: ['gbrain', 'search', slug], mcp: { tool: 'search', arguments: { query: slug } } });
+  if (status === 'no_edges') return readFix(`"${slug}" has no typed ${String(hops[0]?.link_type)} edges in the needed direction; the relationship may only be written as plain mentions. A depth-1 walk shows what is linked.`,
+    { argv: ['gbrain', 'graph-query', slug, cliFlag('depth'), '1'], mcp: { tool: 'traverse_graph', arguments: { slug, depth: 1 } } });
+  if (status === 'empty_hop' && emptyHop && emptyHop > 1) {
+    const prefix = hops.slice(0, emptyHop - 1);
+    return readFix(`Hop ${emptyHop} (${String(hops[emptyHop - 1]?.link_type)}) found no typed edges from the pages hop ${emptyHop - 1} reached; the shorter chain lists those pages so you can inspect them.`,
+      { argv: ['gbrain', 'graph-query', slug, ...hopArgs(prefix)], mcp: { tool: 'traverse_graph', arguments: { slug, hops: prefix } } });
+  }
+  if (status === 'truncated') return readFix('A chain cap was hit (diagnostics.cap_hit names the cap and hop), so lower-ranked answers were dropped; narrow the chain or start from a more specific page for a complete list.',
+    { argv: ['gbrain', 'graph-query', slug, ...hopArgs(hops)], mcp: { tool: 'traverse_graph', arguments: { slug, hops } } });
+  return undefined;
+}
+
 const traverse_graph: Operation = {
   name: 'traverse_graph',
   mutating: false,
@@ -456,11 +515,18 @@ const traverse_graph: Operation = {
     depth: { type: 'number', description: `Max depth (cap ${TRAVERSE_DEPTH_CAP}).` },
     link_type: { type: 'string', description: 'Follow only this link type.' },
     direction: { type: 'string', description: 'Remote default both.', enum: ['in', 'out', 'both'] },
+    hops: {
+      type: 'array',
+      description: '≤3 typed hops, e.g. [{"link_type":"founded","toward":"subject"}]; toward: object|subject.',
+      items: { type: 'object', properties: { link_type: { type: 'string' }, toward: { type: 'string' } } },
+      fullSurfaceOnly: true,
+    },
     source_id: LINK_SOURCE_ID_PARAM,
     all_sources: LINK_ALL_SOURCES_PARAM,
   },
   handler: async (ctx, p) => {
     const slug = p.slug as string;
+    if (p.hops !== undefined) return traverseChain(ctx, p, slug);
     const linkType = p.link_type as string | undefined;
     // #4666: remote callers (ctx.remote !== false — fail-closed) default to
     // direction=both, so a node with only INBOUND typed edges stops reading

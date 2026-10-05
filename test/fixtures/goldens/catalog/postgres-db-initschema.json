@@ -274,7 +274,7 @@
     "functions": {
       "bump_page_generation_clock_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=c40a0a3b86e640b6c8979976173dd93ae92c8c1b9a9e3595cae2af1e265328fe",
       "bump_page_generation_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=c4135ae3f74177aa71313a6c73f22bda7a298bbf12435a8def390212ae11466a",
-      "enforce_minion_queue_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e0b3db944d3b4281b9483ce77aa734e0c9aa5b0d46bb5dcb5284b6469441a1b8",
+      "enforce_minion_queue_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=be82640d1979fc81dc812efb78bb3596ef536f656d20750e5e4aa19016bf4784",
       "gbrain_advance_page_revision()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=ae793ff5263f7b76311e0c22593fb658db9f82e7b3781914421d9508b6da0e88",
       "gbrain_advance_tag_revision()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=7807b26b4933148aa63c67fca824a60d3492396728205d04e16c48c81174cbd5",
       "gbrain_guard_effect_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=e8b5589dafd4a355106104daffdf57c7776d34fe18c5b5f5336a27de188688a1",

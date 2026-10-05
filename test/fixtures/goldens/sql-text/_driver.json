@@ -678,9 +678,10 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 15,
+            "paramCount": 2,
             "unsafeOptions": {
-              "prepare": false,
+              "cancelFence": false,
+              "prepare": true,
               "simple": false
             },
             "via": "unsafe"
@@ -759,9 +760,10 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 18,
+            "paramCount": 2,
             "unsafeOptions": {
-              "prepare": false,
+              "cancelFence": false,
+              "prepare": true,
               "simple": false
             },
             "via": "unsafe"
@@ -831,9 +833,10 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 17,
+            "paramCount": 2,
             "unsafeOptions": {
-              "prepare": false,
+              "cancelFence": false,
+              "prepare": true,
               "simple": false
             },
             "via": "unsafe"
@@ -984,9 +987,10 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 15,
+            "paramCount": 2,
             "unsafeOptions": {
-              "prepare": false,
+              "cancelFence": false,
+              "prepare": true,
               "simple": false
             },
             "via": "unsafe"

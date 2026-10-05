@@ -1,8 +1,8 @@
 /**
  * Pinned-question identity: source-qualified ids (`<source_id>:<slug>`) and
  * deterministic slugs, so pinning the same question with the same scope twice
- * lands on the same row. Pure; no engine or runtime imports (the v205
- * migration handler imports it).
+ * lands on the same row. Pure; no engine or runtime imports (the pinned-questions
+ * schema migration handler imports it).
  */
 import { createHash } from 'node:crypto';
 

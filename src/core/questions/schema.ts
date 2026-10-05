@@ -1,5 +1,5 @@
 /**
- * Pinned questions storage DDL: one canonical copy used by migration v205 and,
+ * Pinned questions storage DDL: one canonical copy used by the pinned_questions schema migration and,
  * through scripts/build-schema.ts FRAGMENTS, by fresh-install DDL.
  *
  * The answer lives here, never in `pages`: question pages hold the question

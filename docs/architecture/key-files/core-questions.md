@@ -4,7 +4,7 @@
 Current behavior and load-bearing invariants; history belongs in Git and CHANGELOG.
 User guide: [docs/guides/pinned-questions.md](../../guides/pinned-questions.md).
 
-- `src/core/questions/schema.ts` — DDL for `pinned_questions` (one row per pin: question, scope, state, publish mode, the answer as JSON sentences, watermark, durable lease, spend) and `question_evidence` (per-sentence pointers: kind `page|fact|timeline|take|owner`, page id, page generation and knowledge revision, item id, content hash). No foreign keys, so a hard delete or cascade leaves a dangling pointer that reads as stale. Fragment of `src/schema.sql` via `scripts/build-schema.ts`; applied by migration v205.
+- `src/core/questions/schema.ts` — DDL for `pinned_questions` (one row per pin: question, scope, state, publish mode, the answer as JSON sentences, watermark, durable lease, spend) and `question_evidence` (per-sentence pointers: kind `page|fact|timeline|take|owner`, page id, page generation and knowledge revision, item id, content hash). No foreign keys, so a hard delete or cascade leaves a dangling pointer that reads as stale. Fragment of `src/schema.sql` via `scripts/build-schema.ts`; applied by the `pinned_questions` schema migration.
 
 - `src/core/questions/identity.ts` — Source-qualified ids (`<source_id>:questions/<slug>`) and deterministic slugs (kebab of the question plus a hash of the case-folded question, slug prefix and entity), so pinning the same question with the same scope is idempotent. `PINNED_QUESTION_MARKER` (`pinned_question` frontmatter key) and `sentenceId`. Pure; imported by the migration handler.
 

@@ -119,8 +119,10 @@
       "loop_suppressions.loop_suppressions_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "loop_suppressions.loop_suppressions_uniq": "u UNIQUE (source_id, kind, value)",
       "mcp_request_log.mcp_request_log_pkey": "p PRIMARY KEY (id)",
+      "mcp_spend_log.mcp_spend_log_one_budget_owner": "c CHECK (((client_id IS NULL) OR (budget_key IS NULL)))",
       "mcp_spend_log.mcp_spend_log_pkey": "p PRIMARY KEY (id)",
       "mcp_spend_reservations.mcp_spend_reservations_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
+      "mcp_spend_reservations.mcp_spend_reservations_one_budget_owner": "c CHECK (((client_id IS NULL) <> (budget_key IS NULL)))",
       "mcp_spend_reservations.mcp_spend_reservations_pkey": "p PRIMARY KEY (reservation_id)",
       "mcp_spend_reservations.mcp_spend_reservations_status_check": "c CHECK ((status = ANY (ARRAY['pending'::text, 'settled'::text, 'expired'::text])))",
       "migration_impact_log.migration_impact_log_job_id_fkey": "f FOREIGN KEY (job_id) REFERENCES minion_jobs(id) ON DELETE SET NULL",
@@ -337,7 +339,7 @@
       "auto_enable_rls()": "RETURNS event_trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=5e5e0a0ee902f481f07da929c5fd39c2a16671869535b12a1e2270543a5a30eb",
       "bump_page_generation_clock_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=d3359bcd09cccd881585abd9eee81c3dcf4161d935164f7953f2e9fdef73ed3e",
       "bump_page_generation_fn()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=78059745996cfbb72586a2e0e161635b96a62a5db9d0be5c710f4d437d994431",
-      "enforce_minion_queue_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=e0b3db944d3b4281b9483ce77aa734e0c9aa5b0d46bb5dcb5284b6469441a1b8",
+      "enforce_minion_queue_protocol()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[search_path=pg_catalog, public] body_sha256=be82640d1979fc81dc812efb78bb3596ef536f656d20750e5e4aa19016bf4784",
       "gbrain_advance_page_revision()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=ae793ff5263f7b76311e0c22593fb658db9f82e7b3781914421d9508b6da0e88",
       "gbrain_advance_tag_revision()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=7807b26b4933148aa63c67fca824a60d3492396728205d04e16c48c81174cbd5",
       "gbrain_clear_atom_page_state()": "RETURNS trigger kind=f lang=plpgsql volatility=v secdef=false config=[] body_sha256=7db0ef05d1220a579e64428b2dd7cf5183191da186fbe64b6496433a7a713d11",
@@ -819,8 +821,10 @@
       "idx_links_to": "CREATE INDEX idx_links_to ON public.links USING btree (to_page_id)",
       "idx_mcp_log_agent_time": "CREATE INDEX idx_mcp_log_agent_time ON public.mcp_request_log USING btree (agent_name, created_at DESC)",
       "idx_mcp_log_time_agent": "CREATE INDEX idx_mcp_log_time_agent ON public.mcp_request_log USING btree (created_at, token_name)",
+      "idx_mcp_spend_log_budget_key": "CREATE INDEX idx_mcp_spend_log_budget_key ON public.mcp_spend_log USING btree (budget_key) WHERE (budget_key IS NOT NULL)",
       "idx_mcp_spend_log_client_time": "CREATE INDEX idx_mcp_spend_log_client_time ON public.mcp_spend_log USING btree (client_id, created_at)",
       "idx_mcp_spend_log_token_time": "CREATE INDEX idx_mcp_spend_log_token_time ON public.mcp_spend_log USING btree (token_name, created_at)",
+      "idx_mcp_spend_reservations_budget_key": "CREATE INDEX idx_mcp_spend_reservations_budget_key ON public.mcp_spend_reservations USING btree (budget_key) WHERE (budget_key IS NOT NULL)",
       "idx_mcp_spend_reservations_client_time": "CREATE INDEX idx_mcp_spend_reservations_client_time ON public.mcp_spend_reservations USING btree (client_id, created_at)",
       "idx_mcp_spend_reservations_pending_expires": "CREATE INDEX idx_mcp_spend_reservations_pending_expires ON public.mcp_spend_reservations USING btree (status, expires_at) WHERE (status = 'pending'::text)",
       "idx_minion_attachments_job": "CREATE INDEX idx_minion_attachments_job ON public.minion_attachments USING btree (job_id)",
@@ -834,6 +838,7 @@
       "idx_minion_jobs_private_queue_owner": "CREATE INDEX idx_minion_jobs_private_queue_owner ON public.minion_jobs USING btree (private_queue_owner_job_id) WHERE (private_queue_owner_job_id IS NOT NULL)",
       "idx_minion_jobs_private_queue_recovery": "CREATE INDEX idx_minion_jobs_private_queue_recovery ON public.minion_jobs USING btree (queue, private_queue_lease_until) WHERE ((queue ~~ 'dream-inline-%'::text) AND (status = ANY (ARRAY['waiting'::text, 'active'::text, 'delayed'::text, 'waiting-children'::text, 'paused'::text])))",
       "idx_minion_jobs_queue_status_updated": "CREATE INDEX idx_minion_jobs_queue_status_updated ON public.minion_jobs USING btree (queue, status, updated_at)",
+      "idx_minion_jobs_spend_group": "CREATE INDEX idx_minion_jobs_spend_group ON public.minion_jobs USING btree (((spend_authorization ->> 'group_id'::text))) WHERE (spend_authorization IS NOT NULL)",
       "idx_minion_jobs_stagger_key": "CREATE INDEX idx_minion_jobs_stagger_key ON public.minion_jobs USING btree (stagger_key) WHERE (stagger_key IS NOT NULL)",
       "idx_minion_jobs_stalled": "CREATE INDEX idx_minion_jobs_stalled ON public.minion_jobs USING btree (lock_until) WHERE (status = 'active'::text)",
       "idx_minion_jobs_status": "CREATE INDEX idx_minion_jobs_status ON public.minion_jobs USING btree (status)",
@@ -1857,14 +1862,15 @@
           "5 spend_cents numeric/numeric NOT NULL DEFAULT 0",
           "6 provider text/text NULL",
           "7 model text/text NULL",
-          "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+          "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "9 budget_key text/text NULL"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },
       "mcp_spend_reservations": {
         "columns": [
           "1 reservation_id uuid/uuid NOT NULL",
-          "2 client_id text/text NOT NULL",
+          "2 client_id text/text NULL",
           "3 job_id bigint/int8 NULL",
           "4 estimated_cents numeric/numeric NOT NULL",
           "5 actual_cents numeric/numeric NULL",
@@ -1875,7 +1881,8 @@
           "10 settled_at timestamp with time zone/timestamptz NULL",
           "11 expires_at timestamp with time zone/timestamptz NOT NULL",
           "12 estimate_known boolean/bool NOT NULL DEFAULT true",
-          "13 usage_unknown_reason text/text NULL"
+          "13 usage_unknown_reason text/text NULL",
+          "14 budget_key text/text NULL"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },
@@ -1984,7 +1991,9 @@
           "45 stagger_key text/text NULL",
           "46 budget_remaining_cents integer/int4 NULL",
           "47 budget_owner_job_id bigint/int8 NULL",
-          "48 budget_root_owner_id bigint/int8 NULL"
+          "48 budget_root_owner_id bigint/int8 NULL",
+          "49 spend_authorization jsonb/jsonb NULL",
+          "50 spend_claim_token bigint/int8 NULL"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },

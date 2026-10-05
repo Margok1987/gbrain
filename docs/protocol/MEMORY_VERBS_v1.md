@@ -49,7 +49,7 @@ the same registry.
 
 ```bash
 gbrain init --pglite                                      # 2-second local brain
-claude mcp add gbrain -- "$(command -v gbrain)" serve --surface verbs     # the memory-verb surface
+claude mcp add gbrain -- "$(command -v gbrain)" serve --surface starter   # the verbs plus page tools
 gbrain remember "gbrain install check" --provenance install-check
 gbrain recall --query "gbrain install check"              # …now ask your agent in a NEW session
 ```
@@ -64,21 +64,21 @@ If `claude` is not found: install Claude Code first, or use a block below.
 
 **Codex**
 ```bash
-codex mcp add gbrain -- "$(command -v gbrain)" serve --surface verbs
+codex mcp add gbrain -- "$(command -v gbrain)" serve --surface starter
 ```
 
 **Grok Build** (verify with `grok mcp doctor gbrain` — the add is lazy)
 ```bash
-grok mcp add gbrain -e "GBRAIN_HOME=$HOME" -- "$(command -v gbrain)" serve --surface verbs
+grok mcp add gbrain -e "GBRAIN_HOME=$HOME" -- "$(command -v gbrain)" serve --surface starter
 ```
 
 **opencode** (verify with `opencode mcp list` — the add is lazy, and list SPAWNS the server)
 ```bash
-opencode mcp add gbrain --env GBRAIN_HOME=$HOME -- "$(command -v gbrain)" serve --surface verbs
+opencode mcp add gbrain --env GBRAIN_HOME=$HOME -- "$(command -v gbrain)" serve --surface starter
 ```
 
 **OpenClaw / any stdio MCP host** — register the server command
-`gbrain serve --surface verbs`. Remote brains: `gbrain serve --http` on the
+`gbrain serve --surface starter`. Remote brains: `gbrain serve --http` on the
 host, then `gbrain connect https://host/mcp --token gbrain_xxx --install` on
 each client.
 
@@ -90,10 +90,15 @@ verbs plus the daily brain-tool slice, the agent lane, `whoami`, `capture`, and 
 `request_tools` discovery meta-op (re-derivable from production usage via
 `scripts/derive-starter-ops.ts`). Monotonic by construction: verbs ⊆ starter ⊆ full
 (pinned by test) — starter extends the ladder ABOVE verbs and never changes
-verb semantics. `--surface full` (the default) exposes every operation,
-verbs included. Why default full: verbs/starter are for agents and
-quickstarts; full preserves existing advanced tooling. Persist a default
-with `gbrain config set mcp_surface verbs`.
+verb semantics. `--surface full` (the default for a bare `serve`) exposes
+every operation, verbs included. Every stdio registration gbrain writes
+(`gbrain init`'s quickstart, readiness, `gbrain bootstrap hooks`, the plugins)
+pins `starter`, because `verbs` lacks the page reads and writes bootstrap's
+instructions use and `full` puts the whole catalogue in front of the model.
+Persist a default for bare `serve` with `gbrain config set mcp_surface verbs`.
+On stdio, `GBRAIN_SURFACE` in the server's env overrides `--surface`; a
+session widens itself with `request_tools {"surface":"full"}` (see
+`docs/operations/mcp-surface-runbook.md`).
 
 **Ceiling semantics (OAuth HTTP transport):** the server-resolved surface
 is a CEILING, not the final answer. Each request resolves

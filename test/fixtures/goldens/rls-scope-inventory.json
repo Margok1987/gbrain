@@ -3432,6 +3432,7 @@
         "reconnect": "none",
         "refreshPageBody": "none",
         "registerBeforeDisconnect": "none",
+        "relationalChainHop": "none",
         "relationalFanout": "none",
         "removeLink": "none",
         "removeLinksByPagesAndSource": "none",

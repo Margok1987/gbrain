@@ -1623,6 +1623,9 @@ BEGIN
     IF NEW.submission_authority IS NULL OR NEW.claim_generation IS DISTINCT FROM OLD.claim_generation + 1 THEN
       RAISE EXCEPTION 'Minion queue protocol 1 required: old workers cannot claim upgraded queue jobs';
     END IF;
+    IF NEW.spend_authorization IS NOT NULL AND NEW.spend_claim_token IS DISTINCT FROM NEW.claim_generation THEN
+      RAISE EXCEPTION 'Minion spend protocol 1 required: only upgraded workers can claim spend-authorized jobs; restart workers on the upgraded binary';
+    END IF;
   ELSIF NEW.claim_generation IS DISTINCT FROM OLD.claim_generation THEN
     RAISE EXCEPTION 'Minion queue claim generation may advance only with a claim';
   END IF;
