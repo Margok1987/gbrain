@@ -2206,7 +2206,7 @@
         "kind": "function",
         "name": "resolveNativeBaseUrl",
         "signature": [
-          "(provider: \"anthropic\" | \"openai\", cfg: AIGatewayConfig) => string | undefined"
+          "(provider: \"anthropic\" | \"openai\" | \"google\", cfg: AIGatewayConfig) => string | undefined"
         ]
       },
       {

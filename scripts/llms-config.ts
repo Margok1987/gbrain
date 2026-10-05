@@ -218,6 +218,13 @@ export const SECTIONS: DocSection[] = [
     heading: "AI providers",
     entries: [
       {
+        title: "docs/ai-providers/google.md",
+        description:
+          "Google Gemini: GOOGLE_GENERATIVE_AI_API_KEY (GEMINI_API_KEY alias), GOOGLE_GENERATIVE_AI_BASE_URL override for chat, expansion and embeddings (metering proxies, regional gateways), provider_base_urls.google.",
+        path: "docs/ai-providers/google.md",
+        includeInFull: false,
+      },
+      {
         title: "docs/ai-providers/llama-server-reranker.md",
         description:
           "Local reranker via llama.cpp --reranking: Qwen3-Reranker, --alias setup, gbrain config keys, cold-start timeout, budget-cap interaction.",
