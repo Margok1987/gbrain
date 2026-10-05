@@ -1050,6 +1050,12 @@ export interface SearchResult {
    */
   exact_lookup?: 'slug' | 'title';
   /**
+   * Set when `search.entity_anchoring` moved or added this row for an
+   * entity-scoped current-state query (search/entity-anchor.ts): the named
+   * entity's page, or a page that links to it or names it (newest first).
+   */
+  entity_anchored?: 'entity' | 'linked';
+  /**
    * T4 — the strongest signal that surfaced this page (alias_hit >
    * exact_title_match > high_vector_match > keyword_exact > weak_semantic).
    * Computed by classifyEvidence at the end of the hybrid pipeline.

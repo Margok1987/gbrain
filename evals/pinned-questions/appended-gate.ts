@@ -45,7 +45,7 @@ import { listPins } from '../../src/core/questions/store.ts';
 import { CITIES, SpendGuard, correctFor, offlineArms, paidArms, priced, readerAnswer, staleFor, tokens, type GateOpts } from './benefit-gate.ts';
 
 export const RATIOS = [1, 10, 100] as const;
-const BATCHES = 12;
+export const BATCHES = 12;
 const DAY = 86_400_000;
 
 type EventKind = 'create' | 'note' | 'conflict_a' | 'conflict_b' | 'remember' | 'forget' | 'make_private';
@@ -101,7 +101,7 @@ export function appendedHash(w: AppendedWorkload): string {
   return createHash('sha256').update(JSON.stringify(w)).digest('hex').slice(0, 16);
 }
 
-const question = (name: string) => `Which city does ${name} build widgets in now?`;
+export const question = (name: string) => `Which city does ${name} build widgets in now?`;
 const noteSlug = (entity: string, b: number, suffix = '') => `notes/${entity.split('/')[1]}-update-${b}${suffix}`;
 const noteBody = (name: string, b: number, text: string, date: string, extra = '') =>
   `---\ntype: note\ntitle: ${name} update ${b}\ndate: ${date}\n${extra}---\n${text}\n`;
@@ -183,7 +183,7 @@ export interface AppendedOpts {
   arms: Pick<GateOpts, 'questionChat' | 'reader' | 'think'>;
 }
 
-const fit = (parts: string[], budget: number) => {
+export const fit = (parts: string[], budget: number) => {
   let context = '';
   for (const part of parts) {
     const next = `${context}\n${part}`;
