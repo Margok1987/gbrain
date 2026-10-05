@@ -1,23 +1,27 @@
 # Pinned questions: B5 verdict
 
-Pinned questions ship **on**. On a workload where corrections arrive as new notes and the old notes stay as
-written, pinned answers were right on 98.6% of reads, against 51.4% for query plus a reader and 79.2% for
-`think` on every read. They went stale-wrong on 0% of reads, against 48.6% and 20.8%. The safety gate passes
-with zero leakage, including 48 restricted-grant probes on this workload. The main caveat is retrieval: pinned
-refresh anchors its evidence on the pin's entity, newest first, and the other two arms have no scope to anchor
-on, so part of the gap comes from that.
+Pinned questions ship **opt-in**. The win is the anchored retrieval, not the maintained answer. Run 3 used
+embeddings and three seeds. A plain reader handed the same entity-anchored evidence that pinned refresh uses,
+at the same token budget, was as accurate as a pinned answer: 96.8% of reads against 98.1%, and pinned did not
+beat it in seed 42. Handed all of that evidence, the reader was right on every read. The same anchoring lifts
+query plus a reader from 88.4% to 96.8% at equal tokens and removes its stale-wrong answers (11.6% to 0%). The
+safety gate passes with zero leakage, including 144 restricted-grant probes in run 3.
 
-"On" means the refresh phase, publishing and `context_pack` delivery of fresh pinned answers are on by default.
-Pinning a question is still the consent for its paid refresh (plan C1), so gbrain creates no pin by itself and
-a brain with no pins makes no model call. No shipped default changed between run 1 and run 2; the verdict
-moved from opt-in to default-on.
+Pinned answers stay available for owners who want them. They are the cheapest way to serve an entity question
+read many times: at 100 reads per write, a correct pinned answer costs $0.00057, against $0.00152 for the
+anchored reader at equal tokens and $0.00284 at full evidence. Opt-in means gbrain creates no pin by itself.
+Pinning a question is the owner's consent for its paid refresh (plan C1), and a brain with no pins makes no
+model call. The refresh phase and `context_pack` delivery stay on for pins that exist, so no setting changed.
 
-Measured build: gbrain baadfc04 (the `capy/mpw-integration` branch). Stage: dev.
+The anchored retrieval ships in pinned refresh (`retrieveEvidence` in `src/core/questions/refresh.ts`). Where
+else it should apply is under "Where anchored retrieval applies" below.
+
+Measured build: gbrain 1384a0db (the `capy/mpw-integration` branch). Stage: dev.
 
 ## Benefit gate
 
-The decision rule was set before run 2: if pinned beats query plus a reader on accuracy or freshness without
-leakage, it ships default-on; otherwise opt-in stands. Pinned beats it on both.
+Run 3 decides. Its rule was written into this README and pushed (e17258eb) before any run-3 cell ran. Run 2's
+rule compared pinned with query plus a reader on a keyword-only brain, which left the retrieval question open.
 
 ### Run 3: maintained answer against anchored retrieval (preregistered 2026-10-05, before any run-3 cell)
 
@@ -49,6 +53,88 @@ accuracy is higher or its mean freshness lag is lower, and if there are zero lea
   ships, along with a recommendation for where else it applies (such as query for entity-scoped questions),
   and pinned questions go back to opt-in.
 - Any leak means opt-in, whatever the accuracy.
+
+#### Run 3 results
+
+Every arm ran on 3 seeds with `voyage:voyage-4` embeddings and gbrain's default balanced search. Each cell is
+the mean across seeds, with the min and max in brackets. The reads-per-write ratio does not change accuracy or
+freshness.
+
+| Arm | Accuracy | Stale-wrong | Freshness lag (batches) | Correct at change |
+|---|---|---|---|---|
+| pinned, default model (Opus 4.7) | 0.981 [0.972, 1.000] | 0.000 | 0.022 [0.000, 0.033] | 0.978 [0.967, 1.000] |
+| pinned, Sonnet 5.5 refresh | 0.995 [0.986, 1.000] | 0.000 | 0.006 [0.000, 0.017] | 0.994 [0.983, 1.000] |
+| **anchored retrieval + reader (control)** | 0.968 [0.944, 0.986] | 0.000 | 0.039 [0.017, 0.067] | 0.961 [0.933, 0.983] |
+| anchored retrieval + reader, full evidence | 1.000 | 0.000 | 0.000 | 1.000 |
+| query + reader | 0.884 [0.875, 0.903] | 0.116 [0.097, 0.125] | 0.139 [0.117, 0.150] | 0.861 [0.850, 0.883] |
+| query + reader, full evidence | 0.991 [0.972, 1.000] | 0.009 [0.000, 0.028] | 0.011 [0.000, 0.033] | 0.989 [0.967, 1.000] |
+| think | 1.000 | 0.000 | 0.000 | 1.000 |
+
+Per seed, against the control:
+
+| Seed | Pinned accuracy | Control accuracy | Pinned lag | Control lag | Pinned beats control |
+|---|---|---|---|---|---|
+| 42 | 0.972 | 0.986 | 0.033 | 0.017 | no |
+| 7 | 1.000 | 0.972 | 0.000 | 0.033 | yes |
+| 1234 | 0.972 | 0.944 | 0.033 | 0.067 | yes |
+
+**Outcome: tie.** Pinned beats the control in two seeds out of three, and in seed 42 the control is ahead on
+both accuracy and freshness, so the preregistered rule fails. There were zero leaks in 144 probes. Under the
+rule, the anchored retrieval is the win and pinned questions go back to opt-in.
+
+- Most of run 2's gap was keyword-only search and a tight token budget. With embeddings on, query plus a
+  reader at full evidence reaches 0.991, and `think` reaches 1.000.
+- At equal tokens, the anchoring itself is worth about 8 accuracy points over plain query (0.968 against
+  0.884). It also takes stale-wrong answers from 11.6% to 0%, because it puts the newest notes about the
+  entity first.
+- Pinned with Sonnet refresh (0.995) is the arm model-matched to the reader. It stays within a seed's
+  variation of the full-evidence anchored reader (1.000), so a maintained answer adds no accuracy over
+  handing the same evidence to the same model.
+- No refresh failed in 432 attempts. The refresh path now parses tolerantly and retries once (see "Malformed
+  refresh output" below).
+
+Dollars per correct answer (mean across seeds):
+
+| Reads per write | Pinned (Opus 4.7) | Pinned (Sonnet 5.5) | Anchored, equal tokens | Anchored, full | Query + reader | Query, full | Think |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.00966 | 0.00683 | 0.00152 | 0.00284 | 0.00133 | 0.00231 | 0.02665 |
+| 10 | 0.00139 | 0.00139 | 0.00152 | 0.00284 | 0.00133 | 0.00231 | 0.02665 |
+| 100 | 0.00057 | 0.00084 | 0.00152 | 0.00284 | 0.00133 | 0.00231 | 0.02665 |
+
+A pinned read costs about $0.00047, because the reader sees one short answer instead of the evidence. Keeping
+a pin current costs about $0.108 per pin over the 12 batches with Opus, or $0.072 with Sonnet. Pinned overtakes
+the anchored reader at equal tokens after about 110 reads per pin, and the full-evidence anchored reader after
+about 46. That makes pinning a cost choice for questions read often. It is not an accuracy choice.
+
+Metered spend for run 3: $11.80 of the $15 cap. That is $10.95 for the run, $0.38 for a one-entity smoke run
+and $0.48 for a Sonnet refresh replay that looked for the malformed output. Voyage embedding and rerank calls
+are not metered and were small.
+
+#### Where anchored retrieval applies
+
+Anchoring helps whenever a question names one entity and asks for its current state. It puts the entity page
+first, then pages that link to it or name it, newest first. Keyword and vector ranking both treat older and
+newer notes about the entity alike.
+
+- **query / search, for entity-scoped questions** (the largest measured effect: +8 accuracy points and no
+  stale-wrong answers at equal tokens). When the query resolves to one entity and asks for its latest or
+  current state, the newest anchored pages can be blended into the candidate pool ahead of fusion.
+- **think's gather** for "now" or "current" questions about one entity. With embeddings, `think` already reaches
+  1.000 here at 17 times the anchored reader's cost, so anchoring is the cheaper route to the same answer.
+- **context_pack's entity cards**, which choose which pages about a packed entity to show.
+
+Each of these needs its own measured gate before it becomes a default; this run measured only the reader
+arms.
+
+#### Malformed refresh output
+
+Run 2's Sonnet refresh failed twice with `model_output_not_json`. A 72-refresh replay on seed 42 did not
+reproduce it, so the raw reply was never seen. The parser had two gaps that fit the symptom: it only tried the
+span from the first `{` to the last `}`, so prose with braces around the JSON or a draft object followed by a
+corrected one broke it, and one bad reply failed the whole refresh. 1384a0db fixes both. The parser now tries
+every balanced top-level object and takes the last one shaped like an answer. A reply with no answer object
+is retried once with a JSON-only reminder; both calls are charged. Tests are in
+`test/pinned-questions-refresh-parse.test.ts`, and 6 of the 7 fail without the fix.
 
 ### Run 2: corrections appended as new evidence
 
@@ -110,7 +196,7 @@ recorded in `verdict.json` as a diagnostic and was not a decision input.
 - `think` arm: the same default model.
 - Reader for the pinned and query arms: `anthropic:claude-sonnet-5-5`, the fixed reader of the B suites.
 
-Metered spend for run 2: $5.92 of the $10 cap ($2.98 for the deciding run and $2.93 for the diagnostic
+Metered spend for run 2: $5.92 of the $10 cap ($2.98 for the run and $2.93 for the diagnostic
 attempt).
 
 ### Run 1: corrections rewrite the evidence page
@@ -174,7 +260,15 @@ tree at c65a398f. The suite covers:
 ## Reproduce
 
 ```bash
-# Run 2 (deciding)
+# Run 3 (deciding)
+bun evals/pinned-questions/appended-gate.ts --plan --json --seeds 42,7,1234 --entities 6 \
+  --reader-model anthropic:claude-sonnet-5-5 --refresh-models anthropic:claude-opus-4-7,anthropic:claude-sonnet-5-5 \
+  --embeddings voyage:voyage-4
+bun evals/pinned-questions/appended-gate.ts --run --yes --max-usd 14.1 --seeds 42,7,1234 --entities 6 \
+  --reader-model anthropic:claude-sonnet-5-5 --refresh-models anthropic:claude-opus-4-7,anthropic:claude-sonnet-5-5 \
+  --embeddings voyage:voyage-4 --partial run3-partial.json --json
+
+# Run 2
 bun evals/pinned-questions/appended-gate.ts --plan --json --entities 6 --seed 42 \
   --reader-model anthropic:claude-sonnet-5-5 --refresh-models anthropic:claude-opus-4-7,anthropic:claude-sonnet-5-5
 bun evals/pinned-questions/appended-gate.ts --run --yes --max-usd 7 --entities 6 --seed 42 \
@@ -185,11 +279,14 @@ bun evals/pinned-questions/benefit-gate.ts --run --yes --max-usd 40 --entities 6
   --reader-model anthropic:claude-sonnet-5-5 --json
 ```
 
-`verdict.json` carries both run reports and the diagnostic attempt, and `decision.json` records the arms,
+`verdict.json` carries all three run reports and the run-2 diagnostic attempt, and `decision.json` records the arms,
 models, workloads, decision rule and budget.
 
 ## Changelog
 
+- 2026-10-05, run 3: anchored-retrieval control, embeddings on, 3 seeds, on 1384a0db. Pinned ties the anchored
+  control (it loses seed 42), so the anchored retrieval is the win and the verdict returns to opt-in. The
+  refresh parser now handles malformed replies and retries once.
 - 2026-10-05, run 2: appended-corrections workload on baadfc04. Pinned beats query plus a reader on accuracy
   and freshness with zero leakage, so the verdict moves from opt-in to default-on.
 - 2026-10-05, run 1: rewrite workload on a4267eed7. Every arm hit the accuracy ceiling and pinned did not win

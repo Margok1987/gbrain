@@ -330,16 +330,16 @@
         "name": "embedding_migration_state"
       },
       {
+        "category": "brain",
+        "name": "supersession_calibration"
+      },
+      {
         "category": "ops",
         "name": "chat_fallback_chain"
       },
       {
         "category": "meta",
         "name": "behavior_changes"
-      },
-      {
-        "category": "brain",
-        "name": "supersession_calibration"
       },
       {
         "category": "brain",
