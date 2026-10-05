@@ -250,7 +250,7 @@ registerBackgroundWorkDrainer({
  * Applied AFTER cosine re-score so it survives normalization, BEFORE dedup so the
  * boosted ranking determines which chunks per page are kept.
  */
-const BACKLINK_BOOST_COEF = 0.05;
+const BACKLINK_BOOST_COEF = 0;
 const DEBUG = process.env.GBRAIN_SEARCH_DEBUG === '1';
 
 /**
