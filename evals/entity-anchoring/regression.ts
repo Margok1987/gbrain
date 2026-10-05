@@ -9,7 +9,7 @@
  * whose questions never ask for a current state. `--dump-off <file>` writes the
  * key-off rows for a byte-identity check against a build without the change.
  *
- *   bun evals/entity-anchoring/regression.ts --json
+ *   bun evals/entity-anchoring/regression.ts --json [--key search.query_facts_arm]
  */
 import { readFileSync, writeFileSync } from 'node:fs';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
@@ -20,8 +20,11 @@ import { haystackToPages, sessionSlug } from '../../src/eval/longmemeval/adapter
 import { loadNamedThingQuestions, seedNamedThingCorpus } from '../../test/fixtures/retrieval-quality/namedthing/corpus.ts';
 import { RELATIONAL_QUESTIONS, seedRelationalCorpus } from '../../test/fixtures/retrieval-quality/relational/corpus.ts';
 
-const KEY = 'search.entity_anchoring';
-type Row = { slug: string; entity_anchored?: string };
+const KEY = (() => { const i = process.argv.indexOf('--key'); return i >= 0 ? process.argv[i + 1]! : 'search.entity_anchoring'; })();
+type Row = { slug: string; entity_anchored?: string; fact_row?: unknown };
+/** Page rows only: an added fact row is not a page hit for recall. */
+const pagesOf = (rows: Row[]) => rows.filter(r => !r.fact_row);
+const fired = (rows: Row[]) => rows.some(r => r.entity_anchored || r.fact_row);
 const dump: Record<string, unknown> = {};
 
 async function freshEngine(): Promise<PGLiteEngine> {
@@ -46,8 +49,8 @@ async function scoreCorpus(corpus: string, engine: PGLiteEngine, questions: Name
   for (const q of questions) {
     const on = await ranked(engine, q.query, true, corpus);
     const off = await ranked(engine, q.query, false, corpus);
-    if (on.some(x => x.entity_anchored)) r.triggered++;
-    const son = scoreQuestion(q, on.map(x => x.slug)), soff = scoreQuestion(q, off.map(x => x.slug));
+    if (fired(on)) r.triggered++;
+    const son = scoreQuestion(q, pagesOf(on).map(x => x.slug)), soff = scoreQuestion(q, pagesOf(off).map(x => x.slug));
     if (son.recall_at_10 < soff.recall_at_10) r.recall10_lower.push(q.query);
     if (son.recall_at_10 > soff.recall_at_10) r.recall10_higher++;
     if (soff.negative_clean === true && son.negative_clean === false) r.negative_clean_lost.push(q.query);
@@ -70,8 +73,8 @@ async function longMemEval(path: string, cue: boolean): Promise<CorpusReport> {
       const text = cue ? `${String(q.question).replace(/[?.!\s]+$/, '')} now?` : q.question;
       const recall = (rows: Row[]) => gold.size ? rows.filter(x => gold.has(x.slug)).length / gold.size : 0;
       const rr = (rows: Row[]) => { const i = rows.findIndex(x => gold.has(x.slug)); return i < 0 ? 0 : 1 / (i + 1); };
-      const on = await ranked(engine, text, true, r.corpus), off = await ranked(engine, text, false, r.corpus);
-      if (on.some(x => x.entity_anchored)) r.triggered++;
+      const on = pagesOf(await ranked(engine, text, true, r.corpus)), off = pagesOf(await ranked(engine, text, false, r.corpus));
+      if (fired(await ranked(engine, text, true, `${r.corpus}#probe`))) r.triggered++;
       if (recall(on) < recall(off)) r.recall10_lower.push(q.question_id);
       if (recall(on) > recall(off)) r.recall10_higher++;
       r.mean_recall10.on += recall(on) / qs.length; r.mean_recall10.off += recall(off) / qs.length;
@@ -96,14 +99,22 @@ if (import.meta.main) {
       await seed(engine);
       reports.push(await scoreCorpus(name, engine, [...questions]));
       reports.push(await scoreCorpus(`${name}+now`, engine, withCue([...questions])));
+      if (KEY === 'search.query_facts_arm') {
+        // Diagnostic: one saved fact restating each question's answer, so fact rows take page slots.
+        for (const q of questions) {
+          const answer = q.relevant?.[0];
+          if (answer) await engine.insertFact({ fact: `${q.query.replace(/[?.!\s]+$/, '')}: ${answer}`, kind: 'fact', entity_slug: q.seed ?? null, source: 'regression diagnostic', visibility: 'world' }, { source_id: 'default' });
+        }
+        reports.push(await scoreCorpus(`${name}+facts`, engine, [...questions]));
+      }
     } finally {
       await engine.disconnect();
     }
   }
   const lme = new URL('../../test/fixtures/longmemeval-nightly.jsonl', import.meta.url).pathname;
   reports.push(await longMemEval(lme, false), await longMemEval(lme, true));
-  const asWritten = reports.filter(r => !r.corpus.endsWith('+now'));
-  const out = { mode: 'hermetic', keyword_only: true, pass: asWritten.every(r => r.recall10_lower.length === 0), reports };
+  const asWritten = reports.filter(r => !r.corpus.endsWith('+now') && !r.corpus.endsWith('+facts'));
+  const out = { mode: 'hermetic', keyword_only: true, key: KEY, pass: asWritten.every(r => r.recall10_lower.length === 0), reports };
   const dumpPath = flag('--dump-off');
   if (dumpPath) writeFileSync(dumpPath, JSON.stringify(dump, null, 2));
   console.log(args.includes('--json') ? JSON.stringify(out, null, 2) : JSON.stringify(out));

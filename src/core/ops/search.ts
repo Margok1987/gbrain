@@ -12,6 +12,7 @@ import { readHolders } from './context.ts';
 
 import { hybridSearchCached, stampContentFlags, stampUnverifiedExtractions } from '../search/hybrid.ts';
 import { anchorOpResults } from '../search/entity-anchor.ts';
+import { applyQueryArms } from '../search/query-arms.ts';
 import { resolveSearchDateBounds } from '../search/date-bounds.ts';
 import { loadSearchModeConfig, resolveSearchMode, SOURCE_BOOSTS_KEY } from '../search/mode.ts';
 import { looksConceptShaped, classifyQueryShape } from '../search/query-intent.ts';
@@ -421,7 +422,9 @@ async function buildRetrievalResponseMeta(
     excludeSlugPrefixes,
   });
   const aliases = (opts.declarations ?? new DeclarationMemo()).scan(results as DeclarationRow[], queryText);
-  const savedFacts = await matchingSavedFacts(ctx, scope, queryText, aliases);
+  // A fact the facts arm already returned as a row is not repeated beside the blocks.
+  const factRowIds = new Set((results as SearchResult[]).flatMap(r => r.fact_row ? [r.fact_row.id] : []));
+  const savedFacts = (await matchingSavedFacts(ctx, scope, queryText, aliases)).filter(f => !factRowIds.has(f.id));
   const heldFiles = await stampHeldHits(ctx.engine, results as SearchResult[], scope, ctx).catch(() => []);
   const heldNotice = heldFilesNotice(heldFiles, ctx.remote !== false);
   if (heldNotice) ctx.emitNotice?.(heldNotice);
@@ -823,7 +826,7 @@ const query: Operation = {
     // cross-source mode (matches SearchOpts.sourceId contract).
     const typeFilter = await reconcileTypeFilter(ctx, querySourceScope, excludePrivate, types);
     types = typeFilter.types;
-    let capturedMeta: HybridSearchMeta | null = null;
+    let capturedMeta: HybridSearchMeta | null = null; let queryEmbedding: Float32Array | null = null;
     // v0.32.x search-lite: route the query op through hybridSearchCached so
     // token budget and intent weighting apply at the operation boundary.
     // Semantic cache reuse is suspended in the wrapper.
@@ -865,7 +868,7 @@ const query: Operation = {
       intentWeighting: typeof p.intent_weighting === 'boolean' ? (p.intent_weighting as boolean) : undefined,
       // v0.36 cross-modal routing param.
       crossModal: p.cross_modal as 'text' | 'image' | 'both' | 'auto' | undefined,
-      onMeta: (m) => { capturedMeta = m; },
+      onMeta: (m) => { capturedMeta = m; }, onQueryEmbedding: (e) => { queryEmbedding = e; },
       // v0.36 (D15): per-call embedding column override. Resolver rejects
       // unknown names at hybrid entry with EmbeddingColumnNotRegisteredError;
       // the error surfaces back to the agent as the op error envelope.
@@ -883,10 +886,10 @@ const query: Operation = {
       relationalRetrieval: typeof p.relational === 'boolean' ? (p.relational as boolean) : undefined,
     });
     const declarations = new DeclarationMemo();
-    results = await anchorOpResults(ctx.engine, p, queryText, await withDeclaredNameFanOut(results, queryText, declarations, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {
+    results = await applyQueryArms(ctx.engine, p, queryText, await withDeclaredNameFanOut(results, queryText, declarations, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {
       limit: altLimit, excludePrivate, requireSafeChunks: ctx.remote !== false, takesHoldersAllowList: readHolders(ctx),
       expansion: false, types, ...querySourceScope,
-    })), { ...querySourceScope, excludePrivate, requireSafeChunks: ctx.remote !== false, filtered: !!types, evidencePlan: !!plan });
+    })), { ...querySourceScope, excludePrivate, requireSafeChunks: ctx.remote !== false, filtered: !!types, evidencePlan: !!plan, remote: ctx.remote !== false, queryEmbedding, rowCap: () => resolveEffectiveLimit(ctx, p) });
     // #1663 — CRAG confidence gate. Grade what retrieval returned (zero-LLM;
     // reads the stamped honesty signals: evidence, exact_lookup, rerank
     // score), attach grade + query shape to the retrieval meta on EVERY call,

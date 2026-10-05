@@ -1386,6 +1386,7 @@
           "evidence?: Evidence | undefined",
           "exact_lookup?: \"title\" | \"slug\" | undefined",
           "exact_match_boost?: number | undefined",
+          "fact_row?: { id: number; valid_from: string; valid_until: string | null; } | undefined",
           "feedback_boost?: number | undefined",
           "graph_adjacency_boost?: number | undefined",
           "graph_adjacency_hits?: number | undefined",
@@ -1422,6 +1423,7 @@
           "supersede_penalty?: number | undefined",
           "superseded?: boolean | undefined",
           "superseded_by?: string | undefined",
+          "superseded_claim?: { fact_id: number; valid_from: string; } | undefined",
           "thread_id?: string | undefined",
           "title: string",
           "title_match_boost?: number | undefined",
@@ -6422,7 +6424,7 @@
         "kind": "type",
         "name": "AutoReason",
         "signature": [
-          "\"conversation_type\" | \"conversation_slug\" | \"not_conversation\" | \"conversation_over_budget\""
+          "\"conversation_type\" | \"conversation_slug\" | \"not_conversation\" | \"conversation_over_budget\" | \"saved_fact\""
         ]
       },
       {
@@ -6875,6 +6877,7 @@
           "nearSymbol?: string | undefined",
           "offset?: number | undefined",
           "onMeta?: ((meta: HybridSearchMeta) => void) | undefined",
+          "onQueryEmbedding?: ((embedding: Float32Array) => void) | undefined",
           "onRelationalMeta?: ((meta: RelationalArmMeta) => void) | undefined",
           "onRerankPool?: ((pool: readonly SearchResult[], preRerank: readonly SearchResult[]) => void) | undefined",
           "onVectorPoolMeta?: ((m: VectorPoolMeta) => void) | undefined",
@@ -8388,6 +8391,7 @@
           "evidence?: Evidence | undefined",
           "exact_lookup?: \"title\" | \"slug\" | undefined",
           "exact_match_boost?: number | undefined",
+          "fact_row?: { id: number; valid_from: string; valid_until: string | null; } | undefined",
           "feedback_boost?: number | undefined",
           "graph_adjacency_boost?: number | undefined",
           "graph_adjacency_hits?: number | undefined",
@@ -8424,6 +8428,7 @@
           "supersede_penalty?: number | undefined",
           "superseded?: boolean | undefined",
           "superseded_by?: string | undefined",
+          "superseded_claim?: { fact_id: number; valid_from: string; } | undefined",
           "thread_id?: string | undefined",
           "title: string",
           "title_match_boost?: number | undefined",

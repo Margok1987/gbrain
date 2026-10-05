@@ -34,7 +34,7 @@ import { sanitizeRemoteBody } from '../remote-body.ts';
 import { credentialSafeProjection } from '../credential-projection.ts';
 import { stripChunkHeader } from '../chunkers/code.ts';
 import { OperationError } from '../ops/contract.ts';
-import { evidenceDateHeaderEnabled, loadPageDateHeaders, pageDateHeader } from './evidence-date.ts';
+import { evidenceDateHeaderEnabled, factDateHeader, loadPageDateHeaders, pageDateHeader } from './evidence-date.ts';
 
 export const RETURN_UNITS = ['chunk', 'window', 'section', 'page', 'auto'] as const;
 export type ReturnUnit = typeof RETURN_UNITS[number];
@@ -68,7 +68,7 @@ export interface MatchSpan { chunk_id: number; start: number; end: number }
  * a conversation whose matching span no longer fits the budget keeps its
  * ranked chunks too.
  */
-export type AutoReason = 'conversation_type' | 'conversation_slug' | 'not_conversation' | 'conversation_over_budget';
+export type AutoReason = 'conversation_type' | 'conversation_slug' | 'not_conversation' | 'conversation_over_budget' | 'saved_fact';
 
 export interface DeliveredEvidence {
   unit: DeliveredUnit;
@@ -855,6 +855,8 @@ export async function deliverEvidence(
   const groups: Group[] = [];
   const byPage = new Map<number, Group>();
   hits.forEach((h, rank) => {
+    // A saved-fact row (facts arm) has no page to expand: it is delivered as written, paid for first.
+    if (h.fact_row) { passthrough.push({ rank, hit: h, reason: 'saved_fact' }); return; }
     const signal = auto ? conversationSignal(h) : null;
     if (auto && !signal) { passthrough.push({ rank, hit: h, reason: 'not_conversation' }); return; }
     const id = Number.isFinite(h.page_id) ? h.page_id : null;
@@ -907,7 +909,8 @@ export async function deliverEvidence(
       fallbacks.add('date_header_unavailable');
     }
   }
-  const headerFor = (hit: SearchResult): string => dateHeaders ? `${dateHeaders.get(hit.page_id) ?? pageDateHeader(null)}\n` : '';
+  const headerFor = (hit: SearchResult): string => !dateHeaders ? ''
+    : hit.fact_row ? `${factDateHeader(hit.fact_row)}\n` : `${dateHeaders.get(hit.page_id) ?? pageDateHeader(null)}\n`;
 
   const planned: Block[] = [];
   for (const g of groups) {

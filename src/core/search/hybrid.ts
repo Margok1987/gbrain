@@ -958,6 +958,8 @@ export interface HybridSearchOpts extends SearchOpts {
    * seam cannot poison `query_cache` for production queries.
    */
   queryEmbedFn?: (text: string) => Float32Array | Promise<Float32Array>;
+  /** Receives the text query embedding the vector arm used (not called on keyword-only or cached paths). */
+  onQueryEmbedding?: (embedding: Float32Array) => void;
 
   /**
    * INTERNAL — cache-consult outcome threaded from `hybridSearchCached` into
@@ -1111,6 +1113,7 @@ export async function hybridSearch(
   const { effectiveModality, unifiedRouting, queries } = await resolveModalityAndQueries(req);
   const { vectorArms, queryEmbedding, imageQueryEmbedding, unifiedDone } =
     await runVectorArms(req, { effectiveModality, unifiedRouting, queries, multimodalProviderProbe });
+  if (queryEmbedding) opts?.onQueryEmbedding?.(queryEmbedding);
   if (vectorArms.length === 0) {
     return searchVectorFallback(req, lexical, relationalList, postFusionOpts);
   }

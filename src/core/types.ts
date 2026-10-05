@@ -1055,6 +1055,10 @@ export interface SearchResult {
    * entity's page, or a page that links to it or names it (newest first).
    */
   entity_anchored?: 'entity' | 'linked';
+  /** Set on a saved-fact row the `search.query_facts_arm` arm added (search/facts-arm.ts); page_id is 0. */
+  fact_row?: { id: number; valid_from: string; valid_until: string | null };
+  /** A newer active fact covers the same entity and typed claim slot as a fact taken from this page. */
+  superseded_claim?: { fact_id: number; valid_from: string };
   /**
    * T4 — the strongest signal that surfaced this page (alias_hit >
    * exact_title_match > high_vector_match > keyword_exact > weak_semantic).
