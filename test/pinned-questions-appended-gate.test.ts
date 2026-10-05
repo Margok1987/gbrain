@@ -6,7 +6,8 @@
  * does find the private note once the operator exposes private pages (so a
  * zero is not vacuous); ratio weighting keeps lifecycle cost fixed. No network.
  */
-import { describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
+import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { __resetPrivateVisibilityCacheForTests } from '../src/core/search/private-visibility.ts';
@@ -26,9 +27,9 @@ describe('appended-corrections benefit gate (offline plumbing)', () => {
       const g = w.gold[e.slug]!;
       const ev = w.batches.map(b => b.filter(x => x.entity === e.slug));
       expect(g).toHaveLength(12);
-      expect(g[4]).toBe(ev[4]!.find(x => x.kind === 'conflict_b')!.city);
+      expect(g[4]).toBe(ev[4]!.find(x => x.kind === 'conflict_b')!.city!);
       expect(ev[4]!.find(x => x.kind === 'conflict_a')!.city).not.toBe(g[4]);
-      expect(g[6]).toBe(ev[6]!.find(x => x.kind === 'remember')!.city);
+      expect(g[6]).toBe(ev[6]!.find(x => x.kind === 'remember')!.city!);
       expect(g[7]).toBe(g[5]);
       expect(g[6]).not.toBe(g[5]);
       expect(g[10]).toBe(g[9]);
@@ -53,41 +54,46 @@ describe('appended-corrections benefit gate (offline plumbing)', () => {
     expect(at1.freshness.changes).toBeGreaterThan(0);
   }, 180_000);
 
-  test('the leakage probe catches a private note once private pages are exposed to remote readers', async () => {
-    const engine = new PGLiteEngine();
-    await engine.connect({});
-    await engine.initSchema();
-    try {
-      const w = generateAppendedWorkload(3, 1);
-      const ctx = { engine, config: { engine: 'pglite', embedding_disabled: true } as never, remote: false, sourceId: 'default', dryRun: false, logger: { info() {}, warn() {}, error() {} } };
-      await submitPageMutation(ctx, { operation: 'put_page', params: { slug: 'notes/example-1-update-9', content: '---\ntype: note\ntitle: secret\nvisibility: private\n---\nAs of 2026-05-10, example-1 builds widgets in Ghent.\n' } });
-      expect((await leakageProbe(engine, w, [])).leaks).toEqual([]);
-      await engine.setConfig('search.remote_private_pages', 'visible');
-      __resetPrivateVisibilityCacheForTests();
-      expect((await leakageProbe(engine, w, [])).leaks.length).toBeGreaterThan(0);
-    } finally {
-      __resetPrivateVisibilityCacheForTests();
-      await engine.disconnect();
-    }
-  }, 120_000);
+  describe('on a PGLite brain', () => {
+    let engine: PGLiteEngine;
+    beforeAll(async () => {
+      engine = new PGLiteEngine();
+      await engine.connect({});
+      await engine.initSchema();
+    });
+    afterAll(async () => { await engine.disconnect(); });
+    beforeEach(async () => { await resetPgliteState(engine); });
 
-  test('refresh retrieval keeps each entity\'s newest note in evidence once notes accumulate', async () => {
-    const engine = new PGLiteEngine();
-    await engine.connect({});
-    await engine.initSchema();
-    try {
-      const w = generateAppendedWorkload(42, 6);
-      const remembered = new Map<string, string>();
-      for (const batch of w.batches) await applyEventsForTest(engine, batch, remembered);
-      for (const e of w.entities) {
-        const question = `Which city does ${e.name} build widgets in now?`;
-        const scope = { source: 'default', entity: e.slug };
-        const { row } = await insertPin(engine, { sourceId: 'default', slug: questionSlug(question, scope), question, scope, state: 'active', inactiveReason: null, publishMode: 'publish', createdBy: 'cli' });
-        const pages = (await retrieveEvidence(engine, row)).filter(i => i.kind === 'page').map(i => i.page_slug);
-        expect(pages.slice(0, 2)).toEqual([e.slug, `notes/${e.name}-update-11`]);
+    test('the leakage probe catches a private note once private pages are exposed to remote readers', async () => {
+      try {
+        const w = generateAppendedWorkload(3, 1);
+        const ctx = { engine, config: { engine: 'pglite', embedding_disabled: true } as never, remote: false, sourceId: 'default', dryRun: false, logger: { info() {}, warn() {}, error() {} } };
+        await submitPageMutation(ctx, { operation: 'put_page', params: { slug: 'notes/example-1-update-9', content: '---\ntype: note\ntitle: secret\nvisibility: private\n---\nAs of 2026-05-10, example-1 builds widgets in Ghent.\n' } });
+        expect((await leakageProbe(engine, w, [])).leaks).toEqual([]);
+        await engine.setConfig('search.remote_private_pages', 'visible');
+        __resetPrivateVisibilityCacheForTests();
+        expect((await leakageProbe(engine, w, [])).leaks.length).toBeGreaterThan(0);
+      } finally {
+        await engine.setConfig('search.remote_private_pages', 'hidden');
+        __resetPrivateVisibilityCacheForTests();
       }
-    } finally {
-      await engine.disconnect();
-    }
-  }, 120_000);
+    }, 120_000);
+
+    test('refresh retrieval keeps each entity\'s newest note in evidence once notes accumulate', async () => {
+      try {
+        const w = generateAppendedWorkload(42, 6);
+        const remembered = new Map<string, string>();
+        for (const batch of w.batches) await applyEventsForTest(engine, batch, remembered);
+        for (const e of w.entities) {
+          const question = `Which city does ${e.name} build widgets in now?`;
+          const scope = { source: 'default', entity: e.slug };
+          const { row } = await insertPin(engine, { sourceId: 'default', slug: questionSlug(question, scope), question, scope, state: 'active', inactiveReason: null, publishMode: 'publish', createdBy: 'cli' });
+          const pages = (await retrieveEvidence(engine, row)).filter(i => i.kind === 'page').map(i => i.page_slug);
+          expect(pages.slice(0, 2)).toEqual([e.slug, `notes/${e.name}-update-11`]);
+        }
+      } finally {
+        __resetPrivateVisibilityCacheForTests();
+      }
+    }, 120_000);
+  });
 });

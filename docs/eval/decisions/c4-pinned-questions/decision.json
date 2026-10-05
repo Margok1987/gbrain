@@ -2,25 +2,29 @@
   "schema_version": 1,
   "decision_id": "c4-pinned-questions",
   "plan": "MEMORY_PROOF_WAVE C4 + B5",
-  "title": "Pinned questions: B5 safety gate and benefit gate (lifecycle dollars per correct fresh answer)",
+  "title": "Pinned questions: B5 safety gate and benefit gate (accuracy, freshness and lifecycle dollars per correct fresh answer)",
   "verdict_type": "cost_quality",
   "stage": "dev",
   "candidate": {
-    "gbrain": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+    "gbrain": "garrytan/gbrain@baadfc04064826e8c60dd8e67e0a55bf96f95c3f",
     "arm": "pinned",
     "config": {
       "models.standing_questions": "anthropic:claude-opus-4-7",
       "cycle.standing_questions.cooldown_days": "0"
+    },
+    "cost_lever_arm": {
+      "arm": "pinned",
+      "models.standing_questions": "anthropic:claude-sonnet-5-5"
     }
   },
   "baselines": [
     {
-      "gbrain": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+      "gbrain": "garrytan/gbrain@baadfc04064826e8c60dd8e67e0a55bf96f95c3f",
       "arm": "query_reader",
       "note": "hybrid query (keyword-only: no embedding key in the harness brain) at the pinned answer's delivered-token budget, then one reader call"
     },
     {
-      "gbrain": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+      "gbrain": "garrytan/gbrain@baadfc04064826e8c60dd8e67e0a55bf96f95c3f",
       "arm": "think",
       "note": "on-demand think per read with the default deep model"
     }
@@ -29,9 +33,23 @@
     "answer_and_refresh": "anthropic:claude-opus-4-7",
     "think": "anthropic:claude-opus-4-7",
     "reader": "anthropic:claude-sonnet-5-5",
-    "selection": "answer/refresh and think: gbrain's default for questions (models.standing_questions -> deep tier); reader: the B-suite fixed reader"
+    "selection": "answer/refresh and think: gbrain's default for questions (models.standing_questions -> deep tier); reader: the B-suite fixed reader",
+    "refresh_cost_lever": "anthropic:claude-sonnet-5-5"
   },
   "sources": [
+    {
+      "kind": "seeded-workload",
+      "id": "pinned-questions-appended",
+      "run": "run_2",
+      "generator": "evals/pinned-questions/appended-gate.ts generateAppendedWorkload",
+      "seed": 42,
+      "entities": 6,
+      "write_batches": 12,
+      "writes_per_entity": 13,
+      "workload_hash": "ce95164d25dd0cb8",
+      "engine": "pglite",
+      "events": "corrections appended as dated notes (old pages left as written); conflicting notes in batch 4; remember in batch 6, forget in batch 7; newest note made private in batch 10"
+    },
     {
       "kind": "seeded-workload",
       "id": "pinned-questions-benefit",
@@ -40,18 +58,22 @@
       "entities": 6,
       "write_batches": 4,
       "workload_hash": "9428f19ffe229e66",
-      "engine": "pglite"
+      "engine": "pglite",
+      "run": "run_1"
     }
   ],
   "frozen_reads_per_write": [
     1,
-    10
+    10,
+    100
   ],
   "metrics": [
+    "accuracy",
+    "stale_wrong_rate",
+    "freshness_lag_batches",
     "usd_per_correct_fresh_answer",
-    "correct",
-    "stale_wrong",
-    "break_even_reads"
+    "break_even_reads_per_pin",
+    "leakage"
   ],
   "safety_gate": {
     "suite": "test/helpers/pinned-questions-scenarios.ts",
@@ -62,8 +84,17 @@
     "required": "zero stale-sentence or cross-grant leakage on every surface"
   },
   "budget": {
-    "max_usd": 40,
-    "metered_spend_usd": 2.3402
+    "run_2": {
+      "max_usd": 10,
+      "metered_spend_usd": 5.9164,
+      "note": "includes the 2.9324 pre-fix diagnostic attempt"
+    },
+    "run_1": {
+      "max_usd": 40,
+      "metered_spend_usd": 2.3402
+    }
   },
-  "reproduce": "bun evals/pinned-questions/benefit-gate.ts --run --yes --max-usd 40 --entities 6 --batches 4 --seed 42 --reader-model anthropic:claude-sonnet-5-5 --json"
+  "reproduce": "bun evals/pinned-questions/appended-gate.ts --run --yes --max-usd 7 --entities 6 --seed 42 --reader-model anthropic:claude-sonnet-5-5 --refresh-models anthropic:claude-opus-4-7,anthropic:claude-sonnet-5-5 --json",
+  "decision_rule": "Set before run 2: if pinned beats query+reader on accuracy or freshness without leakage, ship default-on (plan C1); otherwise opt-in stands.",
+  "reproduce_run_1": "bun evals/pinned-questions/benefit-gate.ts --run --yes --max-usd 40 --entities 6 --batches 4 --seed 42 --reader-model anthropic:claude-sonnet-5-5 --json"
 }

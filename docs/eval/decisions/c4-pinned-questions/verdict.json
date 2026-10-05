@@ -2,8 +2,9 @@
   "decision_id": "c4-pinned-questions",
   "plan": "MEMORY_PROOF_WAVE C4 + B5",
   "stage": "dev",
-  "decided_at": "2026-10-05T09:30:00Z",
-  "measured_build": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+  "decided_at": "2026-10-05T18:00:00Z",
+  "measured_build": "garrytan/gbrain@baadfc04064826e8c60dd8e67e0a55bf96f95c3f",
+  "deciding_run": "run_2",
   "safety_gate": {
     "status": "pass",
     "scenarios": 33,
@@ -11,102 +12,533 @@
       "pglite": "33/33",
       "postgres": "33/33"
     },
-    "full_ci": "bun run ci:ubicloud green on garrytan/gbrain@2b1f5b69 (capy/mpw-integration)"
+    "full_ci": "bun run ci:ubicloud: see the pushed integration head in README",
+    "appended_workload_leakage": {
+      "probes": 48,
+      "leaks": 0,
+      "surfaces": [
+        "search",
+        "get_page",
+        "context_pack",
+        "questions_status"
+      ],
+      "grant": "restricted MCP grant that cannot read private pages"
+    }
   },
   "benefit_gate": {
-    "status": "fail",
+    "status": "pass",
     "against": {
-      "query_reader": "fail",
+      "query_reader": "pass",
       "think": "pass"
     },
-    "reason": "Accuracy is at ceiling for every arm (100% correct, 0 stale-wrong), so the gate is decided on lifecycle cost. Pinned costs 4.4x query+reader per correct answer at 1 read per write and matches it at 10 reads per write ($0.000526 vs $0.000529); break-even is about 240 reads per pin. Pinned is 3.3x (1 read/write) to 14.5x (10 reads/write) cheaper than on-demand think."
+    "reason": "On the appended-corrections workload pinned answers with the default model were correct on 98.6% of reads versus 51.4% for query+reader and 79.2% for think, with 0% stale-wrong versus 48.6% and 20.8%. Mean freshness lag was 0.017 write batches versus 0.583 and 0.25. Zero leaks in 48 restricted-grant probes. Decision rule (set before the run): pinned beating query+reader on accuracy or freshness without leakage means default-on; it beats it on both."
   },
-  "overall": "opt_in",
-  "default_decision": "Pinned questions ship opt-in: the feature does nothing until the owner pins a question, and no pin is created by default. Default-on is withheld because the benefit gate did not pass against query+reader.",
-  "ceiling_note": "Every arm answered every read correctly; the workload rewrites the evidence page on correction, so no arm had a superseded value to repeat. The run cannot show an accuracy or freshness difference.",
-  "metered_spend_usd": 2.3402,
-  "run": {
-    "mode": "run",
-    "workload_hash": "9428f19ffe229e66",
+  "overall": "default_on",
+  "default_decision": "Pinned questions ship on. The standing_questions phase, publishing and context_pack delivery of fresh pinned answers are on by default (cycle.standing_questions.enabled=true, publish_mode=publish). Pinning a question remains the consent for its paid refresh, as plan C1 specifies, so no pin is created automatically and a brain with no pins makes no model call. Migrated dream.auto_think questions keep their old enabled, budget and auto_commit state. No shipped default changes relative to run 1; the verdict label moves from opt_in to default_on.",
+  "caveats": [
+    "Retrieval asymmetry: the run-2 build anchors pinned refresh retrieval on the pin scope (entity page first, then pages that link to or name it, newest first). query+reader uses ordinary keyword query retrieval and think its own gather, both without that anchoring. The accuracy gap is partly this retrieval difference; a pin has a scope and an ad hoc query does not.",
+    "Keyword-only retrieval for every arm: the harness brain has no embedding key.",
+    "Cost: pinned with the default model costs more total dollars than query+reader until about 147 reads per pin (163 with the Sonnet refresh model). Per correct answer it costs 4.1x query+reader at 1 read per write, 0.59x at 10 and 0.24x at 100.",
+    "Withdrawal is the weakest event: 1 of 6 (default model) and 2 of 6 (Sonnet) pinned answers missed the revert after forget in batch 7.",
+    "Sonnet refresh returned non-JSON twice in 72 attempts (model_output_not_json); the pin kept its previous answer, which counts against it.",
+    "One seed, 6 entities; dev stage."
+  ],
+  "metered_spend_usd": 5.9164,
+  "run_2": {
+    "workload": "appended",
+    "workload_hash": "ce95164d25dd0cb8",
     "seed": 42,
     "entities": 6,
-    "batches": 4,
-    "answer_model": "anthropic:claude-opus-4-7",
+    "batches": 12,
+    "states": 72,
     "reader_model": "anthropic:claude-sonnet-5-5",
-    "metered_spend_usd": 2.3401960000000015,
-    "reports": [
+    "think_model": "anthropic:claude-opus-4-7",
+    "refresh_models": [
+      "anthropic:claude-opus-4-7",
+      "anthropic:claude-sonnet-5-5"
+    ],
+    "frozen_reads_per_write": [
+      1,
+      10,
+      100
+    ],
+    "metered_spend_usd": 2.9839,
+    "leakage": {
+      "probes": 48,
+      "leaks": []
+    },
+    "refresh_failures": {
+      "model_output_not_json": 2,
+      "refresh_model": "anthropic:claude-sonnet-5-5"
+    },
+    "summary": [
       {
         "reads_per_write": 1,
-        "arms": [
-          {
-            "arm": "pinned",
-            "reads": 24,
-            "correct": 24,
-            "stale_wrong": 0,
-            "usd": 0.055947,
-            "usd_per_correct": 0.002331125
-          },
-          {
-            "arm": "query_reader",
-            "reads": 24,
-            "correct": 24,
-            "stale_wrong": 0,
-            "usd": 0.012694,
-            "usd_per_correct": 0.0005289166666666667
-          },
-          {
-            "arm": "think",
-            "reads": 24,
-            "correct": 24,
-            "stale_wrong": 0,
-            "usd": 0.18278499999999998,
-            "usd_per_correct": 0.007616041666666666
-          }
-        ],
-        "pinned_breakdown": {
-          "pin_and_refresh_usd": 0.048025,
-          "read_usd": 0.007921999999999998,
-          "refresh_attempts": 14
-        },
-        "break_even_reads": 242,
-        "plumbing_only": false
+        "arm": "pinned",
+        "refresh_model": "anthropic:claude-opus-4-7",
+        "accuracy": 0.986111,
+        "stale_wrong_rate": 0,
+        "lifecycle_usd": 0.64916,
+        "usd": 0.68241,
+        "usd_per_correct": 0.009611,
+        "break_even_reads_per_pin": 147,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.0167,
+          "correct_at_change": 0.9833
+        }
+      },
+      {
+        "reads_per_write": 1,
+        "arm": "query_reader",
+        "accuracy": 0.513889,
+        "stale_wrong_rate": 0.486111,
+        "lifecycle_usd": 0,
+        "usd": 0.086432,
+        "usd_per_correct": 0.002336,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.5833,
+          "correct_at_change": 0.4833
+        }
+      },
+      {
+        "reads_per_write": 1,
+        "arm": "think",
+        "accuracy": 0.791667,
+        "stale_wrong_rate": 0.208333,
+        "lifecycle_usd": 0,
+        "usd": 1.74488,
+        "usd_per_correct": 0.030612,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.25,
+          "correct_at_change": 0.7833
+        }
+      },
+      {
+        "reads_per_write": 1,
+        "arm": "pinned",
+        "refresh_model": "anthropic:claude-sonnet-5-5",
+        "accuracy": 0.958333,
+        "stale_wrong_rate": 0.013889,
+        "lifecycle_usd": 0.414458,
+        "usd": 0.470192,
+        "usd_per_correct": 0.006814,
+        "break_even_reads_per_pin": 163,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.05,
+          "correct_at_change": 0.95
+        }
       },
       {
         "reads_per_write": 10,
-        "arms": [
-          {
-            "arm": "pinned",
-            "reads": 240,
-            "correct": 240,
-            "stale_wrong": 0,
-            "usd": 0.1262400000000003,
-            "usd_per_correct": 0.0005260000000000012
-          },
-          {
-            "arm": "query_reader",
-            "reads": 240,
-            "correct": 240,
-            "stale_wrong": 0,
-            "usd": 0.12697999999999998,
-            "usd_per_correct": 0.0005290833333333332
-          },
-          {
-            "arm": "think",
-            "reads": 240,
-            "correct": 240,
-            "stale_wrong": 0,
-            "usd": 1.835549999999999,
-            "usd_per_correct": 0.007648124999999995
-          }
-        ],
-        "pinned_breakdown": {
-          "pin_and_refresh_usd": 0.047859999999999986,
-          "read_usd": 0.07838000000000032,
-          "refresh_attempts": 14
-        },
-        "break_even_reads": 237,
-        "plumbing_only": false
+        "arm": "pinned",
+        "refresh_model": "anthropic:claude-opus-4-7",
+        "accuracy": 0.986111,
+        "stale_wrong_rate": 0,
+        "lifecycle_usd": 0.64916,
+        "usd": 0.98166,
+        "usd_per_correct": 0.001383,
+        "break_even_reads_per_pin": 147,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.0167,
+          "correct_at_change": 0.9833
+        }
+      },
+      {
+        "reads_per_write": 10,
+        "arm": "query_reader",
+        "accuracy": 0.513889,
+        "stale_wrong_rate": 0.486111,
+        "lifecycle_usd": 0,
+        "usd": 0.86432,
+        "usd_per_correct": 0.002336,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.5833,
+          "correct_at_change": 0.4833
+        }
+      },
+      {
+        "reads_per_write": 10,
+        "arm": "think",
+        "accuracy": 0.791667,
+        "stale_wrong_rate": 0.208333,
+        "lifecycle_usd": 0,
+        "usd": 17.4488,
+        "usd_per_correct": 0.030612,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.25,
+          "correct_at_change": 0.7833
+        }
+      },
+      {
+        "reads_per_write": 10,
+        "arm": "pinned",
+        "refresh_model": "anthropic:claude-sonnet-5-5",
+        "accuracy": 0.958333,
+        "stale_wrong_rate": 0.013889,
+        "lifecycle_usd": 0.414458,
+        "usd": 0.971798,
+        "usd_per_correct": 0.001408,
+        "break_even_reads_per_pin": 163,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.05,
+          "correct_at_change": 0.95
+        }
+      },
+      {
+        "reads_per_write": 100,
+        "arm": "pinned",
+        "refresh_model": "anthropic:claude-opus-4-7",
+        "accuracy": 0.986111,
+        "stale_wrong_rate": 0,
+        "lifecycle_usd": 0.64916,
+        "usd": 3.97416,
+        "usd_per_correct": 0.00056,
+        "break_even_reads_per_pin": 147,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.0167,
+          "correct_at_change": 0.9833
+        }
+      },
+      {
+        "reads_per_write": 100,
+        "arm": "query_reader",
+        "accuracy": 0.513889,
+        "stale_wrong_rate": 0.486111,
+        "lifecycle_usd": 0,
+        "usd": 8.6432,
+        "usd_per_correct": 0.002336,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.5833,
+          "correct_at_change": 0.4833
+        }
+      },
+      {
+        "reads_per_write": 100,
+        "arm": "think",
+        "accuracy": 0.791667,
+        "stale_wrong_rate": 0.208333,
+        "lifecycle_usd": 0,
+        "usd": 174.488,
+        "usd_per_correct": 0.030612,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.25,
+          "correct_at_change": 0.7833
+        }
+      },
+      {
+        "reads_per_write": 100,
+        "arm": "pinned",
+        "refresh_model": "anthropic:claude-sonnet-5-5",
+        "accuracy": 0.958333,
+        "stale_wrong_rate": 0.013889,
+        "lifecycle_usd": 0.414458,
+        "usd": 5.987858,
+        "usd_per_correct": 0.000868,
+        "break_even_reads_per_pin": 163,
+        "freshness": {
+          "changes": 60,
+          "mean_lag_batches": 0.05,
+          "correct_at_change": 0.95
+        }
       }
-    ]
+    ],
+    "diagnostic_pre_fix_attempt": {
+      "measured_build": "garrytan/gbrain@183fee7f (refresh retrieval without scope anchoring)",
+      "metered_spend_usd": 2.9324,
+      "finding": "Pinned refresh retrieval ranked every note sharing the question words alike and missed each entity newest note once notes accumulated, so pinned matched query+reader (0.528/0.542 vs 0.514 accuracy). Fixed in baadfc04 (src/core/questions/refresh.ts anchoredSlugs) with a regression test; not a decision input.",
+      "summary": [
+        {
+          "reads_per_write": 1,
+          "arm": "pinned",
+          "refresh_model": "anthropic:claude-opus-4-7",
+          "accuracy": 0.527778,
+          "stale_wrong_rate": 0.458333,
+          "lifecycle_usd": 0.622705,
+          "usd": 0.658259,
+          "usd_per_correct": 0.017323,
+          "break_even_reads_per_pin": 147,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.5667,
+            "correct_at_change": 0.5
+          }
+        },
+        {
+          "reads_per_write": 1,
+          "arm": "query_reader",
+          "accuracy": 0.513889,
+          "stale_wrong_rate": 0.486111,
+          "lifecycle_usd": 0,
+          "usd": 0.086568,
+          "usd_per_correct": 0.00234,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.5833,
+            "correct_at_change": 0.4833
+          }
+        },
+        {
+          "reads_per_write": 1,
+          "arm": "think",
+          "accuracy": 0.791667,
+          "stale_wrong_rate": 0.208333,
+          "lifecycle_usd": 0,
+          "usd": 1.74198,
+          "usd_per_correct": 0.030561,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.25,
+            "correct_at_change": 0.7833
+          }
+        },
+        {
+          "reads_per_write": 1,
+          "arm": "pinned",
+          "refresh_model": "anthropic:claude-sonnet-5-5",
+          "accuracy": 0.541667,
+          "stale_wrong_rate": 0.444444,
+          "lifecycle_usd": 0.389088,
+          "usd": 0.445642,
+          "usd_per_correct": 0.011427,
+          "break_even_reads_per_pin": 156,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.55,
+            "correct_at_change": 0.5
+          }
+        },
+        {
+          "reads_per_write": 10,
+          "arm": "pinned",
+          "refresh_model": "anthropic:claude-opus-4-7",
+          "accuracy": 0.527778,
+          "stale_wrong_rate": 0.458333,
+          "lifecycle_usd": 0.622705,
+          "usd": 0.978245,
+          "usd_per_correct": 0.002574,
+          "break_even_reads_per_pin": 147,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.5667,
+            "correct_at_change": 0.5
+          }
+        },
+        {
+          "reads_per_write": 10,
+          "arm": "query_reader",
+          "accuracy": 0.513889,
+          "stale_wrong_rate": 0.486111,
+          "lifecycle_usd": 0,
+          "usd": 0.86568,
+          "usd_per_correct": 0.00234,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.5833,
+            "correct_at_change": 0.4833
+          }
+        },
+        {
+          "reads_per_write": 10,
+          "arm": "think",
+          "accuracy": 0.791667,
+          "stale_wrong_rate": 0.208333,
+          "lifecycle_usd": 0,
+          "usd": 17.4198,
+          "usd_per_correct": 0.030561,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.25,
+            "correct_at_change": 0.7833
+          }
+        },
+        {
+          "reads_per_write": 10,
+          "arm": "pinned",
+          "refresh_model": "anthropic:claude-sonnet-5-5",
+          "accuracy": 0.541667,
+          "stale_wrong_rate": 0.444444,
+          "lifecycle_usd": 0.389088,
+          "usd": 0.954628,
+          "usd_per_correct": 0.002448,
+          "break_even_reads_per_pin": 156,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.55,
+            "correct_at_change": 0.5
+          }
+        },
+        {
+          "reads_per_write": 100,
+          "arm": "pinned",
+          "refresh_model": "anthropic:claude-opus-4-7",
+          "accuracy": 0.527778,
+          "stale_wrong_rate": 0.458333,
+          "lifecycle_usd": 0.622705,
+          "usd": 4.178105,
+          "usd_per_correct": 0.0011,
+          "break_even_reads_per_pin": 147,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.5667,
+            "correct_at_change": 0.5
+          }
+        },
+        {
+          "reads_per_write": 100,
+          "arm": "query_reader",
+          "accuracy": 0.513889,
+          "stale_wrong_rate": 0.486111,
+          "lifecycle_usd": 0,
+          "usd": 8.6568,
+          "usd_per_correct": 0.00234,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.5833,
+            "correct_at_change": 0.4833
+          }
+        },
+        {
+          "reads_per_write": 100,
+          "arm": "think",
+          "accuracy": 0.791667,
+          "stale_wrong_rate": 0.208333,
+          "lifecycle_usd": 0,
+          "usd": 174.198,
+          "usd_per_correct": 0.030561,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.25,
+            "correct_at_change": 0.7833
+          }
+        },
+        {
+          "reads_per_write": 100,
+          "arm": "pinned",
+          "refresh_model": "anthropic:claude-sonnet-5-5",
+          "accuracy": 0.541667,
+          "stale_wrong_rate": 0.444444,
+          "lifecycle_usd": 0.389088,
+          "usd": 6.044488,
+          "usd_per_correct": 0.00155,
+          "break_even_reads_per_pin": 156,
+          "freshness": {
+            "changes": 60,
+            "mean_lag_batches": 0.55,
+            "correct_at_change": 0.5
+          }
+        }
+      ]
+    }
+  },
+  "run_1": {
+    "measured_build": "garrytan/gbrain@a4267eed7bb6f9478df73fef6266b8a111a3891a",
+    "benefit_gate": {
+      "status": "fail",
+      "against": {
+        "query_reader": "fail",
+        "think": "pass"
+      },
+      "reason": "Accuracy is at ceiling for every arm (100% correct, 0 stale-wrong), so the gate is decided on lifecycle cost. Pinned costs 4.4x query+reader per correct answer at 1 read per write and matches it at 10 reads per write ($0.000526 vs $0.000529); break-even is about 240 reads per pin. Pinned is 3.3x (1 read/write) to 14.5x (10 reads/write) cheaper than on-demand think."
+    },
+    "overall": "opt_in",
+    "default_decision": "Pinned questions ship opt-in: the feature does nothing until the owner pins a question, and no pin is created by default. Default-on is withheld because the benefit gate did not pass against query+reader.",
+    "ceiling_note": "Every arm answered every read correctly; the workload rewrites the evidence page on correction, so no arm had a superseded value to repeat. The run cannot show an accuracy or freshness difference.",
+    "metered_spend_usd": 2.3402,
+    "run": {
+      "mode": "run",
+      "workload_hash": "9428f19ffe229e66",
+      "seed": 42,
+      "entities": 6,
+      "batches": 4,
+      "answer_model": "anthropic:claude-opus-4-7",
+      "reader_model": "anthropic:claude-sonnet-5-5",
+      "metered_spend_usd": 2.3401960000000015,
+      "reports": [
+        {
+          "reads_per_write": 1,
+          "arms": [
+            {
+              "arm": "pinned",
+              "reads": 24,
+              "correct": 24,
+              "stale_wrong": 0,
+              "usd": 0.055947,
+              "usd_per_correct": 0.002331125
+            },
+            {
+              "arm": "query_reader",
+              "reads": 24,
+              "correct": 24,
+              "stale_wrong": 0,
+              "usd": 0.012694,
+              "usd_per_correct": 0.0005289166666666667
+            },
+            {
+              "arm": "think",
+              "reads": 24,
+              "correct": 24,
+              "stale_wrong": 0,
+              "usd": 0.18278499999999998,
+              "usd_per_correct": 0.007616041666666666
+            }
+          ],
+          "pinned_breakdown": {
+            "pin_and_refresh_usd": 0.048025,
+            "read_usd": 0.007921999999999998,
+            "refresh_attempts": 14
+          },
+          "break_even_reads": 242,
+          "plumbing_only": false
+        },
+        {
+          "reads_per_write": 10,
+          "arms": [
+            {
+              "arm": "pinned",
+              "reads": 240,
+              "correct": 240,
+              "stale_wrong": 0,
+              "usd": 0.1262400000000003,
+              "usd_per_correct": 0.0005260000000000012
+            },
+            {
+              "arm": "query_reader",
+              "reads": 240,
+              "correct": 240,
+              "stale_wrong": 0,
+              "usd": 0.12697999999999998,
+              "usd_per_correct": 0.0005290833333333332
+            },
+            {
+              "arm": "think",
+              "reads": 240,
+              "correct": 240,
+              "stale_wrong": 0,
+              "usd": 1.835549999999999,
+              "usd_per_correct": 0.007648124999999995
+            }
+          ],
+          "pinned_breakdown": {
+            "pin_and_refresh_usd": 0.047859999999999986,
+            "read_usd": 0.07838000000000032,
+            "refresh_attempts": 14
+          },
+          "break_even_reads": 237,
+          "plumbing_only": false
+        }
+      ]
+    },
+    "decided_at": "2026-10-05T09:30:00Z"
   }
 }
