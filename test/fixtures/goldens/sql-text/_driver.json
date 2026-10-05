@@ -1435,7 +1435,7 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 20,
+            "paramCount": 21,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -1450,7 +1450,7 @@
             "via": "tagged"
           },
           {
-            "paramCount": 20,
+            "paramCount": 21,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -1474,7 +1474,7 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 19,
+            "paramCount": 20,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -1500,7 +1500,7 @@
             "via": "tagged"
           },
           {
-            "paramCount": 24,
+            "paramCount": 25,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -1524,7 +1524,7 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 24,
+            "paramCount": 25,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
@@ -1533,7 +1533,7 @@
             "via": "unsafe"
           },
           {
-            "paramCount": 23,
+            "paramCount": 24,
             "unsafeOptions": {
               "cancelFence": false,
               "prepare": true,
