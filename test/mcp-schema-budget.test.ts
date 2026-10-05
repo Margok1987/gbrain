@@ -29,7 +29,9 @@
  * F10 template text that brought sub-60-character descriptions up to
  * purpose + next step + scope, and query's key-dependence sentence.
  * query +170 (P2): the `explain` and `explain_target` params (score_details
- * and missing-page diagnosis), declared on query only so search stays lean.
+ * and missing-page diagnosis), declared on query only so search stays lean;
+ * with the temporal-edge params already on master they take the whole JSON to
+ * the measured total plus 175, so its ceiling is 26,600 (model-visible characters stay under 25,000).
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -42,8 +44,8 @@ import { cl100kAvailable, estimateTokens } from '../src/core/chunkers/token-esti
 
 const SERVED_STARTER_MAX_CHARS = 25_000;
 const SERVED_STARTER_MAX_TOKENS = 5_700;
-/** The whole tools/list JSON, annotations included (25,735 measured at v0.60.46.0; traverse_graph's `hops` is full-surface-only, 25,941 measured; 26,402 once mute_notice, the dismissal for the coaching notices starter sessions receive, joined starter). */
-const SERVED_STARTER_MAX_JSON_CHARS = 26_450;
+/** The whole tools/list JSON, annotations included (25,735 measured at v0.60.46.0; traverse_graph's `hops` is full-surface-only, 25,941 measured; 26,402 once mute_notice, the dismissal for the coaching notices starter sessions receive, joined starter; P2's query explain params add 175). */
+const SERVED_STARTER_MAX_JSON_CHARS = 26_600;
 /** 4,042 at the cost wave + 586 for the operator contract's error protocol, notice prefix and memory loop (F1); no schema guidance moved here. */
 const INSTRUCTIONS_MAX_CHARS = 4_628;
 const DESCRIPTION_HARD_CAP = 1_200;
