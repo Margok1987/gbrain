@@ -53,6 +53,7 @@ Repo: https://github.com/garrytan/gbrain
 
 ## AI providers
 
+- [docs/ai-providers/google.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/ai-providers/google.md): Google Gemini: GOOGLE_GENERATIVE_AI_API_KEY (GEMINI_API_KEY alias), GOOGLE_GENERATIVE_AI_BASE_URL override for chat, expansion and embeddings (metering proxies, regional gateways), provider_base_urls.google.
 - [docs/ai-providers/llama-server-reranker.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/ai-providers/llama-server-reranker.md): Local reranker via llama.cpp --reranking: Qwen3-Reranker, --alias setup, gbrain config keys, cold-start timeout, budget-cap interaction.
 - [docs/ai-providers/typesafe.md](https://raw.githubusercontent.com/garrytan/gbrain/master/docs/ai-providers/typesafe.md): TypeSafe Jev: TYPESAFE_API_KEY (JEV_TYPESAFE_API_KEY alias), pinned vs alias models, Jev search reranker setup (#5178), pricing, limits, data handling and what never leaves the machine.
 
