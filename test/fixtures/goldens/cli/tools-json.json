@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 208629,
-    "stdoutSha256": "c6830adde6b192f5d86b0f7fcff33714af4725d9d8dc33e52f3a65d8a043f677",
+    "stdoutBytes": 208464,
+    "stdoutSha256": "1dfdfca690c16604904833bf24c76b2b606a9d966e109301a238df26e72cdf87",
     "toolNames": [
       "remember",
       "entity",
@@ -171,7 +171,7 @@
     ],
     "tools": [
       {
-        "description": "MEMORY VERB (v1): save one fact; provenance required. Set `entity` when the fact has a subject, or entity-scoped recall misses it. Branch on `status` (inserted|duplicate|superseded). write_pending carries a receipt: poll get_write_request.",
+        "description": "MEMORY VERB (v1): save one fact with provenance. Set `entity` for a subject, or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.",
         "idempotent": true,
         "local_only": false,
         "mutating": true,
@@ -194,7 +194,7 @@
         "schema": {
           "properties": {
             "entity": {
-              "description": "Who or what it is about (name or slug).",
+              "description": "Subject name or slug.",
               "type": "string"
             },
             "expected_revision": {
@@ -237,15 +237,15 @@
               "type": "string"
             },
             "ttl": {
-              "description": "\"30d\", \"12h\" or ISO 8601 time; omit = never.",
+              "description": "\"30d\", \"12h\" or ISO time; omit = never.",
               "type": "string"
             },
             "valid_from": {
-              "description": "ISO 8601 date or time the fact was said or became true (e.g. the conversation date); omit = unknown, recorded as now.",
+              "description": "When said or true (ISO).",
               "type": "string"
             },
             "visibility": {
-              "description": "world (default) or private (local CLI only).",
+              "description": "world (default) or private (local CLI).",
               "enum": [
                 "world",
                 "private"

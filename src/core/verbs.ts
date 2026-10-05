@@ -62,7 +62,7 @@ const remember: Operation = {
   name: 'remember',
   idempotent: true,
   outputRedaction: 'no_stored_text',
-  description: 'MEMORY VERB (v1): save one fact; provenance required. Set `entity` when the fact has a subject, or entity-scoped recall misses it. Branch on `status` (inserted|duplicate|superseded). write_pending carries a receipt: poll get_write_request.',
+  description: 'MEMORY VERB (v1): save one fact with provenance. Set `entity` for a subject, or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.',
   params: {
     ...PAGE_MUTATION_PARAMS,
     fact: { type: 'string', description: 'One claim.', required: true },
@@ -73,15 +73,15 @@ const remember: Operation = {
     },
     ttl: {
       type: 'string',
-      description: '"30d", "12h" or ISO 8601 time; omit = never.',
+      description: '"30d", "12h" or ISO time; omit = never.',
     },
     valid_from: {
       type: 'string',
-      description: 'ISO 8601 date or time the fact was said or became true (e.g. the conversation date); omit = unknown, recorded as now.',
+      description: 'When said or true (ISO).',
     },
     entity: {
       type: 'string',
-      description: 'Who or what it is about (name or slug).',
+      description: 'Subject name or slug.',
     },
     infer_entity: {
       type: 'boolean',
@@ -94,7 +94,7 @@ const remember: Operation = {
     visibility: {
       type: 'string',
       enum: ['world', 'private'],
-      description: 'world (default) or private (local CLI only).',
+      description: 'world (default) or private (local CLI).',
     },
   },
   mutating: true,
