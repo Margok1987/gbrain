@@ -1626,6 +1626,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'sync.bulk',
   'sync.bulk_size',
   'sync.bulk_max_txn_ms',
+  'sync.lanes',
   // Persisted indexing scope (comma/newline-separated glob list; trailing '/'
   // normalizes to a '/**' subtree glob). Read best-effort at the top of
   // performSyncInner and UNIONED with any per-call --exclude so internal

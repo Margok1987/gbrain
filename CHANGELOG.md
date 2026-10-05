@@ -10,6 +10,66 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.73.0] - 2026-10-05
+
+**A managed Postgres brain far from its database now catches up a sync backlog at about 150 pages a minute: a 10,000-file backlog takes about 1.2 hours instead of 5.4 (#5984).**
+
+`gbrain sync` on a managed brain already saved pages in groups and queued the next group while one was saving, but only one group could save at a time. Now up to six groups save at once, each on its own database connection, and they still commit in file order, so nobody ever sees a later page without the earlier ones. Every page keeps its own write receipt, a failed page still stops the run before anything after it is published, and your agent's own writes still go first.
+
+### The numbers that matter
+
+| 57 ms to the database | Before (v0.60.58.0) | Now |
+| --- | --- | --- |
+| Pages per minute once the catch-up is running | about 29 | 150 to 153 |
+| 10,000-file backlog (300-word pages) | about 5.4 h | about 1.2 h |
+| A foreground write while catching up (p95) | 15.1 s (14.9 s idle) | 15.8 s (14.1 s idle), no failures |
+| Same backlog next to the database | 545 pages/min | 741 pages/min |
+
+### How to use it
+
+Nothing to do: lanes are on by default for managed Postgres syncs. `--lanes N` (1 to 8) or `gbrain config set sync.lanes N` changes the count; `--no-lanes` saves one group at a time. The count is capped by the connection pool (a pool of 10 allows 6; raise `GBRAIN_POOL_SIZE` for more). The final JSON reports `drain.bulk.lanes`: how many ran, why fewer when they did, and how many groups overlapped.
+
+### Things to watch
+
+- A lock or statement timeout in a lane costs one lane for the rest of that run (`step_down` in the JSON says why).
+- The first minute or so of a catch-up still runs at the old speed: discovery and already-deleted files are handled one at a time before the groups start.
+- Finish a running catch-up before downgrading gbrain, as with v0.60.58.0.
+
+## To take advantage of v0.60.70.0
+
+`gbrain upgrade` should do this automatically. If it didn't, or if `gbrain doctor` warns about a partial migration:
+
+1. **Run the orchestrator manually:**
+   ```bash
+   gbrain apply-migrations --yes
+   ```
+2. **Nothing else to migrate.** There is no schema change; the next `gbrain sync` uses lanes.
+3. **Verify the outcome:**
+   ```bash
+   gbrain sync --source <id> --no-pull --json
+   ```
+   `drain.bulk.lanes.effective` is the number of groups that saved at once.
+4. **If any step fails or the numbers look wrong,** please file an issue:
+   https://github.com/garrytan/gbrain/issues with:
+   - output of `gbrain doctor`
+   - contents of `~/.gbrain/upgrade-errors.jsonl` if it exists
+   - which step broke
+
+   This feedback loop is how the gbrain maintainers find fragile upgrade paths. Thank you.
+
+### Itemized changes
+
+- **Lane claims** (`sync-lanes.ts`, `claimNextLaneHead` in `journal.ts`, consumer `claimLanes`): the drain opens a lane run for its worktree; this process's consumer claims the next admitted group head while earlier groups of the same run still publish, up to the effective lane count. Any other unfinished request (a foreground write, a recovering request, another run) still blocks it, and other processes claim lane rows under the ordinary FIFO.
+- **Shared worktree lock** (`worktree-lease.ts`, `acquireWorktreeShared`): lanes share this process's native worktree lock. Every exclusive `acquireWorktree` first makes the lanes step aside; a lease stops taking new lanes after 30 s of continuous holding so other processes get a turn.
+- **Ordered commit** (`awaitLaneBegin`, `awaitLaneTurn`): lane transactions begin and commit in manifest order; a lane commits only after its predecessor (`intent.after`) committed. A failed predecessor cancels the later groups; a requeued or not-yet-admitted one makes them give back their claims; a wounded lease or 60 s rolls them back. Publication validation accepts a lane group whose predecessor is still publishing.
+- **Admit-ahead with lanes**: the drain keeps twice the lane count of groups admitted ahead, admits them in order and stops at the first failed admission.
+- **Step-down and reporting**: lock and statement timeouts lower the lane count (`stepDownLanes`); `drain.bulk.lanes` reports `configured`, `effective`, `reason`, `step_down`, `overlapped_groups` and `fallbacks`.
+- **Settings**: `--lanes N` / `--no-lanes` > `GBRAIN_SYNC_LANES` > `sync.lanes` > 6, clamped to the pool's long-hold capacity minus 3; lanes need bulk groups.
+
+### For contributors
+
+- `test/managed-sync-lanes.test.ts` (Postgres; laned in CI) covers lane settings, the shared lease, the commit-order wait, a lane drain, a failure mid-run and a cross-linked corpus built the same with and without lanes. Results are in `docs/eval/managed-sync-catchup.md` ("Parallel lanes").
+
 ## [0.60.72.0] - 2026-10-05
 
 **`ci:ubicloud` VMs carry their owner's name, an interrupted run destroys every VM it asked for, and no run destroys another owner's VMs.**
