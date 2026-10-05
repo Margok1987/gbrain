@@ -35,7 +35,7 @@ describe('supersession_calibration', () => {
     expect(categorizeCheck('supersession_calibration')).toBe('brain');
   });
 
-  test('an uncalibrated model is informational, names the model and carries the calibrate → sweep → register action', async () => {
+  test('an uncalibrated model is informational, names the model and carries the calibrate → register action', async () => {
     configureGateway({ embedding_model: 'openai:text-embedding-3-large', embedding_dimensions: 1536, env: { OPENAI_API_KEY: 'k' } });
     await engine.setConfig('facts.supersession_thresholds', JSON.stringify({ 'other:model@8': 0.9 }));
     try {
@@ -45,10 +45,10 @@ describe('supersession_calibration', () => {
       const fix = check.fix as Action;
       expect(fix.consent).toEqual(['paid', 'egress']);
       expect(fix.user_message).toContain('about a cent');
-      expect(fix.argv!.slice(2, 7)).toEqual(['embed', '--model', 'openai:text-embedding-3-large', '--dims', '1536']);
+      expect(fix.argv!.slice(2, 5)).toEqual(['calibrate', 'openai:text-embedding-3-large', '1536']);
       expect(fix.argv![1]).toMatch(/scripts\/eval-c2-candidate-fusion\.ts$/);
-      expect(fix.then!.argv).toContain('0.80:0.97:0.01');
-      const register = fix.then!.then!;
+      expect(fix.argv!.some(a => a.startsWith('--'))).toBe(false);
+      const register = fix.then!;
       expect(register.argv!.slice(0, 4)).toEqual(['gbrain', 'config', 'set', 'facts.supersession_thresholds']);
       expect(register.argv![4]).toBe('{"other:model@8":0.9,"openai:text-embedding-3-large@1536":THRESHOLD}');
       expect(register.inputs![0].name).toBe('THRESHOLD');

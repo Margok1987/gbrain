@@ -72,7 +72,10 @@ Fix 1 below is in the memory proof wave. Fix 2 is not.
 - **Override.** `facts.supersession_thresholds` takes a JSON map `{"provider:model@dims": number | "off"}`, so an
   operator can register a measured value without a release.
 - **Doctor.** `supersession_calibration` is an informational check. For an uncalibrated model it names the
-  model and returns the embed, sweep and register commands.
+  model and returns two commands, which need consent because the first one costs money:
+  `bun scripts/eval-c2-candidate-fusion.ts calibrate <provider:model> <dims> <out>` embeds the fixture (about a
+  cent), sweeps 0.80 to 0.97 and prints `threshold_pick.guarded`; then
+  `gbrain config set facts.supersession_thresholds` registers the result.
 
 ## Proposed fix
 
@@ -81,9 +84,9 @@ Fix 1 below is in the memory proof wave. Fix 2 is not.
    Keep `voyage:voyage-4` at 0.95. A model with no calibrated entry, such as `openai:text-embedding-3-large`,
    should not supersede by cosine. Its writes insert the new fact and leave the pair to the existing
    conflict review where that is enabled. At 0.95 on 3-large, that gives up the 37% of corrections it
-   catches today and removes the 54% of wrong replacements. `gbrain doctor` could flag a brain whose embedding model has
-   no calibrated threshold. This fixture calibrates a new model for about a cent:
-   `bun scripts/eval-c2-candidate-fusion.ts embed …` then `run … --taus 0.80:0.97:0.01`.
+   catches today and removes the 54% of wrong replacements. `gbrain doctor` flags a brain whose embedding model has
+   no calibrated threshold. This fixture calibrates a new model for about a cent with
+   `bun scripts/eval-c2-candidate-fusion.ts calibrate <provider:model> <dims> <out>`.
 2. **Make supersession slot-aware.** The remaining misses need more than a threshold. Supersession can use
    the claim slot: the typed `claim_metric` and `claim_period` columns when both rows carry them, or the
    caller-named target from `remember.replaces` (#6027). Then cosine only nominates candidates, and the slot

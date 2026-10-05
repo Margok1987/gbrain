@@ -21,33 +21,26 @@ import type { Action } from '../../../core/agent-output.ts';
 const DOCS = 'docs/eval/decisions/supersession-threshold-dev/README.md';
 const SCRIPT = resolve(import.meta.dir, '../../../../scripts/eval-c2-candidate-fusion.ts');
 
-/** embed (paid, ask first) → sweep (free) → register the guarded pick. */
+/** Calibrate (paid, ask first: embeds the fixture, then sweeps for free) → register the guarded pick. */
 function calibrationFix(model: string, dims: number, key: string, overrides: Record<string, unknown>): Action {
   const out = join(tmpdir(), `gbrain-supersession-${key.replace(/[^a-z0-9]+/gi, '-')}.json.gz`);
   const register = JSON.stringify({ ...overrides, [key]: '<THRESHOLD>' }).replace('"<THRESHOLD>"', 'THRESHOLD');
   return {
-    argv: ['bun', SCRIPT, 'embed', '--model', model, '--dims', String(dims), '--out', out],
+    argv: ['bun', SCRIPT, 'calibrate', model, String(dims), out],
     consent: ['paid', 'egress'],
     actor: 'agent',
-    why: `Supersession by similarity is off for ${key} until a threshold is measured for it. This embeds the synthetic C2 fixture (1,506 test sentences, about 23K tokens) with ${model}; no brain content is sent.`,
+    why: `Supersession by similarity is off for ${key} until a threshold is measured for it. This embeds the synthetic C2 fixture (1,506 test sentences, about 23K tokens) with ${model}, then replays it at thresholds 0.80 to 0.97 on a throwaway in-memory brain (several minutes, no further provider calls) and prints threshold_pick.guarded. No brain content is sent.`,
     user_message: `Facts saved on this brain never replace a similar older fact automatically, because its embedding model (${key}) has no measured threshold. Measuring one sends about 23K tokens of synthetic test sentences to the embedding provider (about a cent). OK to run it?`,
     docs: DOCS,
     requires_exclusive: false,
     then: {
-      argv: ['bun', SCRIPT, 'run', '--embeddings', out, '--taus', '0.80:0.97:0.01'],
+      argv: ['gbrain', 'config', 'set', 'facts.supersession_thresholds', register],
       consent: [],
       actor: 'agent',
-      why: 'Replays the fixture at each threshold on a throwaway in-memory brain (no provider calls) and prints threshold_pick.guarded: the threshold that misses the fewest corrections while false supersession stays at or under 1% and 99.5% of distinct claims survive.',
+      why: 'Registers the measured threshold for this model; the next fact write uses it. Remove it with gbrain config unset facts.supersession_thresholds.',
+      inputs: [{ name: 'THRESHOLD', how: 'threshold_pick.guarded from the calibrate output. When it is null no threshold is safe for this model: skip this step and leave supersession off.' }],
+      verify: doctorVerify('supersession_calibration'),
       requires_exclusive: false,
-      then: {
-        argv: ['gbrain', 'config', 'set', 'facts.supersession_thresholds', register],
-        consent: [],
-        actor: 'agent',
-        why: 'Registers the measured threshold for this model; the next fact write uses it. Remove it with gbrain config unset facts.supersession_thresholds.',
-        inputs: [{ name: 'THRESHOLD', how: 'threshold_pick.guarded from the previous step\'s JSON output. When it is null no threshold is safe for this model: skip this step and leave supersession off.' }],
-        verify: doctorVerify('supersession_calibration'),
-        requires_exclusive: false,
-      },
     },
   };
 }
