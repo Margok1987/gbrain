@@ -349,7 +349,7 @@ async function run(embeddingsPath: string, outDir: string | null, taus: number[]
   resetGateway();
   configureGateway({ embedding_model: 'openai:text-embedding-3-small', embedding_dimensions: store.dims, env: { OPENAI_API_KEY: 'sk-offline-c2-eval-no-network' } });
   const model = store.model.includes(':') ? store.model : `local:${store.model}`;
-  const sweep: Array<Record<string, unknown>> = [];
+  const sweep: SweepRow[] = [];
   const sources: unknown[] = [];
   const summary: Record<string, unknown> = {};
   const allVerdicts: string[] = [];
