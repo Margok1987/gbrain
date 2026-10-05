@@ -235,7 +235,7 @@ matched. **create_safety** (enum): `exists` (a page for this already exists)
 signal). The derivation of both is implementation-defined and may improve;
 the values are frozen.
 
-### remember(fact, provenance, ttl?, entity?, kind?, visibility?, request_id?) — write
+### remember(fact, provenance, ttl?, entity?, kind?, visibility?, valid_from?, request_id?) — write
 
 Save ONE fact with mandatory attribution.
 
@@ -244,6 +244,10 @@ Save ONE fact with mandatory attribution.
   Empty ⇒ `provenance_required` error with a fix.
 - `entity`: set whenever the fact is about a specific person/company/project —
   entity-scoped recall will not find unattributed facts.
+- `valid_from` (additive, ISO 8601 date or time): when the fact was said or
+  became true, such as the date of the conversation it comes from. Omitted, the
+  fact is recorded with the write time, and date headers read its start of
+  validity as `unknown`. Not ISO 8601 ⇒ `invalid_params`.
 - `infer_entity` (additive, boolean, default `true`): when `entity` is omitted,
   the server may link the fact to the one entity page its text names exactly
   (zero LLM; a second competing name, a bare first name or an ambiguous match

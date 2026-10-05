@@ -25,6 +25,9 @@ describe('header grammar and dates', () => {
     expect(factDateHeader({ valid_from: new Date('2026-03-01T00:00:00Z'), valid_until: null })).toBe('[observed unknown; valid 2026-03-01 to unknown]');
     expect(factDateHeader({ valid_from: null, valid_until: '2026-04-01T00:00:00.000Z' })).toBe('[observed unknown; valid unknown to 2026-04-01]');
     for (const h of [pageDateHeader(null), factDateHeader({})]) expect(h).not.toContain('\n');
+    // A valid_from that only records the write time is not a known start of validity.
+    expect(factDateHeader({ valid_from: '2026-10-05T12:00:00.000Z', valid_until: null, created_at: '2026-10-05T12:00:00.400Z' })).toBe('[observed unknown; valid unknown to unknown]');
+    expect(factDateHeader({ valid_from: '2026-03-01T00:00:00.000Z', valid_until: null, created_at: '2026-10-05T12:00:00.000Z' }, null, '2026-02-10')).toBe('[observed 2026-02-10; valid 2026-03-01 to unknown]');
   });
 
   test('formatBrainDay: midnight UTC renders as written, other instants in brain.timezone', () => {
@@ -152,6 +155,39 @@ describe('ops on PGLite', () => {
     } finally {
       await engine.unsetConfig(EVIDENCE_DATE_HEADER_KEY);
     }
+  });
+
+  test('on: a fact from a dated source page is observed on that date; a fact written without a date does not show the write time as valid-from', async () => {
+    await engine.setConfig(EVIDENCE_DATE_HEADER_KEY, 'true');
+    try {
+      const fromChat = await engine.insertFact({ fact: 'Walrus moved its launch to April', kind: 'fact', entity_slug: 'notes/walrus-undated', source: 'test', visibility: 'world',
+        valid_from: new Date('2026-02-10T00:00:00Z') }, { source_id: 'default' });
+      await engine.executeRaw('UPDATE facts SET source_markdown_slug = $2 WHERE id = $1', [fromChat.id, 'chat/2026-02-10-walrus']);
+      const undated = await op('recall').handler(ctxOf(), { entity: 'notes/walrus-undated' }) as Record<string, any>;
+      expect(undated.facts.find((f: any) => f.fact.includes('April')).date_header).toBe('[observed 2026-02-10; valid 2026-02-10 to unknown]');
+      const written = await engine.insertFact({ fact: 'Walrus hired a new lead', kind: 'fact', entity_slug: 'notes/walrus-undated', source: 'test', visibility: 'world' }, { source_id: 'default' });
+      const again = await op('recall').handler(ctxOf(), { entity: 'notes/walrus-undated' }) as Record<string, any>;
+      expect(again.facts.find((f: any) => f.id === written.id).date_header).toBe('[observed unknown; valid unknown to unknown]');
+    } finally {
+      await engine.unsetConfig(EVIDENCE_DATE_HEADER_KEY);
+    }
+  });
+
+  test('remember with valid_from stores it, and the header shows it as the start of validity', async () => {
+    await engine.setConfig(EVIDENCE_DATE_HEADER_KEY, 'true');
+    try {
+      await op('remember').handler(ctxOf(), { fact: 'Walrus opened a Porto office', provenance: 'chat on 2026-03-01', entity: 'notes/walrus-undated', valid_from: '2026-03-01' });
+      const recall = await op('recall').handler(ctxOf(), { entity: 'notes/walrus-undated' }) as Record<string, any>;
+      const row = recall.facts.find((f: any) => f.fact.includes('Porto'));
+      expect(row.valid_from.slice(0, 10)).toBe('2026-03-01');
+      expect(row.date_header).toBe('[observed unknown; valid 2026-03-01 to unknown]');
+    } finally {
+      await engine.unsetConfig(EVIDENCE_DATE_HEADER_KEY);
+    }
+  });
+
+  test('remember rejects a valid_from that is not an ISO 8601 date', async () => {
+    await expect(op('remember').handler(ctxOf(), { fact: 'Walrus is in Lisbon', provenance: 'test', valid_from: 'last spring' })).rejects.toMatchObject({ code: 'invalid_params' });
   });
 
   test('remote clamp: 32k by default and reported; a trusted eval brain raises it with search.return_budget_max_remote', async () => {

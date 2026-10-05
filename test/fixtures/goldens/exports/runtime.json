@@ -780,6 +780,7 @@
         "isConversationLabels",
         "locateChunks",
         "pageEvidenceText",
+        "pagePlanHits",
         "parseReturnUnit",
         "parseReturnWindow",
         "resolveEvidencePlan",

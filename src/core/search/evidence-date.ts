@@ -70,13 +70,26 @@ export function pageDateHeader(observed: string | null): string {
   return `[observed ${observed ?? UNKNOWN_DATE}]`;
 }
 
+/** A valid_from within this of created_at is the write-time default, not a known start of validity. */
+const WRITE_TIME_DEFAULT_MS = 60_000;
+
+/**
+ * `observed` is when the fact was said: the observation date of the page it
+ * came from, when the caller supplies it. `valid FROM` is the fact's
+ * valid_from, except a valid_from that only records the write time (the
+ * default when `remember` gets no date) renders `unknown`: the header never
+ * presents when a fact was written as when it became true.
+ */
 export function factDateHeader(
-  fact: { valid_from?: Date | string | null; valid_until?: Date | string | null },
+  fact: { valid_from?: Date | string | null; valid_until?: Date | string | null; created_at?: Date | string | null },
   timeZone?: string | null,
+  observed?: string | null,
 ): string {
-  const from = formatBrainDay(fact.valid_from, timeZone) ?? UNKNOWN_DATE;
+  const writeTimeDefault = fact.valid_from && fact.created_at
+    && Math.abs(new Date(fact.valid_from).getTime() - new Date(fact.created_at).getTime()) < WRITE_TIME_DEFAULT_MS;
+  const from = (writeTimeDefault ? null : formatBrainDay(fact.valid_from, timeZone)) ?? UNKNOWN_DATE;
   const until = formatBrainDay(fact.valid_until, timeZone) ?? UNKNOWN_DATE;
-  return `[observed ${UNKNOWN_DATE}; valid ${from} to ${until}]`;
+  return `[observed ${observed ?? UNKNOWN_DATE}; valid ${from} to ${until}]`;
 }
 
 /**
@@ -103,13 +116,48 @@ export async function loadPageDateHeaders(
 }
 
 /** `recall` fact rows plus `date_header` when `search.evidence_date_header` is on; unchanged otherwise. */
-export async function withFactDateHeaders<T extends { valid_from: string | null; valid_until: string | null }>(
-  engine: { getConfig(key: string): Promise<string | null> },
+export async function withFactDateHeaders<T extends { id: number; valid_from: string | null; valid_until: string | null; created_at?: string | null; entity_slug?: string | null; source_id?: string }>(
+  engine: { getConfig(key: string): Promise<string | null>; executeRaw<R>(sql: string, params?: unknown[]): Promise<R[]> },
   facts: T[],
 ): Promise<Array<T & { date_header?: string }>> {
   if (!await evidenceDateHeaderEnabled(engine)) return facts;
   const timeZone = (await engine.getConfig('brain.timezone').catch(() => null))?.trim() || null;
-  return facts.map(f => ({ ...f, date_header: factDateHeader(f, timeZone) }));
+  const observed = await factObservationDates(engine, facts, timeZone).catch(() => new Map<number, string>());
+  return facts.map(f => ({ ...f, date_header: factDateHeader(f, timeZone, observed.get(f.id)) }));
+}
+
+/**
+ * When each fact was said: the observation date of the page the fact came
+ * from (`facts.source_markdown_slug`, e.g. the conversation it was extracted
+ * from). A fact stored in its own entity page's facts fence has no such page,
+ * so it stays unknown. One facts read and one pages read per call.
+ */
+async function factObservationDates(
+  engine: { executeRaw<R>(sql: string, params?: unknown[]): Promise<R[]> },
+  facts: Array<{ id: number; entity_slug?: string | null }>,
+  timeZone: string | null,
+): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const ids = facts.map(f => f.id).filter(id => Number.isInteger(id) && id > 0);
+  if (!ids.length) return out;
+  const rows = await engine.executeRaw<{ id: number; source_id: string; slug: string | null; entity_slug: string | null }>(
+    'SELECT id, source_id, source_markdown_slug AS slug, entity_slug FROM facts WHERE id = ANY($1::bigint[])', [ids]);
+  const wanted = rows.filter(r => r.slug && r.slug !== r.entity_slug);
+  if (!wanted.length) return out;
+  const pages = await engine.executeRaw<{ source_id: string; slug: string; frontmatter: unknown; import_filename: string | null }>(
+    `SELECT p.source_id, p.slug, p.frontmatter, p.import_filename FROM pages p
+     JOIN unnest($1::text[], $2::text[]) AS w(source_id, slug) ON p.source_id = w.source_id AND p.slug = w.slug WHERE p.deleted_at IS NULL`,
+    [wanted.map(r => r.source_id), wanted.map(r => r.slug!)]);
+  const byKey = new Map(pages.map(p => {
+    const fm = typeof p.frontmatter === 'string' ? JSON.parse(p.frontmatter) : p.frontmatter;
+    const day = formatBrainDay(pageObservationDate({ slug: p.slug, frontmatter: fm && typeof fm === 'object' ? fm as Record<string, unknown> : null, filename: p.import_filename, timeZone }), timeZone);
+    return [`${p.source_id}\u0000${p.slug}`, day] as const;
+  }));
+  for (const r of wanted) {
+    const day = byKey.get(`${r.source_id}\u0000${r.slug}`);
+    if (day) out.set(Number(r.id), day);
+  }
+  return out;
 }
 
 /** `search.evidence_date_header` is on ('true' | 'on' | '1' | 'yes'); off by default and on any read error. */

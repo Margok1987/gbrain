@@ -30,7 +30,7 @@ import { bumpLastRetrievedAt } from '../last-retrieved.ts';
 import { applySnippetCap, DEFAULT_AGENT_SNIPPET_CHARS } from '../search/snippet-cap.ts';
 import { redactRetrievalOutput } from '../search/output-redaction.ts';
 import { projectRows, resultRowsFor } from '../search/lean-rows.ts';
-import { assembleEvidenceForHits, capDeliveredSnippets, deliverEvidence, effectivePlan, resolveEvidencePlan, unsupportedDelivery, type DeliveryMeta, type DeliveryScope, type EvidencePlan, type FrozenHit, type ReturnUnit } from '../search/evidence-delivery.ts';
+import { assembleEvidenceForHits, capDeliveredSnippets, deliverEvidence, effectivePlan, pagePlanHits, resolveEvidencePlan, unsupportedDelivery, type DeliveryMeta, type DeliveryScope, type EvidencePlan, type FrozenHit, type ReturnUnit } from '../search/evidence-delivery.ts';
 import { privateProvenanceFilterFragment, resolveExcludePrivatePages } from '../search/private-visibility.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { SAFE_FENCE_CHUNKER_VERSION } from '../search/safe-chunks.ts';
@@ -837,7 +837,7 @@ const query: Operation = {
       // `(p.limit as number) || undefined` keeps 0 in that same "unset"
       // bucket rather than requesting a literal empty result — see the
       // `limit` param description above for why.
-      limit: (p.limit as number) || undefined,
+      limit: (p.limit as number) || pagePlanHits(plan).limit,
       offset: (p.offset as number) || 0,
       excludePrivate,
       requireSafeChunks: ctx.remote !== false, decide: { remote: ctx.remote !== false, answerability: true },
@@ -878,7 +878,7 @@ const query: Operation = {
       adaptiveReturn: typeof p.adaptive_return === 'boolean' ? (p.adaptive_return as boolean) : undefined,
       // v0.42.3.0 — autocut ceiling override. Omitted = smart default (ON in
       // reranked modes). `false` forces the full top-K.
-      autocut: typeof p.autocut === 'boolean' ? (p.autocut as boolean) : undefined,
+      autocut: typeof p.autocut === 'boolean' ? (p.autocut as boolean) : pagePlanHits(plan).autocut,
       // v0.43 — relational recall override. Omitted = smart default (mode bundle).
       relationalRetrieval: typeof p.relational === 'boolean' ? (p.relational as boolean) : undefined,
     });

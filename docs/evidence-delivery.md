@@ -63,6 +63,11 @@ gbrain recall --query "renewal terms" --return-unit section --budget-tokens 4000
 Use `page` for multi-session / temporal questions where the answer depends on
 the whole conversation. Use `window` when you only need local context.
 
+With `return_unit: page`, `query` sizes its hit list to the budget so the
+budget fills. Autocut stays off unless you set `autocut`, and a budget above
+about 6,250 tokens raises the row count to one row per 250 tokens, up to 100.
+An explicit `limit` or `autocut` still wins.
+
 ## Parameters and config
 
 Per-call params on `search`, `query`, `recall`:
@@ -112,8 +117,15 @@ renders as written, any other instant in `brain.timezone`. The header line
 and its newline are part of `chunk_text`: they count in `delivered.tokens`,
 `tokens_delivered` and the budget, `match_spans` offsets include them, and
 `evidenceFingerprint` hashes them. `recall` facts gain
-`date_header: "[observed unknown; valid 2026-03-01 to unknown]"` (facts carry
-no observation date; an open validity end reads `unknown`). The setting
+`date_header: "[observed 2026-02-10; valid 2026-03-01 to unknown]"`. A fact's
+`observed` date is the observation date of the page it came from
+(`source_markdown_slug`, such as the conversation it was extracted from), and it
+reads `unknown` for a fact kept only in its entity page's facts fence. `valid`
+starts at the fact's `valid_from`: `remember` sets it from its `valid_from`
+parameter (when the fact was said or became true). A `valid_from` that only
+records the write time (within a minute of `created_at`) reads `unknown`, so a
+header never presents when a fact was written as when it became true. An open
+validity end reads `unknown`. The setting
 applies to `search`, `query`, `recall`, `think` and `assemble_evidence`.
 
 Config keys: `search.return_unit`, `search.return_window`,

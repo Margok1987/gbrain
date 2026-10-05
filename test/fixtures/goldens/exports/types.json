@@ -6745,6 +6745,13 @@
       },
       {
         "kind": "function",
+        "name": "pagePlanHits",
+        "signature": [
+          "(plan: EvidencePlan | null) => { limit?: number; autocut?: false; }"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "parseReturnUnit",
         "signature": [
           "(raw: unknown, op: string) => ReturnUnit | undefined"

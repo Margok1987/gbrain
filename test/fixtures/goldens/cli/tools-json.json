@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 208390,
-    "stdoutSha256": "a6ca01d48a4d10f68e29a441b5771fee06e1aa415b343f8b95ecd4baf24ada15",
+    "stdoutBytes": 208629,
+    "stdoutSha256": "c6830adde6b192f5d86b0f7fcff33714af4725d9d8dc33e52f3a65d8a043f677",
     "toolNames": [
       "remember",
       "entity",
@@ -187,6 +187,7 @@
           "request_id": "string?",
           "source_id": "string?",
           "ttl": "string?",
+          "valid_from": "string?",
           "visibility": "string?"
         },
         "required_scopes": [],
@@ -237,6 +238,10 @@
             },
             "ttl": {
               "description": "\"30d\", \"12h\" or ISO 8601 time; omit = never.",
+              "type": "string"
+            },
+            "valid_from": {
+              "description": "ISO 8601 date or time the fact was said or became true (e.g. the conversation date); omit = unknown, recorded as now.",
               "type": "string"
             },
             "visibility": {

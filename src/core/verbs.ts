@@ -75,6 +75,10 @@ const remember: Operation = {
       type: 'string',
       description: '"30d", "12h" or ISO 8601 time; omit = never.',
     },
+    valid_from: {
+      type: 'string',
+      description: 'ISO 8601 date or time the fact was said or became true (e.g. the conversation date); omit = unknown, recorded as now.',
+    },
     entity: {
       type: 'string',
       description: 'Who or what it is about (name or slug).',
@@ -136,6 +140,13 @@ const remember: Operation = {
         'invalid_params',
         `visibility "${visibility}" is not valid.`,
         'Use "world" (default — agents can recall it) or "private" (local CLI reads only).',
+      );
+    }
+    if (p.valid_from !== undefined && (typeof p.valid_from !== 'string' || !Number.isFinite(Date.parse(p.valid_from)))) {
+      throw verbError(
+        'invalid_params',
+        'valid_from must be an ISO 8601 date or time.',
+        'Pass when the fact was said or became true, e.g. valid_from: "2026-03-01", or omit it.',
       );
     }
     if (ctx.dryRun) {

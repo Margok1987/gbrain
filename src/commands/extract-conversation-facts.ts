@@ -64,6 +64,7 @@
  *   `--override-disabled` to force-run.
  */
 
+import { extractExitCode, extractRunStatus, recordFailedPage, reportFailedPage } from '../core/facts/conversation-run-status.ts';
 import type { BrainEngine, NewFact } from '../core/engine.ts';
 import type { Page } from '../core/types.ts';
 import {
@@ -301,6 +302,8 @@ export interface ExtractConversationFactsCoreOpts {
   extractor?: (input: ExtractInput) => Promise<ExtractedFact[]>;
 }
 
+export { extractExitCode, extractRunStatus };
+
 export interface ExtractConversationFactsResult {
   pages_considered: number;
   pages_processed: number;
@@ -324,6 +327,8 @@ export interface ExtractConversationFactsResult {
   pages_skipped_unrecognized_speaker: number;
   /** Pages whose claim reached extraction but failed before durable outcome. */
   pages_failed: number;
+  /** The failed pages (first 50) with the error each one hit; they stay unfinished and retry next run. */
+  failed_pages: Array<{ slug: string; error: string }>;
   /**
    * Pages whose built-in parse returned `no_match` and whose messages were
    * recovered by the explicitly enabled LLM fallback.
@@ -1218,8 +1223,8 @@ async function processPage(
       `[extract-conversation-facts] ${page.slug} changed during extraction; leaving it unfinished for replay\n`,
     );
     // #4869: no terminal, no checkpoint — this claim did not reach a durable
-    // outcome, so it counts as failed (CLI exit 1 / cycle 'warn'), not processed.
-    state.result.pages_failed++;
+    // outcome, so it counts as failed (cycle 'warn'), not processed.
+    state.result.pages_failed++; recordFailedPage(state.result, page.slug, 'the page changed during extraction; left unfinished for replay');
     return { newEndIso: null };
   }
 
@@ -1325,6 +1330,7 @@ export async function runExtractConversationFactsCore(
     pages_marked_non_extractable: 0,
     pages_skipped_unrecognized_speaker: 0,
     pages_failed: 0,
+    failed_pages: [],
     pages_llm_fallback: 0,
     pages_lock_skipped: 0,
     orphan_facts_cleaned: 0,
@@ -1582,9 +1588,7 @@ export async function runExtractConversationFactsCore(
             const message = failure.error instanceof Error
               ? failure.error.message
               : String(failure.error);
-            process.stderr.write(
-              `[extract-conversation-facts] ${failure.label} failed: ${message}\n`,
-            );
+            reportFailedPage(result, failure.label, message);
           }
 
           processedPagesCount += claimable.length;
@@ -1893,6 +1897,11 @@ Options:
   --yes                  Auto-confirm cost preview in non-TTY contexts.
   --help, -h             Show this help.
 
+Exit status: 0 when the run finished, including a partial run where some pages
+failed (they are listed, stay unfinished and retry on the next run; --json
+reports status "partial" with failed_pages). 1 when every attempted page failed,
+a model has no pricing, or the gateway is unavailable.
+
 Multi-source: when --source-id is omitted, the command iterates ALL
 sources from gbrain sources list. Per-source budget cap defaults to
 --max-cost-usd; the brain-wide cap when running via the autopilot cycle
@@ -1980,6 +1989,7 @@ export async function runExtractConversationFacts(
     pages_marked_non_extractable: 0,
     pages_skipped_unrecognized_speaker: 0,
     pages_failed: 0,
+    failed_pages: [],
     pages_llm_fallback: 0,
     pages_lock_skipped: 0,
     orphan_facts_cleaned: 0,
@@ -2034,6 +2044,7 @@ export async function runExtractConversationFacts(
       aggregate.pages_marked_non_extractable += perSource.pages_marked_non_extractable;
       aggregate.pages_skipped_unrecognized_speaker += perSource.pages_skipped_unrecognized_speaker;
       aggregate.pages_failed += perSource.pages_failed;
+      for (const failed of perSource.failed_pages) recordFailedPage(aggregate, failed.slug, failed.error);
       aggregate.pages_llm_fallback += perSource.pages_llm_fallback;
       aggregate.pages_lock_skipped += perSource.pages_lock_skipped;
       aggregate.orphan_facts_cleaned += perSource.orphan_facts_cleaned;
@@ -2059,9 +2070,12 @@ export async function runExtractConversationFacts(
   // #5448: --json is a universal cli-flag-registry flag, so scripts add it
   // expecting an envelope. Emit the same counters as the Done: summary as one
   // JSON object on stdout; progress and diagnostics stay on stderr.
+  const runStatus = extractRunStatus(aggregate);
   if (parsed.json) {
     console.log(JSON.stringify({
       ...aggregate,
+      status: runStatus,
+      ...(aggregate.pages_failed > 0 ? { next: { action: 'rerun', why: 'Failed pages stay unfinished and are retried by re-running the same command; pages that succeeded are not redone.' } } : {}),
       sources: sourceIds,
       dry_run: parsed.dryRun ?? false,
       outcome,
@@ -2100,7 +2114,8 @@ export async function runExtractConversationFacts(
       console.log(`  Marked ${aggregate.pages_marked_non_extractable} page(s) as scanned, not extractable.`);
     }
     if (aggregate.pages_failed > 0) {
-      console.error(`  Failed ${aggregate.pages_failed} page(s); they remain unfinished and will retry.`);
+      console.error(`  Failed ${aggregate.pages_failed} page(s); they remain unfinished and will retry. Re-run the same command to retry them:`);
+      for (const failed of aggregate.failed_pages) console.error(`    ${failed.slug}: ${failed.error}`);
     }
     if (aggregate.pages_llm_fallback > 0) {
       console.log(`  Parsed ${aggregate.pages_llm_fallback} page(s) with the opt-in LLM fallback.`);
@@ -2131,7 +2146,11 @@ export async function runExtractConversationFacts(
   // anyBudgetExhausted doesn't trigger exit 3; the budget message
   // above already tells the user what to do, and exit 0 is the right
   // signal for "ran to the cap intentionally."
-  if (aggregate.pages_failed > 0 || unpricedModels.size > 0) {
+  // Partial success (some pages extracted, some failed) exits 0: the failed
+  // pages are listed above / in the JSON envelope and retry on the next run.
+  // Nonzero is reserved for a run where every attempted page failed, or for
+  // missing model pricing (a configuration problem a re-run cannot fix).
+  if (extractExitCode(aggregate, unpricedModels.size) !== 0) {
     process.exit(1);
   }
   if (aggregate.pages_lock_skipped > 0 && !anyBudgetExhausted) {
@@ -2143,6 +2162,7 @@ export async function runExtractConversationFacts(
 // ---------------------------------------------------------------------------
 // Helpers.
 // ---------------------------------------------------------------------------
+
 
 function pickLaterIso(
   a: string | null | undefined,

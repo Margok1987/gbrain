@@ -236,6 +236,7 @@ export async function runPhaseConversationFactsBackfill(
     pages_marked_non_extractable: 0,
     pages_skipped_unrecognized_speaker: 0,
     pages_failed: 0,
+    failed_pages: [],
     pages_llm_fallback: 0,
     // v0.41.15.0 (D6 + D11): new counters from the per-page lock
     // + delete-orphans-first replay safety.
