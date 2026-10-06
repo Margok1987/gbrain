@@ -41,7 +41,7 @@ import { fenceReceiptLocation } from '../fence-repair/refusal.ts';
 import { faultPoint } from './fault-points.ts';
 import { withCoordinatedWrite } from './context.ts';
 import { principalAttribution } from './attribution.ts';
-import { addRecovered, buildHoldReport, clearGitHold, clearGitHoldRetryPaths, readSyncHoldPolicy, recordSyncConversion, recoveredReport, writeGitHold } from './sync-holds.ts';
+import { addFencesNormalized, addRecovered, buildHoldReport, clearGitHold, clearGitHoldRetryPaths, fencesNormalizedReport, readSyncHoldPolicy, recordSyncConversion, recoveredReport, writeGitHold, type FencesTally } from './sync-holds.ts';
 
 export interface ManagedSyncWriteDiagnostic {
   source_id: string;
@@ -71,7 +71,9 @@ interface Cursor extends SyncDiscovery { runId: string; index: number; authority
     /** DX-A7: entries advanced without an admission because their publication would change nothing. */
     waived?: { imports: number; deletes: number };
     /** #5988: imports held, and files imported only after quoting frontmatter. */
-    held?: number; recovered?: { count: number; sample_paths: string[]; comment_values?: number } };
+    held?: number; recovered?: { count: number; sample_paths: string[]; comment_values?: number };
+    /** #6188: files whose fences Tier 1 rewrote (and the Git effect committed). */
+    fences?: FencesTally };
   /** #5988: failed content-refusal requests this run converted in place. */
   convertedFromFailed?: string[];
   /** #5984: the active drain window (reset when a new drain starts), so a backlog ETA never counts downtime. */
@@ -517,6 +519,8 @@ function countCommitted(counts: Cursor['counts'], pending: Pending, outcome: Wri
   counts.chunks += Number(outcome?.chunks ?? 0);
   if ((outcome?.recovered_frontmatter || outcome?.comment_value) && pending.intent.path) counts.recovered = addRecovered(counts.recovered,
     { paths: outcome.recovered_frontmatter ? [pending.intent.path] : [], commentValues: outcome.comment_value ? 1 : 0 });
+  const fences = outcome?.fences_normalized;
+  if (Array.isArray(fences) && fences.length && pending.intent.path) counts.fences = addFencesNormalized(counts.fences, pending.intent.path, fences as Array<{ class: string }>);
 }
 interface BulkPass { settings: BulkSettings; perMemberMs: number | null;
   /** #5984 admit-ahead: when this pass last saw a foreground write queued on the worktree. */
@@ -711,8 +715,9 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       policy: await readSyncHoldPolicy(engine), pendingScreen: synced.reason === 'writer_yield',
       screened: 'entries' in (cursor ?? {}) ? (cursor as Cursor).entries.slice(0, cursor!.index).filter(entry => entry.action === 'import').length : 0 });
     const recovered = state.remote ? undefined : recoveredReport(state.sourceId, cursor?.counts.recovered);
+    const fences = fencesNormalizedReport(state.sourceId, cursor?.counts.fences, state.remote === true);
     return { ...synced, ...report, ...(!state.remote && cursor?.convertedFromFailed?.length ? { converted_from_failed: cursor.convertedFromFailed } : {}),
-      ...(recovered ? { recovered_frontmatter: recovered } : {}) };
+      ...(recovered ? { recovered_frontmatter: recovered } : {}), ...(fences ? { fences_normalized: fences } : {}) };
   } catch {
     return synced;
   }

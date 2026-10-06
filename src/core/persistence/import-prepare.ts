@@ -11,6 +11,7 @@ import { hasMalformedPathSegment, isCodeFilePath, slugifyCodePath, slugifyPath }
 import { OperationError, opError } from '../ops/contract.ts';
 import { contentRefusalError, screenImportContent, type ContentRefusal } from '../import-screen.ts';
 import { fenceWhere } from '../fence-repair/refusal.ts';
+import { pageFencesNormalized } from '../fence-repair/report.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { assertPageRevision } from '../page-state/types.ts';
 import { sealPageTextProjection } from '../page-state/projections.ts';
@@ -180,8 +181,9 @@ export async function prepareManagedImportMutation(engine: BrainEngine, row: Wri
     ? await importImageFile(engine, p.inputPath, p.sourcePath, { ...source, noEmbed: p.noEmbed, bytes: imageBytes, prepare })
     : code
     ? await importCodeFile(engine, p.sourcePath, p.content, { ...source, noEmbed: true, prepare })
-    : await importFromContent(engine, row.slug, p.content, { ...source, noEmbed: true, remote: false, prepare,
+    : await importFromContent(engine, row.slug, p.content, { ...source, noEmbed: true, remote: false, prepare, fences: 'coordinated',
       activePack: p.activePack, sourcePath: p.sourcePath, filename: basename(p.sourcePath, '.md'), allowEmptyOverwrite: true });
+  if (!prepared && result.refusal?.code === 'invalid_fence') throw managedImportRefusal(result.refusal, p.sourcePath);
   if (!prepared) throw opError('invalid_params', result.error ?? 'The file could not be prepared.',
     `${p.sourcePath} was rejected while preparing import request ${row.request_id} for source ${row.source_id}; nothing was published. Fix the file content or frontmatter named in the message, then import it again.`,
     { fix: reimportFix(p.inputPath, row.source_id) });
@@ -205,6 +207,8 @@ export async function prepareManagedImportMutation(engine: BrainEngine, row: Wri
       await tx.executeRaw('UPDATE pages SET source_path=$3 WHERE source_id=$1 AND slug=$2 AND source_path IS DISTINCT FROM $3', [row.source_id, row.slug, p.sourcePath]);
       if (!ready.noop && project) await project(tx);
       if (!ready.noop && !image) await sealPageTextProjection(tx, row.slug, row.source_id);
-      return { ...result, parsedPage: undefined, imported_file: true, source_id: row.source_id };
+      // #6188: the canonical file is written from the normalized page; the outcome reports what Tier 1 rewrote.
+      return { ...result, parsedPage: undefined, imported_file: true, source_id: row.source_id, fences_normalized: result.fences_normalized?.length
+        ? pageFencesNormalized({ sourceId: row.source_id, slug: row.slug, fixes: result.fences_normalized, writer: row.principal_kind, path: p.sourcePath, remote: false }) : undefined };
     } };
 }

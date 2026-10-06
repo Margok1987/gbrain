@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrainEngine } from '../src/core/engine.ts';
@@ -29,6 +29,10 @@ import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
+import { waitFor } from './helpers/wait-for.ts';
+import { readFileSync } from 'node:fs';
+import { parseFactsFence } from '../src/core/facts-fence.ts';
+import { parseTakesFence } from '../src/core/takes-fence.ts';
 
 const backends = testBackends();
 const home = mkdtempSync(join(tmpdir(), 'gbrain-fence-holds-'));
@@ -58,14 +62,17 @@ afterAll(async () => {
   await closePostgres?.(); rmSync(home, { recursive: true, force: true });
 });
 
-async function source(engine: BrainEngine, files: Record<string, string>) {
+async function source(engine: BrainEngine, files: Record<string, string>, config: Record<string, string> = {}, durable = false) {
   const id = `fence-${randomUUID().replace(/-/g, '').slice(0, 20)}`, root = join(home, id);
   const write = (path: string, content: string) => { mkdirSync(join(root, path, '..'), { recursive: true }); writeFileSync(join(root, path), content); };
   mkdirSync(root, { recursive: true }); git(root, 'init', '-q');
+  // The Git target effect commits (durability on: the managed post-commit hook) with the checkout's own identity.
+  git(root, 'config', 'user.name', 'Example'); git(root, 'config', 'user.email', 'example@example.invalid');
+  if (durable) { writeFileSync(join(root, '.git', 'hooks', 'post-commit'), '#!/bin/sh\n# gbrain brain-durability post-commit hook (v0.42.44+)\nexit 0\n'); chmodSync(join(root, '.git', 'hooks', 'post-commit'), 0o755); }
   for (const [path, content] of Object.entries(files)) write(path, content);
   commit(root, 'fixture');
   await engine.executeRaw('UPDATE persistence_brain SET enabled=false WHERE singleton=1');
-  await engine.executeRaw("INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,'{}')", [id, root]);
+  await engine.executeRaw('INSERT INTO sources(id,name,local_path,config) VALUES($1,$1,$2,$3::text::jsonb)', [id, root, JSON.stringify(config)]);
   await claimWorktree(engine, id, root);
   await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
   const sync = (extra: Partial<SyncOpts> = {}) => performManagedSync(engine, { sourceId: id, noPull: true, noEmbed: true, noExtract: true, ...extra });
@@ -83,7 +90,7 @@ async function each(run: (engine: BrainEngine) => Promise<void>) {
   await withEnv(env, async () => {
     for (const engine of engines) {
       try { await run(engine); }
-      finally { await disposePersistenceConsumer(engine); await engine.unsetConfig('sync.holds'); }
+      finally { await disposePersistenceConsumer(engine); await engine.unsetConfig('sync.holds'); await engine.unsetConfig('fences.normalize'); }
     }
   });
 }
@@ -251,4 +258,110 @@ test('a bulk group whose middle member fails on a stored-row collision is held a
   // The colliding page was admitted as a member of a bulk group, not on the single path.
   const [grouped] = await engine.executeRaw<{ n: number }>("SELECT count(*)::int AS n FROM persistence_requests WHERE source_id=$1 AND intent->>'path'='people/probe.md' AND intent ? 'group'", [s.id]);
   expect(grouped!.n).toBeGreaterThan(0);
+}), 180_000);
+
+// ── #6188 PR2: Tier 1 normalizes a fixable fence inline; the managed sync commits the rewritten file ──
+
+const FB = '<!--- gbrain:facts:begin -->', FBE = '<!--- gbrain:facts:end -->';
+const FH = '| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |\n|---|---|---|---|---|---|---|---|---|---|';
+const FIXCLAIM = 'Sentinelfixzq8 partners with an example vendor';
+const fixable = (title = 'Fixable') => `---\ntitle: ${title}\n---\nA synthetic page.\n\n${FB}\n${FH}\n| 1 | ${FIXCLAIM} | partnership | 1.0 | private | medium | 2026-01-01 |  | chat |  |\n${FBE}\n\n`
+  + `${T}\n${TH}\n${take(1, 'Synthetic take', 'System')}\n${TE}\n`;
+const committedBytes = (root: string, path: string) => git(root, 'show', `HEAD:${path}`);
+
+test('a manifest with one fixable fence, one unfixable fence and clean files: the fixable file is rewritten, committed and imported; the other held', () => each(async engine => {
+  const s = await source(engine, { 'notes/a.md': note('A'), 'notes/b.md': note('B'), 'people/fixable.md': fixable(), 'people/malformed.md': MALFORMED }, {}, true);
+  const head = git(s.root, 'rev-parse', 'HEAD');
+  const result = await s.sync();
+  expect(result).toMatchObject({ status: 'first_sync', added: 3, held_count: 1 });
+  expect(await s.lastCommit()).toBe(head);
+  expect(result.held!.map(item => item.path)).toEqual(['people/malformed.md']);
+  expect(result.fences_normalized).toMatchObject({ count: 1, by_class: { kind_map: 1, holder_alias: 1 }, sample_paths: ['people/fixable.md'],
+    common_prefix: 'people', writers: [{ writer: 'people/', count: 1 }] });
+  // The stored page and its projections are the normalized fence: the invented kind maps to fact (word kept in context), system -> brain.
+  const page = await engine.getPage('people/fixable', { sourceId: s.id });
+  const [fact] = parseFactsFence(page!.compiled_truth).facts;
+  expect(fact).toMatchObject({ rowNum: 1, claim: FIXCLAIM, kind: 'fact', context: 'original kind: partnership' });
+  expect(parseTakesFence(page!.compiled_truth).takes[0]).toMatchObject({ rowNum: 1, holder: 'brain' });
+  expect(await engine.executeRaw('SELECT kind FROM facts WHERE source_id=$1 AND source_markdown_slug=$2 AND row_num=1', [s.id, 'people/fixable'])).toEqual([{ kind: 'fact' }]);
+  expect(await engine.executeRaw('SELECT holder FROM takes k JOIN pages p ON p.id=k.page_id WHERE p.source_id=$1 AND p.slug=$2', [s.id, 'people/fixable'])).toEqual([{ holder: 'brain' }]);
+  // The file is rewritten on disk and the Git effect commits it (claims unchanged).
+  await waitFor(() => { try { return committedBytes(s.root, 'people/fixable.md').includes('| fact |'); } catch { return false; } }, { timeoutMs: 30_000, label: 'normalized file committed' });
+  const onDisk = readFileSync(join(s.root, 'people/fixable.md'), 'utf8');
+  expect(onDisk).toContain(FIXCLAIM);
+  expect(parseFactsFence(onDisk).warnings).toEqual([]);
+  expect(parseTakesFence(onDisk).takes[0]!.holder).toBe('brain');
+  expect(committedBytes(s.root, 'people/fixable.md')).toBe(onDisk.trim());
+  expect(git(s.root, 'status', '--porcelain', '--', 'people')).toBe('');
+  expect(git(s.root, 'log', '-1', '--format=%s')).toBe('gbrain: persist canonical memory update');
+  // Printed output names the normalization and the writer advice; never a claim, holder or kind value.
+  const text = printed(result);
+  expect(text).toContain('Normalized fences in 1 file(s) (kind_map x1, holder_alias x1).');
+  for (const blob of [JSON.stringify(result), text]) { expectNoSecrets(blob); expect(blob).not.toContain('Sentinelfixzq8'); expect(blob).not.toContain('partnership'); }
+  const receipts = await engine.executeRaw<{ outcome: unknown }>("SELECT outcome FROM persistence_requests WHERE source_id=$1 AND state='committed'", [s.id]);
+  for (const blob of [JSON.stringify(receipts)]) { expect(blob).not.toContain('Sentinelfixzq8'); expect(blob).not.toContain('partnership'); }
+  // Fixed point: the next sync reads gbrain's own commit as a no-op and normalizes nothing; the one after is up to date.
+  const again = await s.sync();
+  expect(again).toMatchObject({ added: 0, modified: 0 });
+  expect(again.fences_normalized).toBeUndefined();
+  expect((await s.sync()).status).toBe('up_to_date');
+}), 180_000);
+
+test('dry run lists the file it would normalize beside the hold and leaves every file byte-identical', () => each(async engine => {
+  const s = await source(engine, { 'people/fixable.md': fixable(), 'people/malformed.md': MALFORMED, 'notes/ok.md': note('Ok') });
+  const before = readFileSync(join(s.root, 'people/fixable.md'), 'utf8');
+  const dry = await s.sync({ dryRun: true });
+  expect(dry).toMatchObject({ status: 'dry_run', would_hold_count: 1, would_normalize_count: 1 });
+  expect(dry.would_normalize).toEqual([{ path: 'people/fixable.md', classes: ['kind_map', 'holder_alias'] }]);
+  expect(printed(dry)).toContain('Would normalize people/fixable.md: kind_map, holder_alias');
+  expect(readFileSync(join(s.root, 'people/fixable.md'), 'utf8')).toBe(before);
+  expect(git(s.root, 'status', '--porcelain', '--', 'people')).toBe('');
+  expect(await engine.getPage('people/fixable', { sourceId: s.id })).toBeNull();
+  for (const blob of [JSON.stringify(dry), printed(dry)]) { expectNoSecrets(blob); expect(blob).not.toContain('Sentinelfixzq8'); }
+}), 180_000);
+
+test('fences.normalize=false: the fixable file is held like any malformed fence and nothing is rewritten', () => each(async engine => {
+  await engine.setConfig('fences.normalize', 'false');
+  const s = await source(engine, { 'people/fixable.md': fixable(), 'notes/ok.md': note('Ok') });
+  const before = readFileSync(join(s.root, 'people/fixable.md'), 'utf8');
+  const result = await s.sync();
+  expect(result).toMatchObject({ status: 'first_sync', added: 1, held_count: 1 });
+  expect(result.fences_normalized).toBeUndefined();
+  expect(result.held![0]).toMatchObject({ path: 'people/fixable.md', code: 'invalid_fence', fence: { fence: 'facts', section: 'body' } });
+  expect(readFileSync(join(s.root, 'people/fixable.md'), 'utf8')).toBe(before);
+  expect(await engine.getPage('people/fixable', { sourceId: s.id })).toBeNull();
+  // Turning it back on: the held file re-screens on the next sync, is normalized and imports.
+  await engine.unsetConfig('fences.normalize');
+  await retryHeld(engine, s.id, { dryRun: false });
+  const after = await s.sync();
+  expect(after.fences_normalized).toMatchObject({ count: 1 });
+  expect(await s.holds()).toEqual([]);
+}), 180_000);
+
+test('a read-only mirror keeps the normalized fence in the database only; its checkout stays the remote bytes', () => each(async engine => {
+  const s = await source(engine, { 'people/fixable.md': fixable() }, { mirror_read_only: 'true' });
+  const before = readFileSync(join(s.root, 'people/fixable.md'), 'utf8');
+  const result = await s.sync();
+  expect(result).toMatchObject({ added: 1, fences_normalized: { count: 1 } });
+  expect(parseFactsFence((await engine.getPage('people/fixable', { sourceId: s.id }))!.compiled_truth).facts[0]!.kind).toBe('fact');
+  expect(readFileSync(join(s.root, 'people/fixable.md'), 'utf8')).toBe(before);
+  expect(git(s.root, 'status', '--porcelain', '--', 'people')).toBe('');
+}), 180_000);
+
+test('TE1: a stored take whose prior fence did not parse is updated by its normalized row, not refused as a collision', () => each(async engine => {
+  const s = await source(engine, { 'people/probe.md': takesPage('Probe', take(1)) });
+  await s.sync();
+  // The stored page's fence later stopped parsing (an older writer used the invented kind `assessment`, which the
+  // strict parser drops), while the takes table still holds that row.
+  const bad = takesPage('Probe', take(1), take(2, 'Second take', 'brain', 'assessment'));
+  await engine.transaction(tx => withCoordinatedWrite(tx, [s.id], async () => {
+    await tx.executeRaw("UPDATE pages SET compiled_truth=$3 WHERE source_id=$1 AND slug=$2", [s.id, 'people/probe', bad.split('---\n').slice(2).join('---\n')]);
+    await tx.executeRaw("INSERT INTO takes(page_id,row_num,claim,kind,holder,weight) SELECT id,2,'Second take','assessment','brain',0.7 FROM pages WHERE source_id=$1 AND slug=$2", [s.id, 'people/probe']);
+  }, TEST_WRITE_ATTRIBUTION));
+  s.write('people/probe.md', bad); commit(s.root, 'invented kind');
+  const result = await s.sync();
+  expect(result).toMatchObject({ status: 'synced', fences_normalized: { count: 1, by_class: { kind_map: 1 } } });
+  expect(result.held_count ?? 0).toBe(0);
+  expect(await engine.executeRaw('SELECT row_num,kind FROM takes k JOIN pages p ON p.id=k.page_id WHERE p.source_id=$1 AND p.slug=$2 ORDER BY row_num', [s.id, 'people/probe']))
+    .toEqual([{ row_num: 1, kind: 'take' }, { row_num: 2, kind: 'take' }]);
 }), 180_000);

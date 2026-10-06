@@ -7,7 +7,7 @@ import { OperationError, opError, type OpErrorOpts } from '../ops/contract.ts';
 import type { Action } from '../agent-output.ts';
 import type { RegistryCode } from '../error-registry.ts';
 import { importFromContent, importCodeFile, verifyPageReadable } from '../import-file.ts';
-import { screenImportContent, type ContentRefusal, type ImportScreenResult, type ImportSanityConfig } from '../import-screen.ts';
+import { screenImportContent, screenNormalized, type ContentRefusal, type ImportScreenResult, type ImportSanityConfig } from '../import-screen.ts';
 import { ContentSanityBlockError } from '../content-sanity.ts';
 import { parseMarkdown, resolveParsedSubtype, serializePageToMarkdown, type ParseOpts } from '../markdown.ts';
 import { resolveSlugForPath, slugifyPath, isCodeFilePath } from '../sync.ts';
@@ -38,6 +38,10 @@ import { frontmatterSlugConflictMessage } from './verb-errors.ts';
 import { CHUNKER_VERSION } from '../chunkers/code.ts';
 import { clearGitHold, countGitHolds, recordSyncImportProvenance } from './sync-holds.ts';
 import { fenceWhere } from '../fence-repair/refusal.ts';
+import { fencesNormalizeEnabled } from '../fence-repair/config.ts';
+import { describeFixes } from '../fence-repair/report.ts';
+import { fenceFixesWire } from '../fence-repair/tier1.ts';
+import type { FenceFix } from '../fence-repair/types.ts';
 import { VERSION } from '../../version.ts';
 import { windowPredecessor, windowPredecessorAllows } from './sync-window.ts';
 
@@ -133,11 +137,14 @@ function syncContentRefusal(refusal: ContentRefusal, row: WriteRequest, p: SyncI
     : refusal.code === 'file_too_large' ? `${p.sourcePath} is over the import size limit; split it into smaller files or add it to sync.exclude, then commit.`
     : refusal.code === 'content_rejected' ? `The content-sanity gate rejects ${p.sourcePath} under junk_disposition=reject; remove the matched junk and commit.`
     : `Fix ${where} (one line per key, the whole value quoted) and commit the change; gbrain repair frontmatter --source ${row.source_id} previews the exact line fix and writes it only after the preview hash is approved.`;
-  return syncPublicationRefusal(refusal.code, refusal.message, row, p, cause, false, {
+  const error = syncPublicationRefusal(refusal.code, refusal.message, row, p, cause, false, {
     ...(refusal.code === 'content_rejected' ? {} : { legacy_error: 'invalid_params' }),
     ...(refusal.reason ? { reason: refusal.reason } : {}),
     ...(refusal.key || refusal.line !== undefined ? { detail: [refusal.key ? `key ${refusal.key}` : '', refusal.line !== undefined ? `line ${refusal.line}` : ''].filter(Boolean).join(', ') } : {}),
   });
+  if (refusal.fence) error.fence = { ...refusal.fence };
+  if (refusal.fence_issues?.length) error.fenceIssues = refusal.fence_issues.map(issue => ({ ...issue }));
+  return error;
 }
 
 type Snapshot = Awaited<ReturnType<BrainEngine['readPageSnapshot']>>;
@@ -146,6 +153,8 @@ export interface SyncImportScreenInput {
   /** The page at the entry's slug, and the page the import is prepared against (the rename source for a renamed page). */
   snapshot: Snapshot; base: Snapshot; renamed: boolean;
   activePack?: ParseOpts['activePack']; companyApproval?: boolean; sanity?: ImportSanityConfig;
+  /** #6188: `fences.normalize`; false holds a fixable fence like any other. Default true. */
+  normalize?: boolean;
 }
 
 /**
@@ -169,6 +178,7 @@ export function screenSyncImport(input: SyncImportScreenInput): { screen: Import
   // The checkpoint may advance past the pinned commit's bytes because the working tree wins, as for any local edit.
   const newerWorkingTree = !input.companyApproval && !!base && !input.lineEndingOnly && input.rawHash !== sha256(content) && !sameCanonicalImport(base, parsedInput);
   const screen = screenImportContent({ content, path: `${slug}.md`, activePack, expectedSlug: resolveSlugForPath(sourcePath), fences: 'coordinated',
+    ...(input.normalize === false ? { normalize: false } : {}),
     slugExempt: declared => snapshot?.page.source_path != null && syncOriginPath(snapshot.page.source_path) === syncOriginPath(sourcePath) && declared === snapshot.page.slug,
     slugConflictMessage: (found, expected) => frontmatterSlugConflictMessage(sourcePath, found, expected),
     ...(input.sanity ? { sanity: input.sanity } : {}),
@@ -177,6 +187,19 @@ export function screenSyncImport(input: SyncImportScreenInput): { screen: Import
       return !!working && sha256(working) === input.rawHash && sameCanonicalImport(base!, parseMarkdown(working.toString('utf8'), `${slug}.md`, { activePack }));
     } } : {}) });
   return { screen, parsedInput, newerWorkingTree };
+}
+
+/** #6188: the prepare screen with `fences.normalize` settled; the switch is read only for a file Tier 1 would rewrite. */
+async function settledSyncScreen(engine: BrainEngine, input: SyncImportScreenInput): Promise<ReturnType<typeof screenSyncImport>> {
+  const screened = screenSyncImport(input);
+  return screenNormalized(screened.screen) && !await fencesNormalizeEnabled(engine) ? screenSyncImport({ ...input, normalize: false }) : screened;
+}
+
+/** UC3: a company-brain source never rewrites repository files; a fence Tier 1 would normalize is named by location. */
+function companyWritebackRefusal(row: WriteRequest, p: SyncIntent, fenceFixes: readonly FenceFix[]): OperationError {
+  return syncPublicationRefusal('source_writeback_required', 'Canonical preparation requires a source-content correction; this profile never writes repository files.', row, p,
+    fenceFixes.length ? `${p.sourcePath} has a facts or takes fence gbrain would normalize (${describeFixes(fenceFixes)}), and a company-brain source never rewrites repository files; fix the fence in the repository and commit.`
+      : `The file of ${row.slug} needs a canonical correction, and a company-brain source never rewrites repository files; correct it in the repository and commit.`);
 }
 
 export async function prepareManagedSyncMutation(engine: BrainEngine, row: WriteRequest, _config: GBrainConfig): Promise<PreparedMutation> {
@@ -370,7 +393,7 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     throw syncPublicationRefusal('revision_conflict', 'The renamed page changed after sync admission.', row, p,
       `Page ${renamed.slug}, which this file was renamed from, changed or was deleted after the sync was admitted.`);
   }
-  const { screen, parsedInput, newerWorkingTree } = screenSyncImport({ content: p.content, rawHash: p.rawHash, lineEndingOnly: p.lineEndingOnly === true,
+  const { screen, parsedInput, newerWorkingTree } = await settledSyncScreen(engine, { content: p.content, rawHash: p.rawHash, lineEndingOnly: p.lineEndingOnly === true,
     slug: row.slug, sourcePath: p.sourcePath, path: p.path, root, snapshot, base, renamed: !!renamed, activePack, companyApproval: !!p.companyApproval });
   if (screen.status === 'published') return { observedRevision: snapshot?.revision ?? null, noop: true, contentUnchanged: true, validate,
     apply: async tx => { await releaseHold(tx); return { status: 'skipped', slug: row.slug, source_id: row.source_id, chunks: 0, noop: true, imported_file: true }; } };
@@ -391,7 +414,9 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
     }
   }
   let prepared: PreparedContentImport | undefined;
-  const importOptions = { ...source, noEmbed: true, remote: row.authority.remote, activePack, coordinated: true,
+  // #6188: the import reuses this screen's fence verdict for the same bytes (one fence scan per file at prepare).
+  const importOptions = { ...source, noEmbed: true, remote: row.authority.remote, activePack, coordinated: true, fences: 'coordinated' as const,
+    ...(importContent === p.content && screen.status === 'importable' ? { fenceScreen: screen.fences ?? null } : {}),
     filename: basename(p.sourcePath).replace(/\.mdx?$/i, ''), sourcePath: p.sourcePath, allowEmptyOverwrite: true };
   const result = await importFromContent(engine, renamed?.slug ?? row.slug, importContent, { ...importOptions,
     prepare: async value => { prepared = value; return value.result; } }).catch(error => {
@@ -419,8 +444,8 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
   // A move re-infers an implicit type from the new location, as a fresh import there would.
   const renamedType = renamed && parsedInput.typeExplicit !== true ? parsedInput.type : undefined;
   const overlay = digest(canonical(parsed, parsed.tags)) !== digest(canonical({ ...ready.parsedPage, type: renamedType ?? ready.parsedPage.type }, tags));
-  if (overlay && p.companyApproval) throw syncPublicationRefusal('source_writeback_required', 'Canonical preparation requires a source-content correction; this profile never writes repository files.', row, p,
-    `The file of ${row.slug} needs a canonical correction, and a company-brain source never rewrites repository files; correct it in the repository and commit.`);
+  const fenceFixes = ready.result.fences_normalized ?? [];
+  if (overlay && p.companyApproval) throw companyWritebackRefusal(row, p, fenceFixes);
   // #5409: a read-only mirror keeps its canonical metadata in the database only; its checkout stays the remote's bytes.
   const mirrorReadOnly = overlay && await sourceMirrorReadOnly(engine, row.source_id);
   const writeback = overlay && !mirrorReadOnly;
@@ -471,7 +496,8 @@ export async function prepareManagedSyncMutation(engine: BrainEngine, row: Write
       preparedImport.postimage = final;
       return { status: moved ? 'renamed' : applied.noop ? 'skipped' : snapshot ? 'updated' : 'created', slug: row.slug, source_id: row.source_id,
         chunks: applied.result.chunks, noop: applied.noop && !moved, imported_file: true, ...(moved ? { renamed_from: moved.slug } : {}),
-        ...(recovery?.length ? { recovered_frontmatter: true } : {}), ...(commentValue ? { comment_value: true } : {}) };
+        ...(recovery?.length ? { recovered_frontmatter: true } : {}), ...(commentValue ? { comment_value: true } : {}),
+        ...(fenceFixes.length ? { fences_normalized: fenceFixesWire(fenceFixes) } : {}) };
     } };
   return preparedImport;
 }
