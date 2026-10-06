@@ -276,11 +276,12 @@ vars — incident-time escape hatches, not everyday knobs.
    repaired. A hold clears when the file changes, is deleted, or a newer
    gbrain can read it; `gbrain sync --dry-run` lists would-be holds
    (`would_hold`) without writing anything. The backlog fix is one previewed,
-   hash-bound command:
+   hash-bound command per kind of hold:
 
    ```bash
    gbrain sources status <source-id>                 # what is held and why
-   gbrain repair frontmatter --source <source-id>    # preview; writes nothing
+   gbrain repair frontmatter --source <source-id>    # frontmatter holds: preview; writes nothing
+   gbrain repair fences --source <source-id>         # fence holds: preview; writes nothing, no model call
    ```
 
    A fence whose meaning is unambiguous (a missing end marker after the
@@ -289,13 +290,19 @@ vars — incident-time escape hatches, not everyday knobs.
    reports `fences_normalized` (`gbrain sync --dry-run` lists
    `would_normalize`; `gbrain config set fences.normalize false` turns it off).
    A fence hold (`invalid_fence`) names the fence, section, reason and row
-   numbers, never a cell. Fix it by reading the page
-   (`gbrain get --source <source-id> -- <slug>`), editing that fence in the
-   file, committing, and running `gbrain sync --source <source-id> --no-pull`;
-   frontmatter repair does not touch fences. A fence refused only while being
-   prepared against the stored page (for example a takes row number a stored
-   take already uses) is held in the same run as `prepare_time`. See
-   [fence holds](write-refusals.md#invalid_fence).
+   numbers, never a cell, and clears by itself: the maintenance run's
+   `fence_repair` phase repairs it on the owner host (exact rules first, then
+   the configured chat model for rows only a rewrite can realign, within
+   the daily spend cap) and commits the file.
+   `gbrain repair fences --source <source-id>` previews the same repair and
+   prints its apply command, which needs no extra consent; frontmatter repair
+   does not touch fences. A hold whose reason is `manual` needs a person: read
+   the page (`gbrain get --source <source-id> -- <slug>`), edit that fence in
+   the file, commit, and run `gbrain sync --source <source-id> --no-pull`. A
+   fence refused only while being prepared against the stored page (for
+   example a takes row number a stored take already uses) is held in the same
+   run as `prepare_time`. See [fence holds](write-refusals.md#invalid_fence)
+   and [fence repair](repair.md#fences).
 
    Walkthrough with real output: [held files](repair.md#held-files); codes:
    [content refusals](write-refusals.md#held-files-and-content-refusals).
@@ -303,7 +310,11 @@ vars — incident-time escape hatches, not everyday knobs.
    holds; for fences, legacy sync stores the normalized fence in the database
    (it never rewrites the file), keeps importing a page whose fence cannot be
    normalized with its bad rows skipped (reported in `fence_issues`), and
-   never holds it. Holds never count toward the
+   never holds it. The fence repair still repairs such a file: on a legacy
+   source it re-reads the file, backs it up under `~/.gbrain/backups/`,
+   writes and imports it, and leaves the change for you to commit
+   (`gbrain sources status` names the `git add`/`git commit` command until
+   you do). Holds never count toward the
    legacy auto-skip streak below. A source blocked by such a file before this
    release recovers on its next sync, or now with
    `gbrain sync --source <source-id> --no-pull`. Teams that want fail-closed
