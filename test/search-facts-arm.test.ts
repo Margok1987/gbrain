@@ -49,9 +49,9 @@ describe('facts arm', () => {
     const unset = await query({ limit: 10 });
     await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false');
     const off = await query({ limit: 10 });
-    expect(unset.some(r => r.fact_row)).toBe(true);
-    expect(off.some(r => r.fact_row)).toBe(false);
-    expect(JSON.stringify(unset.filter(r => !r.fact_row).map(r => [r.slug, r.chunk_text]))).toBe(JSON.stringify(off.map(r => [r.slug, r.chunk_text])));
+    expect(unset.some(r => r.result_type === 'fact')).toBe(true);
+    expect(off.some(r => r.result_type === 'fact')).toBe(false);
+    expect(JSON.stringify(unset.filter(r => r.result_type !== 'fact').map(r => [r.slug, r.chunk_text]))).toBe(JSON.stringify(off.map(r => [r.slug, r.chunk_text])));
   });
 
   test('on: the matching fact is a row of its own, newest first, in free slots after every page row', async () => {
@@ -62,8 +62,8 @@ describe('facts arm', () => {
       const on = await query({ limit: 10 });
       expect(on.length).toBeLessThanOrEqual(10);
       expect(on.slice(0, off.length).map(r => [r.slug, r.chunk_id])).toEqual(off.map(r => [r.slug, r.chunk_id]));
-      const facts = on.filter(r => r.fact_row);
-      expect(facts.map(r => r.fact_row!.valid_from.slice(0, 10))).toEqual(['2025-07-13', '2025-07-12']);
+      const facts = on.filter(r => r.result_type === 'fact');
+      expect(facts.map(r => r.chunk_text.match(/valid from (\S+?);/)![1])).toEqual(['2025-07-13', '2025-07-12']);
       expect(facts[1]!.chunk_text).toContain('Missoula');
       expect(facts[1]!.chunk_text).toContain('valid from 2025-07-12');
       expect(facts[0]!.chunk_text).toContain('secret');
@@ -97,9 +97,33 @@ describe('facts arm', () => {
     await engine.setConfig(QUERY_FACTS_ARM_KEY, 'true');
     try {
       const rows = await query({ return_unit: 'page', token_budget: 2000, limit: 10 }) as Array<SearchResult & { delivered?: { reason?: string } }>;
-      const fact = rows.find(r => r.fact_row && r.chunk_text.includes('Missoula'))!;
+      const fact = rows.find(r => r.result_type === 'fact' && r.chunk_text.includes('Missoula'))!;
       expect(fact.delivered?.reason).toBe('saved_fact');
       expect(fact.chunk_text.startsWith('Saved fact')).toBe(true);
+    } finally { await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false'); }
+  });
+
+  test('on, remote: a fact row is never page-shaped and never points at get_page; the entity page is named only when it exists', async () => {
+    await engine.setConfig(QUERY_FACTS_ARM_KEY, 'true');
+    try {
+      const factRows = async () => {
+        const r = await dispatchToolCall(engine, 'query', { query: Q, expand: false, limit: 10, snippet_chars: 20 }, { remote: true, transport: 'stdio', sourceId,
+          auth: { token: 't', clientId: 'facts-probe', scopes: ['read'], sourceId, allowedSources: [sourceId] }, config: { engine: engine.kind } as never, logger: { info() {}, warn() {}, error() {} } });
+        const text = r.content.map(c => (c as { text?: string }).text ?? '').join('\n');
+        return { text, rows: (JSON.parse((r.content[0] as { text: string }).text) as Array<Record<string, unknown>>).filter(row => row.result_type === 'fact') };
+      };
+      const before = await factRows();
+      expect(before.rows.length).toBeGreaterThan(0);
+      for (const row of before.rows) {
+        expect(row).toMatchObject({ result_type: 'fact', fact_id: expect.stringMatching(/^\d+$/), follow_up: { op: 'recall', args: { entity: 'forge', source_id: sourceId } } });
+        for (const key of ['slug', 'id', 'type', 'chunk_id', 'page_slug', 'fact_row']) expect(row).not.toHaveProperty(key);
+        expect(String(row.chunk_text)).toContain(`recall {"entity":"forge","source_id":"${sourceId}"}`);
+      }
+      expect(before.text).not.toContain('get_page forge');
+      expect(before.text).not.toContain('get_page facts/');
+      await putPage(engine, sourceId, 'forge', page('company', 'Forge', 'Forge runs an annual offsite.'));
+      const after = await factRows();
+      for (const row of after.rows) expect(row.page_slug).toBe('forge');
     } finally { await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false'); }
   });
 

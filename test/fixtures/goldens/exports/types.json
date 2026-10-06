@@ -1386,8 +1386,10 @@
           "evidence?: Evidence | undefined",
           "exact_lookup?: \"title\" | \"slug\" | undefined",
           "exact_match_boost?: number | undefined",
+          "fact_id?: string | undefined",
           "fact_row?: { id: number; valid_from: string; valid_until: string | null; } | undefined",
           "feedback_boost?: number | undefined",
+          "follow_up?: { op: \"recall\"; args: Record<string, string>; } | undefined",
           "graph_adjacency_boost?: number | undefined",
           "graph_adjacency_hits?: number | undefined",
           "graph_cross_source_boost?: number | undefined",
@@ -1401,6 +1403,7 @@
           "message_id?: string | undefined",
           "modality?: \"image\" | \"text\" | undefined",
           "page_id: number",
+          "page_slug?: string | undefined",
           "recency_boost?: number | undefined",
           "relational?: RelationalEvidence | undefined",
           "relational_hop?: number | undefined",
@@ -1412,6 +1415,7 @@
           "rerank_score?: number | undefined",
           "rerank_score_kind?: \"rubric\" | undefined",
           "reranker_delta?: number | undefined",
+          "result_type?: \"fact\" | undefined",
           "salience_boost?: number | undefined",
           "score: number",
           "session_demote_factor?: number | undefined",
@@ -3421,7 +3425,7 @@
         "kind": "type",
         "name": "FactKind",
         "signature": [
-          "\"event\" | \"preference\" | \"commitment\" | \"belief\" | \"fact\" | \"idea\""
+          "\"fact\" | \"event\" | \"preference\" | \"commitment\" | \"belief\" | \"idea\""
         ]
       },
       {
@@ -8468,8 +8472,10 @@
           "evidence?: Evidence | undefined",
           "exact_lookup?: \"title\" | \"slug\" | undefined",
           "exact_match_boost?: number | undefined",
+          "fact_id?: string | undefined",
           "fact_row?: { id: number; valid_from: string; valid_until: string | null; } | undefined",
           "feedback_boost?: number | undefined",
+          "follow_up?: { op: \"recall\"; args: Record<string, string>; } | undefined",
           "graph_adjacency_boost?: number | undefined",
           "graph_adjacency_hits?: number | undefined",
           "graph_cross_source_boost?: number | undefined",
@@ -8483,6 +8489,7 @@
           "message_id?: string | undefined",
           "modality?: \"image\" | \"text\" | undefined",
           "page_id: number",
+          "page_slug?: string | undefined",
           "recency_boost?: number | undefined",
           "relational?: RelationalEvidence | undefined",
           "relational_hop?: number | undefined",
@@ -8494,6 +8501,7 @@
           "rerank_score?: number | undefined",
           "rerank_score_kind?: \"rubric\" | undefined",
           "reranker_delta?: number | undefined",
+          "result_type?: \"fact\" | undefined",
           "salience_boost?: number | undefined",
           "score: number",
           "session_demote_factor?: number | undefined",

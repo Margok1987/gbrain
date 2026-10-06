@@ -304,7 +304,10 @@ Two cross-cutting seams sit around the pipeline rather than inside it:
   capacity only: free slots under the caller's row count, and what the page
   rows leave of the token budget. A page row is never displaced. It also marks
   a page row `superseded_claim` when a newer fact covers its typed claim
-  (`src/core/search/facts-arm.ts`). No model call. In the B2 corrections suite
+  (`src/core/search/facts-arm.ts`). A fact row is never page-shaped: it carries
+  `result_type: "fact"`, `fact_id` and a `follow_up` recall call, no `slug` or
+  `id`, and `page_slug` only when the caller can read the entity page. No model
+  call. In the B2 corrections suite
   with correction-dated writes it lifted forget-then-remember from 92% to 100%
   correct. `search.query_facts_arm=false` turns it off. Verdict and gates:
   `docs/eval/decisions/query-facts-arm/`.

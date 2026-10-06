@@ -21,10 +21,10 @@ import { loadNamedThingQuestions, seedNamedThingCorpus } from '../../test/fixtur
 import { RELATIONAL_QUESTIONS, seedRelationalCorpus } from '../../test/fixtures/retrieval-quality/relational/corpus.ts';
 
 const KEY = (() => { const i = process.argv.indexOf('--key'); return i >= 0 ? process.argv[i + 1]! : 'search.entity_anchoring'; })();
-type Row = { slug: string; entity_anchored?: string; fact_row?: unknown };
+type Row = { slug: string; entity_anchored?: string; result_type?: string };
 /** Page rows only: an added fact row is not a page hit for recall. */
-const pagesOf = (rows: Row[]) => rows.filter(r => !r.fact_row);
-const fired = (rows: Row[]) => rows.some(r => r.entity_anchored || r.fact_row);
+const pagesOf = (rows: Row[]) => rows.filter(r => r.result_type !== 'fact');
+const fired = (rows: Row[]) => rows.some(r => r.entity_anchored || r.result_type === 'fact');
 const dump: Record<string, unknown> = {};
 
 async function freshEngine(): Promise<PGLiteEngine> {

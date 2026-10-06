@@ -1038,7 +1038,7 @@ export function capDeliveredSnippets<T extends SearchResult & { delivered?: Deli
   const out = results.map(r => {
     if (typeof r.chunk_text !== 'string' || r.chunk_text.length <= cap) return r;
     any = true;
-    const text = r.chunk_text.slice(0, cap) + buildSnippetMarker(r.slug, r.chunk_text.length - cap);
+    const text = r.chunk_text.slice(0, cap) + buildSnippetMarker(r.slug, r.chunk_text.length - cap, r.follow_up);
     if (!r.delivered) return { ...r, chunk_text: text };
     const spans = r.delivered.match_spans.filter(s => s.start < cap).map(s => ({ ...s, end: Math.min(s.end, cap) }));
     const lost = r.delivered.match_spans.filter(s => s.start >= cap).map(s => s.chunk_id);

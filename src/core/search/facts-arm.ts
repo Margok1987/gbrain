@@ -17,12 +17,13 @@
  * for remote callers.
  */
 import type { BrainEngine } from '../engine.ts';
-import type { SearchResult } from '../types.ts';
+import type { PageReadScope, SearchResult } from '../types.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
 import { getFtsLanguage } from '../fts-language.ts';
 import { getEmbeddingModel } from '../ai/gateway.ts';
 import { privateProvenanceFilterFragment } from './private-visibility.ts';
 import { namedEntity } from './entity-anchor.ts';
+import { pageReadFilter } from './read-policy-sql.ts';
 import { enforceTokenBudget, resultTokens } from './token-budget.ts';
 
 export const QUERY_FACTS_ARM_KEY = 'search.query_facts_arm';
@@ -92,11 +93,14 @@ export async function matchQueryFacts(engine: BrainEngine, query: string, scope:
     .slice(0, MAX_FACT_ROWS);
 }
 
-function factRow(f: FactCandidate, score: number): SearchResult {
+function factRow(f: FactCandidate, score: number, pageSlug: string | undefined): SearchResult {
   const from = day(f.valid_from);
   const until = day(f.valid_until);
+  const args: Record<string, string> = f.entity_slug ? { entity: f.entity_slug } : { grep: f.fact.slice(0, 60) };
+  if (f.source_id !== 'default') args.source_id = f.source_id;
   return {
-    slug: f.entity_slug ?? `facts/${f.id}`, page_id: 0, title: f.entity_slug ? `Saved fact about ${f.entity_slug}` : 'Saved fact', type: 'note',
+    result_type: 'fact', fact_id: String(f.id), ...(pageSlug ? { page_slug: pageSlug } : {}), follow_up: { op: 'recall', args },
+    slug: `facts/${f.id}`, page_id: 0, title: f.entity_slug ? `Saved fact about ${f.entity_slug}` : 'Saved fact', type: 'note',
     chunk_text: `Saved fact (${f.kind}; valid from ${from ?? 'unknown'}${until ? ` to ${until}` : ''}; provenance: ${f.source}): ${f.fact}`,
     chunk_source: 'compiled_truth', chunk_id: -Number(f.id), chunk_index: 0, score, stale: false, source_id: f.source_id,
     fact_row: { id: Number(f.id), valid_from: new Date(f.valid_from).toISOString(), valid_until: f.valid_until ? new Date(f.valid_until).toISOString() : null },
@@ -126,7 +130,30 @@ async function stampSupersededClaims(engine: BrainEngine, results: SearchResult[
   }
 }
 
+/** `source\0slug` keys of the facts' entity pages (page slug = fact entity_slug, same source) the caller may read. */
+async function readableEntityPages(engine: BrainEngine, facts: FactCandidate[], scope: PageReadScope | undefined): Promise<Set<string>> {
+  const slugs = [...new Set(facts.flatMap(f => f.entity_slug ? [f.entity_slug] : []))];
+  if (!slugs.length) return new Set();
+  const params: unknown[] = [slugs];
+  const filter = pageReadFilter('p', scope, params, true);
+  const rows = await engine.executeRaw<{ slug: string; source_id: string }>(`SELECT p.slug, p.source_id FROM pages p WHERE p.slug = ANY($1::text[]) AND ${filter}`, params);
+  return new Set(rows.map(r => `${r.source_id}\u0000${r.slug}`));
+}
+
+/**
+ * What a caller sees of a fact row: the fact, its identity and how to follow
+ * it, never page fields (slug, id, type, chunk_id) that would invite get_page
+ * or fetch on a page that may not exist.
+ */
+export function factRowOutput<T extends Partial<SearchResult>>(row: T): T {
+  if (row.result_type !== 'fact') return row;
+  const { slug: _slug, id: _id, type: _type, chunk_id: _chunk, page_id: _page, chunk_index: _index, chunk_source: _source, fact_row: _fact, ...rest } = row as T & { id?: string };
+  return rest as T;
+}
+
 export interface FactsArmOpts extends FactsArmScope {
+  /** The caller's page read policy: a fact's entity page is named (`page_slug`) only when the caller may read it. */
+  readScope?: PageReadScope;
   tokenBudget?: number;
   queryEmbedding?: Float32Array | null;
   /** The caller's row count (explicit limit or the mode's default), read only when a fact matches. */
@@ -147,7 +174,9 @@ export async function applyFactsArm(engine: BrainEngine, query: string, results:
     if (free <= 0) return results;
     const pages = results.map(r => ({ ...r }));
     const floor = pages.reduce((m, r) => (Number.isFinite(r.score) && r.score < m ? r.score : m), pages[0]?.score ?? 1);
-    let rows = facts.slice(0, free).map((f, i) => factRow(f, floor - (i + 1) * 1e-6));
+    const shown = facts.slice(0, free);
+    const pageSlugs = await readableEntityPages(engine, shown, opts.readScope).catch(() => new Set<string>());
+    let rows = shown.map((f, i) => factRow(f, floor - (i + 1) * 1e-6, f.entity_slug && pageSlugs.has(`${f.source_id}\u0000${f.entity_slug}`) ? f.entity_slug : undefined));
     if (opts.tokenBudget) {
       let left = opts.tokenBudget - enforceTokenBudget(pages, opts.tokenBudget).meta.used;
       rows = rows.filter(r => { const cost = resultTokens(r); if (cost > left) return false; left -= cost; return true; });
