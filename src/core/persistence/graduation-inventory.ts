@@ -39,6 +39,7 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('code_edges_symbol', 'user_data', 'Code graph edges to unresolved symbols.'),
     carry('config', 'user_data', 'Brain settings, including the embedding column registry; the engine name and schema version stay each engine\'s own.',
       { rowFilter: "key NOT IN ('engine','version','graduation.deferred_indexes')" }),
+    carry('core_edit_notices', 'user_data', 'Remote edits to always-loaded core pages awaiting the owner\'s review (gbrain core diff/ack); dropping them would hide unreviewed edits.'),
     carry('content_chunks', 'user_data', 'Chunks with embeddings (paid work), vectors carried as text at the source typmod.'),
     carry('context_volunteer_events', 'operational', 'Push-context telemetry.'),
     carry('conversation_parser_llm_cache', 'operational', 'Paid LLM parse cache; rebuilding spends money.'),

@@ -559,6 +559,46 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 |---|---|---|---|---|---|---|
 | The content-sanity gate rejected the content because the operator set `content_sanity.junk_disposition` to `reject`. | A junk-pattern or operator-literal hit is refused instead of quarantined under that setting, so the page was not written. The same content refuses on every retry. | Remove the matched junk from the file, or switch `content_sanity.junk_disposition` back to `quarantine` (a user decision), then import it again. | agent | `repeat the read that failed` | 1 | no |
 
+### core_budget_exceeded
+
+<a id="core_budget_exceeded"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| The write would push always-loaded core memory over its brain-wide character budget or page limit. | Core pages enter every session's prompt in every harness, so their total size is capped on the write path. | Correct the request using the message above, then retry. Run: gbrain core status --json | agent | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/core-memory.md#budget](../../docs/guides/core-memory.md#budget)
+
+### core_delete_owner_only
+
+<a id="core_delete_owner_only"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A remote caller tried to delete an always-loaded core page; only the owner can remove pages from core. | The step needs the user's decision before it runs. | Stop and ask the user; re-run only with the authorization the message names. | user | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/core-memory.md#owner-only](../../docs/guides/core-memory.md#owner-only)
+
+### core_mark_owner_only
+
+<a id="core_mark_owner_only"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A remote caller tried to change always_load or core_priority; only the owner designates core pages. | The step needs the user's decision before it runs. | Stop and ask the user; re-run only with the authorization the message names. | user | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/core-memory.md#owner-only](../../docs/guides/core-memory.md#owner-only)
+
+### core_remote_edit_refused
+
+<a id="core_remote_edit_refused"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| Remote edits to always-loaded core pages are refused by memory.core.remote_edit. | The step needs the user's decision before it runs. | Stop and ask the user; re-run only with the authorization the message names. | user | `repeat the read that failed` | 1 | no |
+
+More: [docs/guides/core-memory.md#remote-edits](../../docs/guides/core-memory.md#remote-edits)
+
 ### cost_cap_exceeded
 
 <a id="cost_cap_exceeded"></a>

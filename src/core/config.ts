@@ -1467,6 +1467,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // Fire-once sentinel for the ambient-writeback consent nudge (WP8):
   // stamped 'true' after the init/post-upgrade ask has been shown once.
   'memory.auto_writeback_notice_shown',
+  // Always-loaded core memory + context-pressure notice (docs/guides/core-memory.md#configuration).
+  'memory.core.enabled', 'memory.core.max_chars', 'memory.core.remote_edit',
+  'memory.pressure.enabled', 'memory.pressure.warn_ratio', 'memory.pressure.context_window',
   // Declared brain audience: 'personal' | 'shared'. Set by the operator, by
   // company-brainify's Phase-5 handoff (shared), or from the bootstrap
   // interview. Declaration beats the conservative client-count heuristic in

@@ -115,7 +115,7 @@ export async function prepareMemoryMutation(engine: BrainEngine, row: WriteReque
     page = await preparePageMutation(engine, { ...row, intent: { ...p, content, expected_revision: observedRevision, force: false } }, config, undefined, signal);
     if (page.observedRevision !== observedRevision) conflict(row);
   }
-  return { observedRevision, file: page?.file, validate: async tx => { await validate(tx); await page?.validate?.(tx); }, apply: async tx => {
+  return { observedRevision, file: page?.file, ...(page?.exclusiveSources ? { exclusiveSources: page.exclusiveSources } : {}), validate: async tx => { await validate(tx); await page?.validate?.(tx); }, apply: async tx => {
     await page?.apply(tx);
     let id: number;
     if (rowNum !== undefined) {

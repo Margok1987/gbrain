@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 210265,
-    "stdoutSha256": "cb8cf3d2f8ef0214ac2463b42d7d5fa6a8e80709db0de845637c8906bea1efdc",
+    "stdoutBytes": 210403,
+    "stdoutSha256": "bc5960d65803b62a772ab9d14daf399d2b5cef9b1a42b386bf8c0439314e7ca1",
     "toolNames": [
       "remember",
       "entity",
@@ -172,7 +172,7 @@
     ],
     "tools": [
       {
-        "description": "MEMORY VERB (v1): save one fact with provenance. Set `entity` for a subject, or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.",
+        "description": "MEMORY VERB (v1): save facts with provenance. Set `entity` to the subject or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.",
         "idempotent": true,
         "local_only": false,
         "mutating": true,
@@ -180,11 +180,12 @@
         "parameters": {
           "entity": "string?",
           "expected_revision": "string?",
-          "fact": "string",
+          "fact": "string?",
           "force": "boolean?",
           "infer_entity": "boolean?",
+          "items": "array?",
           "kind": "string?",
-          "provenance": "string",
+          "provenance": "string?",
           "replaces": "string?",
           "request_id": "string?",
           "source_id": "string?",
@@ -196,7 +197,7 @@
         "schema": {
           "properties": {
             "entity": {
-              "description": "Subject name or slug.",
+              "description": "Subject (name or slug).",
               "type": "string"
             },
             "expected_revision": {
@@ -215,6 +216,13 @@
               "description": "Default true.",
               "type": "boolean"
             },
+            "items": {
+              "description": "≤20 facts: [{fact, provenance}]",
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
             "kind": {
               "description": "Default fact.",
               "enum": [
@@ -227,7 +235,7 @@
               "type": "string"
             },
             "provenance": {
-              "description": "Where the fact came from (max 500 chars).",
+              "description": "Fact source (max 500 chars).",
               "type": "string"
             },
             "replaces": {
@@ -259,10 +267,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "fact",
-            "provenance"
-          ],
+          "required": [],
           "type": "object"
         },
         "scope": "write"
@@ -5428,14 +5433,14 @@
         "scope": "read"
       },
       {
-        "description": "MEMORY VERB (v1): budget-packed cards, open threads and hot facts for up to 8 entities, zero LLM. Call at session start and after compaction.",
+        "description": "MEMORY VERB (v1): core memory, budget-packed cards, open threads and hot facts for up to 8 entities, zero LLM. Call at session start and after compaction.",
         "idempotent": true,
         "local_only": false,
         "mutating": false,
         "name": "context_pack",
         "parameters": {
           "budget_tokens": "number?",
-          "entities": "string",
+          "entities": "string?",
           "include_private": "boolean?",
           "session_id": "string?",
           "since": "string?"
@@ -5464,9 +5469,7 @@
               "type": "string"
             }
           },
-          "required": [
-            "entities"
-          ],
+          "required": [],
           "type": "object"
         },
         "scope": "read"

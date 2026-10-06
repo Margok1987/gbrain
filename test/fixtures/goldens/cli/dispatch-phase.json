@@ -455,6 +455,13 @@
         "thinClient": "none",
         "thinClientRoutedSubcommands": []
       },
+      "core": {
+        "hasSwitchCase": true,
+        "phase": "post-connect",
+        "preConnectRules": [],
+        "thinClient": "none",
+        "thinClientRoutedSubcommands": []
+      },
       "creds": {
         "hasSwitchCase": false,
         "phase": "pre-connect",

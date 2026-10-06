@@ -98,6 +98,13 @@ export interface DeltaPage {
 export interface TurnContextResult {
   /** Rendered block ('' when there is nothing to inject). */
   text: string;
+  /**
+   * Always-loaded core block (core-memory.ts) on session-start and coreOnly
+   * requests; absent from older serves and from every other trigger.
+   */
+  core?: { text: string; revision: string; chars_used: number; chars_limit: number; truncated: boolean };
+  /** Context-pressure gate (pressure.ts), serve-sourced; an older serve omits it and no notice fires. */
+  pressure?: import('./pressure.ts').PressureGate;
   /** Reflex pointers that survived suppression + budget. */
   pointers: ReflexPointer[];
   /**

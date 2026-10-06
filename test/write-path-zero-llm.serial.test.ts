@@ -163,6 +163,15 @@ describe('writes commit with zero generative model calls', () => {
     expectNoGenerative('remember/forget');
   });
 
+  test('remember items[] (a pre-compaction batch) embeds at most, never generates', async () => {
+    const batch = await call('remember', { provenance: 'test', items: [
+      { fact: 'Alice Example ships on Fridays.', entity: 'companies/acme-example' },
+      'Bob Example prefers written updates.',
+    ] }, true);
+    expect(batch.saved).toBe(2);
+    expectNoGenerative('remember items[]');
+  });
+
   test('delete_page and restore_page', async () => {
     COVERED.add('delete_page'); COVERED.add('restore_page');
     await call('put_page', { slug: 'notes/temp', content: `---\ntype: note\ntitle: Temp\n---\nTemporary.` });

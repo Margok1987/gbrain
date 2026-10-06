@@ -9131,6 +9131,31 @@ Optional response fields; clients must ignore any they do not know.
   caller is never told about an entity it cannot read: that case is `NO_ENTITY`.
 - `hint: string` — present with `warnings`; names the `entity` input.
 
+#### remember items: several facts in one call (additive)
+
+`items` (1 to 20) replaces `fact` for a batch, typically right before
+context compaction. Each item is a fact string or an object with `fact` plus
+optional `entity`, `kind`, `ttl`, `visibility`, `provenance`,
+`infer_entity` and `replaces`; top-level `provenance`,
+`kind`, `ttl`, `visibility` and `infer_entity` are the defaults, so top-level
+`provenance` is optional when every item carries its own. `replaces` names one
+fact, so it goes on its item; passing both `fact` and `items`, or a top-level
+`replaces` with `items`, is `invalid_params`.
+
+Every item is validated before any is written: one invalid item refuses the
+whole call with `items[<i>]` in the message. Each item is then saved as its own
+write with a child `request_id` derived from the call's `request_id` and the
+item index, so replaying the same `request_id` replays each child's outcome and
+writes nothing twice.
+
+Response: `{ protocol_version, request_id, items[], saved, failed, partial,
+hints?, next? }`. Each `items[]` entry is a compact receipt `{ index,
+request_id, status, id?, entity_slug?, warnings?, valid_until?, state? }`
+(`state` and `retry_after_ms` only when the write is not yet committed), or
+`{ index, request_id, status: "failed", error: { code, message } }`. Hints the
+single-fact response would repeat per item appear once in `hints`. `partial: true` means some items saved and some failed; resend
+only the failed items, in a new call with a new `request_id`.
+
 ### entity(name) — read, zero LLM, p99 < 100ms
 
 One known person/company/project card. NEVER errors on a miss.
@@ -9455,9 +9480,19 @@ lockstep, and is honored ONLY for trusted-local callers (`remote === false`); a
 remote caller never widens (fail-closed).
 
 Response: `{ protocol_version, entities, cards[], open_threads[], facts[], text,
-degraded_reason?, budget_tokens?, budget_used?, dropped_count? }`. `text` is the
+degraded_reason?, budget_tokens?, budget_used?, dropped_count?, core?, pinned_questions?, withheld? }`. `text` is the
 pre-rendered, envelope-wrapped injectable block; with `budget_tokens` it is
 rendered from the packed sets and never exceeds the declared budget.
+
+#### context_pack core memory (additive)
+
+`core: { text, revision, chars_used, chars_limit, pages, truncated }` carries the
+always-loaded core block (owner-designated pages loaded in every session,
+[core memory](../guides/core-memory.md)) when core memory is on and not empty.
+`text` starts with the core block, and core tokens count inside
+`budget_tokens`. `entities` may be omitted to fetch core alone.
+
+#### context_pack pinned questions (additive)
 
 Two optional fields carry pinned-question answers
 ([pinned questions](../guides/pinned-questions.md)) for owner-capable callers

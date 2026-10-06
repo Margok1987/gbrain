@@ -674,6 +674,10 @@
         "name": "revision_backfill"
       },
       {
+        "category": "brain",
+        "name": "core_memory"
+      },
+      {
         "category": "ops",
         "name": "search_mode"
       },

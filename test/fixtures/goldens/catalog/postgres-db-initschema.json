@@ -26,6 +26,7 @@
       "content_chunks.content_chunks_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "content_chunks.content_chunks_pkey": "p PRIMARY KEY (id)",
       "context_volunteer_events.context_volunteer_events_pkey": "p PRIMARY KEY (id)",
+      "core_edit_notices.core_edit_notices_pkey": "p PRIMARY KEY (id)",
       "decide_calibrations.decide_calibrations_pkey": "p PRIMARY KEY (id)",
       "decide_proposals.decide_proposals_pkey": "p PRIMARY KEY (id)",
       "decide_proposals.decide_proposals_sweep_id_pair_index_key": "u UNIQUE (sweep_id, pair_index)",
@@ -338,6 +339,9 @@
       "context_volunteer_events": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "core_edit_notices": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "decide_calibrations": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
@@ -617,6 +621,8 @@
       "context_volunteer_events_pkey": "CREATE UNIQUE INDEX context_volunteer_events_pkey ON public.context_volunteer_events USING btree (id)",
       "context_volunteer_events_src_slug_idx": "CREATE INDEX context_volunteer_events_src_slug_idx ON public.context_volunteer_events USING btree (source_id, slug)",
       "context_volunteer_events_src_time_idx": "CREATE INDEX context_volunteer_events_src_time_idx ON public.context_volunteer_events USING btree (source_id, volunteered_at DESC)",
+      "core_edit_notices_pending_idx": "CREATE INDEX core_edit_notices_pending_idx ON public.core_edit_notices USING btree (source_id, slug, id) WHERE (acked_at IS NULL)",
+      "core_edit_notices_pkey": "CREATE UNIQUE INDEX core_edit_notices_pkey ON public.core_edit_notices USING btree (id)",
       "decide_calibrations_lookup_idx": "CREATE INDEX decide_calibrations_lookup_idx ON public.decide_calibrations USING btree (slot, provider, model_resolved, created_at DESC)",
       "decide_calibrations_pkey": "CREATE UNIQUE INDEX decide_calibrations_pkey ON public.decide_calibrations USING btree (id)",
       "decide_proposals_pkey": "CREATE UNIQUE INDEX decide_proposals_pkey ON public.decide_proposals USING btree (id)",
@@ -872,6 +878,7 @@
       "code_edges_symbol_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=code_edges_symbol.id",
       "content_chunks_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=content_chunks.id",
       "context_volunteer_events_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=context_volunteer_events.id",
+      "core_edit_notices_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=core_edit_notices.id",
       "decide_calibrations_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=decide_calibrations.id",
       "decide_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=decide_proposals.id",
       "decide_review_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=decide_review_proposals.id",
@@ -1074,6 +1081,21 @@
           "10 volunteered_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=false force_rls=false"
+      },
+      "core_edit_notices": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('core_edit_notices_id_seq'::regclass)",
+          "2 source_id text/text NOT NULL",
+          "3 slug text/text NOT NULL",
+          "4 page_id bigint/int8 NULL",
+          "5 revision text/text NULL",
+          "6 base_revision text/text NULL",
+          "7 base_text text/text NULL",
+          "8 actor text/text NOT NULL",
+          "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "10 acked_at timestamp with time zone/timestamptz NULL"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
       },
       "decide_calibrations": {
         "columns": [

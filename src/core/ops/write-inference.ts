@@ -80,6 +80,9 @@ export const CLI_WRITE_INFERENCE: Readonly<Record<string, WriteInference>> = {
   'hook ipc banking': 'none',
   // P1: accept/undo/date append or remove a timeline line and re-derive links; reject records a verdict.
   'edge-proposals': 'none',
+  // Core memory: mark or unmark a page as always loaded through put_page as the local owner.
+  'core add': 'async_derived',
+  'core remove': 'async_derived',
 };
 
 export function writeInferenceOf(op: Pick<Operation, 'name' | 'writeInference'>): WriteInference {

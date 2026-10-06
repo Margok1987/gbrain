@@ -62,14 +62,19 @@ const remember: Operation = {
   name: 'remember',
   idempotent: true,
   outputRedaction: 'no_stored_text',
-  description: 'MEMORY VERB (v1): save one fact with provenance. Set `entity` for a subject, or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.',
+  description: 'MEMORY VERB (v1): save facts with provenance. Set `entity` to the subject or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.',
   params: {
     ...PAGE_MUTATION_PARAMS,
-    fact: { type: 'string', description: 'One claim.', required: true },
+    fact: { type: 'string', description: 'One claim.' },
+    items: {
+      type: 'array',
+      description: '≤20 facts: [{fact, provenance}]',
+      items: { type: 'object' },
+    },
     provenance: {
       type: 'string',
-      required: true,
-      description: 'Where the fact came from (max 500 chars).',
+      // Required for a single fact (the handler refuses with provenance_required); with items it may be given per item.
+      description: 'Fact source (max 500 chars).',
     },
     ttl: {
       type: 'string',
@@ -81,7 +86,7 @@ const remember: Operation = {
     },
     entity: {
       type: 'string',
-      description: 'Subject name or slug.',
+      description: 'Subject (name or slug).',
     },
     infer_entity: {
       type: 'boolean',
@@ -104,12 +109,26 @@ const remember: Operation = {
   annotations: { title: 'remember (memory write)', idempotentHint: true },
   handler: async (ctx, p) => {
     const { verbError, parseTtlParam } = await import('./operations.ts');
+    if (p.items !== undefined) {
+      const { runRememberBatch } = await import('./remember-batch.ts');
+      return runRememberBatch(ctx, p, remember.handler, (code, message, suggestion) => verbError(code as never, message, suggestion));
+    }
     const fact = typeof p.fact === 'string' ? p.fact.trim() : '';
     if (!fact) {
       throw verbError(
         'invalid_params',
         'fact must be a non-empty string.',
-        'Pass the claim to remember, e.g. fact: "picked Stripe over Adyen — onboarding speed".',
+        p.fact === undefined && Object.keys(p).length === 0
+          ? 'The call arrived with no arguments; a tool call cut off at your output-token limit looks like this. Pass fact, or items with fewer entries per call.'
+          : 'Pass the claim to remember, e.g. fact: "picked Stripe over Adyen — onboarding speed", or several as items: [{fact, provenance}].',
+      );
+    }
+    // v1 contract: an absent provenance is a missing required parameter (invalid_params), an empty one is provenance_required.
+    if (p.provenance === undefined) {
+      throw verbError(
+        'invalid_params',
+        'Missing required parameter: provenance',
+        'Pass `provenance` as a string (where the fact came from), e.g. provenance: "user told me, 2026-06-12". With items, provenance may be given per item instead.',
       );
     }
     const provenance = typeof p.provenance === 'string' ? p.provenance.trim() : '';

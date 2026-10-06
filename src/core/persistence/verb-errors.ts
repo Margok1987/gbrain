@@ -34,6 +34,9 @@ export function heldFileDiagnostic(message: string | null | undefined, sourceId 
 export function writeFailureDiagnostic(code: string, message?: string | null): { reason: string; message: string; suggestion: string } {
   const held = code === 'source_changed' ? heldFileDiagnostic(message) : null;
   if (held) return held;
+  // Always-loaded core refusals carry their numbers and the owner command in the message.
+  if (code.startsWith('core_') && message) return { reason: code, message,
+    suggestion: 'Change the content as the message says, or ask the user for the owner step it names (docs/guides/core-memory.md).' };
   if (code === 'source_changed') {
     if (message === 'The canonical file contains an uncoordinated local edit.') return {
       reason: 'file_database_drift', message: 'The canonical file and database disagree. Neither copy was overwritten.',
@@ -126,7 +129,7 @@ export function frozenVerbWriteError(receipt: WriteReceipt, reason?: WriteErrorC
     : receipt.state === 'conflict' ? 'revision_conflict'
       : receipt.state === 'cancelled' ? 'cancelled' : 'storage_error');
   const code = ['source_changed','permission_denied','scope_denied','writer_registration_required'].includes(writeError) ? 'scope_denied'
-    : ['revision_required', 'revision_conflict', 'idempotency_conflict','invalid_params','page_identity_changed'].includes(writeError)
+    : ['revision_required', 'revision_conflict', 'idempotency_conflict','invalid_params','page_identity_changed'].includes(writeError) || writeError.startsWith('core_')
       ? 'invalid_params' : 'unavailable';
   const diagnostic = writeFailureDiagnostic(writeError, message);
   const suggestion = pending

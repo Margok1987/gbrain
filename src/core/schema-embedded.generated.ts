@@ -2742,6 +2742,28 @@ END \$rls\$;
 CREATE SEQUENCE IF NOT EXISTS graph_generation_seq;
 -- END GENERATED from src/core/link-temporal-schema.ts (LINK_TEMPORAL_SCHEMA_SQL)
 
+-- Always-loaded core memory: remote-edit notices.
+-- BEGIN GENERATED from src/core/core-memory-schema.ts (CORE_EDIT_NOTICES_SCHEMA_SQL). Edit that file, then run: bun run build:schema
+CREATE TABLE IF NOT EXISTS core_edit_notices (
+  id              BIGSERIAL PRIMARY KEY,
+  source_id       TEXT NOT NULL,
+  slug            TEXT NOT NULL,
+  page_id         BIGINT,
+  revision        TEXT,
+  base_revision   TEXT,
+  base_text       TEXT,
+  actor           TEXT NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  acked_at        TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS core_edit_notices_pending_idx ON core_edit_notices (source_id, slug, id) WHERE acked_at IS NULL;
+DO \$rls\$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    ALTER TABLE core_edit_notices ENABLE ROW LEVEL SECURITY;
+  END IF;
+END \$rls\$;
+-- END GENERATED from src/core/core-memory-schema.ts (CORE_EDIT_NOTICES_SCHEMA_SQL)
+
 -- #5255/#5176 (O-DX-8): last upstream observation per source, recorded by sync
 -- from the checkout's Git state (upstream ref, its last fetch/push time, commits
 -- the synced commit lacks); doctor sync_freshness reads it with no subprocess.

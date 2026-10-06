@@ -457,7 +457,7 @@ export async function startMcpServer(engine: BrainEngine, opts: { surface?: McpS
     bootPhase('persistence_consumer');
     const persistence = await createPersistenceIpcProvider(engine, residentPersistenceConfig(config) ?? { engine: engine.kind });
     bootPhase('resolve_ipc_bind');
-    ipcBinding = await bindResolveIpcForServe(engine, ipcSourceId, persistence);
+    ipcBinding = await bindResolveIpcForServe(engine, ipcSourceId, persistence, { rememberCallable: () => !session.allowedOps || session.allowedOps.has('remember') });
 
     // v0.45.7 ambient recall: age out stale session cursors once per serve boot
     // (7-day TTL, indexed DELETE). Best-effort — GC failure never blocks serve.

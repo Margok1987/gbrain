@@ -156,6 +156,7 @@ CHECKS=(
   "check:pg-url-redaction"
   # Containment sprint: module-size ratchet + structural-suite freshness.
   "check:module-size"
+  "check:core-guard-coverage"
   # W5 (refactor wave 1): per-function line ratchet over src/**/*.ts (TS AST,
   # ~1.5s); baseline scripts/function-size-baseline.tsv.
   "check:function-size"

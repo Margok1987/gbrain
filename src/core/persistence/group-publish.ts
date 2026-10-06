@@ -62,7 +62,7 @@ function syncMember(row: WriteRequest): boolean {
 
 /** Whether a prepared member can share a group transaction. */
 export function groupable(row: WriteRequest, prepared: PreparedMutation): boolean {
-  if ((row.target_kind ?? 'page') !== 'page' || prepared.target === 'skill_bundle' || prepared.sourceExclusive) return false;
+  if ((row.target_kind ?? 'page') !== 'page' || prepared.target === 'skill_bundle' || prepared.sourceExclusive || prepared.exclusiveSources?.length) return false;
   if (syncMember(row)) return !prepared.file && typeof prepared.validate === 'function';
   return publicationGroupKey(row)?.startsWith('batch:') === true;
 }

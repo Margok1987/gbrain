@@ -77,6 +77,7 @@ boundary and add its link here rather than raising the cap.
 | [Agent Bootstrap (continued)](key-files/agent-bootstrap-continued.md) | Remaining cross-file entries |
 | [Google connector + open-loop engine (key files cluster)](key-files/google-and-loops.md) | Cross-file subsystem contract |
 | [Google And Loops (continued)](key-files/google-and-loops-continued.md) | Remaining cross-file entries |
+| [Always-loaded core memory (key files cluster)](key-files/core-memory.md) | Core tier, write-path guard and lock order, delivery lanes, pressure notice |
 
 ## BrainBench — in a sibling repo
 
@@ -97,3 +98,7 @@ See [Agent bootstrap cluster (the paste-in desktop-agent install)](key-files/age
 ## Google connector + open-loop engine (key files cluster)
 
 See [Google connector + open-loop engine (key files cluster)](key-files/google-and-loops.md).
+
+## Always-loaded core memory (key files cluster)
+
+See [Always-loaded core memory (key files cluster)](key-files/core-memory.md).
