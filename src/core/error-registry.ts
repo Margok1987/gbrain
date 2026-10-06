@@ -397,4 +397,5 @@ export const NOTICE_CODES = {
   relational_chain: { kind: 'degraded', summary: 'A typed relationship chain found no complete answer (start page not visible, no typed edges, an empty hop) or hit a cap; the notice names the hop and the next call.' },
   held_files: { kind: 'degraded', summary: 'Sync holds files in the read scope it cannot import: held new files are missing and pages whose newer file is held are stale; the fix is the repair preview on the brain host.' },
   recovered_frontmatter: { kind: 'coaching', summary: 'Files imported only after quoting unquoted frontmatter values; the generator writing them should quote values (the fix is the repair preview).' },
+  fence_normalized: { kind: 'coaching', summary: 'A write\'s facts or takes fence was rewritten losslessly (rows and classes named, never values): the stored page differs from what was sent, so re-read it with get_page before editing; remember and takes_add write rows that never need it.' },
 } as const satisfies Record<string, NoticeEntry>;

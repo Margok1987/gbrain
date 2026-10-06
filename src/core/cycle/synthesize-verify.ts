@@ -66,6 +66,7 @@ import { serializePageToMarkdown } from '../markdown.ts';
 import { throwIfAborted } from '../abort-check.ts';
 import type { Page } from '../types.ts';
 import { materializedHistoryRanges, prepareCanonicalProjections } from '../persistence/canonical-projections.ts';
+import { normalizePageFences } from '../fence-repair/import-step.ts';
 import { prepareAutomaticLinks } from '../persistence/links-preparation.ts';
 import { isAutoLinkEnabled } from '../link-extraction.ts';
 import { resolveCycleDate, utcDate } from './cycle-date.ts';
@@ -1366,6 +1367,9 @@ export async function verifyAndRepairDreamPages(
       if (verified.changed) {
         const tags = await engine.getTags(ref.slug, { sourceId: ref.source_id });
         const next = { ...page, compiled_truth: verified.compiled_truth, timeline: verified.timeline, frontmatter: verified.frontmatter };
+        // #6188: Tier 1 normalizes a fixable fence before the verified body is compiled and written.
+        const fences = await normalizePageFences(engine, { sourceId: ref.source_id, slug: ref.slug, page: next });
+        if (fences) Object.assign(next, fences.page);
         const md = serializePageToMarkdown(next, tags);
         // The children's put_page projected timeline, facts, takes and links
         // from the unverified body; re-project from the verified body in the

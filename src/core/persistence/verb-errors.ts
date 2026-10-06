@@ -92,6 +92,10 @@ export function writeFailureDiagnostic(code: string, message?: string | null): {
     suggestion: 'Correct the named frontmatter line in the file (one line per key, the whole value quoted) and commit the change.' };
   // #6188: a typed fence refusal (wire invalid_params, or take_row_collision) keeps its location-only message and the fence edit.
   const fence = fenceLocationFromMessage(code, message);
+  // A verb's own target page (D19): read the page and fix the stored fence, or rewrite it whole with put_page (which normalizes what it can).
+  if (fence?.reason === 'target_fence_malformed') return { reason: 'invalid_fence', message: message!,
+    suggestion: `The target page's stored ${fenceWhere(fence)} does not parse, so nothing was changed. Read the page with get_page, fix that fence `
+      + '(or write the whole page with put_page, which normalizes what it can and names every row it cannot), then retry.' };
   if (fence) return { reason: 'invalid_fence', message: message!,
     suggestion: `Edit ${fenceWhere(fence)} in the file as the message says and commit the change; never edit the frontmatter for it. `
       + 'A managed sync with sync.holds=hold holds such a file instead of blocking; under sync.holds=fail and on company-brain sources it blocks until the file is fixed.' };
@@ -117,7 +121,12 @@ export async function runMemoryWrite<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); } catch (error) {
     if (!(error instanceof OperationError)) throw error;
     if (error.protocolVersion === 1 && ['invalid_params','provenance_required','not_found','scope_denied','unavailable','budget_unsatisfiable','internal'].includes(error.code)) throw error;
-    if (error.writeRequest) throw frozenVerbWriteError(error.writeRequest, error.writeError, error.message);
+    if (error.writeRequest) {
+      const frozen = frozenVerbWriteError(error.writeRequest, error.writeError, error.message);
+      // #6188: the frozen v1 code stays; the fence refusal's reason, location and issues ride along additively.
+      if (error.canonicalCode === 'invalid_fence') Object.assign(frozen, { reason: error.reason, fence: error.fence, fenceIssues: error.fenceIssues });
+      throw frozen;
+    }
     const code = ['permission_denied','scope_denied','source_changed','writer_registration_required'].includes(error.code)
       ? 'scope_denied' : ['revision_required','revision_conflict','idempotency_conflict','invalid_params','page_identity_changed'].includes(error.code)
         ? 'invalid_params' : 'unavailable';
