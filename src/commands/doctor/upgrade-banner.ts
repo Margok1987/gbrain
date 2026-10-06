@@ -14,7 +14,7 @@ import { findingSource, runWaveChecks, waveRepairKind, type WaveFinding } from '
 import { repairPreviewCommand, repairSpec } from '../../core/repair/registry.ts';
 import { readConnectorSourceStatuses } from '../../core/persistence/connector-status.ts';
 import { legacyDefaultSpendBannerNote, legacyJobAuthorityBannerNote } from './checks/legacy-job-authority.ts';
-import { frontmatterHoldsBannerNote } from './checks/git-holds.ts';
+import { fenceHoldsBannerNote, frontmatterHoldsBannerNote } from './checks/git-holds.ts';
 
 /** #5686: connector sources that re-walk their window once, or resumed from a pre-upgrade checkpoint. */
 async function connectorRewalkNote(engine: BrainEngine): Promise<string | null> {
@@ -31,7 +31,7 @@ async function connectorRewalkNote(engine: BrainEngine): Promise<string | null> 
  * of connector sources that will re-walk once after a checkpoint migration).
  * Each returns null when it has nothing to say.
  */
-export const POST_UPGRADE_NOTES: Array<(engine: BrainEngine) => Promise<string | null>> = [connectorRewalkNote, legacyJobAuthorityBannerNote, legacyDefaultSpendBannerNote, frontmatterHoldsBannerNote];
+export const POST_UPGRADE_NOTES: Array<(engine: BrainEngine) => Promise<string | null>> = [connectorRewalkNote, legacyJobAuthorityBannerNote, legacyDefaultSpendBannerNote, frontmatterHoldsBannerNote, fenceHoldsBannerNote];
 
 /** One banner line for a non-ok wave finding. */
 export function bannerFindingLine({ spec, check, state }: WaveFinding): string {

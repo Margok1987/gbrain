@@ -177,3 +177,22 @@ for (const phase of ['admitted', 'complete']) for (const caller of ['explicit', 
     } finally { engine.executeRaw = execute; fetcher.mockRestore(); await disposePersistenceConsumer(engine); }
   });
 }
+
+// #6188 (UC3): a company-profile source never holds a malformed fence; it fails closed with the typed refusal and the commit-upstream fix.
+check('a company source with a malformed fence blocks with the typed fence refusal and holds nothing', async engine => {
+  const fence = '<!--- gbrain:takes:begin -->\n| # | claim | kind | who | weight | since | source |\n|---|---|---|---|---|---|---|\n'
+    + '| 1 | Synthetic take | take | Sentinelholderzq7 Example | 0.7 | 2026-01 | chat |\n<!--- gbrain:takes:end -->\n';
+  const f = await input(engine, true, { 'customers/fenced.md': `---\ntype: customer\ntitle: Fenced Account\n---\n# Fenced Account\nA synthetic account.\n\n${fence}` });
+  const connected = await connectCompanyBrain(engine, f);
+  expect(connected.ok).toBe(false);
+  const failed = await engine.executeRaw<{ error_code: string; error_message: string }>("SELECT error_code,error_message FROM persistence_requests WHERE source_id=$1 AND state IN ('failed','conflict')", [f.sourceId]);
+  expect(failed).toHaveLength(1);
+  expect(failed[0]!.error_code).toBe('invalid_params');
+  expect(failed[0]!.error_message).toMatch(/^Fence holder_unresolved: in the takes fence \(body\)/);
+  expect(failed[0]!.error_message).not.toContain('Sentinelholderzq7');
+  const blocked = await performSync(engine, { sourceId: f.sourceId });
+  expect(blocked).toMatchObject({ status: 'blocked_by_failures' });
+  expect(blocked.managedWrite?.reason).toBe('invalid_fence');
+  expect(await engine.executeRaw("SELECT 1 FROM op_checkpoints WHERE op='sync-hold' AND fingerprint LIKE $1", [`${f.sourceId}:%`])).toEqual([]);
+  await disposePersistenceConsumer(engine);
+});

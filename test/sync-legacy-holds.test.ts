@@ -311,3 +311,15 @@ test('escalation fires past the configured hold count', () => eachEngine(async (
     await engine.setConfig('sync.hold_escalate_count', '50');
   }
 }), 120_000);
+
+test('#6188 (T5): legacy sync imports a page with a malformed fence as before and never holds it', async () => eachEngine(async () => {
+  const fence = '<!--- gbrain:takes:begin -->\n| # | claim | kind | who | weight | since | source |\n|---|---|---|---|---|---|---|\n'
+    + '| 1 | Synthetic take | take | brain | 0.7 | 2026-01 | chat |\n| 2 | Another take | sentinelkindzq7 | brain | 0.5 | 2026-01 | chat |\n<!--- gbrain:takes:end -->\n';
+  const { id, root } = await source({ 'notes/fenced.md': `---\ntitle: Fenced\n---\nA synthetic page.\n\n${fence}`, 'notes/ok.md': good('Ok') });
+  const result = await sync(id, root);
+  expect(result.status).toBe('first_sync');
+  expect(await holds(id)).toEqual([]);
+  expect(result.held_count ?? 0).toBe(0);
+  // Stored as written: the legacy path never refuses or rewrites a fence.
+  expect((await engine.getPage('notes/fenced', { sourceId: id }))?.compiled_truth).toContain('| 2 | Another take | sentinelkindzq7 |');
+}));

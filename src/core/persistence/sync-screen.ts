@@ -6,11 +6,15 @@
  * content is loaded. `sync_parser_regression` stops the run only when the
  * page's import provenance proves the exact bytes imported validated before.
  * Dry runs screen every pending import read-only with batched Git reads.
+ * #6188: the screen runs with `fences: 'coordinated'` (see `screenSyncImport`),
+ * so a malformed facts or takes fence is held as `invalid_fence` here too.
  */
 import type { BrainEngine } from '../engine.ts';
 import { OperationError, opError } from '../ops/contract.ts';
 import { loadImportSanityConfig, type ImportSanityConfig } from '../import-screen.ts';
-import { RECOVERY_VERSION } from '../markdown.ts';
+import { parseMarkdown, RECOVERY_VERSION } from '../markdown.ts';
+import { fenceMessage, type FenceMessageLocation } from '../fence-repair/reasons.ts';
+import { completeFenceLocation, FENCE_VERSION, type ReceiptFenceLocation } from '../fence-repair/refusal.ts';
 import { slugConflictHoldMessage } from '../import-file.ts';
 import { isImageFilePath, resolveSlugForPath } from '../sync.ts';
 import { loadActivePackForEngine } from '../schema-pack/engine-resolution.ts';
@@ -46,13 +50,28 @@ export function pinnedBlob(discovery: Pick<SyncDiscovery, 'root' | 'gitRoot' | '
   return readTreeBlobs(discovery.gitRoot, discovery.target, [gitPath]).get(gitPath) ?? null;
 }
 
-function heldEntry(entry: SyncEntry, slug: string, pageId: number | null, refusal: { code: GitHoldRecord['code']; reason?: GitHoldRecord['meta']['reason']; key?: string; line?: number; message: string },
-  content: string | null, blob: TreeBlob | null | undefined): HeldEntry {
+function heldEntry(entry: Pick<SyncEntry, 'path' | 'sourcePath' | 'working' | 'renameFrom' | 'renameHeld'>, slug: string, pageId: number | null,
+  refusal: { code: GitHoldRecord['code']; reason?: GitHoldRecord['meta']['reason']; key?: string; line?: number; message: string; fence?: FenceMessageLocation },
+  content: string | null, blob: Pick<TreeBlob, 'oid'> | null | undefined): HeldEntry {
   return { path: entry.path, source_path: entry.sourcePath, slug, page_id: pageId, code: refusal.code, message: refusal.message,
     upstream_version: content === null ? null : sha256(content),
     meta: { ...(refusal.reason ? { reason: refusal.reason } : {}), ...(refusal.key ? { key: refusal.key } : {}), ...(refusal.line !== undefined ? { line: refusal.line } : {}),
-      recovery_version: RECOVERY_VERSION, ...(blob ? { blob_oid: blob.oid } : {}), ...(entry.working ? { working: true } : {}),
+      recovery_version: RECOVERY_VERSION, ...(refusal.fence ? { fence: refusal.fence, fence_version: FENCE_VERSION } : {}),
+      ...(blob ? { blob_oid: blob.oid } : {}), ...(entry.working ? { working: true } : {}),
       ...(entry.renameFrom ?? entry.renameHeld ? { rename_from: entry.renameFrom ?? entry.renameHeld } : {}) } };
+}
+
+/**
+ * #6188: the hold a failed fence refusal earns when the screen admitted the
+ * same bytes (the refusal depended on stored rows: a stored-row collision, a
+ * withdrawn claim, rows quoted in code). Reason `prepare_time`; the receipt's
+ * own reason stays in `meta.fence`. Location-only, rebuilt from the receipt.
+ */
+export function prepareTimeFenceHold(entry: Pick<SyncEntry, 'path' | 'sourcePath' | 'working' | 'renameFrom' | 'renameHeld'>, slug: string, pageId: number | null,
+  receipt: ReceiptFenceLocation, content: string, blobOid: string | null | undefined): HeldEntry {
+  // An older gbrain's receipt named no section: take it from the refused bytes themselves.
+  const fence = completeFenceLocation(receipt, parseMarkdown(content, `${slug}.md`));
+  return heldEntry(entry, slug, pageId, { code: 'invalid_fence', reason: 'prepare_time', fence, message: fenceMessage(fence) }, content, blobOid ? { oid: blobOid } : null);
 }
 
 /**

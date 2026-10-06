@@ -10,6 +10,7 @@ import { getCompanyBrainProfile } from '../company-brain/profile.ts';
 import { hasMalformedPathSegment, isCodeFilePath, slugifyCodePath, slugifyPath } from '../sync.ts';
 import { OperationError, opError } from '../ops/contract.ts';
 import { contentRefusalError, screenImportContent, type ContentRefusal } from '../import-screen.ts';
+import { fenceWhere } from '../fence-repair/refusal.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { assertPageRevision } from '../page-state/types.ts';
 import { sealPageTextProjection } from '../page-state/projections.ts';
@@ -54,7 +55,9 @@ export function readImportBytes(path: string): Buffer {
 
 /** #5988: the typed import refusal; the wire `error` stays `invalid_params` as before. */
 function managedImportRefusal(refusal: ContentRefusal, sourcePath: string): OperationError {
-  const suggestion = refusal.code === 'frontmatter_slug_conflict'
+  const suggestion = refusal.code === 'invalid_fence'
+    ? `Edit ${fenceWhere(refusal.fence)} in ${sourcePath} as the message says (the rest of the page is fine), then import it again.`
+    : refusal.code === 'frontmatter_slug_conflict'
     ? `In ${sourcePath}, remove the frontmatter slug or set it to the path-derived slug (the path decides the slug), or move the file to the path that matches its slug, then import again.`
     : refusal.code === 'file_too_large' ? `${sourcePath} is over the import size limit and was not imported. Split it into smaller files or leave it out of the import.`
     : refusal.code === 'content_rejected' ? `Remove the matched junk from ${sourcePath}, then import it again.`
@@ -76,7 +79,7 @@ export function managedImportContent(sourcePath: string, bytes: Buffer, activePa
   if (isCodeFilePath(sourcePath)) return { slug: slugifyCodePath(sourcePath), content };
   if (!/\.mdx?$/i.test(sourcePath)) throw opError('invalid_params', 'Managed import supports Markdown, code and supported image files.',
     `${sourcePath} is not a Markdown (.md, .mdx), code or supported image file, so it was not imported. Convert it to Markdown or leave it out.`);
-  const screen = screenImportContent({ content, path: sourcePath, byteLength: bytes.length, expectedSlug: slugifyPath(sourcePath),
+  const screen = screenImportContent({ content, path: sourcePath, byteLength: bytes.length, expectedSlug: slugifyPath(sourcePath), fences: 'coordinated',
     slugConflictMessage: (found, expected) => `Frontmatter slug "${found}" does not match path-derived slug "${expected}".` });
   if (screen.status === 'refused') throw managedImportRefusal(screen.refusal, sourcePath);
   content = applyInference(sourcePath, content).content;
