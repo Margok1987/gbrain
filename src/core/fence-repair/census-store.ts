@@ -151,10 +151,17 @@ export async function recordSyncRunTrend(engine: Exec, input: { sourceId: string
 export async function flushSyncFenceTrend(engine: Exec, input: { sourceId: string; runId: string | null | undefined;
   tally: { count: number; by_class: Record<string, number>; writers: Record<string, number> } | null | undefined; now?: Date }): Promise<void> {
   if (!input.runId || !input.tally?.count) return;
-  try {
-    await recordSyncRunTrend(engine, { sourceId: input.sourceId, runId: input.runId, day: (input.now ?? new Date()).toISOString().slice(0, 10),
-      count: input.tally.count, byClass: input.tally.by_class, writers: input.tally.writers });
-  } catch { /* the trend is advisory; the sync result already reports fences_normalized */ }
+  const row = { sourceId: input.sourceId, runId: input.runId, day: (input.now ?? new Date()).toISOString().slice(0, 10),
+    count: input.tally.count, byClass: input.tally.by_class, writers: input.tally.writers };
+  // One retry: the row is replaced idempotently. A failure is reported, never thrown; the sync result already carries fences_normalized.
+  for (let attempt = 1; ; attempt++) {
+    try { await recordSyncRunTrend(engine, row); return; } catch (error) {
+      if (attempt < 2) continue;
+      process.stderr.write(`[sync] the fences_normalized trend of source ${input.sourceId} was not recorded (${error instanceof Error ? error.message : String(error)}); `
+        + 'gbrain doctor --only fence_integrity undercounts this run.\n');
+      return;
+    }
+  }
 }
 
 /** One normalized page write (put_page, put_pages, remember, takes and fact writers), written once per request. */

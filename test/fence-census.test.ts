@@ -33,7 +33,7 @@ import { purgeStaleCheckpoints } from '../src/core/op-checkpoint.ts';
 import { FENCE_REPAIR_ATTEMPT_OP } from '../src/core/fence-repair/attempts.ts';
 import { listFenceCandidates, runFenceCensus, summarizeFenceCensus } from '../src/core/fence-repair/census.ts';
 import {
-  FENCE_CANDIDATE_OP, FENCE_SCAN_OP, FENCE_TREND_OP, readScanRecord, readTrend, recordPublicationFenceTrend, recordSyncRunTrend,
+  FENCE_CANDIDATE_OP, FENCE_SCAN_OP, FENCE_TREND_OP, flushSyncFenceTrend, readScanRecord, readTrend, recordPublicationFenceTrend, recordSyncRunTrend,
 } from '../src/core/fence-repair/census-store.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
@@ -319,3 +319,23 @@ for (const backend of backends) {
     }, 60_000);
   });
 }
+
+describe('sync trend flush', () => {
+  test('retries a failed trend write once, then reports it on stderr without failing the sync', async () => {
+    const calls: unknown[][] = [];
+    let failures = 1;
+    const flaky = { executeRaw: async (_sql: string, params?: unknown[]) => { calls.push(params ?? []); if (failures-- > 0) throw new Error('transient'); return []; } };
+    const tally = { count: 2, by_class: { renumber: 2 }, writers: { 'notes/': 2 } };
+    await flushSyncFenceTrend(flaky as never, { sourceId: 'src', runId: 'run-1', tally });
+    expect(calls).toHaveLength(2);
+    const written: string[] = [];
+    const write = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => { written.push(String(chunk)); return true; }) as typeof process.stderr.write;
+    try {
+      const broken = { executeRaw: async () => { throw new Error('ledger table locked'); } };
+      await flushSyncFenceTrend(broken as never, { sourceId: 'src', runId: 'run-2', tally });
+    } finally { process.stderr.write = write; }
+    expect(written.join('')).toContain('[sync] the fences_normalized trend of source src was not recorded (ledger table locked)');
+    await flushSyncFenceTrend({ executeRaw: async () => { throw new Error('never called'); } } as never, { sourceId: 'src', runId: null, tally });
+  });
+});
