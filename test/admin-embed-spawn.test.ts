@@ -28,6 +28,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Subprocess } from 'bun';
+import { createServer, type AddressInfo } from 'node:net';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 
@@ -39,12 +40,28 @@ interface ServeProc {
   cleanup: () => Promise<void>;
 }
 
-function pickPort(): number {
-  // High-random port. Collision is unlikely; test reruns get fresh ports.
-  return 31000 + Math.floor(Math.random() * 4000);
+/** A loopback port the OS reports free. */
+async function freePort(): Promise<number> {
+  const probe = createServer();
+  await new Promise<void>(resolve => probe.listen(0, '127.0.0.1', resolve));
+  const { port } = probe.address() as AddressInfo;
+  await new Promise<void>(resolve => probe.close(() => resolve()));
+  return port;
 }
 
+/**
+ * Another process can take the port between the probe and serve's bind; a
+ * server that exits before it is ready is retried on a fresh port.
+ */
 async function spawnServer(): Promise<ServeProc> {
+  for (let attempt = 1; ; attempt++) {
+    const started = await spawnServerOnce();
+    if ('proc' in started) return started;
+    if (!started.exitedEarly || attempt === 3) throw new Error(started.error);
+  }
+}
+
+async function spawnServerOnce(): Promise<ServeProc | { exitedEarly: boolean; error: string }> {
   const home = mkdtempSync(join(tmpdir(), 'gbrain-admin-embed-'));
   // serve never creates a configured PGLite brain that is missing (status-only `missing_brain`); the data dir exists, empty.
   mkdirSync(join(home, '.gbrain', 'brain.pglite'), { recursive: true });
@@ -61,7 +78,7 @@ async function spawnServer(): Promise<ServeProc> {
   // out of the startup banner (and the banner stays predictable across
   // future formatting tweaks).
   const bootstrapToken = 'test-bootstrap-token-aaaaaaaaaaaaaaaaaa'; // 41 chars
-  const port = pickPort();
+  const port = await freePort();
 
   // CRITICAL: cwd is the tmpdir, NOT the repo. This forces serve-http to
   // fall into the embedded-manifest branch because cwd/admin/dist does
@@ -100,7 +117,7 @@ async function spawnServer(): Promise<ServeProc> {
   // is allowed to drift; a /health probe is the contract that matters.
   const deadline = Date.now() + 30_000;
   let ready = false;
-  while (Date.now() < deadline) {
+  while (Date.now() < deadline && proc.exitCode === null) {
     try {
       const res = await fetch(`http://127.0.0.1:${port}/health`, {
         signal: AbortSignal.timeout(2000),
@@ -132,11 +149,10 @@ async function spawnServer(): Promise<ServeProc> {
   };
 
   if (!ready) {
+    const exitedEarly = proc.exitCode !== null;
     await cleanup();
     const stderrText = await new Response(proc.stderr).text().catch(() => '');
-    throw new Error(
-      `serve --http never became ready on port ${port} after 30s. stderr: ${stderrText.slice(0, 2000)}`,
-    );
+    return { exitedEarly, error: `serve --http never became ready on port ${port}. stderr: ${stderrText.slice(0, 2000)}` };
   }
 
   return { proc, port, home, bootstrapToken, cleanup };
