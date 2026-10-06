@@ -1763,6 +1763,7 @@
                 "top_writers": []
               }
             ],
+            "uncommitted_repairs": 0,
             "warn_at_normalized_7d": 20
           },
           "message": "No malformed facts or takes fence is held, stored or waiting in a checkout (1 source(s) scanned).",
