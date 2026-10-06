@@ -28,7 +28,7 @@ import type { Action } from '../agent-output.ts';
 import type { ContentRefusal } from '../import-screen.ts';
 import { RECOVERY_VERSION, type InvalidFrontmatterReason } from '../markdown.ts';
 import { FENCE_REASONS, type FenceMessageLocation } from '../fence-repair/reasons.ts';
-import type { FenceReason } from '../fence-repair/types.ts';
+import type { FenceReason, FenceTier, GateLetter } from '../fence-repair/types.ts';
 import { FENCE_VERSION, fenceWhere } from '../fence-repair/refusal.ts';
 import { STRUCTURED_WRITE_ADVICE, type FencesNormalized } from '../fence-repair/report.ts';
 import type { SyncRename } from './sync-discovery.ts';
@@ -69,6 +69,18 @@ export interface GitHoldMeta {
   working?: boolean;
   /** The held file is a rename destination: the page it moves when the hold clears. */
   rename_from?: SyncRename;
+  /** #6188: the last fence repair attempt (repair kind or maintenance phase) that left this hold in place; location and reason only. */
+  fence_repair?: FenceHoldRepairState;
+}
+
+/** #6188: why the last fence repair left a hold in place, and when the maintenance run tries it again (null: it does not). */
+export interface FenceHoldRepairState {
+  reason: FenceReason;
+  tier: FenceTier;
+  at: string;
+  next_attempt_after: string | null;
+  gate?: GateLetter;
+  rows?: number[];
 }
 
 export interface GitHoldRecord {
@@ -195,6 +207,17 @@ export async function clearGitHold(tx: Exec, input: { sourceId: string; incarnat
   await tx.executeRaw('DELETE FROM op_checkpoints WHERE op=$1 AND fingerprint=$2', [GIT_HOLD_OP, gitHoldFingerprint(input.sourceId, input.incarnation, input.path)]);
   await adjustSummary(tx, input.sourceId, input.incarnation, -1, -staleWeight(existing), -imageWeight(existing), -fenceWeight(existing));
   return true;
+}
+
+/**
+ * #6188: records on a fence hold why the last repair left it held (the repair kind and the maintenance phase call it),
+ * without touching its observation time or counts. False when the hold is gone or is not a fence hold.
+ */
+export async function recordFenceHoldRepair(engine: Exec, input: { sourceId: string; incarnation: string; path: string; state: FenceHoldRepairState }): Promise<boolean> {
+  const rows = await engine.executeRaw(`UPDATE op_checkpoints SET completed_keys=jsonb_set(completed_keys,'{0,meta,fence_repair}',$3::text::jsonb),updated_at=now()
+    WHERE op=$1 AND fingerprint=$2 AND completed_keys->0->>'code'='invalid_fence' RETURNING 1`,
+  [GIT_HOLD_OP, gitHoldFingerprint(input.sourceId, input.incarnation, input.path), JSON.stringify(input.state)]);
+  return rows.length === 1;
 }
 
 export async function readGitHold(engine: Exec, sourceId: string, incarnation: string, path: string): Promise<GitHoldRecord | null> {
