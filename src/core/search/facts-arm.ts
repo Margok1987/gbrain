@@ -23,7 +23,7 @@ import { getFtsLanguage } from '../fts-language.ts';
 import { getEmbeddingModel } from '../ai/gateway.ts';
 import { privateProvenanceFilterFragment } from './private-visibility.ts';
 import { namedEntity } from './entity-anchor.ts';
-import { enforceTokenBudget } from './token-budget.ts';
+import { enforceTokenBudget, resultTokens } from './token-budget.ts';
 
 export const QUERY_FACTS_ARM_KEY = 'search.query_facts_arm';
 /** Fact rows added per query at most. */
@@ -134,21 +134,25 @@ export interface FactsArmOpts extends FactsArmScope {
 }
 
 /**
- * The facts arm: matched facts appended as rows (in free slots, else the
- * last ones, so the row count never grows), superseded page claims stamped,
- * and the token budget re-applied. No match or any error: the results unchanged.
+ * The facts arm: matched facts appended as rows in spare capacity only (free
+ * slots under the caller's row count, and what the pages leave of the token
+ * budget), so no page row is ever displaced; superseded page claims stamped.
+ * No match, no spare capacity or any error: the results unchanged.
  */
 export async function applyFactsArm(engine: BrainEngine, query: string, results: SearchResult[], opts: FactsArmOpts): Promise<SearchResult[]> {
   try {
     const facts = await matchQueryFacts(engine, query, opts, opts.queryEmbedding);
     if (!facts.length) return results;
-    // Facts fill free slots first; they displace the lowest page rows only when the pages already fill the row count.
-    const rowCount = Math.max(results.length, (await opts.rowCap?.().catch(() => 0)) ?? 0, facts.length);
-    let pages = results.slice(0, Math.min(results.length, rowCount - facts.length)).map(r => ({ ...r }));
+    const free = ((await opts.rowCap?.().catch(() => 0)) ?? 0) - results.length;
+    if (free <= 0) return results;
+    const pages = results.map(r => ({ ...r }));
     const floor = pages.reduce((m, r) => (Number.isFinite(r.score) && r.score < m ? r.score : m), pages[0]?.score ?? 1);
-    const rows = facts.map((f, i) => factRow(f, floor - (i + 1) * 1e-6));
-    // Facts are paid for first inside the budget; the pages share the rest.
-    if (opts.tokenBudget) pages = enforceTokenBudget(pages, Math.max(1, opts.tokenBudget - enforceTokenBudget(rows, opts.tokenBudget).meta.used)).results;
+    let rows = facts.slice(0, free).map((f, i) => factRow(f, floor - (i + 1) * 1e-6));
+    if (opts.tokenBudget) {
+      let left = opts.tokenBudget - enforceTokenBudget(pages, opts.tokenBudget).meta.used;
+      rows = rows.filter(r => { const cost = resultTokens(r); if (cost > left) return false; left -= cost; return true; });
+    }
+    if (!rows.length) return results;
     const merged = [...pages, ...rows];
     await stampSupersededClaims(engine, merged, facts).catch(() => undefined);
     return merged;

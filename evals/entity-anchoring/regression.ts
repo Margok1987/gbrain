@@ -114,7 +114,9 @@ if (import.meta.main) {
   const lme = new URL('../../test/fixtures/longmemeval-nightly.jsonl', import.meta.url).pathname;
   reports.push(await longMemEval(lme, false), await longMemEval(lme, true));
   const asWritten = reports.filter(r => !r.corpus.endsWith('+now') && !r.corpus.endsWith('+facts'));
-  const out = { mode: 'hermetic', keyword_only: true, key: KEY, pass: asWritten.every(r => r.recall10_lower.length === 0), reports };
+  const withFacts = reports.filter(r => !r.corpus.endsWith('+now'));
+  const out = { mode: 'hermetic', keyword_only: true, key: KEY, pass: asWritten.every(r => r.recall10_lower.length === 0),
+    pass_with_facts_diagnostics: withFacts.every(r => r.recall10_lower.length === 0), reports };
   const dumpPath = flag('--dump-off');
   if (dumpPath) writeFileSync(dumpPath, JSON.stringify(dump, null, 2));
   console.log(args.includes('--json') ? JSON.stringify(out, null, 2) : JSON.stringify(out));

@@ -1,7 +1,8 @@
 /**
  * Facts arm for `query` (`search.query_facts_arm`, search/facts-arm.ts): with
  * the key on, an active fact that matches the question comes back as a row of
- * its own inside the row count and budget; a remote caller never sees a
+ * its own in spare capacity only (free slots under the row count, what the
+ * pages leave of the token budget), never displacing a page; a remote caller never sees a
  * private fact; page-unit delivery passes the fact row through as written;
  * a page whose typed claim a newer fact covers is stamped superseded_claim;
  * with the key off the rows are unchanged. PGLite, keyword-only, no network.
@@ -11,6 +12,7 @@ import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { handleToolCall } from '../src/mcp/server.ts';
 import { dispatchToolCall } from '../src/mcp/dispatch.ts';
 import { QUERY_FACTS_ARM_KEY, matchQueryFacts, queryTerms } from '../src/core/search/facts-arm.ts';
+import { resultTokens } from '../src/core/search/token-budget.ts';
 import type { SearchResult } from '../src/core/types.ts';
 import { newSource, page, putPage } from './helpers/pinned-questions-fixture.ts';
 
@@ -50,18 +52,32 @@ describe('facts arm', () => {
     expect(unset.some(r => r.fact_row)).toBe(false);
   });
 
-  test('on: the matching fact is a row of its own, newest first, inside the same row count', async () => {
+  test('on: the matching fact is a row of its own, newest first, in free slots after every page row', async () => {
     await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false');
-    const off = await query();
+    const off = await query({ limit: 10 });
     await engine.setConfig(QUERY_FACTS_ARM_KEY, 'true');
     try {
-      const on = await query();
-      expect(on).toHaveLength(off.length);
+      const on = await query({ limit: 10 });
+      expect(on.length).toBeLessThanOrEqual(10);
+      expect(on.slice(0, off.length).map(r => [r.slug, r.chunk_id])).toEqual(off.map(r => [r.slug, r.chunk_id]));
       const facts = on.filter(r => r.fact_row);
       expect(facts.map(r => r.fact_row!.valid_from.slice(0, 10))).toEqual(['2025-07-13', '2025-07-12']);
       expect(facts[1]!.chunk_text).toContain('Missoula');
       expect(facts[1]!.chunk_text).toContain('valid from 2025-07-12');
       expect(facts[0]!.chunk_text).toContain('secret');
+    } finally { await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false'); }
+  });
+
+  test('on, no spare capacity: a full row count or a spent token budget returns the page rows unchanged', async () => {
+    await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false');
+    const full = await query();
+    const budget = resultTokens(full[0]!);
+    const spent = await query({ limit: 10, token_budget: budget });
+    await engine.setConfig(QUERY_FACTS_ARM_KEY, 'true');
+    try {
+      expect(full).toHaveLength(6);
+      expect(JSON.stringify(await query())).toBe(JSON.stringify(full));
+      expect(JSON.stringify(await query({ limit: 10, token_budget: budget }))).toBe(JSON.stringify(spent));
     } finally { await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false'); }
   });
 
@@ -78,7 +94,7 @@ describe('facts arm', () => {
   test('on, return_unit page: the fact row passes through as written and counts in the budget', async () => {
     await engine.setConfig(QUERY_FACTS_ARM_KEY, 'true');
     try {
-      const rows = await query({ return_unit: 'page', token_budget: 2000 }) as Array<SearchResult & { delivered?: { reason?: string } }>;
+      const rows = await query({ return_unit: 'page', token_budget: 2000, limit: 10 }) as Array<SearchResult & { delivered?: { reason?: string } }>;
       const fact = rows.find(r => r.fact_row && r.chunk_text.includes('Missoula'))!;
       expect(fact.delivered?.reason).toBe('saved_fact');
       expect(fact.chunk_text.startsWith('Saved fact')).toBe(true);

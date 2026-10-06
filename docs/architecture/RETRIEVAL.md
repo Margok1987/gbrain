@@ -301,7 +301,9 @@ Two cross-cutting seams sit around the pipeline rather than inside it:
 - **Facts arm in `query` (default off).** With `search.query_facts_arm=true`,
   `query` adds up to three active saved facts that match the question (by the
   query embedding it already computed, by shared terms or by a named entity)
-  as fact rows inside the caller's row count and token budget, and marks a
+  as fact rows in spare capacity only (free slots under the caller's row
+  count, and what the page rows leave of the token budget; a page row is
+  never displaced), and marks a
   page row `superseded_claim` when a newer fact covers its typed claim
   (`src/core/search/facts-arm.ts`). No model call. It stays off: in the B2
   corrections suite the facts surfaced but the reader kept the old value,
