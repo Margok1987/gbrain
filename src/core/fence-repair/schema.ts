@@ -59,7 +59,8 @@ export const CANONICAL_HEADER: Record<FenceKind, { narrow: string; wide: string;
 };
 
 const ROW_NUM_ALIASES = ['#', 'row', 'row #', 'row num', 'row number', 'no', 'no.', 'num'];
-const HEADER_ALIASES: Record<FenceKind, Readonly<Record<string, readonly string[]>>> = {
+/** Header spellings each canonical column accepts (`header_alias`), before `lookupKey` folding. */
+export const HEADER_ALIASES: Record<FenceKind, Readonly<Record<string, readonly string[]>>> = {
   facts: {
     '#': ROW_NUM_ALIASES,
     claim: ['claim', 'fact', 'statement'],
@@ -171,22 +172,27 @@ function confidenceValid(text: string): boolean {
   return Number.isFinite(n) && n >= 0 && n <= 1;
 }
 
-const FACT_KIND_SYNONYMS: Readonly<Record<string, string>> = {
+/** `kind_map` for facts: written word to kind (any other word maps to `fact`). */
+export const FACT_KIND_SYNONYMS: Readonly<Record<string, string>> = {
   proposal: 'idea', suggestion: 'idea', hypothesis: 'idea',
   opinion: 'belief', view: 'belief', insight: 'belief', assessment: 'belief', frame: 'belief',
   promise: 'commitment', pledge: 'commitment',
   meeting: 'event', launch: 'event', announcement: 'event', milestone: 'event',
 };
-const TAKE_KIND_SYNONYMS: Readonly<Record<string, string>> = {
+/** `kind_map` for takes: the only words mapped; any other word is `takes_kind_unsupported`. */
+export const TAKE_KIND_SYNONYMS: Readonly<Record<string, string>> = {
   assessment: 'take', recommendation: 'take', 'strategic position': 'take', opinion: 'take', view: 'take',
   prediction: 'bet', forecast: 'bet',
   guess: 'hunch', intuition: 'hunch',
 };
-const PRIVATE_SYNONYMS: ReadonlySet<string> = new Set(['internal', 'team', 'confidential', 'restricted', 'secret', 'shared']);
-const NOTABILITY_SYNONYMS: Readonly<Record<string, string>> = {
+/** `enum_synonym`: visibility words read as `private`. */
+export const PRIVATE_SYNONYMS: ReadonlySet<string> = new Set(['internal', 'team', 'confidential', 'restricted', 'secret', 'shared']);
+/** `enum_synonym`: notability words mapped to a canonical level. */
+export const NOTABILITY_SYNONYMS: Readonly<Record<string, string>> = {
   critical: 'high', 'very high': 'high', highest: 'high', 'very low': 'low', minor: 'low',
 };
-const BRAIN_ALIASES: ReadonlySet<string> = new Set(['system', 'assistant', 'ai', 'agent', 'gbrain', 'model', 'brain']);
+/** `holder_alias`: holder words read as `brain`. */
+export const BRAIN_ALIASES: ReadonlySet<string> = new Set(['system', 'assistant', 'ai', 'agent', 'gbrain', 'model', 'brain']);
 
 /** `kind_map` for facts: any word maps (unknown words to `fact`). */
 export function factsKindMap(word: string): string {

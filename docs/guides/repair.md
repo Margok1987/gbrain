@@ -819,6 +819,23 @@ step. Per-file outcomes report `written`, `imported`, `hold_cleared` and
 `committed`. Repair stays explicit-only: `gbrain repair --all` and
 `gbrain doctor --remediate` never run it.
 
+<a id="fences"></a>
+### Fences
+
+`gbrain repair fences` repairs malformed facts and takes fences: files sync
+held with `invalid_fence`, stored pages whose fence does not parse, and
+checkout files not yet synced. The maintenance run applies the same repair
+automatically (phase `fence_repair`), so a fence hold usually clears with no
+command. The preview is read-only and makes no model call; applying needs no
+extra consent. What each reason means and who acts:
+[fence holds](write-refusals.md#invalid_fence); the format and every rule:
+[fence format](fence-format.md).
+
+```bash
+gbrain repair fences --source <id>                          # preview: tiers, rows, estimated model cost, apply command
+gbrain repair fences --source <id> --apply --expect <hash>  # apply exactly the previewed set
+```
+
 ## Resume
 
 Runs are resumable. After each page commits, the position is saved under the
