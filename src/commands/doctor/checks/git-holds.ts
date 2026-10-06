@@ -48,7 +48,8 @@ export async function gitHeldFilesCheck(engine: BrainEngine, sourceIds?: string[
       message: `${held} file(s) in Git sources are held and not imported; the rest of each sync continues. ${lines.join('; ')}. `
         + (escalated.length ? `Escalated: ${escalated.map(source => source.source_id).join(', ')} hold more than ${policy.escalateCount} files (sync.hold_escalate_count), so a generator or an upgrade is likely writing or reading them wrong; fix the cause first. ` : '')
         + 'A page whose newer file is held is read-only for put_page until the file is repaired, so do not retry a refused write. '
-        + `Inspect with ${sources.map(source => source.status).join('; ')}; then ${sources.map(source => `${source.source_id}: ${source.next}`).join('; ')}.`,
+        + `Inspect with ${sources.map(source => source.status).join('; ')}; `
+        + (sources.some(source => source.fences) ? `then ${sources.map(source => `${source.source_id}: ${source.next}`).join('; ')}.` : `preview the fix with ${sources.map(source => source.repair).join('; ')}.`),
       fix: single
         ? agentFix(single.argv, fenceOnly ? `Lists each held file of ${single.source_id} with the fence and reason that hold it; edit that fence in the file, commit, then run gbrain sync --source ${single.source_id} --no-pull.`
           : 'Previews the minimal line fix for each held file (or names the line to fix by hand) and prints the hash-bound apply command; it writes nothing.', 'git_held_files', { docs: 'docs/guides/repair.md#held-files' })

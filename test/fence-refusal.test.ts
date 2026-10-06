@@ -9,7 +9,9 @@
 import { describe, expect, test } from 'bun:test';
 import { compileCanonicalProjections } from '../src/core/persistence/canonical-projections.ts';
 import { screenImportContent, isContentRefusal, contentRefusalFromReceipt } from '../src/core/import-screen.ts';
-import { fenceMessage, FENCE_REASON_CODES, type FenceMessageLocation } from '../src/core/fence-repair/reasons.ts';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fenceMessage, FENCE_REASON_CODES, FENCE_REASONS, type FenceMessageLocation } from '../src/core/fence-repair/reasons.ts';
 import type { FenceReason } from '../src/core/fence-repair/types.ts';
 import { gitHoldFix, holdRepairSteps } from '../src/core/persistence/sync-holds.ts';
 import { prepareTimeFenceHold } from '../src/core/persistence/sync-screen.ts';
@@ -102,6 +104,15 @@ const UNSHIPPED = /repair fences|repair pass/;
 describe('no PR1 message or fix names a command that has not shipped', () => {
   test('every reason the screen and the projection emit is one PR1 accounts for', () => {
     for (const [, body, timeline] of cases) expect(PR1_REASONS).toContain(scanCanonicalFences(page(body, timeline)).defects[0]!.reason);
+  });
+
+  test('every PR1 reason links to an anchor the refusal guide defines', () => {
+    const guide = readFileSync(join(import.meta.dir, '..', 'docs/guides/write-refusals.md'), 'utf8');
+    for (const reason of PR1_REASONS) {
+      const [path, anchor] = FENCE_REASONS[reason].docs.split('#');
+      expect(path).toBe('docs/guides/write-refusals.md');
+      expect(guide).toContain(`<a id="${anchor}"></a>`);
+    }
   });
 
   test('messages, suggestions and fixes for every PR1 reason point at the page read, the fence edit and the sync', () => {
