@@ -161,11 +161,15 @@ export async function applyFactsArm(engine: BrainEngine, query: string, results:
   }
 }
 
-/** `search.query_facts_arm` is on ('true' | 'on' | '1' | 'yes'); off by default and on any read error. */
+/**
+ * `search.query_facts_arm`: on by default (gates 1b and 2 passed,
+ * docs/eval/decisions/query-facts-arm/); 'false' | 'off' | '0' | 'no' turns it
+ * off. A config read error leaves it off.
+ */
 export async function queryFactsArmEnabled(engine: { getConfig(key: string): Promise<string | null> }): Promise<boolean> {
   try {
     const raw = (await engine.getConfig(QUERY_FACTS_ARM_KEY))?.trim().toLowerCase();
-    return raw === 'true' || raw === 'on' || raw === '1' || raw === 'yes';
+    return !(raw === 'false' || raw === 'off' || raw === '0' || raw === 'no');
   } catch {
     return false;
   }

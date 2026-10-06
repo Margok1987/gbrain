@@ -1,10 +1,48 @@
 # Facts arm in query: gates and verdict
 
-The facts arm is built and stays off. It sits behind `search.query_facts_arm` (default off), measured at
-garrytan/gbrain@16288b95c. Gate 1 failed as preregistered and gate 2 passed. With the key off, `query` returns
-exactly what it returned before the arm existed.
+The facts arm is on by default. It sits behind `search.query_facts_arm`, and `false` turns it off. Gate 1b and
+the revised gate 2 passed at garrytan/gbrain@947536f4c, the build where fact rows take only spare capacity. Gate
+1 failed at 16288b95c, and that failure is recorded below. With the key set to `false`, `query` returns exactly
+what it returned before the arm existed.
 
-## Result
+## Result: gate 1b and revised gate 2
+
+**Gate 1b passed.** In the B2 corrections suite each correction was dated when it was made. Forget-then-remember
+went from 92% correct and 8% stale with the key off to 100% correct and 0% stale with it on, after 1 write and
+after 5. The fact row was in the reader's context for all 200 answers after the correction.
+
+Corrected-value accuracy and stale-answer rate per 100 items, reader `claude-sonnet-5-5`, build 947536f4c:
+
+| Arm | Key | Before correction | After 1 write | After 5 writes |
+|---|---|---|---|---|
+| forget-then-remember | off | 100% / 0% | 92% / 8% | 92% / 8% |
+| forget-then-remember | on | 100% / 0% | 100% / 0% | 100% / 0% |
+| edit-sync | off and on | 100% / 0% | 100% / 0% | 100% / 0% |
+| append | off and on | 100% / 0% | 100% / 0% | 100% / 0% |
+
+Edit-sync and append lose nothing, but the check can't show more than that. Those arms save no facts, so the arm
+never added a row there (0 of 600 answers each), and both sit at 100%.
+
+**Revised gate 2 passed.** Fact rows now take only spare capacity, so they never push out a page. No question's
+recall@10 is lower with the key on, in any of the five sets:
+
+| Set | Questions | Arm added a row | Recall@10 lower |
+|---|---|---|---|
+| NamedThingBench | 12 | 0 | 0 |
+| Relational retrieval-quality | 38 | 0 | 0 |
+| LongMemEval nightly | 10 | 0 | 0 |
+| NamedThingBench + one saved fact per question | 12 | 11 | 0 |
+| Relational + one saved fact per question | 38 | 38 | 0 (was 2 at 16288b95c) |
+
+The runs are hermetic and keyword-only. The harness reports this rule as `pass_with_facts_diagnostics`.
+
+Spend was $18.05 against a $30 cap. A first attempt that ran out of disk is not in that total. Its records were
+lost, but it ran for about two minutes, which by the observed rate cost under $0.50.
+
+**Decision.** `search.query_facts_arm` is on by default. Each `query` now runs up to three extra lookups
+on the facts table: terms, embedding and named entity. It makes no model call.
+
+## Result: gate 1 (16288b95c)
 
 **Gate 1 failed.** In the B2 corrections suite's forget-then-remember arm, the key moved the stale-answer rate
 from 92% to 4-6%. Corrected-value accuracy went from 0% to 1% after one unrelated write and stayed at 0% after
@@ -56,7 +94,7 @@ Records are in `decision.json` (what was tested and how) and `verdict.json` (wha
 mirror carries the two bench flags the gate-1 runs used (`--gbrain-search-config`, `--remember-valid-from`) as a
 patch.
 
-**Decision.** `search.query_facts_arm` stays off by default.
+**Decision at gate 1.** `search.query_facts_arm` stayed off by default.
 
 ## Gate 1b and revised gate 2: preregistered
 
@@ -164,3 +202,4 @@ stays off. The spend cap is set before the gate 1 run.
 - 2026-10-05: gates preregistered before any code or gated run.
 - 2026-10-06: built at 16288b95c and gated. Gate 1 failed, gate 2 passed, and the key stays off.
 - 2026-10-06: gate 1b (correction-dated writes) and revised gate 2 (fact rows take spare capacity only) preregistered before any of their runs.
+- 2026-10-06: gate 1b and revised gate 2 passed at 947536f4c; the key is on by default.

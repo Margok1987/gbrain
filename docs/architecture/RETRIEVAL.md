@@ -298,16 +298,15 @@ Two cross-cutting seams sit around the pipeline rather than inside it:
   token budget stay what the caller asked for, and anchored rows take at most
   half the rows. It is skipped with `offset`, type, date, language or symbol
   filters. Verdict and gates: `docs/eval/decisions/entity-anchoring-query/`.
-- **Facts arm in `query` (default off).** With `search.query_facts_arm=true`,
-  `query` adds up to three active saved facts that match the question (by the
-  query embedding it already computed, by shared terms or by a named entity)
-  as fact rows in spare capacity only (free slots under the caller's row
-  count, and what the page rows leave of the token budget; a page row is
-  never displaced), and marks a
-  page row `superseded_claim` when a newer fact covers its typed claim
-  (`src/core/search/facts-arm.ts`). No model call. It stays off: in the B2
-  corrections suite the facts surfaced but the reader kept the old value,
-  because a remembered fact is dated when it was saved. Verdict and gates:
+- **Facts arm in `query` (default on).** `query` adds up to three active
+  saved facts that match the question (by the query embedding it already
+  computed, by shared terms or by a named entity) as fact rows in spare
+  capacity only: free slots under the caller's row count, and what the page
+  rows leave of the token budget. A page row is never displaced. It also marks
+  a page row `superseded_claim` when a newer fact covers its typed claim
+  (`src/core/search/facts-arm.ts`). No model call. In the B2 corrections suite
+  with correction-dated writes it lifted forget-then-remember from 92% to 100%
+  correct. `search.query_facts_arm=false` turns it off. Verdict and gates:
   `docs/eval/decisions/query-facts-arm/`.
 
 ### Use-attributed feedback

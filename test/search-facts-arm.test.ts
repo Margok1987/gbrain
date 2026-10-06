@@ -5,7 +5,7 @@
  * pages leave of the token budget), never displacing a page; a remote caller never sees a
  * private fact; page-unit delivery passes the fact row through as written;
  * a page whose typed claim a newer fact covers is stamped superseded_claim;
- * with the key off the rows are unchanged. PGLite, keyword-only, no network.
+ * the key is on when unset, and with it off the rows are unchanged. PGLite, keyword-only, no network.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -44,12 +44,14 @@ describe('facts arm', () => {
     expect(queryTerms(Q)).toEqual(['forge', 'offsite', 'booked']);
   });
 
-  test('off (unset or false): no fact rows, rows unchanged', async () => {
-    const unset = await query();
+  test('unset is on; false turns it off and leaves the page rows unchanged', async () => {
+    await engine.executeRaw(`DELETE FROM config WHERE key = $1`, [QUERY_FACTS_ARM_KEY]);
+    const unset = await query({ limit: 10 });
     await engine.setConfig(QUERY_FACTS_ARM_KEY, 'false');
-    const off = await query();
-    expect(JSON.stringify(off.map(r => [r.slug, r.chunk_text]))).toBe(JSON.stringify(unset.map(r => [r.slug, r.chunk_text])));
-    expect(unset.some(r => r.fact_row)).toBe(false);
+    const off = await query({ limit: 10 });
+    expect(unset.some(r => r.fact_row)).toBe(true);
+    expect(off.some(r => r.fact_row)).toBe(false);
+    expect(JSON.stringify(unset.filter(r => !r.fact_row).map(r => [r.slug, r.chunk_text]))).toBe(JSON.stringify(off.map(r => [r.slug, r.chunk_text])));
   });
 
   test('on: the matching fact is a row of its own, newest first, in free slots after every page row', async () => {

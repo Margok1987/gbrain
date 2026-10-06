@@ -1,9 +1,9 @@
 /**
- * The `query` op's opt-in arms, applied after hybrid search and the
+ * The `query` op's post-retrieval arms, applied after hybrid search and the
  * declared-name fan-out, before the CRAG grade: entity anchoring
- * (`search.entity_anchoring`, search/entity-anchor.ts) and then the facts arm
- * (`search.query_facts_arm`, search/facts-arm.ts). Both default off; with
- * both off the rows pass through unchanged.
+ * (`search.entity_anchoring`, default off, search/entity-anchor.ts) and then
+ * the facts arm (`search.query_facts_arm`, default on, search/facts-arm.ts).
+ * With both off the rows pass through unchanged.
  */
 import type { BrainEngine } from '../engine.ts';
 import type { PageReadScope, SearchResult } from '../types.ts';
