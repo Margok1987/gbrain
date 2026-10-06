@@ -219,7 +219,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; sealChunkerVersion?: number; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; selfContained?: boolean; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "BrainEngine"
@@ -1202,7 +1202,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; sealChunkerVersion?: number; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; selfContained?: boolean; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "PostgresEngine",
@@ -3350,7 +3350,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; sealChunkerVersion?: number; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; selfContained?: boolean; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "BrainEngine"

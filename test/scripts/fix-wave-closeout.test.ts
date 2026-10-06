@@ -11,7 +11,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 import {
   COMMENT_MARKER, closeoutMessage, isMergedWave, runCloseout, supersededNumbers,
   type CloseoutClient, type CloseoutEvent, type PullInfo,
@@ -140,7 +140,7 @@ describe('fix-wave closeout run', () => {
 });
 
 describe('fix-wave-closeout workflow', () => {
-  const wf = safeLoad(readFileSync(join(ROOT, '.github', 'workflows', 'fix-wave-closeout.yml'), 'utf8')) as {
+  const wf = load(readFileSync(join(ROOT, '.github', 'workflows', 'fix-wave-closeout.yml'), 'utf8')) as {
     on: Record<string, { branches?: string[]; types?: string[] }>;
     permissions: Record<string, string>;
     jobs: Record<string, { if?: string; permissions: Record<string, string>; steps: Array<{ uses?: string; with?: Record<string, unknown>; run?: string }> }>;

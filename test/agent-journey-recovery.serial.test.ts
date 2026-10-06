@@ -40,7 +40,6 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { spawn, type ChildProcess } from 'node:child_process';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { operations } from '../src/core/operations.ts';
@@ -48,10 +47,10 @@ import { shellQuote } from '../src/core/agent-output.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
-import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
 import {
   REPO, body, call, expectOneBlockError, gb, journeyEnv, mcp, oneDocument, type GbResult,
 } from './helpers/agent-journey.ts';
+import { startServeHttp, type ServeHttp } from './helpers/serve-http.ts';
 
 const MARKER = 'wombat-tier2-marker';
 
@@ -151,14 +150,14 @@ describe('H1b: --surface starter', () => {
 
 describe('H1b: read-only grant over HTTP', () => {
   let home = '';
-  let http: ChildProcess | null = null;
+  let http: ServeHttp | null = null;
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), 'gbrain-tier2-ro-'));
     expect((await gb(home, ['init', '--pglite', '--no-embedding', '--json'])).exitCode).toBe(0);
     expect((await gb(home, ['import', writeNotes(join(home, 'notes'), 2), '--no-embed', '--json'])).exitCode).toBe(0);
   }, 300_000);
-  afterAll(() => {
-    if (http) try { http.kill('SIGTERM'); } catch { /* gone */ }
+  afterAll(async () => {
+    await http?.stop();
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -167,17 +166,9 @@ describe('H1b: read-only grant over HTTP', () => {
     expect(minted.exitCode, minted.stderr).toBe(0);
     const token = (minted.stdout.match(/gbrain_[a-f0-9]{64}/) ?? [''])[0];
     expect(token).toBeTruthy();
-    const port = await startOnFreePort(async candidate => {
-      const child = spawn('bun', ['--no-env-file', 'run', join(REPO, 'src', 'cli.ts'), 'serve', '--http', '--bind', '127.0.0.1', '--port', String(candidate)],
-        { cwd: home, env: journeyEnv(home), stdio: ['ignore', 'ignore', 'ignore'] });
-      http = child;
-      const state = await waitForHealthy(`http://127.0.0.1:${candidate}/health`, () => child.exitCode !== null || child.signalCode !== null, 60_000);
-      if (state === 'exited') return new ExitedEarly(`serve --http exited with ${child.exitCode ?? child.signalCode}`);
-      expect(state).toBe('healthy');
-      return candidate;
-    });
+    http = await startServeHttp({ cwd: home, env: journeyEnv(home) });
     const client = new Client({ name: 'ro-harness', version: '1' }, { capabilities: {} });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    await client.connect(new StreamableHTTPClientTransport(new URL(`${http.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     try {
       const listed = (await client.listTools()).tools;
       const byName = new Map(operations.map(op => [op.name, op]));

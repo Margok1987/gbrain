@@ -771,11 +771,11 @@ export interface BrainEngine {
   /** Mandatory resident-consumer stop barrier before datastore/pool shutdown. */
   registerBeforeDisconnect(stop: () => Promise<void>): () => void;
   /**
-   * Run `fn` with a dedicated connection (Postgres: reserved backend;
-   * PGLite: pass-through). See `ReservedConnection` for semantics and
-   * usage constraints. Release is automatic. `route: 'ordinary'` skips the direct route.
+   * Run `fn` with a dedicated connection (Postgres: reserved backend; PGLite: pass-through). See `ReservedConnection`
+   * for semantics and usage constraints. Release is automatic. `route: 'ordinary'` skips the direct route. `selfContained`:
+   * `fn` uses only `conn` and never waits on the pool (like a transaction), so a one-connection ordinary pool may lend it.
    */
-  withReservedConnection<T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: 'ordinary' }): Promise<T>;
+  withReservedConnection<T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: 'ordinary'; selfContained?: boolean }): Promise<T>;
 
   // Pages CRUD
   /**

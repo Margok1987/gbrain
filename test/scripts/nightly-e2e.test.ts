@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 import { verifyNightlyE2E } from '../../scripts/verify-nightly-e2e.ts';
 import { classifyShards, main as classifyMain, DOCS as CLASSIFY_DOCS, type ShardJob } from '../../scripts/classify-full-e2e-shards.ts';
 
@@ -53,7 +53,7 @@ describe('nightly E2E execution receipts', () => {
 
 describe('nightly E2E scheduling', () => {
   test('full-profile shell flags use environment data instead of expression interpolation', () => {
-    const workflow = safeLoad(readFileSync(join(repo, '.github/workflows/e2e.yml'), 'utf8')) as any;
+    const workflow = load(readFileSync(join(repo, '.github/workflows/e2e.yml'), 'utf8')) as any;
     const steps = [
       workflow.jobs['prepare-e2e'].steps.find((step: any) => step.id === 'select'),
       workflow.jobs['e2e-status'].steps.find((step: any) => step.name === 'Aggregate result'),
@@ -94,7 +94,7 @@ describe('nightly E2E scheduling', () => {
     }, partitions);
   });
   test('nightly jobs preserve job-local Postgres, independent artifacts, always-reporting and required execution evidence', () => {
-    const workflow = safeLoad(readFileSync(join(repo, '.github/workflows/e2e.yml'), 'utf8')) as any;
+    const workflow = load(readFileSync(join(repo, '.github/workflows/e2e.yml'), 'utf8')) as any;
     const job = workflow.jobs['coverage-full-e2e'];
     expect(job.if).toBe(fullProfile);
     expect(job.strategy).toEqual({ 'fail-fast': false, matrix: { shard: [1, 2, 3, 4] } });
@@ -159,7 +159,7 @@ describe('nightly E2E scheduling', () => {
     expect(validate.run).toBe('bun scripts/verify-nightly-e2e.ts "$RUNNER_TEMP/e2e-execution" 4 "$GITHUB_SHA"');
   });
   test('manual full corpus is opt-in and uses the complete scheduled profile without cancelling ordinary runs', () => {
-    const workflow = safeLoad(readFileSync(join(repo, '.github/workflows/e2e.yml'), 'utf8')) as any;
+    const workflow = load(readFileSync(join(repo, '.github/workflows/e2e.yml'), 'utf8')) as any;
     expect(workflow.on.workflow_dispatch.inputs.full_corpus).toMatchObject({ type: 'boolean', default: false });
     for (const name of ['coverage-full-unit', 'coverage-full-serial', 'coverage-full-slow', 'coverage-full-e2e']) expect(workflow.jobs[name].if).toBe(fullProfile);
     for (const step of workflow.jobs['e2e-status'].steps.slice(1)) expect(step.if).toBe(fullProfile);

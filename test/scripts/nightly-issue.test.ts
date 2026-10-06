@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } fro
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
-import { safeLoad } from 'js-yaml';
+import { load as loadYaml } from 'js-yaml';
 import { loadReceiptDir } from '../../scripts/ci-executed-counts.ts';
 import { buildManifest, checkManifest, failureSignature, junitMessages, MANIFEST_ARTIFACT, MANIFEST_SCHEMA, type CiManifest } from '../../scripts/ci-manifest.ts';
 import { failureSignature as gateSignature, parseExemptionBlocks } from '../fixtures/nightly-watch/stress-exemption-contract.ts';
@@ -233,8 +233,8 @@ describe('.github/nightly-known-red.tsv', () => {
 describe('nightly-watch coverage ratchet', () => {
   test('every workflow with a schedule trigger is watched', () => {
     const dir = join(ROOT, '.github/workflows');
-    const watch = safeLoad(readFileSync(join(dir, 'nightly-watch.yml'), 'utf8')) as { on: { workflow_run: { workflows: string[] } } };
-    const scheduled = readdirSync(dir).filter(f => f.endsWith('.yml')).map(f => safeLoad(readFileSync(join(dir, f), 'utf8')) as { name: string; on?: { schedule?: unknown } })
+    const watch = loadYaml(readFileSync(join(dir, 'nightly-watch.yml'), 'utf8')) as { on: { workflow_run: { workflows: string[] } } };
+    const scheduled = readdirSync(dir).filter(f => f.endsWith('.yml')).map(f => loadYaml(readFileSync(join(dir, f), 'utf8')) as { name: string; on?: { schedule?: unknown } })
       .filter(w => w.on && typeof w.on === 'object' && 'schedule' in w.on).map(w => w.name);
     expect(scheduled.length).toBeGreaterThan(5);
     const missing = scheduled.filter(name => !watch.on.workflow_run.workflows.includes(name));
@@ -774,7 +774,7 @@ describe('nightly-watch routing and guard', () => {
   test('push run of a non-allowlisted workflow refused', () => refuse({ ...T.r8320, name: 'Heavy Tests', path: '.github/workflows/heavy-tests.yml' }, 'which master-red does not watch'));
   test('a replay must be an E2E Tests dispatch on master', () => refuse({ ...T.r8320, event: 'workflow_dispatch' }, 'issue-bound replay must be an E2E Tests dispatch', 7));
 
-  const yaml = (f: string) => safeLoad(readFileSync(join(ROOT, '.github/workflows', f), 'utf8')) as Record<string, any>;
+  const yaml = (f: string) => loadYaml(readFileSync(join(ROOT, '.github/workflows', f), 'utf8')) as Record<string, any>;
   test('nightly-watch.yml: master-only workflow_run, guard for schedule + allowlisted push-to-master from this repo, one queue per repo + workflow + track', () => {
     const w = yaml('nightly-watch.yml');
     expect(w.on.workflow_run.branches).toEqual(['master']);

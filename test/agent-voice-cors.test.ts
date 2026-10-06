@@ -22,8 +22,8 @@
 
 import { describe, test, expect } from 'bun:test';
 import type { Subprocess } from 'bun';
+import { freePort } from './helpers/serve-http.ts';
 import { join } from 'path';
-import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
 
 const SERVER_SCRIPT = join(import.meta.dir, '..', 'recipes', 'agent-voice', 'code', 'server.mjs');
 const EVIL = 'https://evil.example';
@@ -37,45 +37,49 @@ interface VoiceServer {
 }
 
 async function spawnVoice(extraEnv: Record<string, string> = {}): Promise<VoiceServer> {
-  return startOnFreePort(async port => {
-    const env: Record<string, string> = {
-      ...(process.env as Record<string, string>),
-      PORT: String(port),
-      // The server starts without a key; /session 500s lazily — which the
-      // ordering assertions below rely on.
-      OPENAI_API_KEY: '',
-    };
-    // A developer's shell must not leak an allowlist or bind override into the
-    // default-deny spawn.
-    delete env.AGENT_VOICE_CORS_ORIGIN;
-    delete env.HOST;
-    Object.assign(env, extraEnv);
+  const port = await freePort();
+  const env: Record<string, string> = {
+    ...(process.env as Record<string, string>),
+    PORT: String(port),
+    // The server starts without a key; /session 500s lazily — which the
+    // ordering assertions below rely on.
+    OPENAI_API_KEY: '',
+  };
+  // A developer's shell must not leak an allowlist or bind override into the
+  // default-deny spawn.
+  delete env.AGENT_VOICE_CORS_ORIGIN;
+  delete env.HOST;
+  Object.assign(env, extraEnv);
 
-    const proc = Bun.spawn([process.execPath, SERVER_SCRIPT], {
-      env,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
+  const proc = Bun.spawn([process.execPath, SERVER_SCRIPT], {
+    env,
+    stdin: 'ignore',
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
 
-    // Drain stdout in the background so the startup log lines are assertable.
-    let out = '';
-    (async () => {
-      try {
-        for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
-          out += new TextDecoder().decode(chunk);
-        }
-      } catch { /* stream closed on shutdown */ }
-    })();
+  // Drain stdout in the background so the startup log lines are assertable.
+  let out = '';
+  (async () => {
+    try {
+      for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
+        out += new TextDecoder().decode(chunk);
+      }
+    } catch { /* stream closed on shutdown */ }
+  })();
 
-    const base = `http://127.0.0.1:${port}`;
-    const state = await waitForHealthy(`${base}/health`, () => proc.exitCode !== null, 30_000);
-    if (state === 'healthy') return { port, base, proc, stdout: () => out };
-    proc.kill();
-    const stderr = (await new Response(proc.stderr).text()).slice(-800);
-    if (state === 'exited') return new ExitedEarly(stderr);
-    throw new Error(`agent-voice server did not become healthy in 30s\nstderr: ${stderr}`);
-  }, { host: '0.0.0.0' });
+  const base = `http://127.0.0.1:${port}`;
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline && proc.exitCode === null) {
+    try {
+      const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok) return { port, base, proc, stdout: () => out };
+    } catch { /* not up yet */ }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  proc.kill();
+  const stderr = await new Response(proc.stderr).text();
+  throw new Error(`agent-voice server on port ${port} did not become healthy (exit code ${proc.exitCode})\nstderr: ${stderr.slice(-800)}`);
 }
 
 async function stopVoice(server: VoiceServer): Promise<void> {

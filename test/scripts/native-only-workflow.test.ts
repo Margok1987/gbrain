@@ -4,10 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { runInNewContext } from 'node:vm';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 
 type Job = { if?: string; name?: string; needs?: string[]; uses?: string; steps?: Array<{ name: string; run?: string }> };
-const workflow = safeLoad(readFileSync(join(import.meta.dir, '../../.github/workflows/test.yml'), 'utf8')) as {
+const workflow = load(readFileSync(join(import.meta.dir, '../../.github/workflows/test.yml'), 'utf8')) as {
   on: { workflow_dispatch: { inputs: Record<string, { type: string; default: boolean | string }> } };
   concurrency: { group: string; 'cancel-in-progress': boolean }; jobs: Record<string, Job>;
 };

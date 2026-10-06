@@ -28,7 +28,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { Subprocess } from 'bun';
-import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
+import { freePort } from './helpers/serve-http.ts';
 
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
 
@@ -40,7 +40,7 @@ interface ServeProc {
   cleanup: () => Promise<void>;
 }
 
-async function spawnServer(port: number): Promise<ServeProc | ExitedEarly> {
+async function spawnServer(): Promise<ServeProc> {
   const home = mkdtempSync(join(tmpdir(), 'gbrain-admin-embed-'));
   // serve never creates a configured PGLite brain that is missing (status-only `missing_brain`); the data dir exists, empty.
   mkdirSync(join(home, '.gbrain', 'brain.pglite'), { recursive: true });
@@ -57,6 +57,7 @@ async function spawnServer(port: number): Promise<ServeProc | ExitedEarly> {
   // out of the startup banner (and the banner stays predictable across
   // future formatting tweaks).
   const bootstrapToken = 'test-bootstrap-token-aaaaaaaaaaaaaaaaaa'; // 41 chars
+  const port = await freePort();
 
   // CRITICAL: cwd is the tmpdir, NOT the repo. This forces serve-http to
   // fall into the embedded-manifest branch because cwd/admin/dist does
@@ -93,7 +94,20 @@ async function spawnServer(port: number): Promise<ServeProc | ExitedEarly> {
   // Wait for readiness by polling /health. Bun's readable streams don't
   // give us a synchronous "stderr line" API and the startup banner format
   // is allowed to drift; a /health probe is the contract that matters.
-  const state = await waitForHealthy(`http://127.0.0.1:${port}/health`, () => proc.exitCode !== null, 30_000);
+  const deadline = Date.now() + 30_000;
+  let ready = false;
+  while (Date.now() < deadline && proc.exitCode === null) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        signal: AbortSignal.timeout(2000),
+      });
+      if (res.ok) {
+        ready = true;
+        break;
+      }
+    } catch { /* not ready yet */ }
+    await new Promise(r => setTimeout(r, 250));
+  }
 
   const cleanup = async () => {
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -113,11 +127,12 @@ async function spawnServer(port: number): Promise<ServeProc | ExitedEarly> {
     }
   };
 
-  if (state !== 'healthy') {
+  if (!ready) {
     await cleanup();
-    const stderrText = (await new Response(proc.stderr).text().catch(() => '')).slice(0, 2000);
-    if (state === 'exited') return new ExitedEarly(stderrText);
-    throw new Error(`serve --http never became ready on port ${port} after 30s. stderr: ${stderrText}`);
+    const stderrText = await new Response(proc.stderr).text().catch(() => '');
+    throw new Error(
+      `serve --http never became ready on port ${port} (exit code ${proc.exitCode}). stderr: ${stderrText.slice(0, 2000)}`,
+    );
   }
 
   return { proc, port, home, bootstrapToken, cleanup };
@@ -127,7 +142,7 @@ describe('admin embed E2E — /admin served from embedded manifest (v0.36.1.x #1
   let server: ServeProc;
 
   beforeAll(async () => {
-    server = await startOnFreePort(spawnServer);
+    server = await spawnServer();
   }, 90_000);
 
   afterAll(async () => {

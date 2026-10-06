@@ -25,6 +25,8 @@ export const LEASE_TURN_MS = 30_000;
 
 interface Lease { lock: NativeLockHandle; holders: number; since: number; draining: boolean; wounded: boolean; ended: Promise<void>; end: () => void }
 const leases = new Map<string, Lease>();
+/** A native lock acquisition in flight per path: lanes arriving meanwhile wait for it and join the lease it creates. */
+const opening = new Map<string, Promise<unknown>>();
 
 /** Whether lanes of this worktree should stop: an exclusive writer waits, or the lease used up its turn. */
 export function leaseDraining(path: string): boolean {
@@ -41,22 +43,29 @@ export function leaseWounded(path: string): boolean {
 
 /**
  * Joins this process's lease on `path`, or takes the native lock through
- * `acquire` when there is none. Null when the lock is busy elsewhere or an
- * exclusive writer waits for the lease; the caller releases its claim and retries later.
+ * `acquire` when there is none. Lanes never race each other for the native
+ * lock: one lane acquires it while the others wait and join, and a lease whose
+ * last holder is still releasing the lock stays registered until the lock is
+ * free. Null when the lock is busy elsewhere or an exclusive writer waits for
+ * the lease; the caller releases its claim and retries later.
  */
 export async function acquireShared(path: string, acquire: () => Promise<NativeLockHandle | null>): Promise<NativeLockHandle | null> {
   const live = leases.get(path);
   if (live) {
     // A used-up turn only stops new lane claims (sync-lanes.ts laneRoots); a wounded lease also refuses joins.
-    if (live.lock.released || live.wounded) return null;
+    if (live.wounded) return null;
+    if (live.holders === 0) { await live.ended; return acquireShared(path, acquire); }
+    if (live.lock.released) return null;
     live.holders++;
     return share(path, live);
   }
-  const lock = await acquire();
+  const pending = opening.get(path);
+  if (pending) { await pending; return acquireShared(path, acquire); }
+  const attempt = acquire();
+  opening.set(path, attempt.catch(() => null));
+  let lock: NativeLockHandle | null;
+  try { lock = await attempt; } finally { opening.delete(path); }
   if (!lock) return null;
-  // Another lane may have created the lease while this one waited for the lock.
-  const raced = leases.get(path);
-  if (raced) { await lock.release(); return acquireShared(path, acquire); }
   let end!: () => void;
   const ended = new Promise<void>(resolve => { end = resolve; });
   const lease: Lease = { lock, holders: 1, since: Date.now(), draining: false, wounded: false, ended, end };
@@ -72,8 +81,7 @@ function share(path: string, lease: Lease): NativeLockHandle {
       if (released) return;
       released = true;
       if (--lease.holders > 0) return;
-      leases.delete(path);
-      try { await lease.lock.release(); } finally { lease.end(); }
+      try { await lease.lock.release(); } finally { if (leases.get(path) === lease) leases.delete(path); lease.end(); }
     },
   };
 }

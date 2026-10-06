@@ -8,7 +8,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 import {
   HELPER_FAN_IN_LIMIT, SPECIAL_FILES, allTestFiles, changedFiles, defaultSeed, directImporters, expandHelper,
   notStressedReason, parseFileList, planShards, profileFor, redact, reproduceLine, seededSample, validRef,
@@ -44,7 +44,7 @@ describe('execution profiles', () => {
   });
 
   test('slow-file specifics mirror the workflow values a pull request uses', () => {
-    const wf = safeLoad(readFileSync(join(REPO, '.github/workflows/test.yml'), 'utf8')) as { jobs: Record<string, { steps: Array<{ run?: string; env?: Record<string, string> }> }> };
+    const wf = load(readFileSync(join(REPO, '.github/workflows/test.yml'), 'utf8')) as { jobs: Record<string, { steps: Array<{ run?: string; env?: Record<string, string> }> }> };
     const exportStep = wf.jobs['slow-entity-resolve-perf']!.steps.find(s => s.run?.includes('test/export-scale.slow.test.ts'))!;
     const pages = runInNewContext(exportStep.env!.GBRAIN_TEST_EXPORT_SCALE_PAGES!.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), { github: { event_name: 'pull_request' } });
     expect(profileFor('test/export-scale.slow.test.ts', { armed: true, postgres: false }).vars).toEqual({ GBRAIN_TEST_EXPORT_SCALE_PAGES: pages });

@@ -38,6 +38,19 @@ import {
 import { VERSION } from '../src/version.ts';
 import { checkBehaviorChanges } from '../src/commands/doctor/checks/behavior-changes.ts';
 import { dispatchToolCall } from '../src/mcp/dispatch.ts';
+
+// Expectations derive from the BEHAVIOR_CHANGES table, so adding a release's
+// rows does not require re-pinning every count; each release's own content is
+// still asserted by text below.
+const NEWEST = BEHAVIOR_NOTICE_SINCE;
+const NEXT_PATCH = NEWEST.replace(/^(\d+\.\d+\.)(\d+)(.*)$/, (_m, a: string, b: string, c: string) => `${a}${Number(b) + 1}${c}`);
+const NEWEST_TEXT = (BEHAVIOR_CHANGES.find(c => c.since === NEWEST && typeof c.text === 'string')!.text as string).slice(0, 48);
+function noticeHeader(after: string, withChain = false): string {
+  const rows = BEHAVIOR_CHANGES.filter(c => compareReleases(c.since, after) > 0 && (withChain || typeof c.text === 'string'));
+  const releases = [...new Set(rows.map(c => `v${c.since}`))];
+  const list = releases.length > 1 ? `${releases.slice(0, -1).join(', ')} and ${releases.at(-1)}` : releases[0];
+  return `gbrain ${list} changed ${rows.length} behavior${rows.length === 1 ? '' : 's'}`;
+}
 import { NoticeLedger, __resetProcessNoticeLedgerForTests } from '../src/core/notice-ledger.ts';
 import { _resetDbPlaneMergeMemoForTests } from '../src/core/config-db-merge.ts';
 import type { GBrainConfig } from '../src/core/config.ts';
@@ -232,7 +245,7 @@ for (const backend of testBackends()) {
         expect(await takeLocalBehaviorNotice(engine, 'cli', { cfg: null, brainKey: 'doctor' })).not.toBeNull();
         const again = await checkBehaviorChanges(engine, { cfg: null, brainKey: 'doctor' });
         expect(again.details).toMatchObject({ shown: { cli: true, stdio: false } });
-        expect(again.message).toContain('gbrain v0.60.68.0, v0.60.74.0, v0.60.77.0 and v0.60.78.0 changed 12 behaviors');
+        expect(again.message).toContain(noticeHeader('0'));
       });
     });
 
@@ -303,7 +316,7 @@ describe('per-release content', () => {
     expect(later.why).not.toContain('chat_fallback_chain is live');
     expect(later.fix?.argv).toEqual(['gbrain', 'doctor', '--only', 'behavior_changes', '--json']);
     const all = behaviorChangesNotice(chain)!;
-    expect(all.why).toContain('gbrain v0.60.68.0, v0.60.74.0, v0.60.77.0 and v0.60.78.0 changed 13 behaviors');
+    expect(all.why).toContain(noticeHeader('0', true));
     expect(all.fix?.argv).toEqual(['unset', 'GBRAIN_CHAT_FALLBACK_CHAIN']);
   });
 });
@@ -367,8 +380,8 @@ describe('upgrades across releases (each step a new process pinned to a gbrain V
   test('a brain that saw the notice gets nothing from a later release that adds no behavior changes', async () => {
     const home = freshHome();
     for (const channel of ['cli', 'http:client-a']) {
-      expect(await runAt(home, '0.60.78.0', 'seen', channel)).toContain(OPT_OUT);
-      expect(await runAt(home, '0.60.78.0', 'seen', channel)).toBeNull();
+      expect(await runAt(home, NEWEST, 'seen', channel)).toContain(NEWEST_TEXT);
+      expect(await runAt(home, NEWEST, 'seen', channel)).toBeNull();
       expect(await runAt(home, '0.60.99.0', 'seen', channel)).toBeNull();
     }
   }, 60_000);
@@ -380,27 +393,28 @@ describe('upgrades across releases (each step a new process pinned to a gbrain V
     writeFileSync(join(noticeDir(home), 'behavior_changes_0.60.68.0.b68.cli.shown'), '2026-10-05T00:00:00.000Z\n');
     writeFileSync(join(home, 'brain-config.json'), JSON.stringify({ [HTTP_SHOWN_KEY]: JSON.stringify({ id: 'behavior_changes@0.60.68.0', clients: { 'client-a': '2026-10-05T00:00:00.000Z' } }) }));
     for (const channel of ['cli', 'http:client-a']) {
-      const why = await runAt(home, '0.60.78.0', 'b68', channel);
-      expect(why).toContain('gbrain v0.60.74.0, v0.60.77.0 and v0.60.78.0 changed 9 behaviors');
+      const why = await runAt(home, NEWEST, 'b68', channel);
+      expect(why).toContain(noticeHeader('0.60.68.0'));
       expect(why).toContain(WAVE9);
       expect(why).toContain(OPT_OUT);
       expect(why).not.toContain(V68);
       expect(why).not.toContain('v0.60.68.0');
-      expect(await runAt(home, '0.60.78.0', 'b68', channel)).toBeNull();
-      expect(await runAt(home, '0.60.79.0', 'b68', channel)).toBeNull();
+      expect(await runAt(home, NEWEST, 'b68', channel)).toBeNull();
+      expect(await runAt(home, NEXT_PATCH, 'b68', channel)).toBeNull();
     }
   }, 60_000);
 
   test('a brain older than 0.60.68 sees every item, labeled with its release, once', async () => {
     const home = freshHome();
     for (const channel of ['cli', 'stdio', 'http:client-a']) {
-      const why = await runAt(home, '0.60.78.0', 'old', channel);
-      expect(why).toContain('gbrain v0.60.68.0, v0.60.74.0, v0.60.77.0 and v0.60.78.0 changed 12 behaviors');
+      const why = await runAt(home, NEWEST, 'old', channel);
+      expect(why).toContain(noticeHeader('0'));
       expect(why).toContain(`v0.60.68.0: (1) On a managed brain`);
       expect(why).toContain(`v0.60.74.0: (4) A shell job`);
       expect(why).toContain(`v0.60.77.0: (10) think answers`);
       expect(why).toContain(`v0.60.78.0: (12) On a brain with embedding turned off`);
-      expect(await runAt(home, '0.60.78.0', 'old', channel)).toBeNull();
+      expect(why).toContain(`v0.60.79.0: (13) Frontmatter is parsed as YAML 1.2`);
+      expect(await runAt(home, NEWEST, 'old', channel)).toBeNull();
       expect(await runAt(home, '0.60.99.0', 'old', channel)).toBeNull();
     }
     expect(readFileSync(join(noticeDir(home), 'old.baseline'), 'utf8').trim()).toBe('0');
@@ -409,9 +423,9 @@ describe('upgrades across releases (each step a new process pinned to a gbrain V
   test('a fresh brain sees nothing, then or after later upgrades', async () => {
     const home = freshHome();
     for (const channel of ['cli', 'http:client-a']) {
-      expect(await runAt(home, '0.60.78.0', 'new', channel, { createdAgoMs: 0 })).toBeNull();
+      expect(await runAt(home, NEWEST, 'new', channel, { createdAgoMs: 0 })).toBeNull();
       expect(await runAt(home, '0.60.99.0', 'new', channel, { createdAgoMs: 2 * DAY })).toBeNull();
     }
-    expect(readFileSync(join(noticeDir(home), 'new.baseline'), 'utf8').trim()).toBe('0.60.78.0');
+    expect(readFileSync(join(noticeDir(home), 'new.baseline'), 'utf8').trim()).toBe(NEWEST);
   }, 60_000);
 });

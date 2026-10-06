@@ -25,10 +25,9 @@ import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
-import { spawn, type ChildProcess } from 'node:child_process';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { keylessBrainEnv } from './helpers/provider-env.ts';
-import { ExitedEarly, freePort, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
+import { freePort, startServeHttp, type ServeHttp } from './helpers/serve-http.ts';
 
 const MARKER = 'zelkova-status-marker-4q7';
 
@@ -175,7 +174,7 @@ describe('status-only serve: no brain → init → recovery in place', () => {
 describe('status-only serve: lock contention → one shared serve --http (b)', () => {
   let home: string;
   let env: Record<string, string>;
-  let http: ChildProcess | null = null;
+  let http: ServeHttp | null = null;
   const opened: Array<{ client: Client; transport: StdioClientTransport }> = [];
 
   beforeAll(() => {
@@ -190,7 +189,7 @@ describe('status-only serve: lock contention → one shared serve --http (b)', (
 
   afterAll(async () => {
     for (const c of opened) { try { await c.client.close(); } catch { /* best-effort */ } }
-    if (http) { try { http.kill('SIGTERM'); } catch { /* best-effort */ } }
+    await http?.stop();
     rmSync(home, { recursive: true, force: true });
   });
 
@@ -212,15 +211,7 @@ describe('status-only serve: lock contention → one shared serve --http (b)', (
     });
     expect(tokens.every(Boolean)).toBe(true);
     // Step 2: one shared HTTP server owns the brain.
-    const port = await startOnFreePort(async candidate => {
-      const child = spawn('bun', ['--no-env-file', 'run', 'src/cli.ts', 'serve', '--http', '--bind', '127.0.0.1', '--port', String(candidate)],
-        { cwd: process.cwd(), env, stdio: ['ignore', 'ignore', 'ignore'] });
-      http = child;
-      const state = await waitForHealthy(`http://127.0.0.1:${candidate}/health`, () => child.exitCode !== null || child.signalCode !== null, 60_000);
-      if (state === 'exited') return new ExitedEarly(`serve --http exited with ${child.exitCode ?? child.signalCode}`);
-      expect(state).toBe('healthy');
-      return candidate;
-    });
+    http = await startServeHttp({ cwd: process.cwd(), env });
 
     // The stale stdio server cannot take the brain back; it names the HTTP owner and the rewiring fix.
     const after = body(await stale.client.callTool({ name: 'gbrain_status', arguments: {} }));
@@ -232,7 +223,7 @@ describe('status-only serve: lock contention → one shared serve --http (b)', (
     // Step 3: each harness, rewired to the shared server, recalls.
     for (const token of tokens) {
       const client = new Client({ name: 'shared-http', version: '1' }, { capabilities: {} });
-      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${http.base}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
       try {
         const found = await client.callTool({ name: 'search', arguments: { query: MARKER } });
         expect(found.isError).toBeFalsy();
@@ -279,7 +270,7 @@ describe('status-only serve: the shared-HTTP transition fails midway (H2)', () =
     // Step 2 fails: the port is taken, so the shared server cannot start.
     const http = await import('node:http');
     blocker = http.createServer((_q, r) => { r.end('not gbrain'); });
-    await new Promise<void>(r => blocker!.listen(0, '127.0.0.1', () => r()));
+    await new Promise<void>((r, reject) => { blocker!.once('error', reject); blocker!.listen(0, '127.0.0.1', () => r()); });
     const PORT = (blocker.address() as import('node:net').AddressInfo).port;
     const started = spawnSync('bun', ['--no-env-file', 'run', 'src/cli.ts', 'serve', '--http', '--bind', '127.0.0.1', '--port', String(PORT)],
       { cwd: process.cwd(), env, input: '', encoding: 'utf8', timeout: 60_000 });

@@ -33,6 +33,7 @@
 
 import { describe, test, expect, beforeAll, afterAll } from 'bun:test';
 import { spawn, spawnSync } from 'child_process';
+import { freePort } from '../helpers/serve-http.ts';
 import {
   cpSync,
   mkdirSync,
@@ -47,7 +48,6 @@ import { tmpdir } from 'os';
 import { join, resolve } from 'path';
 import { PGLiteEngine } from '../../src/core/pglite-engine.ts';
 import type { EngineConfig } from '../../src/core/types.ts';
-import { ExitedEarly, startOnFreePort } from '../helpers/free-port.ts';
 
 const REPO_ROOT = resolve(import.meta.dir, '..', '..');
 const BIN_CACHE = join(REPO_ROOT, 'test', '.cache');
@@ -492,46 +492,43 @@ describe('WAL-repair wave — corrupt persistent brain, auto-repair off: owned e
 
 describe('v0.41.8.0 — daemon survival (regression guard for narrow force-exit)', () => {
   test('gbrain serve --http stays alive past the timeout window', async () => {
-    // An OS-assigned free port; a "port in use" exit (another process took it
-    // before serve bound) is retried, any other early exit is the regression.
-    const { wasAlive, earlyCode } = await startOnFreePort(async port => {
-      const child = spawn(
-        SHIM_PATH,
-        ['serve', '--http', '--port', String(port), '--token-ttl', '60'],
-        {
-          cwd: REPO_ROOT,
-          env: runEnv,
-          detached: false,
-        },
-      );
-      let stderr = '';
-      child.stderr?.on('data', chunk => { stderr += String(chunk); });
+    // A port the kernel reports free (a taken one would also exit early,
+    // and read as this regression). We're testing "still alive
+    // 3 seconds after startup" — if the force-exit guard misfired
+    // on 'serve', the process would die immediately after binding.
+    const port = await freePort();
+    const child = spawn(
+      SHIM_PATH,
+      ['serve', '--http', '--port', String(port), '--token-ttl', '60'],
+      {
+        cwd: REPO_ROOT,
+        env: runEnv,
+        detached: false,
+      },
+    );
 
-      let exitedEarly = false;
-      let code: number | null = null;
-      child.on('exit', (c) => {
-        exitedEarly = true;
-        code = c;
-      });
-
-      // Give the server 3 seconds. If the force-exit narrow guard is
-      // working, the daemon stays alive past this window.
-      await new Promise((r) => setTimeout(r, 3_000));
-
-      const alive = !exitedEarly;
-      try {
-        child.kill('SIGTERM');
-        // Give it a moment to clean up
-        await new Promise((r) => setTimeout(r, 1_000));
-        if (!exitedEarly) {
-          try { child.kill('SIGKILL'); } catch { /* already dead */ }
-        }
-      } catch {
-        /* already dead */
-      }
-      if (!alive && /serve_port_in_use|in use\?/.test(stderr)) return new ExitedEarly(stderr.slice(-400));
-      return { wasAlive: alive, earlyCode: code };
+    let exitedEarly = false;
+    let earlyCode: number | null = null;
+    child.on('exit', (code) => {
+      exitedEarly = true;
+      earlyCode = code;
     });
+
+    // Give the server 3 seconds. If the force-exit narrow guard is
+    // working, the daemon stays alive past this window.
+    await new Promise((r) => setTimeout(r, 3_000));
+
+    const wasAlive = !exitedEarly;
+    try {
+      child.kill('SIGTERM');
+      // Give it a moment to clean up
+      await new Promise((r) => setTimeout(r, 1_000));
+      if (!exitedEarly) {
+        try { child.kill('SIGKILL'); } catch { /* already dead */ }
+      }
+    } catch {
+      /* already dead */
+    }
 
     if (!wasAlive) {
       throw new Error(

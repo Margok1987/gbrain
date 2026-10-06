@@ -4,7 +4,7 @@
 // out in-flight creates when `up` gets SIGTERM or SIGKILL mid-provision.
 
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startMockUbicloud, waitForEvent, type MockUbicloud, type MockUbicloudOptions } from "../helpers/mock-ubicloud-api.ts";
@@ -104,6 +104,27 @@ describe("teardown waits for in-flight creates", () => {
     expect(api.events.slice(-2)).toEqual([`destroy ${name}`, `removed ${name}`]);
     expect(api.vms.size).toBe(0);
   });
+
+  // Bash 5.2 runs a pending signal trap inside the parse of the next $(...),
+  // where the trap fails to parse and the shell exits 2 without running it.
+  // BASH_ENV turns on xtrace with a PS4 whose first $(...) sends the runner
+  // SIGTERM, so the second is always parsed with that trap pending.
+  for (const args of [["up"], ["run", "--", "true"]]) {
+    it(`${args[0]}: a SIGTERM that lands while bash parses a $(...) still destroys the VM and exits 130`, async () => {
+      const api = serve();
+      const bashEnv = join(dir, "bash-env");
+      writeFileSync(bashEnv, `PS4='$([ "$BASH_SUBSHELL" = 1 ] && [ -e "$PROBE_DIR/go" ] && mkdir "$PROBE_DIR/fired" 2>/dev/null && kill -TERM $$)$(:)+ '\nset -x\n`);
+      const proc = spawnRunner(args, { UBI_OWNER: "t1", BASH_ENV: bashEnv, PROBE_DIR: dir });
+      const output = Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
+      const name = (await waitForEvent(api, /^created /)).split(" ")[1]!;
+      writeFileSync(join(dir, "go"), "");
+      expect(await proc.exited).toBe(130);
+      await output;
+      expect(existsSync(join(dir, "fired"))).toBe(true);
+      expect(api.events.slice(-2)).toEqual([`destroy ${name}`, `removed ${name}`]);
+      expect(api.vms.size).toBe(0);
+    });
+  }
 
   it("after SIGKILL mid-create, down waits for the create to land and destroys the VM", async () => {
     const api = serve({ createDelayMs: () => 1500 });

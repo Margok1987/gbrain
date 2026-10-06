@@ -3,12 +3,12 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 
 const root = join(import.meta.dir, '..', '..');
 type Job = { needs?: string | string[]; if?: string; steps: Array<{ name?: string; run?: string; uses?: string; env?: Record<string, string> }> };
 type Workflow = { on: Record<string, { paths?: string[] }>; jobs: Record<string, Job> };
-const loadWorkflow = (name: string) => safeLoad(readFileSync(join(root, '.github/workflows', name), 'utf8')) as Workflow;
+const loadWorkflow = (name: string) => load(readFileSync(join(root, '.github/workflows', name), 'utf8')) as Workflow;
 const unit = loadWorkflow('test.yml');
 const e2e = loadWorkflow('e2e.yml');
 

@@ -81,6 +81,43 @@ test('a lease is shared by lanes; an exclusive writer drains and wounds it and g
   expect(leaseDraining(path)).toBe(false);
 });
 
+test('lanes that start together share one native lock instead of all but one reporting busy', async () => {
+  let held = false, locks = 0;
+  const native = async (): Promise<NativeLockHandle | null> => {
+    await new Promise(resolve => setTimeout(resolve, 20));
+    if (held) return null;
+    held = true; locks++;
+    let done = false;
+    return { get released() { return done; }, async release() { held = false; done = true; } };
+  };
+  const path = join(home, 'lease-start-race');
+  const lanes = await Promise.all([acquireShared(path, native), acquireShared(path, native), acquireShared(path, native)]);
+  expect(lanes.every(Boolean)).toBe(true);
+  expect(locks).toBe(1);
+  for (const lane of lanes) await lane!.release();
+  expect(held).toBe(false);
+});
+
+test('a lane that joins while the last holder is still releasing the native lock waits for it instead of reporting busy', async () => {
+  let held = false, locks = 0;
+  const native = async (): Promise<NativeLockHandle | null> => {
+    if (held) return null;
+    held = true; locks++;
+    let done = false;
+    return { get released() { return done; }, async release() { await new Promise(resolve => setTimeout(resolve, 50)); held = false; done = true; } };
+  };
+  const path = join(home, 'lease-release-gap');
+  const first = (await acquireShared(path, native))!;
+  const releasing = first.release();
+  const next = await acquireShared(path, native);
+  await releasing;
+  expect(next).not.toBeNull();
+  expect(locks).toBe(2);
+  expect(held).toBe(true);
+  await next!.release();
+  expect(held).toBe(false);
+});
+
 test('a lane waits for its predecessor to commit, yields to a requeued or unadmitted one and stops after a failed one', async () => {
   openLanes('wt-turn', 'run-turn', 4, null);
   const state = laneOf({ worktree_id: 'wt-turn', intent: { lane: 'run-turn' } } as never)!;

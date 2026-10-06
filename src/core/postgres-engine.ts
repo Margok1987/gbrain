@@ -621,7 +621,7 @@ export class PostgresEngine implements BrainEngine {
   }
 
   /** Long holds share a budget across every engine that uses the same physical pool. */
-  async withReservedConnection<T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: 'ordinary' }): Promise<T> {
+  async withReservedConnection<T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: 'ordinary'; selfContained?: boolean }): Promise<T> {
     let pool = this.sql;
     let releasePermit: (() => void) | null = null;
     if (!this._pageTransaction && opts?.route !== 'ordinary' && this.connectionManager?.isDualPoolActive()) {
@@ -633,7 +633,7 @@ export class PostgresEngine implements BrainEngine {
         // A disabled direct route falls back to the same bounded ordinary pool.
       }
     }
-    releasePermit ??= tryAcquirePoolLongHold(pool);
+    releasePermit ??= tryAcquirePoolLongHold(pool, undefined, { selfContained: opts?.selfContained });
     if (!releasePermit) throw new PoolCapacityError();
     // Gauge BEFORE reserve(): a reserve() stuck waiting for a free slot is
     // exactly the in-flight pressure the probe diagnostics should surface.

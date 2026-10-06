@@ -622,6 +622,9 @@ const cases: Record<ContractCase, (state: CaseState) => Promise<void>> = {
    */
   async extract_conversation_facts_thread(state) {
     await gmailSweep(state, { reply: true });
+    // The sweep queued loops_extract (priority 5). Left waiting, this case's worker can
+    // claim it once the facts job finishes, and its commitment fact is a facts write.
+    await state.brain.engine.executeRaw("UPDATE minion_jobs SET status='cancelled' WHERE id > $1 AND status IN ('waiting','delayed')", [state.detector.jobsFrom]);
     const [job] = await runJobs(state.brain.engine, [{ name: 'extract-conversation-facts', data: { sourceId: state.sourceId } }]);
     requireCompleted([job]);
     expect((await changesSince(state)).filter(c => c.tbl === 'facts')).toEqual([]);
@@ -721,6 +724,11 @@ const cases: Record<ContractCase, (state: CaseState) => Promise<void>> = {
   async embed_backfill(state) {
     await gmailSweep(state);
     const { engine } = state.brain;
+    // The sweep queued loops_extract (priority 5). Left waiting, the embed-backfill worker
+    // can claim it once embed-backfill finishes; its commitment fact republishes
+    // people/alice-example as a new chunk whose embedding effect has not run when the
+    // count below is read.
+    await engine.executeRaw("UPDATE minion_jobs SET status='cancelled' WHERE id > $1 AND status IN ('waiting','delayed')", [state.detector.jobsFrom]);
     if (engine.kind === 'pglite') {
       // PGLite has no persistent worker surface: the queue refuses the job up
       // front and names the inline command, which this lane then runs.

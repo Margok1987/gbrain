@@ -26,8 +26,8 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from 'fs
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { keylessBrainEnv } from './helpers/provider-env.ts';
+import { startServeHttp, type ServeHttp } from './helpers/serve-http.ts';
 import { cliDiagnostic, fixtureDiagnostic } from './helpers/fixture-diagnostics.ts';
-import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
 
 function test(name: string, fn: () => void | Promise<unknown>): void {
   testRaw(name, fn, 120000);
@@ -62,7 +62,7 @@ describe('qm-harness provisioning + write fence (e2e, PGLite)', () => {
   let workDir: string;
   let aliceHome: string;
   let bobHome: string;
-  let serverProc: ReturnType<typeof Bun.spawn> | null = null;
+  let server: ServeHttp | null = null;
   let serverPort: number;
   const creds: Record<string, { clientId: string; secret: string }> = {};
   let rerunCredsGrew = true; // set false when idempotency holds
@@ -136,20 +136,14 @@ describe('qm-harness provisioning + write fence (e2e, PGLite)', () => {
     };
 
     // 5. Serve over HTTP MCP (holds the PGLite lock from here on).
-    const env = keylessBrainEnv(process.env, hostHome, {
-      DATABASE_URL: undefined, GBRAIN_DATABASE_URL: undefined, GBRAIN_REMOTE_CLIENT_SECRET: undefined,
+    server = await startServeHttp({
+      cwd: process.cwd(),
+      env: keylessBrainEnv(process.env, hostHome, {
+        DATABASE_URL: undefined, GBRAIN_DATABASE_URL: undefined, GBRAIN_REMOTE_CLIENT_SECRET: undefined,
+      }),
+      timeoutMs: 30_000,
     });
-    serverPort = await startOnFreePort(async port => {
-      const proc = Bun.spawn({
-        cmd: ['bun', '--no-env-file', 'run', CLI, 'serve', '--http', '--port', String(port)],
-        env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
-      });
-      serverProc = proc;
-      const state = await waitForHealthy(`http://127.0.0.1:${port}/.well-known/oauth-authorization-server`, () => proc.exitCode !== null, 30_000);
-      if (state === 'exited') return new ExitedEarly((await new Response(proc.stderr).text()).slice(-800));
-      if (state === 'timeout') throw new Error('serve --http did not come up');
-      return port;
-    });
+    serverPort = server.port;
 
     // 6. Thin-client bootstrap for both scopes (the once-per-sandbox step).
     //    --oauth-client-secret (NOT the env var) on purpose: an env-sourced
@@ -170,10 +164,7 @@ describe('qm-harness provisioning + write fence (e2e, PGLite)', () => {
   }, 300_000);
 
   afterAll(async () => {
-    if (serverProc) {
-      serverProc.kill();
-      await serverProc.exited.catch(() => {});
-    }
+    await server?.stop();
     for (const dir of [hostHome, workDir, aliceHome, bobHome]) {
       if (dir) rmSync(dir, { recursive: true, force: true });
     }

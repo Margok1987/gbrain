@@ -14,7 +14,6 @@
 
 ## Dependency hygiene (filed 2026-10-06, GBRA-40)
 
-- [ ] **P3 — Move js-yaml 3 → 4 to drop argparse@1 / sprintf-js.** **What:** `osv-scanner.toml` ignores GHSA-hp3w-g68c-fv3c (sprintf-js, no patched version) until 2027-01-06 because only js-yaml 3's CLI loads argparse@1 → sprintf-js. **Fix:** upgrade js-yaml to 4 (argparse 2 has no sprintf-js; `safeLoad`/`safeDump` become `load`/`dump`), update `@types/js-yaml` and the override, then delete the ignore entry. **Effort:** S. **Priority:** P3.
 
 ## Contributor audit wave follow-ups (filed 2026-10-05, GBRA-40)
 

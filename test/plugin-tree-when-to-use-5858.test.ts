@@ -7,12 +7,12 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { FAILSAFE_SCHEMA, safeLoad } from 'js-yaml';
+import { FAILSAFE_SCHEMA, load } from 'js-yaml';
 
 const ROOT = resolve(import.meta.dir, '..');
 function frontmatter(path: string): Record<string, unknown> | null {
   const match = readFileSync(path, 'utf8').match(/^---\n([\s\S]*?)\n---/);
-  return match ? safeLoad(match[1], { schema: FAILSAFE_SCHEMA }) as Record<string, unknown> : null;
+  return match ? load(match[1], { schema: FAILSAFE_SCHEMA }) as Record<string, unknown> : null;
 }
 function skillFiles(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).filter(entry => entry.isDirectory())

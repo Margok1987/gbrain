@@ -241,6 +241,7 @@ export const BEHAVIOR_CHANGES: ReadonlyArray<{ since: string; text: ChangeText }
   { since: '0.60.77.0', text: 'think answers, saved syntheses, concept narratives and pattern pages check their quotes against their sources: a quote found nowhere loses its quotation marks and is marked [unverified]. It is not yet measured as a catch for made-up quotes. `gbrain config set think.quote_verify false` and `gbrain config set dream.quote_verify false` turn it off.' },
   { since: '0.60.77.0', text: 'forget responses list close active facts it did not withdraw (`similar_active`); with a TypeSafe key, forgetting also queues an overnight review that only proposes withdrawing rewordings (`gbrain decide proposals list`; `gbrain config set decide.slots.conflict.review_withdraw false` turns it off).' },
   { since: '0.60.78.0', text: 'On a brain with embedding turned off, search, query, recall, think and fact writes no longer send text to an embedding provider: reads run keyword-only and say so, and `gbrain doctor --json` names the enable command if the user wants semantic search back.' },
+  { since: '0.60.79.0', text: 'Frontmatter is parsed as YAML 1.2: clock-like values such as `10:30` stay text (they were read as base-60 numbers, so 10:30 became 630), a leading zero is decimal (`010` is 10, not 8), `0o` marks octal, and `1_000` stays text. Re-syncing a page whose frontmatter used those forms stores the new values.' },
 ];
 
 /** The newest disclosed change's release: the notice id moves only when a release adds rows. */
