@@ -62,7 +62,7 @@ const remember: Operation = {
   name: 'remember',
   idempotent: true,
   outputRedaction: 'no_stored_text',
-  description: 'MEMORY VERB (v1): save facts with provenance. Set `entity` to the subject or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.',
+  description: 'MEMORY VERB (v1): save facts with provenance. Set `entity` (the subject) or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.',
   params: {
     ...PAGE_MUTATION_PARAMS,
     fact: { type: 'string', description: 'One claim.' },
@@ -74,20 +74,19 @@ const remember: Operation = {
     provenance: {
       type: 'string',
       // Required for a single fact (the handler refuses with provenance_required); with items it may be given per item.
-      description: 'Fact source (max 500 chars).',
+      description: 'Source (≤500 chars).',
     },
     ttl: {
       type: 'string',
-      description: '"30d", "12h" or ISO time; omit = never.',
+      description: '"30d", "12h" or ISO; omit = never.',
     },
     valid_from: {
       type: 'string',
-      description: 'When said or true (ISO).',
-      fullSurfaceOnly: true,
+      description: 'When true (ISO).',
     },
     entity: {
       type: 'string',
-      description: 'Subject (name or slug).',
+      description: 'Subject name or slug.',
     },
     infer_entity: {
       type: 'boolean',

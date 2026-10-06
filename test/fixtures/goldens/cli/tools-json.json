@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 210403,
-    "stdoutSha256": "bc5960d65803b62a772ab9d14daf399d2b5cef9b1a42b386bf8c0439314e7ca1",
+    "stdoutBytes": 210328,
+    "stdoutSha256": "7796557202b324d19a4ea8961ec479267fd1926bc60a1d2c12edb014883fd50e",
     "toolNames": [
       "remember",
       "entity",
@@ -172,7 +172,7 @@
     ],
     "tools": [
       {
-        "description": "MEMORY VERB (v1): save facts with provenance. Set `entity` to the subject or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.",
+        "description": "MEMORY VERB (v1): save facts with provenance. Set `entity` (the subject) or entity recall misses it. Branch on `status` (inserted|duplicate|superseded); write_pending: poll get_write_request.",
         "idempotent": true,
         "local_only": false,
         "mutating": true,
@@ -197,7 +197,7 @@
         "schema": {
           "properties": {
             "entity": {
-              "description": "Subject (name or slug).",
+              "description": "Subject name or slug.",
               "type": "string"
             },
             "expected_revision": {
@@ -235,7 +235,7 @@
               "type": "string"
             },
             "provenance": {
-              "description": "Fact source (max 500 chars).",
+              "description": "Source (≤500 chars).",
               "type": "string"
             },
             "replaces": {
@@ -251,11 +251,11 @@
               "type": "string"
             },
             "ttl": {
-              "description": "\"30d\", \"12h\" or ISO time; omit = never.",
+              "description": "\"30d\", \"12h\" or ISO; omit = never.",
               "type": "string"
             },
             "valid_from": {
-              "description": "When said or true (ISO).",
+              "description": "When true (ISO).",
               "type": "string"
             },
             "visibility": {
@@ -5372,7 +5372,7 @@
               "type": "number"
             },
             "entity": {
-              "description": "Entity slug; facts about it, newest first.",
+              "description": "Entity slug; its facts, newest first.",
               "type": "string"
             },
             "grep": {
@@ -5380,11 +5380,11 @@
               "type": "string"
             },
             "include_expired": {
-              "description": "Include expired facts.",
+              "description": "Include expired.",
               "type": "boolean"
             },
             "include_pending": {
-              "description": "Add pending count.",
+              "description": "Pending count.",
               "type": "boolean"
             },
             "limit": {
@@ -5392,11 +5392,11 @@
               "type": "number"
             },
             "query": {
-              "description": "Also search pages (results[] arm).",
+              "description": "Also search pages (results[]).",
               "type": "string"
             },
             "return_unit": {
-              "description": "Evidence unit for results[] (see search).",
+              "description": "results[] evidence unit (see search).",
               "enum": [
                 "chunk",
                 "window",
@@ -5411,19 +5411,19 @@
               "type": "number"
             },
             "session_id": {
-              "description": "Facts captured in this session.",
+              "description": "This session's facts.",
               "type": "string"
             },
             "since": {
-              "description": "Facts since (ISO 8601 or \"8 hours ago\").",
+              "description": "Since (ISO 8601 or \"8 hours ago\").",
               "type": "string"
             },
             "source_id": {
-              "description": "Narrow to one source you may read.",
+              "description": "One source you may read.",
               "type": "string"
             },
             "supersessions": {
-              "description": "Only the supersession audit log.",
+              "description": "Supersession audit log only.",
               "type": "boolean"
             }
           },
