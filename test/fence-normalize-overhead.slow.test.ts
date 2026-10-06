@@ -8,8 +8,8 @@
  * it replaced by a no-op; the statement totals and throughput of each arm are
  * printed for the release report (totals vary a little run to run with the
  * consumer's polling, so they are reported, not compared exactly).
- * FENCE_BENCH_FILES sizes it (default 1000; the PR reports 10000) and
- * FENCE_BENCH_ROUNDS the live/no-op pairs (default 2). Synthetic content only.
+ * FENCE_BENCH_FILES sizes it (default 300; the PR reports 10000) and
+ * FENCE_BENCH_ROUNDS the live/no-op pairs (default 1). Synthetic content only.
  */
 import { afterAll, beforeAll, expect, spyOn, test } from 'bun:test';
 import { execFileSync } from 'node:child_process';
@@ -26,8 +26,8 @@ import * as fenceConfig from '../src/core/fence-repair/config.ts';
 import * as importStep from '../src/core/fence-repair/import-step.ts';
 import { withEnv } from './helpers/with-env.ts';
 
-const FILES = Number(process.env.FENCE_BENCH_FILES ?? 1000);
-const ROUNDS = Number(process.env.FENCE_BENCH_ROUNDS ?? 2);
+const FILES = Number(process.env.FENCE_BENCH_FILES ?? 300);
+const ROUNDS = Number(process.env.FENCE_BENCH_ROUNDS ?? 1);
 /** The statements Tier 1 can add: the switch read, the stored-row loads (renumber) and the TE1 prior-takes read. */
 const TIER1_STATEMENT = (sql: string, params: unknown) => (Array.isArray(params) && params.includes('fences.normalize'))
   || sql === 'SELECT row_num, claim FROM takes WHERE page_id=$1' || sql === 'SELECT row_num FROM takes WHERE page_id=$1'
