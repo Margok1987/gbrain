@@ -59,6 +59,12 @@ export function cellsChanged(pair: PairLike, before: RawRow, after: RawRow, ctx:
     const ok = column === 'context' && check.kind === 'facts' ? contextOk(check, text) : cellOk(check, column, text);
     if (!ok) check.failed.push(column);
   }
+  for (const cell of after.extra) {
+    const text = collapse(cell.text);
+    const kept = check.sources.find(s => !s.used && s.text === text);
+    if (kept) use(kept);
+    else if (text) check.failed.push('extra');
+  }
   for (const s of check.sources) if (!s.used && s.text) check.failed.push(s.column ?? 'extra');
   return check.failed;
 }

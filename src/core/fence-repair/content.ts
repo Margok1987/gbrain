@@ -179,6 +179,12 @@ function renumber(pass: Pass, kind: FenceKind): void {
   }
 }
 
+/** The number the row was written with (`0` and negatives included), or null when the cell is not numeric or absent. */
+function writtenNum(row: RawRow): number | null {
+  const n = parseInt(row.byColumn.get('#')?.text ?? '', 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 function finalNum(w: RowWork): number | null {
   return w.newNum ?? w.num;
 }
@@ -190,7 +196,7 @@ function emitFence(pass: Pass, work: FenceWork): void {
     if (!w.plan) continue;
     const row = finalNum(w);
     if (w.newNum !== undefined) {
-      pass.fixes.push({ fence: fence.kind, section: fence.section, row, column: '#', line: w.row.line, class: 'renumber', from: w.num });
+      pass.fixes.push({ fence: fence.kind, section: fence.section, row, column: '#', line: w.row.line, class: 'renumber', from: writtenNum(w.row) });
     }
     for (const change of w.plan.changes) {
       if (change.column === 'context' && change.class === 'kind_map') continue;

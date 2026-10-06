@@ -124,12 +124,10 @@ export interface FenceMessageLocation {
   allowed?: readonly string[];
 }
 
-const SECTION_NAME: Record<FenceSection, string> = { body: 'body', timeline: 'timeline' };
-
 /** The reason's fix with its placeholders filled; a placeholder with no value reads as `?`. */
 export function renderFenceFix(at: FenceMessageLocation): string {
   const values: Record<string, string> = {
-    fence: at.fence, section: SECTION_NAME[at.section], line: at.line === null ? '?' : String(at.line),
+    fence: at.fence, section: at.section, line: at.line === null ? '?' : String(at.line),
     rows: at.rows.length ? at.rows.join(', ') : '?', columns: at.columns.length ? at.columns.map(c => `\`${c}\``).join(', ') : '?',
     allowed: at.allowed?.length ? at.allowed.map(a => `\`${a}\``).join(', ') : 'the canonical values',
   };
@@ -138,7 +136,7 @@ export function renderFenceFix(at: FenceMessageLocation): string {
 
 /** `Fence <reason>: in the <fence> fence (<section>), row(s) N, column(s) C, at line L.` plus the fix. */
 export function fenceMessage(at: FenceMessageLocation): string {
-  const parts = [`in the ${at.fence} fence (${SECTION_NAME[at.section]})`];
+  const parts = [`in the ${at.fence} fence (${at.section})`];
   if (at.rows.length) parts.push(`${at.rows.length > 1 ? 'rows' : 'row'} ${at.rows.join(', ')}`);
   if (at.columns.length) parts.push(`${at.columns.length > 1 ? 'columns' : 'column'} ${at.columns.join(', ')}`);
   if (at.line !== null) parts.push(`at line ${at.line}`);
