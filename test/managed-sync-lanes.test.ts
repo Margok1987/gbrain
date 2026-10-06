@@ -18,7 +18,7 @@ import { WINDOW_CANCEL_MESSAGE } from '../src/core/persistence/sync-window.ts';
 import { acquireShared, leaseDraining, leaseWounded, yieldLease } from '../src/core/persistence/worktree-lease.ts';
 import type { NativeLockHandle } from '../src/core/persistence/native-lock.ts';
 import { withEnv } from './helpers/with-env.ts';
-import { awaitLaneTurn, closeLaneRun, laneOf, laneRoots, laneTask, openLanes } from '../src/core/persistence/sync-lanes.ts';
+import { awaitLaneTurn, closeLaneRun, laneClaim, laneOf, laneRoots, laneTask, openLanes } from '../src/core/persistence/sync-lanes.ts';
 
 const home = mkdtempSync(join(tmpdir(), 'gbrain-managed-lanes-'));
 let engine: BrainEngine | undefined;
@@ -145,6 +145,23 @@ test('closing a lane run stops new lane claims and waits for the lane tasks stil
   await closing;
   expect(state.tasks).toBe(0);
   expect(laneOf({ worktree_id: 'wt-close', intent: { lane: 'run-close' } } as never)).toBeNull();
+});
+
+test('closing a lane run waits for a claim still in flight to count its lane task', async () => {
+  openLanes('wt-claim', 'run-claim', 4, null);
+  const state = laneOf({ worktree_id: 'wt-claim', intent: { lane: 'run-claim' } } as never)!;
+  const claimed = laneClaim();
+  let closed = false;
+  const closing = closeLaneRun('run-claim').then(() => { closed = true; });
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(closed).toBe(false);
+  const release = laneTask(state);
+  claimed();
+  await new Promise(resolve => setTimeout(resolve, 100));
+  expect(closed).toBe(false);
+  release();
+  await closing;
+  expect(laneOf({ worktree_id: 'wt-claim', intent: { lane: 'run-claim' } } as never)).toBeNull();
 });
 
 test('lanes publish several groups at once and every page still commits, attributed to its own request, in manifest order', async () => withEnv({ GBRAIN_HOME: home, GBRAIN_SYNC_BULK_SIZE: '4' }, async () => {

@@ -941,6 +941,16 @@ More: [docs/guides/repair.md#file-removed-during-scan](../../docs/guides/repair.
 |---|---|---|---|---|---|---|
 | The file is over the import size limit (5 MB for Markdown and code, 10 MiB for any sync read), so it was not imported. | Size limits bound parsing, chunking and embedding cost. The same bytes refuse on every retry. | Split the file into smaller files, or leave it out of the source (sync.exclude), then sync or import again. | agent | `repeat the read that failed` | 1 | no |
 
+### fix_not_writable
+
+<a id="fix_not_writable"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A gbrain lint fix was not applied because the file refused the write (EACCES, EPERM or EROFS); the file was left unchanged. | Lint repairs files in place, and this file's permissions or a read-only mount stopped the write; lint reports it and continues with the remaining files. | Make the file writable by the user running gbrain, or pass its directory or file name to gbrain lint --exclude, then lint again. | host_admin | `gbrain doctor --json` | 1 | no |
+
+More: [docs/guides/repair.md#fix-not-writable](../../docs/guides/repair.md#fix-not-writable)
+
 ### follow_approval_required
 
 <a id="follow_approval_required"></a>

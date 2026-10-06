@@ -28,6 +28,7 @@ export interface LaneState extends LanePolicy { coordinationPath: string | null;
   /** Lane tasks this process runs for the run, from the head's claim until the task settles; `closing` stops new claims. */
   tasks: number; closing: boolean }
 const policies = new Map<string, LaneState>();
+let claiming = 0;
 
 /** The drain's lane policy for a worktree; replaces any earlier one. */
 export function openLanes(worktreeId: string, run: string, lanes: number, coordinationPath: string | null): void {
@@ -35,15 +36,25 @@ export function openLanes(worktreeId: string, run: string, lanes: number, coordi
 }
 /**
  * Ends a drain's lane run on every worktree it opened: no new lane claims, then waits (up to `maxMs`) for the
- * lane tasks already running to settle, so a drain never reports while one of its groups is still publishing
- * or aborting. Its unclaimed groups go back to the FIFO claim.
+ * consumer claims in flight and the lane tasks already running to settle, so a drain never reports while one of
+ * its groups is still publishing or aborting. Its unclaimed groups go back to the FIFO claim.
  */
 export async function closeLaneRun(run: string, maxMs = 90_000): Promise<void> {
   const open = [...policies].filter(([, state]) => state.run === run);
   for (const [, state] of open) state.closing = true;
   const started = Date.now();
-  while (open.some(([, state]) => state.tasks > 0) && Date.now() - started < maxMs) await sleep(20);
+  while ((claiming > 0 || open.some(([, state]) => state.tasks > 0)) && Date.now() - started < maxMs) await sleep(20);
   for (const [worktreeId, state] of open) if (policies.get(worktreeId) === state) policies.delete(worktreeId);
+}
+/**
+ * Counts a consumer claim that can take a lane row, from before its claim query until the claimed head's lane
+ * task is counted; returns the release. A head claimed while its run closes is already running before its task
+ * counts, so without this the drain could report before that head settles.
+ */
+export function laneClaim(): () => void {
+  claiming++;
+  let released = false;
+  return () => { if (!released) { released = true; claiming--; } };
 }
 /** Counts a lane task from its head's claim until it settles; returns the release. */
 export function laneTask(state: LaneState): () => void {

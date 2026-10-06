@@ -24,8 +24,3 @@ export function recordFailedPage(result: FailedPages, slug: string, error: strin
   if (result.failed_pages.length < FAILED_PAGES_LISTED) result.failed_pages.push({ slug, error: error.slice(0, 300) });
 }
 
-/** A failed page as it happens: one stderr line, plus its entry in the summary. */
-export function reportFailedPage(result: FailedPages, slug: string, error: string): void {
-  process.stderr.write(`[extract-conversation-facts] ${slug} failed: ${error}\n`);
-  recordFailedPage(result, slug, error);
-}

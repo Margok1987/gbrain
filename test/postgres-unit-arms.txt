@@ -42,6 +42,7 @@ test/managed-cycle-pull-upstream.test.ts
 test/managed-lint.test.ts
 test/managed-maintenance-links.test.ts
 test/managed-sweep-corpus-windows.test.ts
+test/managed-sweep-refused-window-retry.test.ts
 test/managed-sweep-timeline.test.ts
 test/managed-sync-bulk.test.ts
 test/managed-sync-chunker-version.test.ts

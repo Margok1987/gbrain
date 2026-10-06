@@ -13,6 +13,40 @@ import { sanitizeForJsonb } from '../batch-rows.ts';
 import { materializedMarker, materializedMarkerHash, timelineKey, timelineKeyHash } from '../timeline-marker.ts';
 import { opError, OperationError } from '../ops/contract.ts';
 import { readFix } from '../ops/op-fix.ts';
+import { codeEndAt, indexOfOutsideCode, protectedRegions, scanMarkdownCode, type MarkdownCodeMap } from '../fence-scan.ts';
+
+const FENCE_MARKERS=[FACTS_FENCE_BEGIN,FACTS_FENCE_END,TAKES_FENCE_BEGIN,TAKES_FENCE_END];
+const FENCE_PAIRS=[{begin:FACTS_FENCE_BEGIN,end:FACTS_FENCE_END},{begin:TAKES_FENCE_BEGIN,end:TAKES_FENCE_END}];
+
+/** True when `marker` occurs more than once outside markdown code (`code` = that body's scan). */
+function repeatsOutsideCode(body:string,marker:string,code:MarkdownCodeMap):boolean {
+  const first=indexOfOutsideCode(body,marker,0,code);
+  return first!==-1 && indexOfOutsideCode(body,marker,first+marker.length,code)!==-1;
+}
+
+/** True when some occurrence of a fence marker sits in markdown code (`code` = that body's scan). */
+function quotesMarker(body:string,code:MarkdownCodeMap):boolean {
+  for(const marker of FENCE_MARKERS) {
+    for(let at=body.indexOf(marker);at!==-1;at=body.indexOf(marker,at+marker.length)) if(codeEndAt(code,at)!==-1) return true;
+  }
+  return false;
+}
+
+/**
+ * Rows held by fences whose begin sits in markdown code. Readers treat such a
+ * fence as an example and project nothing from it, so a real fence wrapped in
+ * code would silently delete the rows it holds. Keys are `row_num:text`.
+ */
+function quotedFenceRows(fields:string[]):{facts:Set<string>,takes:Set<string>} {
+  const facts=new Set<string>(),takes=new Set<string>();
+  for(const field of fields) for(const region of protectedRegions(field,FENCE_PAIRS).regions) {
+    if(region.read) continue;
+    const text=field.slice(region.start,region.end);
+    if(region.pair===0) for(const f of parseFactsFence(text).facts) facts.add(`${f.rowNum}:${f.claim}`);
+    else for(const t of parseTakesFence(text).takes) takes.add(`${t.rowNum}:${t.claim}`);
+  }
+  return {facts,takes};
+}
 
 type CanonicalBody = Pick<ParsedPage, 'compiled_truth' | 'timeline'>;
 
@@ -226,8 +260,13 @@ function fenceError(message: string, slug: string, sourceId: string, what: strin
 
 export function compileCanonicalProjections(page: ParsedPage, slug: string, sourceId: string) {
   const fields=[page.compiled_truth,page.timeline ?? ''];
-  for(const field of fields) for(const marker of [FACTS_FENCE_BEGIN,FACTS_FENCE_END,TAKES_FENCE_BEGIN,TAKES_FENCE_END]) {
-    if(field.split(marker).length>2) throw fenceError('Each canonical body section must contain at most one facts fence and one takes fence.', slug, sourceId, 'A body section repeats a facts or takes fence marker');
+  let quoting=false;
+  for(const field of fields) {
+    // One code scan per field serves all four marker checks; an example quoted in code is not a second fence.
+    if(!FENCE_MARKERS.some(marker=>field.includes(marker))) continue;
+    const code=scanMarkdownCode(field);
+    if(FENCE_MARKERS.some(marker=>repeatsOutsideCode(field,marker,code))) throw fenceError('Each canonical body section must contain at most one facts fence and one takes fence.', slug, sourceId, 'A body section repeats a facts or takes fence marker');
+    quoting ||= quotesMarker(field,code);
   }
   const factSets=fields.map(parseFactsFence),takeSets=fields.map(parseTakesFence);
   if ([...factSets,...takeSets].some(set=>set.warnings.length)) throw fenceError('A canonical facts or takes fence cannot be parsed losslessly.', slug, sourceId, 'A facts or takes table does not parse cleanly');
@@ -235,7 +274,28 @@ export function compileCanonicalProjections(page: ParsedPage, slug: string, sour
   for(const rows of [facts,takes]) if(new Set(rows.map(row=>row.rowNum)).size!==rows.length) {
     throw fenceError('Canonical row numbers must be unique across the entire page.', slug, sourceId, 'Two facts or takes rows share a row number');
   }
-  return { factRows: extractFactsFromFenceText(facts,slug,sourceId), takes };
+  return { factRows: extractFactsFromFenceText(facts,slug,sourceId), takes, quoted: quoting ? quotedFenceRows(fields) : null };
+}
+
+/**
+ * Refuse, rather than silently delete, rows a fence quoted in markdown code
+ * still holds: readers project nothing from such a fence, so a real fence
+ * wrapped in a code block would otherwise expire its facts and drop its takes.
+ */
+async function refuseQuotedFenceLoss(tx: BrainEngine, pageId: number, quoted: { facts: Set<string>; takes: Set<string> },
+  takeRowsGone: number[], factRows: ReturnType<typeof extractFactsFromFenceText>, slug: string, sourceId: string): Promise<void> {
+  const refuse = () => fenceError('A takes or facts fence sits inside markdown code, so this write would remove the rows it holds.', slug, sourceId,
+    'Move the fence out of the code block (or inline code span), or delete the fence to remove its rows; a fence quoted in code holds rows');
+  if (quoted.takes.size && takeRowsGone.length) {
+    const gone = await tx.executeRaw<{ row_num: number; claim: string }>('SELECT row_num,claim FROM takes WHERE page_id=$1 AND row_num=ANY($2::integer[])', [pageId, takeRowsGone]);
+    if (gone.some(r => quoted.takes.has(`${r.row_num}:${r.claim}`))) throw refuse();
+  }
+  if (quoted.facts.size) {
+    const kept = new Set(factRows.map(f => `${f.row_num}:${f.fact}:${f.visibility}`));
+    const live = await tx.executeRaw<{ row_num: number; fact: string; visibility: string }>(`SELECT row_num,fact,visibility FROM facts
+      WHERE source_id=$1 AND source_markdown_slug=$2 AND row_num IS NOT NULL`, [sourceId, slug]);
+    if (live.some(r => !kept.has(`${r.row_num}:${r.fact}:${r.visibility}`) && quoted.facts.has(`${r.row_num}:${r.fact}`))) throw refuse();
+  }
 }
 
 function takeCollision(): OperationError {
@@ -251,7 +311,7 @@ function takeCollision(): OperationError {
  */
 export async function prepareCanonicalProjections(engine: BrainEngine, page: ParsedPage, slug: string, sourceId: string,
   prior: PageSnapshot | null, writer: ProjectionWriter): Promise<(tx: BrainEngine, pageId?: number) => Promise<void>> {
-  const { factRows, takes } = compileCanonicalProjections(page, slug, sourceId);
+  const { factRows, takes, quoted } = compileCanonicalProjections(page, slug, sourceId);
   const { timeline, exactIncoming, pinned } = classifyTimeline(prior ? await storedTimeline(engine, prior.page.id) : [],
     page, prior?.page ?? null, slug, writer);
   const deletions = JSON.stringify(pinned.filter(row => row.action === 'delete')
@@ -272,6 +332,7 @@ export async function prepareCanonicalProjections(engine: BrainEngine, page: Par
   return async (tx, pageId) => {
     const id = pageId ?? (await tx.readPageSnapshot(slug, { sourceId }))?.page.id;
     if (id == null) return;
+    if (quoted) await refuseQuotedFenceLoss(tx, id, quoted, takeRowsGone, factRows, slug, sourceId);
     // Fact IDs in permanent receipts remain meaningful when a canonical row is
     // removed/replaced. Expire and detach its row position instead of deleting it.
     // Conversation-extractor rows share the page coordinate without a fence

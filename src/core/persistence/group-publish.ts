@@ -36,6 +36,7 @@ import { cancelRows, windowPredecessor } from './sync-window.ts';
 import { clearResolvedRecoveries, completeWrite, ENSURE_COUNTERS_SQL, getWriteRequestById, LOCK_COUNTERS_SQL, markRecovering, prepareRecoveries,
   publicationGroupKey, reclaimReleasedWrite, releaseUnpublishedClaim, renewGroupClaims } from './journal.ts';
 import { principalKey, requestPrincipal, type FileRecoveryRecord, type WriteRequest } from './model.ts';
+import { CLAIM_LOST, DEFAULT_CLAIM_LEASE_TIMING, endLostLease, startClaimLease, type ClaimLeaseTiming } from './claim-lease.ts';
 import { setMemberAttribution, withCoordinatedWrite } from './context.ts';
 import { requestAttribution } from './attribution.ts';
 import { tryAcquirePublicationCapacity } from './pool-capacity.ts';
@@ -312,6 +313,13 @@ export interface GroupExecution {
   settled(row: WriteRequest): void;
   hostId: string;
   hooks?: GroupHooks;
+  /** #5373: renewal timing for the group's claims (default DEFAULT_CLAIM_LEASE_TIMING). */
+  lease?: ClaimLeaseTiming;
+  /**
+   * #5373: receives work still running when the group lets go of its claims: the
+   * renewal in flight, or (`blocksRoot`) the preparation abandoned after a lost claim.
+   */
+  leftRunning?(work: Promise<unknown>, blocksRoot: boolean): void;
 }
 
 /**
@@ -320,21 +328,33 @@ export interface GroupExecution {
  * members one at a time in order. After a member ends in failure the later
  * members are cancelled, and after one is released back to the queue the
  * later ones are released too, so nothing overtakes it. Claims are renewed
- * for the whole group while it runs. Returns whether any member settled.
+ * for the whole group while it runs (claim-lease.ts). If the group stops
+ * holding every member's claim while it is still preparing, it lets go: each
+ * member is released unpublished with `claim_lost` (token-fenced, so a member
+ * another consumer took over keeps its new claim) and the unfinished
+ * preparation goes to `leftRunning`, never to publication. Returns whether
+ * any member settled.
  */
 export async function executeClaimedGroup(engine: BrainEngine, rows: WriteRequest[], run: GroupExecution): Promise<boolean> {
-  let renewing: Promise<unknown> | undefined;
-  const interval = setInterval(() => { renewing ??= renewGroupClaims(engine, rows).catch(() => undefined).finally(() => { renewing = undefined; }); }, 10_000);
-  interval.unref?.();
+  const lease = startClaimLease(async signal => (await renewGroupClaims(engine, rows, 30_000, signal)).size === rows.length,
+    run.lease ?? DEFAULT_CLAIM_LEASE_TIMING);
   if (run.lane) laneClaimed(run.lane, rows);
   try {
     const prepared: Array<{ ok: PreparedMutation } | { error: unknown }> = new Array(rows.length);
     // A put_pages group prepares all of its (at most PAGE_BATCH_GROUP_MAX) pages at once.
     const width = publicationGroupKey(rows[0]!)?.startsWith('batch:') ? PAGE_BATCH_GROUP_MAX : 4;
-    for (let start = 0; start < rows.length; start += width) {
-      await Promise.all(rows.slice(start, start + width).map(async (row, offset) => {
-        try { prepared[start + offset] = { ok: await run.prepare(row) }; } catch (error) { prepared[start + offset] = { error }; }
-      }));
+    const preparing = (async () => {
+      for (let start = 0; start < rows.length; start += width) {
+        await Promise.all(rows.slice(start, start + width).map(async (row, offset) => {
+          try { prepared[start + offset] = { ok: await run.prepare(row) }; } catch (error) { prepared[start + offset] = { error }; }
+        }));
+      }
+    })();
+    if (await lease.whileHeld(preparing) === CLAIM_LOST) {
+      run.leftRunning?.(preparing, true);
+      await endLostLease(lease);
+      for (const row of rows) await releaseUnpublishedClaim(engine, row, 'claim_lost');
+      return false;
     }
     // A put_pages batch is independent page writes: one page's failure never cancels its siblings.
     const independent = publicationGroupKey(rows[0]!)?.startsWith('batch:') === true;
@@ -377,7 +397,7 @@ export async function executeClaimedGroup(engine: BrainEngine, rows: WriteReques
     return progressed;
   } finally {
     if (run.lane) laneFinished(run.lane, rows);
-    clearInterval(interval);
-    await renewing;
+    const renewal = lease.end();
+    if (renewal) run.leftRunning?.(renewal, false);
   }
 }

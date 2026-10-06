@@ -10,6 +10,58 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.97.0] - 2026-10-06
+
+**Fix wave 10: 68 community fixes land as reviewed, rewritten code, and gbrain stops overspending, mislabeling and silently skipping in a long list of everyday paths.**
+
+This release folds in the still-valid fixes from the open contributor backlog. Every change was re-checked against master and given a test that fails without it, and any fix that touched authorization, credentials, shell commands or redaction was rewritten in gbrain's own code. Contributors are credited below.
+
+### Behavior changes for scripts and agents
+
+| Change | What you see |
+|---|---|
+| `put_page` slugs | A new slug ending in `.md`/`.mdx` is refused with `invalid_params` naming the bare slug; an existing page under such a slug still updates and gets `slug_advisory`. A file import whose frontmatter `slug:` ends in `.md` is held as `frontmatter_slug_conflict`. |
+| `config set` | An unregistered `search.*` or `content_sanity.*` key is refused (exit 2) with the nearest registered key; `--force` writes it. `cycle.synthesize_concepts.budget_usd` and `dream.propose_takes.call_timeout_ms` reject out-of-range values. |
+| Exit codes | `transcripts ingest --facts` exits 1 when a page fails extraction; `doctor --remediate` exits 1 when a repair preview failed. |
+| Fact visibility | With `facts.default_visibility=world`, conversation facts are written world-visible. |
+| Take sanitizer | The name or word "dan" is no longer redacted; "DAN", "dan mode" and "do anything now" still are. |
+| Google Calendar | Only events between `historyDays` back and 60 days ahead are written; `sync --full` removes in-window events the calendar no longer lists. |
+| Facts backstop | A maintenance write that keeps a page's body no longer re-extracts facts for a page that was already extracted; never-extracted pages still get extraction. |
+
+### Itemized changes
+
+- **Doctor and onboarding.** Orphan-children repair plans with a correlated anti-join instead of `NOT IN` (#5328). Graph and onboard coverage checks report "not applicable" below 5 entity pages. Duplicate-content advice pins the source and no longer suggests a hard purge. Reconcile audits report database-only pages separately. Managed-brain drift hints use `--no-pull`. Repair previews fail per kind with a redacted reason instead of aborting the plan (#6000). Multi-source drift resolves each source's prefix with `git rev-parse --show-prefix` (#5862). Onboard `--history` records remediation impact. The self-retrieval smoke check after an embedding migration samples distinct pages and is budgeted at its real query length.
+- **Cycle, dream and extraction.** A deferred managed publication no longer fails patterns or drift (#6052). One string-aware JSON close-bracket scanner serves atoms, events, take proposals and fenced replies (#6069 in part). Case-only atom title changes reuse the atom. Synthesize-concepts reads its budget key and says when the cap is hit (#4906). Propose-takes takes a per-call timeout bounded by the phase deadline. Grounding repairs no longer mutate their input (#5911). Quarantined pages are kept out of extraction and lag denominators. Contended synthesis publishes defer.
+- **Facts, loops and timeline.** Non-Latin entity slugs resolve (#5421). `open_loops` accepts an `id` (#5870). Conversation extraction records completion at an exact segment limit, continues explicit-slug batches after a failed page (#6033), and honours `facts.default_visibility`. Refused sweep windows retry once their file check passes (#6048).
+- **Persistence and database.** Postgres schema init pins its advisory lock to one backend on pools larger than one. `connect_timeout` in `database_url` is honoured (capped at the timer limit), and worker pools retry only a handshake timeout. Consumers renew claims through one lease that survives a stuck renewal. A delete of a page with no recorded file publishes database-only. Rollback refuses when the retained copy is gone. Workspace locks key on the real path. Managed transcript ingest writes through the coordinator.
+- **Sync, connectors and Google.** `git pull` runs async and stops on timeout, cancel or worker shutdown. Managed sync refreshes `last_sync_at` when nothing changed. `--retry-failed` counts only failures under the current options. Loops extraction retries a truncated reply once. Calendar sync keeps a bounded window and advances its horizon only after a full list (#5442 in part). Auto-submitted mail no longer opens or closes loops.
+- **AI providers, MCP, search and auth.** OpenRouter rate-limit envelopes retry, and a retry whose last error is a 404 halts as `model_not_found`. Provider errors are classified through one bounded cause walker. Remembered facts carry the MCP session (`_meta.session_id` over HTTP too). `get_versions` takes `limit` and `include_body`. `list_pages` maps an unparseable `updated_after` to `invalid_params`. OAuth job-namespace delegated writes publish within the job's own tree. Search transactions run with JIT off. The fence scanner ignores markers quoted in code, and the remote redaction boundary only ever hides more (#5395 in part).
+- **CLI, tests and tooling.** `gbrain/version` is a public export. Backup failures always carry a message. Smoke tests work without GNU `timeout`. CI shards run files in planned order. A new isolation rule catches tests that configure the AI gateway without resetting it. `jobs smoke` cleans up its own jobs. Subagent tool writes that are accepted but pending are replayed until the job deadline (#5474). Lint anchors preamble removal to the page start (#6190).
+
+### Contributors
+
+Thanks to everyone whose fixes and reports shaped this release: @andreineacsu, @Masashi-Ono0611, @rokas-tarasevicius, @furuchanchan, @javieraldape, @rayers, @oakleaf-agent, @meljendy95, @ghitafilali, @Kyzcreig, @G0-0000, @Jey2311, @KeithGiss, @abudhi19, @clatyceo, @goutamadwant, @harjothkhara, @htcom-code, @jordanschwartz-js, @kerrz2020, @mikez93, @mml-studio, @noelboss, @praggybuilds, @roli-lpci, @wisnewskirobert and @garrytan-agents.
+
+## To take advantage of v0.60.97.0
+
+Nothing to do. If a script writes `.md`-suffixed slugs through `put_page`, drop the suffix; if one sets custom `search.*` keys, check the name `config set` suggests or pass `--force`.
+
+## [0.60.96.0] - 2026-10-06
+
+**A lane catch-up that stops on a failed page now settles every later page before it reports, and two flaky test families are fixed.**
+
+`gbrain sync --drain` with lanes could report `blocked` while one group after the failed page was still claimed and `running`. The consumer cancelled that group a moment later, and no page after the failure was ever published. But an agent that read the receipts right after the drain returned could see a request still in flight. The drain now waits for that claim too, so every page after the failure reads `cancelled` when it reports.
+
+### Itemized changes
+
+- **Lane drain report (#6153, #6189).** A lane group head was counted as a lane task only after its claim query returned. The drain's close (`closeLaneRun`) could see zero tasks during that query and return while the head it had just claimed was `running`. Each consumer claim that can take a lane row now counts from before its query until its task is counted, on both the lane path and the FIFO path, and the close waits for claims in flight as well as tasks. Forced probe: with a 500 ms pause between the claim and the task count, `test/managed-sync-lanes.test.ts` › "a failed page under lanes stops the run" failed 8 of 8 runs before and passed 8 of 8 after. A new unit test pins the close waiting for a claim in flight.
+- **Managed atom compaction tests (#6167, #6168).** The `success` scenarios stopped the persistence consumer while a committed atom's embedding effect was still running. Stopping requeues the effect, and compaction keeps a receipt whose effect is unfinished, so compaction returned 2 instead of 3, and the leftover receipt made the next test return one too many. The helper now waits for the source's effects to settle before it stops the consumer. Forced probe: a 400 ms pause in the embedding effect failed both `success` cases on PostgreSQL and PGLite before the fix and passed after. No assertion changed.
+- **#6129** was fixed by #6130 and hasn't recurred on master since.
+
+## To take advantage of v0.60.96.0
+
+Nothing to do. `gbrain sync --drain` picks up the fix after `gbrain upgrade`.
+
 ## [0.60.95.0] - 2026-10-06
 
 **The full Ubicloud test gate finishes in about five and a half minutes instead of ten to fifteen, and the embedding-migration bad-flag test stops timing out.**

@@ -62,7 +62,7 @@
 
 | Check | What it could not read | Fix |
 | --- | --- | --- |
-| `multi_source_drift` | a source's `local_path` root or a directory below it (`details.unreadable_sources`), or the walk hit its bound (`details.limit` files / `details.timeout_ms`) | fix the path or permissions (`gbrain sources status`); for a large source re-run with `GBRAIN_DRIFT_LIMIT=<files> GBRAIN_DRIFT_TIMEOUT_MS=<ms> gbrain doctor` |
+| `multi_source_drift` | a source's `local_path` root or a directory below it (`details.unreadable_sources`), the walk hit its bound (`details.limit` files / `details.timeout_ms`), or, for a source whose slugs are pinned to its git root, where `local_path` sits in its git work tree (`details.git_root_skipped`) | fix the path or permissions (`gbrain sources status`); for a large source re-run with `GBRAIN_DRIFT_LIMIT=<files> GBRAIN_DRIFT_TIMEOUT_MS=<ms> gbrain doctor`; for a git-root source, check that `git -C <local_path> rev-parse --show-prefix` succeeds (a checkout git can read and that it trusts) |
 | `embed_staleness` | the stale-chunk count (the embed worker's own predicate) | the reason names the database error; re-run `gbrain doctor` once it is fixed |
 | `schema_pack_consistency`, `schema_pack_source_drift` | the pages or config query, or a source's active schema pack | `gbrain schema lint --with-db` runs the same classification locally; `gbrain schema active` debugs pack resolution |
 

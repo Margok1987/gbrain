@@ -11,11 +11,18 @@
  * same runner `gbrain repair` uses, never as Minion jobs. Explicit-only kinds
  * are never planned or run here: the plan lists them with their preview
  * command, and `runRepairSteps` refuses a supplied step that names one.
+ * The remediation plan and run use `planRepairStepsReport`, which isolates
+ * preview errors per kind: a kind whose preview throws becomes a
+ * `RepairPreviewFailure` and the remaining kinds are still previewed.
  */
 import type { BrainEngine } from '../engine.ts';
 import { OperationError } from '../ops/contract.ts';
 import { resolveRepairScope, type RepairKind } from '../repair/core.ts';
 import { AUTO_REPAIR_REGISTRY, explicitKindRequired, repairApplyCommand, repairMaySpend, repairRunner, repairSpec } from '../repair/registry.ts';
+import { cliRenderContext, renderAction, type RenderedAction } from '../agent-output.ts';
+import { readFix } from '../ops/op-fix.ts';
+import { isStatementTimeoutError } from '../retry-matcher.ts';
+import { redactConnectionInfo } from '../audit/redact-connection-info.ts';
 
 export interface RepairPlanStep {
   step: number;
@@ -48,14 +55,55 @@ export interface RepairStepResult {
   message?: string;
 }
 
-/** Brain-wide preview of every kind `--all` runs; kinds with nothing pending are omitted. */
-export async function planRepairSteps(engine: BrainEngine, opts: { noEmbed?: boolean; kinds?: readonly RepairKind[] } = {}): Promise<RepairPlanStep[]> {
+/**
+ * An automatic kind whose read-only preview threw. It is not a step, so it is
+ * neither in the consent selection nor in the plan hash, and it never runs.
+ */
+export interface RepairPreviewFailure { kind: RepairKind; code: 'timeout' | 'preview_failed'; message: string; why: string; fix: RenderedAction }
+
+export interface RepairPlanReport { steps: RepairPlanStep[]; previewFailures: RepairPreviewFailure[] }
+
+const PREVIEW_ERROR_MAX_CHARS = 300;
+
+/** Redact before truncating, so a cut can never split a credential the redactor would have matched. */
+function describePreviewFailure(kind: RepairKind, error: unknown): RepairPreviewFailure {
+  const timedOut = isStatementTimeoutError(error);
+  const detail = redactConnectionInfo(error instanceof Error ? error.message : String(error));
+  const cause = timedOut ? 'hit the database statement timeout (GBRAIN_STATEMENT_TIMEOUT)' : 'raised an error';
+  return {
+    kind,
+    code: timedOut ? 'timeout' : 'preview_failed',
+    message: detail.slice(0, PREVIEW_ERROR_MAX_CHARS),
+    why: `The read-only ${kind} preview ${cause}, so ${kind} is left out of this plan and does not run. Every other kind is planned normally.`,
+    fix: renderAction({
+      ...readFix(`Repeats the ${kind} preview on the brain host to show the error; it writes nothing.`, { argv: ['gbrain', 'repair', kind] }),
+      verify: { argv: ['gbrain', 'doctor', '--remediation-plan', '--json'] },
+    }, cliRenderContext()),
+  };
+}
+
+/** `{ repair_preview_failures }` when any preview failed, else nothing, so a healthy plan's JSON is unchanged. */
+export function previewFailureField(failures: readonly RepairPreviewFailure[]): { repair_preview_failures?: RepairPreviewFailure[] } {
+  return failures.length === 0 ? {} : { repair_preview_failures: [...failures] };
+}
+
+async function collectRepairPlan(
+  engine: BrainEngine,
+  opts: { noEmbed?: boolean; kinds?: readonly RepairKind[] },
+  isolatePreviewErrors: boolean,
+): Promise<RepairPlanReport> {
   const scope = await resolveRepairScope(engine);
   const runner = await repairRunner(engine, { apply: false, noEmbed: opts.noEmbed, logger: { info() {}, warn() {}, error() {} } });
-  const steps: RepairPlanStep[] = [];
+  const report: RepairPlanReport = { steps: [], previewFailures: [] };
+  const { steps } = report;
   for (const spec of AUTO_REPAIR_REGISTRY) {
     if (opts.kinds && !opts.kinds.includes(spec.kind)) continue;
-    const preview = await runner.run(spec.kind, scope);
+    const preview = await runner.run(spec.kind, scope).catch((error: unknown) => {
+      if (!isolatePreviewErrors) throw error;
+      report.previewFailures.push(describePreviewFailure(spec.kind, error));
+      return null;
+    });
+    if (preview === null) continue;
     // contextual-mode stamps only sealed pages; pages the safe-chunks step re-seals become eligible during the run.
     const unlocked = spec.kind === 'contextual-mode' && steps.some(step => step.kind === 'safe-chunks') ? Number(preview.residuals.unsealed_projection ?? 0) : 0;
     if (!preview.affected && !unlocked) continue;
@@ -65,7 +113,17 @@ export async function planRepairSteps(engine: BrainEngine, opts: { noEmbed?: boo
       est_usd_cost: paid ? preview.cost.embedding_usd : 0, lifetime_ids: preview.cost.lifetime_ids, checks: spec.checks,
       rationale: `${preview.affected} item(s) pending for gbrain repair ${spec.kind}${unlocked ? `, plus up to ${unlocked} after safe-chunks re-seals them` : ''}` });
   }
-  return steps;
+  return report;
+}
+
+/** Brain-wide preview of every kind `--all` runs; kinds with nothing pending are omitted. The first preview error propagates. */
+export async function planRepairSteps(engine: BrainEngine, opts: { noEmbed?: boolean; kinds?: readonly RepairKind[] } = {}): Promise<RepairPlanStep[]> {
+  return (await collectRepairPlan(engine, opts, false)).steps;
+}
+
+/** The same preview for the remediation plan and run: a failing kind is reported in `previewFailures` instead of aborting the rest. */
+export async function planRepairStepsReport(engine: BrainEngine, opts: { noEmbed?: boolean; kinds?: readonly RepairKind[] } = {}): Promise<RepairPlanReport> {
+  return collectRepairPlan(engine, opts, true);
 }
 
 /**

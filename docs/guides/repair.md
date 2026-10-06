@@ -908,6 +908,21 @@ read-only preview command (`stale-atoms: gbrain repair stale-atoms`), and
 "explicit_kind_required"`, `preview_command`, `docs`). Run each by name after
 the user agrees (see [Explicit-only repair kinds](#explicit-only-repair-kinds)).
 
+A repair kind whose preview errors (on a large brain this is usually a
+statement timeout) does not stop the plan. Every other kind is still
+previewed, and the failed kind is listed under `Repair kinds whose preview
+failed` with its error code, its error and the read-only command that
+repeats the preview. In `--json` it appears in `repair_preview_failures[]`,
+which is present only when a preview failed. Each entry is
+`{kind, code, message, why, fix}`: `code` is `timeout` for a statement
+timeout (raise `GBRAIN_STATEMENT_TIMEOUT`) and `preview_failed` for anything
+else, `message` is redacted and then capped at 300 characters, and `fix` is
+the read-only preview. A failed kind is never a step, so `gbrain doctor
+--remediate` runs the remaining steps, names the kinds it could not run and
+exits 1. An approval covers only the steps the user was shown: once the
+failed preview succeeds, the plan changes and the run refuses with
+`preview_changed`. Preview the plan again and ask the user.
+
 `gbrain doctor --remediate --yes` runs job steps only. Repair steps run only
 when you also pass `--include-repairs`, which records the user's agreement;
 without it they are listed as `N repair steps skipped (user agreement required):
@@ -1335,6 +1350,16 @@ to check the files that exist now. On a managed brain, `lint --fix` instead
 reports the page as a pending `canonical_file_missing` repair (counted in
 `fix_pending`); see
 [lint repairs waiting on a managed brain](concurrent-writes.md#lint-repairs-waiting-on-a-managed-brain).
+
+### Fix not writable
+
+`fix_not_writable` is a non-fixable `gbrain lint --fix` issue: lint found a
+fixable problem but the file refused the write (`EACCES`, `EPERM` or `EROFS`:
+its permissions or a read-only mount), so the file was left unchanged. The
+issue's `reason` is the lowercased errno. Lint continues with the remaining
+files and counts the page in `fix_pending`; the cycle's lint phase reports
+`warn`, not `fail`. Make the file writable by the user running gbrain, or pass
+its directory or file name to `gbrain lint --exclude`, then run lint again.
 
 ## Related
 

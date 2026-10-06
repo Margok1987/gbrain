@@ -905,7 +905,7 @@ export interface BodyVerification {
   quarantined: QuarantinedClaim[];
   provenance: QuoteProvenance[];
   failures: Record<ClaimFailure, number>;
-  /** New units that pass only because they carry no quote, number or attribution (System One S8 checks these). */
+  /** Substantive new units that pass the mechanical checks, with their final quote repairs (System One S8 checks these). */
   groundingUnits: string[];
 }
 
@@ -1064,7 +1064,17 @@ export function verifyBody(body: string, sources: GroundedSource[], opts: { prio
     } else {
       edits.push(...unitEdits);
       provenance.push(...unitProvenance);
-      if (unitSpans.length === 0 && mentioned.size === 0 && isGroundingCandidate(body, u.start, unquoted)) groundingUnits.push(text);
+      // Mechanical evidence validates a quote or number, not the interpretation
+      // around it, so S8 judges every substantive new passing unit, attributed
+      // and numeric ones and labels around valid quotes included. It sees the
+      // final quote repairs: its quarantine reducer removes units by exact text.
+      if (isGroundingCandidate(body, u.start, masked.slice(u.start, u.end))) {
+        let repaired = text;
+        for (const e of [...unitEdits].sort((a, b) => b.start - a.start)) {
+          repaired = repaired.slice(0, e.start - u.start) + e.text + repaired.slice(e.end - u.start);
+        }
+        groundingUnits.push(repaired);
+      }
     }
   }
 
@@ -1077,12 +1087,11 @@ export function verifyBody(body: string, sources: GroundedSource[], opts: { prio
 /** Units shorter than this many words (labels, headings, fragments) are not claims S8 judges. */
 const MIN_GROUNDING_UNIT_WORDS = 5;
 
-/** A passing unit with no number, not a heading, long enough to be a claim. */
-function isGroundingCandidate(body: string, start: number, unquoted: string): boolean {
+/** A passing prose unit, not a heading, long enough to be a claim. */
+function isGroundingCandidate(body: string, start: number, prose: string): boolean {
   const lineStart = body.lastIndexOf('\n', start - 1) + 1;
   if (/^[ \t]*#{1,6}[ \t]/.test(body.slice(lineStart, start + 1))) return false;
-  if (numericFacts(unquoted).size > 0) return false;
-  return (unquoted.match(/\p{L}[\p{L}'-]*/gu) ?? []).length >= MIN_GROUNDING_UNIT_WORDS;
+  return (prose.match(/\p{L}[\p{L}'-]*/gu) ?? []).length >= MIN_GROUNDING_UNIT_WORDS;
 }
 
 /** Drop REMOVED markers and the empty list items / blank runs they leave, keeping the body's trailing newline. */
@@ -1119,7 +1128,7 @@ function recordList<T>(fm: Record<string, unknown> | undefined, key: string, pic
  */
 export interface VerifiedDreamPage extends VerifiablePage {
   changed: boolean;
-  /** New units that pass only for lack of a quote, number or attribution, per body (S8 input). */
+  /** Substantive new units that pass the mechanical checks, per body (S8 input). */
   groundingUnits: Array<{ body: 'compiled_truth' | 'timeline'; text: string }>;
 }
 

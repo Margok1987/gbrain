@@ -844,7 +844,7 @@ export async function runImport(
         }
       } else {
         const { PostgresEngine } = await import('../core/postgres-engine.ts');
-        const { resolvePoolSize } = await import('../core/db.ts');
+        const { connectWithRetry, resolvePoolSize } = await import('../core/db.ts');
         // Each child keeps the established two-connection pool. GBRAIN_POOL_SIZE
         // controls the parent pool; GBRAIN_MAX_CONNECTIONS clamps the child
         // count above so the combined footprint stays within the operator's cap.
@@ -860,7 +860,7 @@ export async function runImport(
           for (let i = 0; i < actualWorkers; i++) {
             if (signal?.aborted) break;
             const eng = new PostgresEngine();
-            await eng.connect({ database_url: databaseUrl, poolSize: workerPoolSize });
+            await connectWithRetry(eng, { database_url: databaseUrl, poolSize: workerPoolSize }, { retryConnectTimeout: true });
             workerEngines.push(eng);
           }
 
