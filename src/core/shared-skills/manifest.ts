@@ -1,6 +1,6 @@
 import { opError } from '../ops/contract.ts';
 import { sha256 } from '../persistence/digest.ts';
-import { FAILSAFE_SCHEMA, safeLoad } from 'js-yaml';
+import { FAILSAFE_SCHEMA, load } from 'js-yaml';
 import { SHARED_SKILL_LIMITS, type SharedSkillFileInput, type SkillFileClass, type SkillMetadata, type StoredSkillFile } from './model.ts';
 
 export function skillName(value: unknown, field = 'name'): string {
@@ -139,7 +139,7 @@ export function skillToolsDeclared(metadata: Pick<SkillMetadata, 'tools_declared
   if (!/^---[ \t]*\n/.test(normalized)) return false;
   const match = normalized.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/);
   try {
-    const parsed: unknown = match ? safeLoad(match[1], { schema: FAILSAFE_SCHEMA }) : undefined;
+    const parsed: unknown = match ? load(match[1], { schema: FAILSAFE_SCHEMA }) : undefined;
     return !(parsed && typeof parsed === 'object' && !Array.isArray(parsed)) || Object.hasOwn(parsed, 'tools');
   } catch { return true; }
 }
@@ -154,7 +154,7 @@ export function skillMetadata(name: string, files: StoredSkillFile[], params: Re
         `Close skills/${name}/SKILL.md's frontmatter with a --- line after the YAML block (or remove the opening ---), then resubmit.`);
     }
     try {
-      const parsed: unknown = safeLoad(match[1], { schema: FAILSAFE_SCHEMA });
+      const parsed: unknown = load(match[1], { schema: FAILSAFE_SCHEMA });
       if (parsed !== undefined && parsed !== null && (typeof parsed !== 'object' || Array.isArray(parsed))) throw new Error('not a mapping');
       fm = parsed as Record<string, unknown> ?? {};
     } catch {

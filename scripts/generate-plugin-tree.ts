@@ -44,7 +44,7 @@ import { REGISTRATION_SURFACE } from '../src/core/mcp-registration.ts';
 import { operations } from '../src/core/operations.ts';
 import { cliEquivalent } from '../src/core/ops/cli-equivalent.ts';
 import { parseSkillFrontmatter } from '../src/core/skill-frontmatter.ts';
-import { FAILSAFE_SCHEMA, safeLoad } from 'js-yaml';
+import { FAILSAFE_SCHEMA, load } from 'js-yaml';
 // Personas: the SINGLE validation implementation (the harness-bridge CLI
 // imports the same module), so CLI errors and CI errors match by construction.
 import { loadPersonas, type PersonaDef } from '../src/core/skillpack/personas.ts';
@@ -199,7 +199,7 @@ function withWhenToUse(text: string): string {
   if (!fm || triggers.length === 0 || /^when_to_use:/m.test(fm.raw)) return text;
   let description = '';
   try {
-    const data: unknown = safeLoad(fm.raw, { schema: FAILSAFE_SCHEMA });
+    const data: unknown = load(fm.raw, { schema: FAILSAFE_SCHEMA });
     if (data && typeof data === 'object' && typeof (data as { description?: unknown }).description === 'string') description = (data as { description: string }).description;
   } catch { return text; }
   const room = SKILL_LISTING_CHARS - description.length - 1;

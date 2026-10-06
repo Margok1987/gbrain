@@ -67,6 +67,7 @@
 import { extractExitCode, extractRunStatus, recordFailedPage, reportFailedPage } from '../core/facts/conversation-run-status.ts';
 import type { BrainEngine, NewFact } from '../core/engine.ts';
 import type { Page } from '../core/types.ts';
+import { observationDateFrom, resolveObservationDate, type ObservationDate } from '../core/ai/date-grounding.ts';
 import {
   extractFactsFromTurnWithOutcome,
   isFactsExtractionEnabled,
@@ -503,6 +504,31 @@ export function splitIntoSegments(
 // ---------------------------------------------------------------------------
 // Segment rendering with topical/temporal header.
 // ---------------------------------------------------------------------------
+
+/**
+ * Observation date of a conversation segment (date-grounding.ts): the
+ * segment's own timestamp when it came from the transcript itself or the
+ * page's frontmatter date — never the synthetic epoch fallback, and never a
+ * timestamp the parser derived from effective_date (which may be an event
+ * date). Otherwise the page's observation date, or null (unknown).
+ */
+/**
+ * A conversation fact's valid_from: a validated event date the extractor
+ * stated (date-grounding variant) wins; else the segment start, except the
+ * epoch fallback (no trustworthy date → the insert's now() default).
+ */
+function segmentValidFrom(extracted: Date | undefined, startIso: string | undefined): { valid_from?: Date } {
+  if (extracted) return { valid_from: extracted };
+  return startIso && !startIso.startsWith('1970-') ? { valid_from: new Date(startIso) } : {};
+}
+
+export function segmentObservationDate(page: Pick<Page, 'slug' | 'frontmatter' | 'effective_date'>, startIso: string | undefined): ObservationDate | null {
+  const day = startIso?.slice(0, 10);
+  const context = deriveDateContext({ page: page as Page });
+  const explicit = !!day && !day.startsWith('1970-')
+    && (context.source === 'explicit' || context.source === 'frontmatter_date' || day !== context.fallbackDate);
+  return explicit ? observationDateFrom(startIso) : resolveObservationDate({ slug: page.slug, frontmatter: page.frontmatter });
+}
 
 export function renderSegmentForExtraction(
   pageTitle: string,
@@ -1139,6 +1165,7 @@ async function processPage(
         source: PER_SEGMENT_SOURCE_PREFIX,
         engine: state.engine,
         abortSignal: state.signal,
+        observationDate: segmentObservationDate(page, seg.startIso),
       });
       if (!extraction.ok) {
         // #3669 — rethrow BudgetExhausted UNWRAPPED. Wrapping it in a plain
@@ -1190,9 +1217,7 @@ async function processPage(
         // Preserve the conversation's valid time instead of defaulting every
         // extracted fact to extraction time. Epoch-anchored parses have no
         // trustworthy date, so they retain the existing now() fallback.
-        ...(seg.startIso && !seg.startIso.startsWith('1970-')
-          ? { valid_from: new Date(seg.startIso) }
-          : {}),
+        ...segmentValidFrom(fact.valid_from, seg.startIso),
         context:
           fact.context ?? `from ${page.slug} segment ${seg.startIso}..${seg.endIso}`,
       }));

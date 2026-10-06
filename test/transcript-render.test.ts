@@ -5,7 +5,7 @@
  * embed-skip-driven part splitting with overlap.
  */
 import { describe, test, expect } from 'bun:test';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 
 import {
   escapeAnchorLines,
@@ -41,7 +41,7 @@ function splitBody(content: string): string {
 
 function frontmatter(content: string): Record<string, any> {
   const end = content.indexOf('---', 4);
-  return safeLoad(content.slice(4, end)) as Record<string, any>;
+  return load(content.slice(4, end)) as Record<string, any>;
 }
 
 const BASIC = session([

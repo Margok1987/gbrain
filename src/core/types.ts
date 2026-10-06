@@ -800,6 +800,13 @@ export interface ChunkInput {
 }
 
 // Search
+export interface RrfAttribution {
+  raw: number;
+  normalized: number;
+  compiled_truth_boost: number;
+  arms: import('./search/rrf-page-fusion.ts').RrfArmVote[];
+}
+
 export interface SearchResult {
   slug: string;
   page_id: number;
@@ -947,6 +954,18 @@ export interface SearchResult {
   /** RRF + cosine score BEFORE any boost stage mutated it. */
   base_score?: number;
   /**
+   * Explain attribution from weighted RRF fusion: the summed vote (`raw`),
+   * the score after max-normalization (`normalized`), the compiled-truth
+   * factor, and every arm-instance vote behind it (0-based ranks). Absent on
+   * rows that never went through `rrfFusionWeighted` (keyword-only single-arm
+   * paths). Lean MCP rows strip it; `explain` renders it as score_details.
+   */
+  rrf?: RrfAttribution;
+  /** Cosine blend input: the max-normalized RRF score the 0.7/0.3 blend used. */
+  blend_norm_rrf?: number;
+  /** Per-row ranking breakdown, set by the `search`/`query` ops only when the caller passes `explain: true`. */
+  score_details?: import('./search/explain-formatter.ts').ScoreDetails;
+  /**
    * v0.46.15 — RAW query↔chunk cosine similarity from cosineReScore's
    * hydration (the active embedding column's space). Absent on keyword-only
    * / no-embedding paths. This is the ONLY calibrated semantic signal on the
@@ -961,6 +980,12 @@ export interface SearchResult {
   feedback_boost?: number;
   /** The page's content_hash when this result was retrieved (stamped while retrieval feedback is enabled). */
   content_hash?: string | null;
+  /** Caller-visible inbound linking pages behind backlink_boost (stamped with it). */
+  backlink_count?: number;
+  /** Hub-dampening weight (0, 1) applied to the backlink lift; absent when undampened. */
+  backlink_hub_weight?: number;
+  /** Hub-dampening weight (0, 1) applied to the adjacency / cross-source lifts; absent when undampened. */
+  graph_hub_weight?: number;
   /** Multiplier applied by applySalienceBoost. */
   salience_boost?: number;
   /** Multiplier applied by applyRecencyBoost. */
@@ -2130,6 +2155,13 @@ export interface HybridSearchMeta {
    * recall there; the gate is never consulted).
    */
   metadata_boost_gate?: import('./search/metadata-boost-gate.ts').MetadataBoostGateDecision;
+  /**
+   * Hub dampening (`search.hub_dampening`): the half degree in force and how
+   * many results had a graph-derived lift reduced. Stamped whenever the
+   * metadata stages ran, even with dampening `off`, so operators can see the
+   * resolved setting.
+   */
+  hub_dampening?: import('./search/hub-dampening.ts').HubDampeningMeta;
   /**
    * v0.32.x (search-lite): token budget enforcement metadata. Omitted when
    * no budget was applied (backward-compatible with pre-search-lite

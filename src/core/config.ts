@@ -1374,6 +1374,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'search.keyword_arm_confidence_floor',
   // Ranker wave (Phase E3): metadata boost gate — `lexical` skips post-fusion metadata boosts when the vector arm was the only voter (mode.ts reads; `always` | `lexical`).
   'search.metadata_boost_gate',
+  'search.hub_dampening',
   'search.crag_escalation',
   'search.crag_think',
   // Evidence delivery (search/evidence-delivery.ts): default unit (auto),
@@ -1446,6 +1447,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   // B-16: confidence stored for an extracted candidate whose confidence is
   // missing or non-numeric (a number in 0..1). Unset keeps the legacy 1.0.
   'facts.extraction_missing_confidence',
+  'extraction.date_grounding', 'facts.attribution', // extraction prompt variants (facts/extract.ts getExtractorVariant)
   // [ENG-8] Brain-level default visibility for facts writes when the caller
   // didn't specify one: 'private' (default) | 'world'. Resolved by
   // src/core/facts/visibility.ts; explicit caller values always win.

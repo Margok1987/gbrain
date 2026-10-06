@@ -709,7 +709,9 @@
         "  --embedding-column         Registered embedding column.",
         "  --adaptive-return          true when one answer is wanted (fewer rows; never returns empty); omit for breadth.",
         "  --autocut                  Default on (never returns empty); false gives full top-K for breadth, unlike adaptive_return.",
-        "  --relational               Relationship-graph arm (default on)."
+        "  --relational               Relationship-graph arm (default on).",
+        "  --explain                  Per-row score_details.",
+        "  --explain-target           Expected page (slug or source:slug): why it is missing."
       ]
     },
     {

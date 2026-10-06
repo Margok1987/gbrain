@@ -30,7 +30,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 import ts from 'typescript';
 import { ARMS_LIST, readArmsList } from './postgres-unit-arms.ts';
 
@@ -143,7 +143,7 @@ export function postgresLanes(): Map<string, string> {
   const add = (path: string, lane: string) => { if (!laned.has(path)) laned.set(path, lane); };
   for (const path of readArmsList(ROOT).files) add(path, ARMS_LIST);
   for (const workflow of files(join(ROOT, '.github', 'workflows'), name => /\.ya?ml$/.test(name))) {
-    const doc = safeLoad(readFileSync(workflow, 'utf8')) as { env?: Record<string, unknown>; jobs?: Record<string, { env?: Record<string, unknown>; steps?: Array<{ name?: string; env?: Record<string, unknown>; run?: string }> }> } | undefined;
+    const doc = load(readFileSync(workflow, 'utf8')) as { env?: Record<string, unknown>; jobs?: Record<string, { env?: Record<string, unknown>; steps?: Array<{ name?: string; env?: Record<string, unknown>; run?: string }> }> } | undefined;
     for (const [jobName, job] of Object.entries(doc?.jobs ?? {})) for (const step of job.steps ?? []) {
       const run = String(step.run ?? '');
       if (!(step.env?.DATABASE_URL || job.env?.DATABASE_URL || doc?.env?.DATABASE_URL || /\bDATABASE_URL=/.test(run))) continue;

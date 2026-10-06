@@ -30,7 +30,7 @@
 # Stale-VM sweeps are off by default. With UBI_GC_HOURS set to a positive
 # number, every `up` first destroys this owner's VMs older than that; `gc HOURS`
 # runs the same sweep on demand. Neither ever touches another owner's VMs.
-set -euo pipefail
+set -Eeuo pipefail
 # Keep heredoc bodies on temp files, not the pipe window (test/heredoc-pipe-deadlock.test.ts).
 BASH_COMPAT=50
 
@@ -47,6 +47,24 @@ PREFIX="ubirun"
 
 die() { echo "ubi-runner: $*" >&2; exit 1; }
 log() { echo "ubi-runner: $*" >&2; }
+
+# Bash 5.2 can lose a signal trap: when the signal lands just before the shell
+# parses a $(...), the trap runs inside that parse, fails to parse itself
+# ("trap: line 2: unexpected EOF while looking for matching `)'") and the shell
+# exits 2 without running it (fixed in bash 5.3). The EXIT trap still runs.
+# The only other exit 2 here is a failed command, which sets FAILED through
+# the ERR trap, so finish reports an exit 2 without FAILED as the signal's 130.
+FAILED=""
+trap 'FAILED=1' ERR
+
+# finish STATUS NAME: EXIT handler of `up` and `run`. Destroys NAME unless it
+# is empty, then exits with STATUS.
+finish() {
+  local rc=$1
+  [ "$rc" != 2 ] || [ -n "$FAILED" ] || rc=130
+  [ -z "$2" ] || cmd_down "$2" || log "WARNING: failed to destroy $2; run: $0 down $2"
+  exit "$rc"
+}
 
 for bin in curl python3 ssh ssh-keygen tar; do
   command -v "$bin" >/dev/null || die "$bin is required"
@@ -408,11 +426,11 @@ cmd_run() {
   RUN_VM=$name
   # Armed before the create request: an interrupted `up` still destroys its VM.
   # A second signal must not cut teardown short, so the EXIT handler ignores them.
-  trap 'trap "" INT TERM HUP QUIT; cmd_down "$RUN_VM" || log "WARNING: failed to destroy $RUN_VM; run: $0 down $RUN_VM"' EXIT
+  trap 'rc=$?; trap "" INT TERM HUP QUIT; finish "$rc" "$RUN_VM"' EXIT
   trap 'exit 130' INT TERM HUP QUIT
   cmd_up "${up_args[@]}" >/dev/null
   if [ "$keep" = 1 ]; then
-    trap - EXIT
+    RUN_VM=""
     log "--keep: leaving $name running; destroy with: $0 down $name"
   fi
 
@@ -480,7 +498,7 @@ case $cmd in
 esac
 case $cmd in
   run) cmd_run "$@" ;;
-  up) trap 'trap "" INT TERM HUP QUIT; [ -z "$UP_NAME" ] || [ -n "$UP_READY" ] || cmd_down "$UP_NAME" || log "WARNING: failed to destroy $UP_NAME; run: $0 down $UP_NAME"' EXIT
+  up) trap 'rc=$?; trap "" INT TERM HUP QUIT; [ -z "$UP_READY" ] || UP_NAME=""; finish "$rc" "$UP_NAME"' EXIT
       trap 'exit 130' INT TERM HUP QUIT
       cmd_up "$@" ;;
   ssh) name=$1; shift; load "$name"

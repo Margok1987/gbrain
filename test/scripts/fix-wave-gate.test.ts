@@ -13,7 +13,7 @@ import { describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { safeLoad } from 'js-yaml';
+import { load as loadYaml } from 'js-yaml';
 import {
   COMMENT_MARKER, MAINTAINERS, OVERRIDE_LABEL, decide, gateMessage, runGate,
   type GateClient, type GateEvent, type TimelineEvent,
@@ -127,7 +127,7 @@ describe('fix-wave gate decision', () => {
 describe('fix-wave gate workflow', () => {
   const text = readFileSync(join(ROOT, '.github', 'workflows', 'fix-wave-gate.yml'), 'utf8');
   type Step = { uses?: string; run?: string; with?: Record<string, unknown>; env?: Record<string, string> };
-  const wf = safeLoad(text) as { on: Record<string, { branches: string[]; types: string[] }>; permissions: unknown; jobs: Record<string, { permissions: Record<string, string>; steps: Step[]; if?: string }> };
+  const wf = loadYaml(text) as { on: Record<string, { branches: string[]; types: string[] }>; permissions: unknown; jobs: Record<string, { permissions: Record<string, string>; steps: Step[]; if?: string }> };
 
   test('a PR that edits the workflow or the gate script cannot change its own result', async () => {
     // pull_request_target runs the default-branch copy of both files; a pull_request trigger would run the PR's copy.

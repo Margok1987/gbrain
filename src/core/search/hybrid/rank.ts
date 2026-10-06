@@ -11,6 +11,7 @@ import { type FusionListEntry, type VectorArm, composeFusionLists } from '../fus
 import { type HybridRequest, applyIdentityBoosts, emitHybridMeta } from './request.ts';
 import type { KeywordArmConfidenceDecision } from '../arm-confidence.ts';
 import { type MetadataBoostGateDecision, decideMetadataBoosts, lexicalArmsVoted } from '../metadata-boost-gate.ts';
+import type { HubDampeningMeta } from '../hub-dampening.ts';
 import { type PostFusionOpts, RRF_K, cosineReScore, resolveWalkDedupCap, rrfFusionWeighted, runPostFusionStages, stampContentFlags, stampUnverifiedExtractions, textVectorArmNonEmpty } from '../hybrid.ts';
 import { type RelationalEvidenceSlotDecision, ensureRelationalEvidenceSlot } from '../relational-recall.ts';
 import { type RelationalRerankPinDecision, pinRelationalRows } from '../relational-rerank-pin.ts';
@@ -129,11 +130,20 @@ export async function fuseArms(
     },
   });
 
+  // explain_target: per-arm presence (keyword before and after relaxed-row demotion).
+  const trace = opts?.explainTarget;
+  if (trace) {
+    trace.observe('arm:keyword_raw', keywordResults);
+    trace.observe('arm:title_raw', titleResults);
+    for (const entry of allLists) trace.observe(`arm:${entry.arm ?? 'list'}`, entry.list);
+  }
+
   // issue #160: stamp unverified auto-extracted stubs across ALL candidate
   // arms BEFORE fusion so the compiled-truth authority boost skips them.
   await stampUnverifiedExtractions(engine, allLists.flatMap((l) => l.list), opts);
 
-  let fused = rrfFusionWeighted(allLists, ctBoost);
+  const attribute = opts?.explain === true || trace !== undefined;
+  let fused = rrfFusionWeighted(allLists, ctBoost, attribute);
 
   // Cosine re-scoring before dedup so semantically better chunks survive.
   // v0.36 (D9): hydrate from the active embedding column so rescore happens
@@ -145,12 +155,14 @@ export async function fuseArms(
     fused = await cosineReScore(
       engine, fused, queryEmbedding, unifiedDone ? 'embedding_multimodal' : resolvedCol.name,
       imageQueryEmbedding && !unifiedDone ? { queryEmbedding: imageQueryEmbedding, column: 'embedding_image' } : undefined,
+      attribute,
     );
   }
 
   // Phase E3 (Cat 13): metadata boost gate — decided from the SAME lexical
   // lists composeFusionLists just fused (post relaxed-row demotion); image
   // modality never skips (no lexical arm ran); stamped on meta even under `always`.
+  let hubDampening: HubDampeningMeta | undefined;
   const metadataBoostGate = decideMetadataBoosts({
     gate: resolvedMode.metadata_boost_gate, modality: effectiveModality,
     lexicalVoted: lexicalArmsVoted({
@@ -165,13 +177,15 @@ export async function fuseArms(
   if (fused.length > 0) {
     await runPostFusionStages(engine, fused, {
       ...postFusionOpts, skipMetadataBoosts: !metadataBoostGate.boosts_applied,
+      onHubDampening: (m) => { hubDampening = m; },
     });
     // v0.32.x search-lite: intent exact-match boost (entity/event intents).
     // No-op when boost factor is 1.0 (general intent or weighting disabled).
     await applyIdentityBoosts(req, fused);
     fused.sort((a, b) => b.score - a.score);
   }
-  return { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate };
+  trace?.observe('fused', fused);
+  return { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate, hubDampening };
 }
 
 /** A2 two-pass structural expansion (default off); grows `fused` in place and returns the dedup options. */
@@ -430,7 +444,7 @@ export async function sizeReturnPool(
 export async function finalizeHybridResults(
   req: HybridRequest,
   returnPool: SearchResult[],
-  { relaxedDropped, adaptiveDecision, autocutDecision, relationalSlotDecision, relationalRerankPin, keywordArmConfidence, metadataBoostGate }: {
+  { relaxedDropped, adaptiveDecision, autocutDecision, relationalSlotDecision, relationalRerankPin, keywordArmConfidence, metadataBoostGate, hubDampening }: {
     relaxedDropped: number;
     adaptiveDecision: AdaptiveReturnDecision | undefined;
     autocutDecision: AutocutDecision | undefined;
@@ -438,15 +452,18 @@ export async function finalizeHybridResults(
     relationalRerankPin: RelationalRerankPinDecision | undefined;
     keywordArmConfidence: KeywordArmConfidenceDecision | undefined;
     metadataBoostGate: MetadataBoostGateDecision;
+    hubDampening?: HubDampeningMeta;
   },
 ): Promise<SearchResult[]> {
   const { engine, opts, resolvedMode, resolvedCol, limit, offset, suggestions, detailResolved, degraded } = req;
   const sliced = returnPool.slice(offset, offset + limit);
+  opts?.explainTarget?.observe('limit_slice', sliced);
   // v0.32.3 search-lite: budget enforcement at the main return path.
   // hybridSearchCached used to be the only place this fired; now bare
   // hybridSearch enforces it too so eval-replay + eval-longmemeval see
   // the same budget behavior as the production query op.
   const { results: budgeted, meta: budgetMeta } = enforceTokenBudget(sliced, resolvedMode.tokenBudget);
+  opts?.explainTarget?.observe('token_budget', budgeted);
   await stampContentFlags(engine, budgeted, opts);
   req.lastResultsCount = budgeted.length;
   req.lastRank1Score = budgeted[0] ? (budgeted[0].base_score ?? budgeted[0].score) : undefined;
@@ -471,6 +488,7 @@ export async function finalizeHybridResults(
     ...(relationalRerankPin ? { relational_rerank_pin: relationalRerankPin } : {}),
     ...(keywordArmConfidence ? { keyword_arm_confidence: keywordArmConfidence } : {}),
     metadata_boost_gate: metadataBoostGate,
+    ...(hubDampening ? { hub_dampening: hubDampening } : {}),
   });
   return budgeted;
 }

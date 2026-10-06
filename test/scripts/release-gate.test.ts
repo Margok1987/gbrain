@@ -9,7 +9,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { safeLoad } from 'js-yaml';
+import { load } from 'js-yaml';
 import { evaluate, gate, GATED, type GateDeps, type GateRun } from '../../scripts/release-gate.ts';
 
 const A = 'a'.repeat(40);
@@ -93,7 +93,7 @@ describe('release gate', () => {
 });
 
 describe('release.yml waits for the CI gate', () => {
-  const wf = safeLoad(readFileSync(join(import.meta.dir, '../../.github/workflows/release.yml'), 'utf8')) as { on: Record<string, unknown>; jobs: Record<string, { needs?: string[] | string; if?: string; steps: Array<{ run?: string; with?: Record<string, string>; env?: Record<string, string> }>; permissions?: Record<string, string> }> };
+  const wf = load(readFileSync(join(import.meta.dir, '../../.github/workflows/release.yml'), 'utf8')) as { on: Record<string, unknown>; jobs: Record<string, { needs?: string[] | string; if?: string; steps: Array<{ run?: string; with?: Record<string, string>; env?: Record<string, string> }>; permissions?: Record<string, string> }> };
   test('build, release, latest-stable and the publish jobs need ci-gate and use its commit', () => {
     expect(wf.on.workflow_dispatch).toBeDefined();
     const gateJob = wf.jobs['ci-gate']!;

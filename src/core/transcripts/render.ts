@@ -27,7 +27,7 @@
  * per-session id would make parts 2..N skip as cross-slug duplicates.
  */
 
-import { safeDump } from 'js-yaml';
+import { dumpFrontmatterYaml } from '../data-frontmatter.ts';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_BYTES_WARN } from '../content-sanity.ts';
@@ -278,7 +278,7 @@ export interface RenderedPart {
 }
 
 export function renderPartContent(frontmatter: Record<string, unknown>, body: string): string {
-  return `---\n${safeDump(frontmatter, { lineWidth: 1000 })}---\n\n${body}\n`;
+  return `---\n${dumpFrontmatterYaml(frontmatter, { lineWidth: 1000 })}---\n\n${body}\n`;
 }
 
 export interface RenderSessionResult {

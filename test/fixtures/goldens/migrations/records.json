@@ -17,13 +17,12 @@
       "PERSISTENCE_SYNC_RUN_INDEXES": "e1b12613c5fd2facb850e6857b0bddcf49b2478ec258fa226fe15e71e55df9c1",
       "TOKEN_TTL_MAX_SECONDS": "f4a45bec6ec0bacc859dc57732ceb76cec7eb72f242b5a6c89d47190d0525ab4",
       "TOKEN_TTL_MIN_SECONDS": "441d8ce6bd21f753de90abd3013eaa9992a469ea60c590f1005533618199aa25",
-      "buildIndexOnline": "c3c076436d7a1d161b94862125cafb9d3ba14d06e296a6379d6149452610285c",
+      "buildIndexOnline": "ed5378b90f24f7d662e02865cf73af4248e348002661f8fbfd8ee1087c60a3e5",
       "clampOAuthTokenTtls": "b1e94ea8f5b3c3870a56b0f6d00d0a274c2e9dcad912b828848aec250732645f",
       "dropInvalidConcurrentIndex": "6864d844b7dfb2fbecdd0fb9c73e06248473376feb794b3fe58f036c70d2d44c",
       "getFtsLanguage": "0d790b4c4af1f67a2a1bbd59470beb13f434917b381931baf8404a41c5d903db",
       "grantFromRow": "2d0603bb0f964d7e45e04aa76bac54cd4f6f63c91a8d9f028b60b4792bc1695e",
       "hnswMaxDimsForType": "a187cdcc520f813b7c39da97ce53da58509232ed9f851627ef41abfe1b68bd26",
-      "migrateAutoThinkToPins": "acdb45b8a1c474004b119f900ddd4a902d98681d6379edad15708d87dd834bb4",
       "migrateConnectorCheckpoints": "e0403022a56559556c82a9fa1e90d928f36e1d09c7db570e1d788a87d2dc9521",
       "migrateLegacyTokens": "6e4abe3670127e7a495b56ecbf9f5789edd3a7362d45704656c2210a85b27f4c",
       "migrationNotice": "9a6607b26a9719ef1833571b137bc8ebfcd1e16d545e89ff8728cf3ccbcbb409",
@@ -2866,8 +2865,8 @@
         "idempotent": true,
         "name": "f1_write_attribution",
         "sql": {
-          "length": 14289,
-          "sha256": "7ea729556506f9d73682f50fb7c26950a61cc3b60ab82d3d2fcbd4252956fb9f"
+          "length": 14327,
+          "sha256": "b33d4cab4dd9f1bed8e7847e800b632c7c6b1ac800c19ddf12d176f83b8b0cd0"
         },
         "sqlFor": "absent",
         "transaction": "absent",
@@ -3155,18 +3154,12 @@
         "version": 212
       },
       {
-        "handler": {
-          "form": "arrow",
-          "helpers": [
-            "migrateAutoThinkToPins"
-          ],
-          "sha256": "6538d483dacf5b76e4eb837603082e0c8611c613f6c534007fa2f2b197e1e1ed"
-        },
+        "handler": "absent",
         "idempotent": true,
-        "name": "pinned_questions",
+        "name": "facts_attributed_to",
         "sql": {
-          "length": 2746,
-          "sha256": "07ff5ebf8abd16f5edf1bb76318ef541e7a74a3c275a78dac04acb103858e93b"
+          "length": 9118,
+          "sha256": "2e772deed199aba5dc05c6b9f88b70c57a6b50dc724d60b0e9eca684c66f63ba"
         },
         "sqlFor": "absent",
         "transaction": "absent",

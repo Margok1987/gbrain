@@ -10,6 +10,9 @@ Two decisions shape every gbrain lookup, and this guide covers both:
    `gbrain query` (hybrid), or `gbrain get` (direct). This is the
    per-lookup decision an agent makes on every question.
 
+To see how a specific result was ranked, or why an expected page is missing,
+see [Explaining search results](search-explain.md).
+
 ## The three mode bundles
 
 A search mode is a named preset for retrieval knobs. Operation-level options
@@ -34,6 +37,7 @@ and maintenance commands remain available.
 | `relational_rerank_pin`       | 3              | 3          | 3              |
 | `keyword_arm_confidence_floor` | `null` (off)  | `null` (off) | `null` (off)  |
 | `metadata_boost_gate`         | `lexical`      | `lexical`  | `lexical`      |
+| `hub_dampening`               | `off`          | `off`      | `off`          |
 | `searchLimit` default         | 10             | 25         | 50             |
 | `reranker` (cross-encoder)    | off            | `voyage:rerank-2.5` | `voyage:rerank-2.5` |
 | `autocut` (rerank-cliff cut)  | off            | off        | off            |

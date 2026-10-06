@@ -982,6 +982,18 @@
         },
         {
           "category": "brain",
+          "message": "inbound links per page p50 0, p90 0, p99 0, max 0 over 0 pages; hub dampening is off (search.hub_dampening). To see whether hub pages crowd a query, run gbrain search \"<query>\" --explain and read each row's backlink inbound count and hub weight.",
+          "name": "hub_degree_shape",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
+          "message": "Relative dates resolve against each source's observation date in fact extraction, dream synthesis, extract_atoms and propose_takes (the default). life chronicle events keep their current prompt unless extraction.date_grounding is set to true. Facts extracted before this was on keep their original wording; re-extract a source only with the user's consent (gbrain extract-conversation-facts --source-id <id> --dry-run previews it).",
+          "name": "extraction_date_grounding",
+          "status": "ok"
+        },
+        {
+          "category": "brain",
           "message": "Sampled 0 pages; no bare-tweet phrases or external links.",
           "name": "integrity",
           "status": "ok"

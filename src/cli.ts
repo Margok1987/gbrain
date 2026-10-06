@@ -1014,7 +1014,8 @@ export function resolveQueryImage(
 }
 
 export function parseOpArgs(op: Operation, args: string[]): Record<string, unknown> {
-  const params: Record<string, unknown> = {};
+  // `gbrain search --explain`: the CLI-local formatter flag also asks the op for score attribution.
+  const params: Record<string, unknown> = op.name === 'search' && args.includes('--explain') ? { explain: true } : {};
   const positional = op.cliHints?.positional || [];
   let posIdx = 0;
 
@@ -1328,7 +1329,8 @@ export function findUnknownOpFlag(op: Operation, args: string[]): string | null 
       if (m[2] === undefined && isBooleanLiteral(args[i + 1])) i++;
       continue;
     }
-    if ((rawKey === 'explain' || rawKey === 'help') && m[2] === undefined) continue;
+    // Bare-only even where an op also declares `explain` (search/query): the `=` form is refused, never parsed as a value.
+    if (rawKey === 'explain' || rawKey === 'help') { if (m[2] === undefined) continue; return `--${rawKey}`; }
     if (rawKey === 'source' || rawKey === 'dry-run') {
       // Non-boolean-style CLI-locals consume the next token as their value
       // in parseOpArgs (source does; dry-run is boolean-read) — mirror the
@@ -1648,6 +1650,8 @@ export function formatResult(
       if (answerId && results.length > 0) process.stderr.write(`answer: ${answerId} (rate with: gbrain rate ${answerId} 1-5)\n`);
       if (params.json === true) {
         if (incompleteNotice) process.stderr.write(incompleteNotice);
+        // --explain --json: the same per-row score_details object MCP `explain: true` returns.
+        if (getCliOptions().explain) for (const r of results) r.score_details ??= require('./core/search/explain-formatter.ts').buildScoreDetails(r);
         return JSON.stringify(answerId ? results.map(r => ({ ...r, answer_id: answerId })) : results, null, 2) + '\n';
       }
       // T15/FOV-1: an empty result names its cause when the pipeline told us

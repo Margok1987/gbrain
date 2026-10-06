@@ -82,7 +82,7 @@
           "expireFact: (id: number, opts?: { supersededBy?: number; at?: Date; }) => Promise<boolean>",
           "findAnomalies: (opts: AnomaliesOpts) => Promise<AnomalyResult[]>",
           "findByTitleFuzzy: (name: string, dirPrefix?: string, minSimilarity?: number, sourceId?: string) => Promise<{ slug: string; similarity: number; } | null>",
-          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; }) => Promise<FactRow[]>",
+          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; attributedTo?: FactAttribution | null; }) => Promise<FactRow[]>",
           "findDuplicatePage?: ((sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>) | undefined",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
           "findOrphanPages: (opts?: PageReadScope & { sourceId?: string; sourceIds?: string[]; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
@@ -219,7 +219,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; sealChunkerVersion?: number; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; selfContained?: boolean; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "BrainEngine"
@@ -639,7 +639,7 @@
         "kind": "type",
         "name": "EvalCaptureFailureReason",
         "signature": [
-          "\"db_down\" | \"rls_reject\" | \"check_violation\" | \"scrubber_exception\" | \"other\""
+          "\"other\" | \"db_down\" | \"rls_reject\" | \"check_violation\" | \"scrubber_exception\""
         ]
       },
       {
@@ -713,6 +713,7 @@
           "detail_resolved: \"low\" | \"medium\" | \"high\" | null",
           "embedding_column?: string | undefined",
           "expansion_applied: boolean",
+          "hub_dampening?: HubDampeningMeta | undefined",
           "intent?: \"entity\" | \"temporal\" | \"event\" | \"concept\" | \"general\" | undefined",
           "keyword_arm_confidence?: KeywordArmConfidenceDecision | undefined",
           "metadata_boost_gate?: MetadataBoostGateDecision | undefined",
@@ -1029,7 +1030,7 @@
           "explainVectorSearch: (embedding: Float32Array, opts?: SearchOpts) => Promise<Record<string, unknown>>",
           "findAnomalies: (opts: AnomaliesOpts) => Promise<AnomalyResult[]>",
           "findByTitleFuzzy: (name: string, dirPrefix?: string, minSimilarity?: number, sourceId?: string) => Promise<{ slug: string; similarity: number; } | null>",
-          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; }) => Promise<FactRow[]>",
+          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; attributedTo?: FactAttribution | null; }) => Promise<FactRow[]>",
           "findDuplicatePage: (sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
           "findOrphanPages: (opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
@@ -1202,7 +1203,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; sealChunkerVersion?: number; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; selfContained?: boolean; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "PostgresEngine",
@@ -1279,6 +1280,16 @@
           "type: \"vector\" | \"halfvec\""
         ],
         "name": "ResolvedColumn"
+      },
+      {
+        "kind": "interface",
+        "members": [
+          "arms: RrfArmVote[]",
+          "compiled_truth_boost: number",
+          "normalized: number",
+          "raw: number"
+        ],
+        "name": "RrfAttribution"
       },
       {
         "kind": "interface",
@@ -1368,7 +1379,10 @@
           "alias_hit?: boolean | undefined",
           "alias_resolved_boost?: number | undefined",
           "backlink_boost?: number | undefined",
+          "backlink_count?: number | undefined",
+          "backlink_hub_weight?: number | undefined",
           "base_score?: number | undefined",
+          "blend_norm_rrf?: number | undefined",
           "chronicle_boost?: number | undefined",
           "chunk_id: number",
           "chunk_index: number",
@@ -1394,6 +1408,7 @@
           "graph_adjacency_hits?: number | undefined",
           "graph_cross_source_boost?: number | undefined",
           "graph_cross_source_hits?: number | undefined",
+          "graph_hub_weight?: number | undefined",
           "graph_session_demoted?: boolean | undefined",
           "graph_session_prefix?: string | undefined",
           "injection_p?: number | undefined",
@@ -1416,8 +1431,10 @@
           "rerank_score_kind?: \"rubric\" | undefined",
           "reranker_delta?: number | undefined",
           "result_type?: \"fact\" | undefined",
+          "rrf?: RrfAttribution | undefined",
           "salience_boost?: number | undefined",
           "score: number",
+          "score_details?: ScoreDetails | undefined",
           "session_demote_factor?: number | undefined",
           "slug: string",
           "source_id?: string | undefined",
@@ -1631,7 +1648,7 @@
         "kind": "type",
         "name": "ChatRole",
         "signature": [
-          "\"user\" | \"tool\" | \"system\" | \"assistant\""
+          "\"user\" | \"assistant\" | \"tool\" | \"system\""
         ]
       },
       {
@@ -3213,7 +3230,7 @@
           "expireFact: (id: number, opts?: { supersededBy?: number; at?: Date; }) => Promise<boolean>",
           "findAnomalies: (opts: AnomaliesOpts) => Promise<AnomalyResult[]>",
           "findByTitleFuzzy: (name: string, dirPrefix?: string, minSimilarity?: number, sourceId?: string) => Promise<{ slug: string; similarity: number; } | null>",
-          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; }) => Promise<FactRow[]>",
+          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; attributedTo?: FactAttribution | null; }) => Promise<FactRow[]>",
           "findDuplicatePage?: ((sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>) | undefined",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
           "findOrphanPages: (opts?: PageReadScope & { sourceId?: string; sourceIds?: string[]; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
@@ -3350,7 +3367,7 @@
           "upsertChunks: (slug: string, chunks: ChunkInput[], opts?: { sourceId?: string; embeddingColumn?: ResolvedColumn; expectedRevision?: string; sealChunkerVersion?: number; } & BatchOpts) => Promise<void>",
           "upsertEventProjection: (opts: { depthSlug: string; eventSlug: string; date: string; summary: string; detail?: string; sourceId?: string; }) => Promise<{ projected: boolean; }>",
           "upsertFile: (spec: FileSpec) => Promise<{ id: number; created: boolean; }>",
-          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; }) => Promise<T>",
+          "withReservedConnection: <T>(fn: (conn: ReservedConnection) => Promise<T>, opts?: { route?: \"ordinary\"; selfContained?: boolean; }) => Promise<T>",
           "writeContradictionsRun: (row: { run_id: string; judge_model: string; prompt_version: string; queries_evaluated: number; queries_with_contradiction: number; total_contradictions_flagged: number; wilson_ci_lower: number; wilson_ci_upper: number; judge_errors_total: number; cost_usd_total: number; duration_ms: number; source_tier_breakdown: Record<string, unknown>; report_json: Record<string, unknown>; }) => Promise<boolean>"
         ],
         "name": "BrainEngine"
@@ -3416,6 +3433,13 @@
       },
       {
         "kind": "type",
+        "name": "FactAttribution",
+        "signature": [
+          "\"user\" | \"assistant\" | \"other\""
+        ]
+      },
+      {
+        "kind": "type",
         "name": "FactInsertStatus",
         "signature": [
           "\"inserted\" | \"duplicate\" | \"superseded\""
@@ -3447,6 +3471,7 @@
       {
         "kind": "interface",
         "members": [
+          "attributed_to?: FactAttribution | null | undefined",
           "confidence: number",
           "consolidated_at: Date | null",
           "consolidated_into: number | null",
@@ -3557,6 +3582,7 @@
       {
         "kind": "interface",
         "members": [
+          "attributed_to?: FactAttribution | null | undefined",
           "claim_metric?: string | null | undefined",
           "claim_period?: string | null | undefined",
           "claim_unit?: string | null | undefined",
@@ -6026,7 +6052,7 @@
           "expireFact: (id: number, opts?: { supersededBy?: number; at?: Date; }) => Promise<boolean>",
           "findAnomalies: (opts: AnomaliesOpts) => Promise<AnomalyResult[]>",
           "findByTitleFuzzy: (name: string, dirPrefix?: string, minSimilarity?: number, sourceId?: string) => Promise<{ slug: string; similarity: number; } | null>",
-          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; }) => Promise<FactRow[]>",
+          "findCandidateDuplicates: (source_id: string, entitySlug: string, factText: string, opts?: { k?: number; embedding?: Float32Array; embeddingModel?: string | null; arm?: \"keyword\"; attributedTo?: FactAttribution | null; }) => Promise<FactRow[]>",
           "findDuplicatePage: (sourceId: string, opts: { hash: string; frontmatterId?: string | null; excludeSlug?: string; }) => Promise<{ slug: string; id: number; } | null>",
           "findOntologyConflicts: (opts?: PageReadScope & { minConfidence?: number; visibility?: OntologyReadOpts[\"visibility\"]; }) => Promise<OntologyConflict[]>",
           "findOrphanPages: (opts?: { sourceId?: string; sourceIds?: string[]; excludePrivate?: boolean; mode?: \"inbound\" | \"islanded\"; }) => Promise<Array<{ slug: string; title: string; domain: string | null; type?: string | null; quarantined?: boolean; source_id?: string; }>>",
@@ -6943,8 +6969,11 @@
           "expandFn?: ((query: string) => Promise<string[]>) | undefined",
           "expansion?: boolean | undefined",
           "expansionVariantBudget?: number | null | undefined",
+          "explain?: boolean | undefined",
+          "explainTarget?: TargetTrace | undefined",
           "floorRatio?: number | undefined",
           "graph_signals?: boolean | undefined",
+          "hubDampening?: string | number | undefined",
           "include_slug_prefixes?: string[] | undefined",
           "intentWeighting?: boolean | undefined",
           "keywordArmConfidenceFloor?: number | null | undefined",
@@ -7017,7 +7046,9 @@
           "fallback?: RecencyDecayConfig | undefined",
           "floorRatio?: number | undefined",
           "graphSignalsEnabled?: boolean | undefined",
+          "hubDampening?: HubDampening | undefined",
           "onGraphMeta?: ((meta: GraphSignalsMeta) => void) | undefined",
+          "onHubDampening?: ((meta: HubDampeningMeta) => void) | undefined",
           "onScoreDistribution?: ((dist: ScoreDistribution) => void) | undefined",
           "query?: string | undefined",
           "recency: \"on\" | \"off\" | \"strong\"",
@@ -7078,7 +7109,7 @@
         "kind": "function",
         "name": "applyBacklinkBoost",
         "signature": [
-          "(results: SearchResult[], counts: Map<number, number>, floorThreshold?: number) => void"
+          "(results: SearchResult[], counts: Map<number, number>, floorThreshold?: number, halfDegree?: HubDampening) => void"
         ]
       },
       {
@@ -7155,7 +7186,7 @@
         "kind": "function",
         "name": "cosineReScore",
         "signature": [
-          "(engine: BrainEngine, results: SearchResult[], queryEmbedding: Float32Array, column?: string, imageSpace?: { queryEmbedding: Float32Array; column: string; }) => Promise<SearchResult[]>"
+          "(engine: BrainEngine, results: SearchResult[], queryEmbedding: Float32Array, column?: string, imageSpace?: { queryEmbedding: Float32Array; column: string; }, attribute?: boolean) => Promise<SearchResult[]>"
         ]
       },
       {
@@ -7239,7 +7270,7 @@
         "kind": "function",
         "name": "rrfFusionWeighted",
         "signature": [
-          "(lists: FusionListEntry[], applyBoost?: boolean | number) => SearchResult[]"
+          "(lists: FusionListEntry[], applyBoost?: boolean | number, attribute?: boolean) => SearchResult[]"
         ]
       },
       {
@@ -7943,7 +7974,7 @@
         "kind": "type",
         "name": "EvalCaptureFailureReason",
         "signature": [
-          "\"db_down\" | \"rls_reject\" | \"check_violation\" | \"scrubber_exception\" | \"other\""
+          "\"other\" | \"db_down\" | \"rls_reject\" | \"check_violation\" | \"scrubber_exception\""
         ]
       },
       {
@@ -8017,6 +8048,7 @@
           "detail_resolved: \"low\" | \"medium\" | \"high\" | null",
           "embedding_column?: string | undefined",
           "expansion_applied: boolean",
+          "hub_dampening?: HubDampeningMeta | undefined",
           "intent?: \"entity\" | \"temporal\" | \"event\" | \"concept\" | \"general\" | undefined",
           "keyword_arm_confidence?: KeywordArmConfidenceDecision | undefined",
           "metadata_boost_gate?: MetadataBoostGateDecision | undefined",
@@ -8370,6 +8402,16 @@
       {
         "kind": "interface",
         "members": [
+          "arms: RrfArmVote[]",
+          "compiled_truth_boost: number",
+          "normalized: number",
+          "raw: number"
+        ],
+        "name": "RrfAttribution"
+      },
+      {
+        "kind": "interface",
+        "members": [
           "days?: number | undefined",
           "excludePrivate?: boolean | undefined",
           "limit?: number | undefined",
@@ -8455,7 +8497,10 @@
           "alias_hit?: boolean | undefined",
           "alias_resolved_boost?: number | undefined",
           "backlink_boost?: number | undefined",
+          "backlink_count?: number | undefined",
+          "backlink_hub_weight?: number | undefined",
           "base_score?: number | undefined",
+          "blend_norm_rrf?: number | undefined",
           "chronicle_boost?: number | undefined",
           "chunk_id: number",
           "chunk_index: number",
@@ -8481,6 +8526,7 @@
           "graph_adjacency_hits?: number | undefined",
           "graph_cross_source_boost?: number | undefined",
           "graph_cross_source_hits?: number | undefined",
+          "graph_hub_weight?: number | undefined",
           "graph_session_demoted?: boolean | undefined",
           "graph_session_prefix?: string | undefined",
           "injection_p?: number | undefined",
@@ -8503,8 +8549,10 @@
           "rerank_score_kind?: \"rubric\" | undefined",
           "reranker_delta?: number | undefined",
           "result_type?: \"fact\" | undefined",
+          "rrf?: RrfAttribution | undefined",
           "salience_boost?: number | undefined",
           "score: number",
+          "score_details?: ScoreDetails | undefined",
           "session_demote_factor?: number | undefined",
           "slug: string",
           "source_id?: string | undefined",

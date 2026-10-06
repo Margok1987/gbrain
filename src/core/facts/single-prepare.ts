@@ -1,4 +1,4 @@
-import type { BrainEngine, FactRow } from '../engine.ts';
+import type { BrainEngine, FactAttribution, FactRow } from '../engine.ts';
 import { verbError } from '../ops/contract.ts';
 import { isAvailable, embedOne, getEmbeddingModel } from '../ai/gateway.ts';
 import { cosineSimilarity } from './classify.ts';
@@ -11,6 +11,8 @@ export type FactCandidate = FactRow & { source_markdown_slug: string | null; row
 export interface FactDecision { status: 'inserted' | 'duplicate' | 'superseded'; candidate: FactCandidate | null; }
 export interface SingleFactIntent {
   fact: string; kind: FactRow['kind']; visibility: FactRow['visibility']; entity_slug: string | null;
+  /** Speaker of the new claim; a fact another known speaker asserted is never its duplicate. */
+  attributed_to?: FactAttribution | null;
 }
 /** Provider work belongs to preparation, never to a page/source transaction. `disabled`: the brain opted out of embedding. */
 export async function prepareFactEmbedding(fact: string, signal?: AbortSignal, disabled = false): Promise<{ embedding: Float32Array | null; embedding_model: string | null; degraded: boolean }> {
@@ -49,11 +51,11 @@ export async function readCandidateFusion(engine: BrainEngine): Promise<Candidat
  * under `interleave` the cosine and keyword arms merged round-robin by fact id
  * and cut to the same k, so the decision still scores at most k rows.
  */
-export async function listSupersessionCandidates(engine: BrainEngine, sourceId: string, entitySlug: string, fact: string, embedding: Float32Array, embeddingModel?: string | null, fusion?: CandidateFusion): Promise<FactRow[]> {
+export async function listSupersessionCandidates(engine: BrainEngine, sourceId: string, entitySlug: string, fact: string, embedding: Float32Array, embeddingModel?: string | null, fusion?: CandidateFusion, attributedTo?: FactAttribution | null): Promise<FactRow[]> {
   const k = SUPERSESSION_CANDIDATE_K;
-  const cosine = await engine.findCandidateDuplicates(sourceId, entitySlug, fact, { embedding, embeddingModel, k });
+  const cosine = await engine.findCandidateDuplicates(sourceId, entitySlug, fact, { embedding, embeddingModel, k, attributedTo });
   if ((fusion ?? await readCandidateFusion(engine)) !== 'interleave') return cosine;
-  const keyword = await engine.findCandidateDuplicates(sourceId, entitySlug, fact, { embedding, embeddingModel, k, arm: 'keyword' });
+  const keyword = await engine.findCandidateDuplicates(sourceId, entitySlug, fact, { embedding, embeddingModel, k, arm: 'keyword', attributedTo });
   return interleaveFusion([cosine, keyword], row => row.id, k);
 }
 
@@ -65,10 +67,11 @@ export async function decideSingleFact(engine: BrainEngine, sourceId: string, in
   const [exact] = await engine.executeRaw<FactCandidate>(`SELECT * FROM facts WHERE source_id=$1
     AND entity_slug IS NOT DISTINCT FROM $2 AND visibility=$3 AND expired_at IS NULL
     AND (valid_until IS NULL OR valid_until>now()) AND gbrain_fact_fingerprint(fact)=gbrain_fact_fingerprint($4)
-    ORDER BY id LIMIT 1`, [sourceId, input.entity_slug, input.visibility, input.fact]);
+    AND ($5::text IS NULL OR attributed_to IS NULL OR attributed_to=$5)
+    ORDER BY id LIMIT 1`, [sourceId, input.entity_slug, input.visibility, input.fact, input.attributed_to ?? null]);
   if (exact) return { status: 'duplicate', candidate: { ...exact, id: Number(exact.id) } };
   if (embedding && input.entity_slug) {
-    const candidates = await listSupersessionCandidates(engine, sourceId, input.entity_slug, input.fact, embedding, embeddingModel);
+    const candidates = await listSupersessionCandidates(engine, sourceId, input.entity_slug, input.fact, embedding, embeddingModel, undefined, input.attributed_to ?? null);
     const metadata = await engine.executeRaw<{ id: number; source_markdown_slug: string | null; row_num: number | null }>(
       'SELECT id,source_markdown_slug,row_num FROM facts WHERE source_id=$1 AND id=ANY($2::int[])',
       [sourceId, candidates.map(c => c.id)]);
