@@ -101,7 +101,7 @@ export interface RepairHandler {
    * Kind-specific result fields, computed once the dry run or apply finished (for example a verification re-check
    * of the selected scope). Runs only when the run ended without an exception.
    */
-  report?(ctx: OperationContext, scope: RepairScope, result: RepairResult, opts: RepairPlanOptions): Promise<Partial<Pick<RepairResult, 'repaired' | 'remaining' | 'verification'>>>;
+  report?(ctx: OperationContext, scope: RepairScope, result: RepairResult, opts: RepairPlanOptions): Promise<Partial<Pick<RepairResult, 'repaired' | 'remaining' | 'verification' | 'stopped'>>>;
 }
 
 /**
