@@ -209,6 +209,26 @@ named fence in the file (never the frontmatter), commit, then
 lists every fence hold with its location. To add rows without hand-editing a
 table, use `remember` (facts) or `takes_add` (takes).
 
+<a id="fence-integrity"></a>**How many are left.** `gbrain doctor --only fence_integrity`
+counts, per source, every malformed fence still waiting, once each: a held
+file, a stored page whose fence does not parse (for example one an older
+release imported as written), and a checkout file not yet synced. Each is
+split by the tier that would clear it: `deterministic` (the normalizer fixes
+it the next time the file syncs or the page is written), `resolver` (a
+holder name to resolve), `llm` (a table only a rewrite can realign) and
+`manual` (an edit only a person can decide). It also shows the oldest hold's
+age, the fences normalized in the last 7 days with their top writers (a
+source at 20 or more warns: something keeps writing malformed fences) and the
+model-repair caps `fences.repair.max_usd_per_page` (default $0.05) and
+`fences.repair.max_usd_per_day` (default $1.00) with today's spend. Each run
+scans for at most `GBRAIN_DOCTOR_FENCE_TIMEOUT_MS` (10 s) and resumes where the
+last one stopped; until a scan finishes the check is `partial` and never `ok`.
+The fix is the edit above for held and unsynced files, and for a stored page:
+read it with `gbrain get --source <source> -- <slug>` and write it again with
+`put_page`.
+
+**Say to your agent:** *"How many broken facts or takes tables are left in my brain?"*
+
 | `invalid_fence` reason | What it means | Recovery |
 | --- | --- | --- |
 | <a id="fence-repeated_marker"></a>`repeated_marker` | A body or timeline section has a second begin or end marker for the same fence outside code. | Keep one begin and one end marker per fence in that section, with every row in one table. |

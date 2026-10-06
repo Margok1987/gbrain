@@ -670,6 +670,10 @@
         "name": "revision_backfill"
       },
       {
+        "category": "brain",
+        "name": "fence_integrity"
+      },
+      {
         "category": "ops",
         "name": "search_mode"
       },
