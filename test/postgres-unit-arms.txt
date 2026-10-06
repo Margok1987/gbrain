@@ -73,6 +73,7 @@ test/persistence-sync-fence-holds.test.ts
 test/persistence-sync-holds.test.ts
 test/persistence-writer-fences.test.ts
 test/repair-embedding-effects.test.ts
+test/repair-fences.test.ts
 test/repair-frontmatter.test.ts
 test/scripts/test-stress-postgres.test.ts
 test/shared-content-freshness.test.ts

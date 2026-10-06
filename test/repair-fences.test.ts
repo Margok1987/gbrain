@@ -51,6 +51,8 @@ import { planRepairSteps, runRepairSteps } from '../src/core/remediation/repairs
 import { fencesRepair, type FencesPreviewDetails } from '../src/core/repair/fences.ts';
 import { readUncommittedFenceRepairs } from '../src/core/fence-repair/uncommitted.ts';
 import { parseRepairArgs, runRepairCommand } from '../src/commands/repair.ts';
+import { runModels } from '../src/commands/models.ts';
+import { resolveFenceRepairModel } from '../src/core/repair/fences.ts';
 import { _resetCliExitVerdictForTests, currentExitCode } from '../src/core/cli-force-exit.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
@@ -464,4 +466,34 @@ test('doctor --remediate: the plan counts the fences model estimate as paid, and
   expect(results.map(r => r.status)).toEqual(['budget_refused']);
   expect(calls).toHaveLength(0);
   expect(s.read('people/model.md')).toBe(md('Model', noHeader()));
+}), 240_000);
+
+test('models.fence_repair: gbrain models lists it on the deep tier, and setting it changes the model the repair calls', async () => withEnv(env, async () => {
+  const engine = legacyEngine;
+  const report = async () => {
+    const chunks: string[] = [];
+    const write = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: string) => { chunks.push(String(chunk)); return true; }) as typeof process.stdout.write;
+    try { await runModels(engine, ['--json']); } finally { process.stdout.write = write; }
+    return JSON.parse(chunks.join('')) as { per_task: Array<{ key: string; tier: string; resolved: string; source: string }> };
+  };
+  const before = (await report()).per_task.find(row => row.key === 'models.fence_repair')!;
+  expect(before.tier).toBe('deep');
+  expect(before.resolved).toBe(await resolveFenceRepairModel(engine));
+  await engine.setConfig('models.fence_repair', 'anthropic:claude-sonnet-5-5');
+  const after = (await report()).per_task.find(row => row.key === 'models.fence_repair')!;
+  expect(after.resolved).toBe('anthropic:claude-sonnet-5-5');
+  expect(await resolveFenceRepairModel(engine)).toBe('anthropic:claude-sonnet-5-5');
+  await engine.executeRaw("DELETE FROM config WHERE key='models.fence_repair'");
+}), 60_000);
+
+test('a run past its deadline stops with time_budget before any item and calls no model', () => each(async engine => {
+  const s = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
+  await s.sync();
+  transport(() => answer(CLAIM));
+  const runner = await repairRunner(engine, { apply: true, noEmbed: true, logger: quiet });
+  const result = await runner.run('fences', await resolveRepairScope(engine, s.id), { deadline: Date.now() - 1 });
+  expect(result.stopped).toMatchObject({ reason: 'time_budget' });
+  expect(result).toMatchObject({ applied: 0, remaining: { time_budget: 1 } });
+  expect(calls).toHaveLength(0);
 }), 240_000);
