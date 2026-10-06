@@ -234,6 +234,8 @@ describe('refuse-only writers (D19)', () => {
     const parsed = parseMarkdown(page('Export', factsFence(fact(1, SECRET_CLAIM, { kind: SECRET_KIND }))), 'people/export.md');
     const error = await refusal(() => assertExportProjectionRoundtrip(engine, parsed, 1, 'default'));
     expect({ code: error.canonicalCode, reason: error.reason }).toEqual({ code: 'invalid_fence', reason: 'enum_unmapped' });
+    expect(error.fix?.argv).toEqual(['gbrain', 'repair', 'fences', '--source', 'default', '--slug', 'people/export']);
+    expect(error.suggestion).toContain('gbrain repair fences --source default --slug people/export');
     expectNoSecrets(error.toJSON());
   }));
 });

@@ -107,15 +107,14 @@ describe('the shared fence check', () => {
 });
 
 /**
- * Every reason PR1 can put in a refusal, hold or receipt. `gbrain repair fences`
- * ships in a later release, so none of their messages or fixes may name it.
+ * Every reason the screen and the projection can put in a refusal, hold or
+ * receipt. #6188 PR4: their holds and source steps route to `gbrain repair
+ * fences` (D6), never to frontmatter repair.
  */
 const PR1_REASONS: readonly FenceReason[] = ['repeated_marker', 'missing_begin', 'marker_near_miss', 'unparseable', 'no_header', 'row_before_header',
   'short_row', 'extra_cells', 'enum_unmapped', 'takes_kind_unsupported', 'confidence_out_of_range', 'claim_value_invalid', 'weight_missing',
   'holder_unresolved', 'row_collision', 'quoted_fence_rows', 'stored_row_collision', 'withdrawn_claim_in_malformed_fence', 'prepare_time'];
-const UNSHIPPED = /repair fences|repair pass/;
-
-describe('no PR1 message or fix names a command that has not shipped', () => {
+describe('every PR1 reason routes to the fence repair, never to frontmatter repair', () => {
   test('every reason the screen and the projection emit is one PR1 accounts for', () => {
     for (const [, body, timeline] of cases) expect(PR1_REASONS).toContain(scanCanonicalFences(page(body, timeline)).defects[0]!.reason);
   });
@@ -129,7 +128,7 @@ describe('no PR1 message or fix names a command that has not shipped', () => {
     }
   });
 
-  test('messages, suggestions and fixes for every PR1 reason point at the page read, the fence edit and the sync', () => {
+  test('hold fixes and source steps for every PR1 reason name gbrain repair fences; messages, suggestions and fixes never name frontmatter repair', () => {
     for (const reason of PR1_REASONS) {
       const location: FenceMessageLocation = { reason, fence: 'takes', section: 'body', rows: [2], columns: ['who'], line: 5 };
       const error = fenceOperationError(location, 'notes/example', 'default');
@@ -137,9 +136,12 @@ describe('no PR1 message or fix names a command that has not shipped', () => {
       const hold = prepareTimeFenceHold({ path: 'notes/example.md', sourcePath: 'notes/example.md', working: false }, 'notes/example', 1, location, 'Body.', null);
       const fix = gitHoldFix({ source_id: 'default', path: 'notes/example.md', code: 'invalid_fence', slug: 'notes/example', page_id: 1,
         meta: { reason, recovery_version: RECOVERY_VERSION, fence: location } });
+      const steps = holdRepairSteps('default', { fences: 1, others: 0 });
+      expect(fix.argv).toEqual(['gbrain', 'repair', 'fences', '--source', 'default', '--only', 'notes/example.md']);
+      expect(steps.argv).toEqual(['gbrain', 'repair', 'fences', '--source', 'default']);
       const texts = [error.message, error.suggestion, JSON.stringify(error.fix), receipt?.suggestion, hold.message, JSON.stringify(fix),
-        writeFailureDiagnostic('invalid_params', error.message).suggestion, holdRepairSteps('default', { fences: 1, others: 0 }).text];
-      for (const text of texts) expect(text ?? '').not.toMatch(UNSHIPPED);
+        writeFailureDiagnostic('invalid_params', error.message).suggestion, steps.text];
+      for (const text of texts) expect(text ?? '').not.toContain('repair frontmatter');
     }
   });
 });

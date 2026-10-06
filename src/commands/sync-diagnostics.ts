@@ -5,12 +5,15 @@ import { fenceWhere } from '../core/fence-repair/refusal.ts';
 const HOLD_LINES = 20;
 
 export function holdLine(item: GitHoldItem, verb: string): string {
-  const where = [item.line !== undefined ? `line ${item.line}` : '', item.key ? `key "${item.key}"` : ''].filter(Boolean).join(', ');
+  const where = item.fence ? '' : [item.line !== undefined ? `line ${item.line}` : '', item.key ? `key "${item.key}"` : ''].filter(Boolean).join(', ');
   const page = item.stale ? 'its page keeps its last good revision and is read-only for put_page until the file is repaired' : 'its page is missing until the file imports';
-  // #6188: a fence hold names fence, section, rows, columns and line (never a cell), then the edit-and-sync step.
-  const fence = item.fence ? ` in ${fenceWhere(item.fence)}${item.reason === 'prepare_time' ? ` (${item.fence.reason})` : ''}` : '';
+  // #6188 (D16): a fence hold names fence, section, rows, columns and its file line (never a cell), then the step its state calls for.
+  const fence = item.fence ? ` in ${fenceWhere({ ...item.fence, line: item.line ?? item.fence.line })}${item.reason === 'prepare_time' ? ` (${item.fence.reason})` : ''}` : '';
   const then = item.fix.then?.argv ? `, then ${item.fix.then.argv.join(' ')}` : '';
-  return `  ${verb} ${item.path}: ${item.code}${item.reason ? ` (${item.reason})` : ''}${fence}${where ? ` at ${where}` : ''}; ${page}. Next: ${item.fix.argv?.join(' ') ?? item.fix.why}${then} (${item.docs})`;
+  const next = item.fix.argv?.join(' ') ?? item.fix.why;
+  const step = item.fence?.auto_retry ? `No action needed: the next maintenance run repairs it. Preview: ${next}`
+    : item.fix.consent.includes('paid') ? `Ask the user first, then: ${next}` : item.fix.actor === 'host_admin' ? `On the owner host: ${next}` : `Next: ${next}`;
+  return `  ${verb} ${item.path}: ${item.code}${item.reason ? ` (${item.reason})` : ''}${fence}${where ? ` at ${where}` : ''}; ${page}. ${step}${then} (${item.docs})`;
 }
 
 /**

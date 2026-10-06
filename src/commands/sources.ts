@@ -2000,7 +2000,7 @@ Subcommands:
   retry-held <id> [--dry-run] [--json]
                                     Re-attempt a connector source's held items, or re-screen a Git source's held files, on its next sync.
                                     Runs nothing now. Most Git holds re-screen by themselves (file changed or deleted, newer gbrain); fix
-                                    frontmatter holds with gbrain repair frontmatter --source <id>, fence holds (invalid_fence) by editing the named fence.
+                                    frontmatter holds with gbrain repair frontmatter --source <id>; preview fence holds (invalid_fence) with gbrain repair fences --source <id>.
   shared-skills <id> on|off|status [--json]
                                     Opt a source out of (or back into) shared-skills adoption; status explains its effective policy.
   set-path <id> --clear             Clear a connector source's (google, github)
