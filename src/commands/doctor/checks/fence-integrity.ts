@@ -25,6 +25,7 @@ import { connectedEngine, type DoctorContext, type DoctorEntry } from '../contex
 import { runFenceCensus, summarizeFenceCensus, type SourceCensus, type TierCounts } from '../../../core/fence-repair/census.ts';
 import { readTrend, type TrendEntry } from '../../../core/fence-repair/census-store.ts';
 import { readFenceRepairCaps } from '../../../core/fence-repair/config.ts';
+import { readUncommittedFenceRepairs } from '../../../core/fence-repair/uncommitted.ts';
 import { STRUCTURED_WRITE_ADVICE } from '../../../core/fence-repair/report.ts';
 import { fencePreviewArgv, readFenceAutoRepair, type FenceAutoRepair } from '../../../core/fence-repair/hold-fix.ts';
 import { dailyLedger, FENCE_REPAIR_LEDGER } from '../../../core/budget/daily-ledger.ts';
@@ -108,12 +109,16 @@ export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutM
   const partial = census.filter(c => !c.scan.complete);
   const noisy = trend.filter(t => t.normalized_7d >= FENCE_NORMALIZATION_WARN_7D);
   const total = waiting.reduce((sum, c) => sum + c.total, 0);
+  // T2: legacy fence repairs written and imported but not committed yet (counts for a scoped remote caller, paths locally).
+  const uncommitted = await readUncommittedFenceRepairs(engine, opts.sourceIds ?? census.map(c => c.source_id)).catch(() => []);
   const details = {
     total, partial: partial.length > 0, partial_sources: partial.map(c => c.source_id), sources: census, trend, warn_at_normalized_7d: FENCE_NORMALIZATION_WARN_7D,
     model_repair: { max_usd_per_page: caps.perPageUsd, max_usd_per_day: caps.perDayUsd, spent_today_usd: today?.committedUsd ?? null, reserved_today_usd: today?.reservedUsd ?? null },
     timeout_ms: timeoutMs, docs: DOCS,
+    uncommitted_repairs: uncommitted.length,
+    ...(uncommitted.length && !opts.sourceIds ? { uncommitted: uncommitted.map(n => ({ source_id: n.source_id, path: n.path, commit_step: n.commit_step })) } : {}),
   };
-  if (!total && !partial.length && !noisy.length) {
+  if (!total && !partial.length && !noisy.length && !uncommitted.length) {
     return { status: 'ok', details, message: census.length ? `No malformed facts or takes fence is held, stored or waiting in a checkout (${census.length} source(s) scanned).` : 'No sources to scan.' };
   }
   const auto = await readFenceAutoRepair(engine, now());
@@ -132,6 +137,11 @@ export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutM
       + `${t.top_writers.length ? ` (top writers: ${t.top_writers.map(w => `${w.writer} ${w.count}`).join(', ')})` : ''}`).join('; ')} (warns at ${FENCE_NORMALIZATION_WARN_7D}). `
       + `Fix the generator; a normalized page differs from what was sent. ${STRUCTURED_WRITE_ADVICE}`);
   }
+  if (uncommitted.length) {
+    const bySource = [...new Set(uncommitted.map(n => n.source_id))];
+    sentences.push(`${uncommitted.length} fence repair(s) on legacy source(s) ${bySource.join(', ')} are written and imported but not committed; `
+      + `gbrain sources status ${bySource[0]} prints each file's exact git add and git commit step (the backup of the original is kept).`);
+  }
   if (partial.length) {
     sentences.push(`PARTIAL CENSUS: the scan of ${partial.map(c => c.source_id).join(', ')} did not finish within ${timeoutMs / 1000}s, so more fences may be malformed; `
       + 'run gbrain doctor --only fence_integrity again to resume it (raise GBRAIN_DOCTOR_FENCE_TIMEOUT_MS for a larger share per run).');
@@ -139,8 +149,10 @@ export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutM
   const first = waiting[0];
   const fix = first ? sourceFix(first, auto)
     : partial.length ? agentFix(['gbrain', 'doctor', '--only', 'fence_integrity', '--json'], 'Resumes the fence census where the last scan stopped and reports what it found.', 'fence_integrity', { docs: DOCS })
-      : agentFix(['gbrain', 'sources', 'status', noisy[0]!.source_id, '--json'], `Shows ${noisy[0]!.source_id}'s recent sync result, including fences_normalized with sample paths, so you can find what writes the malformed fences.`,
-        'fence_integrity', { docs: DOCS });
+      : noisy.length ? agentFix(['gbrain', 'sources', 'status', noisy[0]!.source_id, '--json'], `Shows ${noisy[0]!.source_id}'s recent sync result, including fences_normalized with sample paths, so you can find what writes the malformed fences.`,
+        'fence_integrity', { docs: DOCS })
+        : agentFix(['gbrain', 'sources', 'status', uncommitted[0]!.source_id], 'Lists the uncommitted fence repairs of this legacy source with the exact git add and git commit step for each file.',
+          'fence_integrity', { docs: DOCS });
   return { status: 'warn', details: { ...details, auto_repair: auto }, fix, message: sentences.join(' ') };
 }
 

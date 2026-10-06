@@ -49,6 +49,7 @@ import { resolveRepairScope, type RepairResult } from '../src/core/repair/core.t
 import { repairRunner, repairSpec } from '../src/core/repair/registry.ts';
 import { planRepairSteps, runRepairSteps } from '../src/core/remediation/repairs.ts';
 import { runFenceRepairPhase } from '../src/core/cycle/fence-repair.ts';
+import { fenceIntegrityResult } from '../src/commands/doctor/checks/fence-integrity.ts';
 import { fencesRepair, type FencesPreviewDetails } from '../src/core/repair/fences.ts';
 import { readUncommittedFenceRepairs } from '../src/core/fence-repair/uncommitted.ts';
 import { parseRepairArgs, runRepairCommand } from '../src/commands/repair.ts';
@@ -410,11 +411,15 @@ test('legacy sources: backup, import and an uncommitted-repair notice that clear
   expect((await engine.getPage('notes/model', { sourceId: r.id }))?.compiled_truth).toContain(CLAIM);
   const notices = await readUncommittedFenceRepairs(engine, [r.id]);
   expect(notices.map(n => n.path).sort()).toEqual(['notes/later.md', 'notes/model.md']);
+  const doctor = await fenceIntegrityResult(engine, { sourceIds: [r.id] });
+  expect(doctor).toMatchObject({ status: 'warn', details: { uncommitted_repairs: 2 } });
+  expect(doctor.message).toContain('written and imported but not committed');
   const step = notices.find(n => n.path === 'notes/model.md')!.commit_step;
   expect(step).toContain("commit -m 'gbrain: repair fence in notes/model.md (no_header)'");
   execFileSync('bash', ['-c', step]);
   expect(git(r.root, 'log', '-1', '--format=%s')).toBe('gbrain: repair fence in notes/model.md (no_header)');
   expect((await readUncommittedFenceRepairs(engine, [r.id])).map(n => n.path)).toEqual(['notes/later.md']);
+  expect((await fenceIntegrityResult(engine, { sourceIds: [r.id] })).details).toMatchObject({ uncommitted_repairs: 1 });
   expect(readFileSync(join(home, `${r.id}-target.md`), 'utf8')).toBe(md('Target', noHeader('Linked claim')));
 }), 240_000);
 
@@ -519,6 +524,7 @@ test('two concurrent appliers at the daily cap: one model call, the other stops 
 }), 240_000);
 
 test('the maintenance phase repairs held fences with the real kind, and the daily cap holds across ticks until it is raised', () => each(async engine => {
+  // The phase runs across every active source, including earlier tests' sources that are still held, so the assertions count calls and ledger state.
   const a = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
   const b = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
   await a.sync(); await b.sync();
@@ -529,18 +535,16 @@ test('the maintenance phase repairs held fences with the real kind, and the dail
   const tick = () => runFenceRepairPhase(engine, { dryRun: false, deadlineAtMs: Date.now() + 600_000 });
   const first = await tick();
   expect(first.details).toMatchObject({ mode: 'apply', stopped_reason: 'budget_exhausted' });
+  expect(first.details).toMatchObject({ repaired_by_tier: { llm: 1 } });
   expect(calls).toHaveLength(1);
-  const fixed = [a, b].filter(s => parseFactsFence(s.read('people/model.md')).warnings.length === 0);
-  expect(fixed).toHaveLength(1);
-  expect(await fixed[0]!.holds()).toEqual([]);
   // A second tick the same UTC day spends nothing more.
   const second = await tick();
-  expect(second.details).toMatchObject({ stopped_reason: 'budget_exhausted' });
+  expect(second.details).toMatchObject({ stopped_reason: 'budget_exhausted', repaired_by_tier: { llm: 0 } });
   expect(calls).toHaveLength(1);
   await engine.executeRaw("DELETE FROM config WHERE key='fences.repair.max_usd_per_day'");
   const third = await tick();
   expect(third).toMatchObject({ status: 'ok' });
-  expect(calls).toHaveLength(2);
+  expect(calls.length).toBeGreaterThanOrEqual(2);
   for (const s of [a, b]) { expect(parseFactsFence(s.read('people/model.md')).warnings).toEqual([]); expect(await s.holds()).toEqual([]); }
   expectNoSecrets([first, second, third]);
   // Paused: the phase never calls the kind.
