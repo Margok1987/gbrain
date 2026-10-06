@@ -18,7 +18,7 @@
  * Seams: none (a local provider stand-in behind the documented base-URL env).
  */
 import { afterAll, expect, test } from 'bun:test';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -124,9 +124,6 @@ test('docs/guides/repair.md "Fences": every command runs and prints every line t
   await ok(['git', 'init', '-q', checkout]);
   await ok(['git', '-C', checkout, 'config', 'user.name', 'Example']);
   await ok(['git', '-C', checkout, 'config', 'user.email', 'example@example.invalid']);
-  // A hardened checkout (what `gbrain sources harden notes` installs), so the Git effect commits each repaired file.
-  writeFileSync(join(checkout, '.git', 'hooks', 'post-commit'), '#!/bin/sh\n# gbrain brain-durability post-commit hook (v0.42.44+)\n');
-  chmodSync(join(checkout, '.git', 'hooks', 'post-commit'), 0o755);
   write({ 'people/alice-example.md': '---\ntitle: Alice Example\n---\nAlice Example runs product at widget-co.\n' });
   await commit('init');
   await ok(['gbrain', 'init', '--pglite', '--no-embedding']);
