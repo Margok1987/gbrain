@@ -577,3 +577,7 @@ Garry approved:
 - **Spend cap $2,800** (rebuilt ledger $2,720 at a 25% frontier sweep in the B suites).
 - **Answer model for every A cell: `gemini-3.8-flash`**, identical for both systems; judge `gemini-3.5-flash` (BEAM's harness judge) and the dataset's own judge elsewhere, in one joint blinded re-judge.
 - Agent mode runs on an OpenAI model until gbrain's native Google chat path accepts a base-URL override (added in this wave so it can be metered).
+
+### Margin after the dev variance re-estimate (October 6, 2026)
+
+Dev pairs measured twice the per-question variance the power simulation assumed, giving 71–74% power at margin 3.0 for 54 sealed conversations. Averaging two answer samples per question gave no gain (76%). Garry approved **margin 3.5 points** (86–87% power) on October 6, 2026, recorded in the gbrain-evals preregistration before any validation or sealed cell ran. The freeze build is the wave PR head `d7467d1cf`.
