@@ -24,10 +24,12 @@ content_sanity reject, or on a managed brain a facts or takes fence that
 cannot be imported) is held: the rest of the source imports, the
 checkpoint advances, and each hold prints its code, location and next
 command. Inspect holds with 'gbrain sources status <id>'. Preview a
-frontmatter fix with 'gbrain repair frontmatter --source <id>'; fix a
-fence hold (invalid_fence) by editing the named fence in the file,
-committing, and syncing again. A source a file blocked before this release
-recovers on its next sync ('--no-pull' on a managed brain).
+frontmatter fix with 'gbrain repair frontmatter --source <id>'. A fence hold
+(invalid_fence) is repaired by the next maintenance run when one is active;
+preview it with 'gbrain repair fences --source <id>' (read-only, no model
+call), which prints the apply command, or the exact edit for a fence gbrain
+will not guess. A source a file blocked before this release recovers on its
+next sync ('--no-pull' on a managed brain).
 'gbrain config set sync.holds fail' restores fail-closed blocking.
 
 Options:
@@ -156,7 +158,7 @@ See also:
   gbrain doctor           Diagnose dim mismatches and other sync issues.
   gbrain sources status <id>              Held files with their next command.
   gbrain repair frontmatter --source <id> Preview the fix for frontmatter holds.
-  gbrain get --source <id> -- <slug>      Read a page whose fence is held.
+  gbrain repair fences --source <id>      Preview the repair of fence holds.
   docs/guides/repair.md#held-files        Walkthrough.
 `);
 }

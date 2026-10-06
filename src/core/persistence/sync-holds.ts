@@ -19,9 +19,11 @@
  * source's summary row first, so concurrent cursors of one source serialize.
  * Rows carry key name, line, code and a location-only message, never a raw
  * frontmatter value. #6188 `invalid_fence` holds carry the fence, section,
- * reason, problem classes and parsed row numbers, never a cell value; the
+ * reason, parsed row numbers and the file line, never a cell value; the
  * summary also counts them (`fences`) so every surface can route a source to
- * the right repair (`holdRepairRoute`, D6).
+ * the right repair (`holdRepairSteps`, D6): `gbrain repair fences` for fence
+ * holds, `gbrain repair frontmatter` for the rest. A fence hold's own fix
+ * depends on its state (`fence-repair/hold-fix.ts`, D17).
  */
 import type { BrainEngine } from '../engine.ts';
 import type { Action } from '../agent-output.ts';
@@ -29,7 +31,8 @@ import type { ContentRefusal } from '../import-screen.ts';
 import { RECOVERY_VERSION, type InvalidFrontmatterReason } from '../markdown.ts';
 import { FENCE_REASONS, type FenceMessageLocation } from '../fence-repair/reasons.ts';
 import type { FenceReason, FenceTier, GateLetter } from '../fence-repair/types.ts';
-import { FENCE_VERSION, fenceWhere } from '../fence-repair/refusal.ts';
+import { FENCE_VERSION } from '../fence-repair/refusal.ts';
+import { fenceHoldFix, fenceHoldLocation, fencePreviewArgv, readFenceAutoRepair, type FenceAutoRepair, type FenceHoldLocation } from '../fence-repair/hold-fix.ts';
 import { STRUCTURED_WRITE_ADVICE, type FencesNormalized } from '../fence-repair/report.ts';
 import type { SyncRename } from './sync-discovery.ts';
 
@@ -117,8 +120,8 @@ export interface GitHoldItem {
   reason?: GitHoldReason;
   key?: string;
   line?: number;
-  /** #6188 `invalid_fence`: the fence location (reason, fence, section, rows, columns, line). */
-  fence?: FenceMessageLocation;
+  /** #6188 `invalid_fence` (D16): reason, fence, section, rows, columns, section line, classes, planned tier, auto_retry and next_attempt_after. */
+  fence?: FenceHoldLocation;
   message: string;
   slug: string | null;
   /** True when a page exists and keeps its last good revision; false when the file's page is missing. */
@@ -299,47 +302,46 @@ export function holdRescreenDue(record: Pick<GitHoldRecord, 'code' | 'meta'>, re
 }
 
 /**
- * D6: which repairs a source's holds need. Fence holds are fixed by editing
- * the named fence in the file and syncing; every other hold routes to the
- * frontmatter repair preview. A source with both names both.
+ * D6: which repairs a source's holds need. Fence holds route to the fence
+ * repair preview, every other hold to the frontmatter repair preview; a
+ * source with both names both.
  */
 export interface HoldRepairRoute { fences: number; others: number }
 
-/** The source-level next step every surface prints for `route` (sync results, doctor, read notices, the banner, retry-held). */
-export function holdRepairSteps(sourceId: string, route: HoldRepairRoute): { argv: string[]; commands: string[]; text: string } {
-  const status = ['gbrain', 'sources', 'status', sourceId, '--json'];
+/**
+ * The source-level next step every surface prints for `route` (sync results,
+ * doctor, read notices, the banner, retry-held). `auto`, when the caller read
+ * it, says whether the maintenance run repairs fence holds by itself.
+ */
+export function holdRepairSteps(sourceId: string, route: HoldRepairRoute, auto?: FenceAutoRepair): { argv: string[]; commands: string[]; text: string } {
+  const fences = fencePreviewArgv(sourceId);
   const frontmatter = ['gbrain', 'repair', 'frontmatter', '--source', sourceId];
-  const sync = `gbrain sync --source ${sourceId} --no-pull`;
-  const fenceText = `for each fence hold, read the page (gbrain get --source ${sourceId} -- <slug>), edit the fence that gbrain sources status ${sourceId} names in its file, commit, then run ${sync}`;
+  const automatic = !auto ? '' : auto.active ? 'the next maintenance run repairs the fence holds it can by itself; '
+    : `nothing repairs the fence holds by itself (${auto.enabled ? 'no maintenance run is active' : 'fences.repair.enabled is false'}), so `;
+  const fenceText = `${automatic}preview the fence repairs with ${fences.join(' ')} `
+    + '(read-only, no model call: it lists each held file with its planned repair or the exact edit, and prints the apply command with --expect <hash>)'
+    + (auto?.active ? '' : ', then run the apply command it prints');
   const frontmatterText = `preview the frontmatter and other fixes with ${frontmatter.join(' ')} (writes nothing until a hash-bound apply)`;
-  if (route.fences && !route.others) return { argv: status, commands: [status.join(' '), sync], text: fenceText };
-  if (route.fences) return { argv: frontmatter, commands: [frontmatter.join(' '), status.join(' '), sync], text: `${frontmatterText}; ${fenceText}` };
+  if (route.fences && !route.others) return { argv: fences, commands: [fences.join(' ')], text: fenceText };
+  if (route.fences) return { argv: frontmatter, commands: [frontmatter.join(' '), fences.join(' ')], text: `${frontmatterText}; ${fenceText}` };
   return { argv: frontmatter, commands: [frontmatter.join(' ')], text: frontmatterText };
 }
 
 /**
  * The exact next step for one hold: the repair preview for frontmatter, the
- * split or exclude for size, and for a fence hold the page read, the edit of
- * the named fence and the sync that imports it.
+ * split or exclude for size, and for a fence hold the step its state calls
+ * for (`fenceHoldFix`: that file's `gbrain repair fences --only <path>`
+ * preview, then the apply, the edit or the paid setting). `auto` is what the
+ * caller read about the maintenance run (undefined: unknown).
  */
-export function gitHoldFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'code' | 'meta'> & Partial<Pick<GitHoldRecord, 'slug' | 'page_id'>>): Action {
+export function gitHoldFix(record: Pick<GitHoldRecord, 'source_id' | 'path' | 'code' | 'meta'> & Partial<Pick<GitHoldRecord, 'slug' | 'page_id'>>, auto?: FenceAutoRepair): Action {
   const source = record.source_id;
   const repair = (ambiguous: boolean, why: string): Action => ({ argv: ['gbrain', 'repair', 'frontmatter', '--source', source, ...(ambiguous ? ['--include-ambiguous'] : [])],
     consent: [], actor: 'agent', requires_exclusive: false, why,
     verify: { argv: ['gbrain', 'sources', 'status', source, '--json'] } });
   switch (record.code) {
-    case 'invalid_fence': {
-      const fence = record.meta.fence;
-      const sync = ['gbrain', 'sync', '--source', source, '--no-pull'];
-      const read = record.slug && record.page_id != null ? ['gbrain', 'get', '--source', source, '--', record.slug] : null;
-      const why = `${record.path} is held because ${fenceWhere(fence)} ${record.meta.reason === 'prepare_time' ? 'was refused against the stored page' : 'cannot be imported'}`
-        + ` (${fence?.reason ?? record.meta.reason ?? 'invalid_fence'}). ${read ? 'Read the page, then edit' : 'Edit'} that fence in ${record.path}, commit, and run ${sync.join(' ')}; the file imports and the hold clears. `
-        + 'The rest of the source is not blocked. Edit only the named fence; never the frontmatter.';
-      return { argv: read ?? ['gbrain', 'sources', 'status', source, '--json'], consent: [], actor: 'agent', requires_exclusive: false, why,
-        then: { argv: sync, consent: [], actor: 'agent', requires_exclusive: false, why: `Imports the corrected ${record.path}; a fence that still does not parse stays held without blocking the sync.`,
-          verify: { argv: ['gbrain', 'sources', 'status', source, '--json'] } },
-        verify: { argv: ['gbrain', 'sources', 'status', source, '--json'] } };
-    }
+    case 'invalid_fence':
+      return fenceHoldFix(record, auto);
     case 'file_too_large':
       return { argv: ['gbrain', 'config', 'get', 'sync.exclude'], consent: [], actor: 'agent', requires_exclusive: false,
         why: `The size limit is fixed. Split ${record.path} into smaller files and commit, or leave it out of the source: read the current sync.exclude list, then run gbrain config set sync.exclude '<current list>,${record.path}'. The next gbrain sync --source ${source} --no-pull clears the hold.`,
@@ -374,12 +376,19 @@ export function gitHoldDocs(code: GitHoldCode, reason?: GitHoldReason): string {
   return `docs/guides/write-refusals.md#${reason ? `${code}-${reason}` : code}`;
 }
 
-export function gitHoldItem(record: GitHoldRecord): GitHoldItem {
+/** One hold as surfaces list it; `auto` (what the caller read about the maintenance run) decides a fence hold's fix and `auto_retry`. */
+export function gitHoldItem(record: GitHoldRecord, auto?: FenceAutoRepair): GitHoldItem {
+  const fence = record.code === 'invalid_fence' ? fenceHoldLocation(record.meta, auto) : undefined;
   return { path: record.path, code: record.code, ...(record.meta.reason ? { reason: record.meta.reason } : {}),
     ...(record.meta.key ? { key: record.meta.key } : {}), ...(record.meta.line !== undefined ? { line: record.meta.line } : {}),
-    ...(record.meta.fence ? { fence: record.meta.fence } : {}),
+    ...(fence ? { fence } : {}),
     message: record.message, slug: record.slug, stale: record.page_id !== null, held_since: record.held_at,
-    fix: gitHoldFix(record), docs: gitHoldDocs(record.code, record.meta.reason) };
+    fix: gitHoldFix(record, auto), docs: gitHoldDocs(record.code, record.meta.reason) };
+}
+
+/** What the maintenance run does about fence holds, read only when some of these holds are fence holds. */
+export async function fenceAutoRepairFor(engine: Exec, records: ReadonlyArray<Pick<GitHoldRecord, 'code'>>): Promise<FenceAutoRepair | undefined> {
+  return records.some(record => record.code === 'invalid_fence') ? readFenceAutoRepair(engine) : undefined;
 }
 
 /** A blocked sync request a run converted in place: held (the file is refused) or re-frozen (the file now imports). */
@@ -582,7 +591,8 @@ export async function buildHoldReport(engine: Exec, input: { sourceId: string; i
   const escalated = holdsEscalated(input.policy, outstanding - Number(summary?.images ?? 0),
     { held: runHolds.filter(hold => !imageWeight(hold)).length, screened: input.screened });
   const fences = Math.max(Number(summary?.fences ?? 0), runHolds.filter(hold => fenceWeight(hold)).length);
-  const steps = holdRepairSteps(input.sourceId, { fences, others: Math.max(0, outstanding - fences) });
+  const auto = fences ? await readFenceAutoRepair(engine) : undefined;
+  const steps = holdRepairSteps(input.sourceId, { fences, others: Math.max(0, outstanding - fences) }, auto);
   const verify = { argv: ['gbrain', 'sources', 'status', input.sourceId, '--json'] };
   if (input.remote) return { held_count: runHolds.length, holds_fix: { argv: steps.argv, consent: [], actor: 'host_admin', requires_exclusive: false, verify,
     why: `${outstanding} file(s) in source ${input.sourceId} are held and not imported; only the brain host can inspect and repair them.`,
@@ -591,7 +601,7 @@ export async function buildHoldReport(engine: Exec, input: { sourceId: string; i
     why: `${runHolds.length} file(s) held this run, ${outstanding} held in source ${input.sourceId}; they do not block sync. Inspect them with 'gbrain sources status ${input.sourceId}'; `
       + (fences ? `then ${steps.text}.` : 'the repair preview proposes each fix and writes nothing.')
       + (escalated ? ' Escalated: more files are held than a source should carry, so a generator or a gbrain upgrade is likely writing or reading them wrong; fix the cause before the backlog grows.' : '') };
-  return { held: runHolds.slice(0, input.policy.cap).map(gitHoldItem), held_count: runHolds.length, holds_outstanding: outstanding,
+  return { held: runHolds.slice(0, input.policy.cap).map(hold => gitHoldItem(hold, auto)), held_count: runHolds.length, holds_outstanding: outstanding,
     ...(escalated ? { holds_escalated: true } : {}), ...(runHolds.length > input.policy.cap ? { holds_truncated: true } : {}),
     ...(input.pendingScreen ? { holds_pending_screen: true } : {}), holds_fix: fix };
 }

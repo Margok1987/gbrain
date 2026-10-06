@@ -32,8 +32,8 @@ export interface FenceReasonSpec {
 
 // The anchor is built per reason, so no partial `write-refusals.md#...` literal reads as a broken link (write-refusals-coverage).
 const DOCS = 'docs/guides/write-refusals.md';
-// PR4 switches this next step to `gbrain repair fences`, routed through the hold-repair router.
-const REPAIR = 'Edit the fence by hand, then sync or write the page again.';
+const REPAIR = 'Preview its repair with `gbrain repair fences` (read-only; it names the exact edit when gbrain will not repair it), or fix the fence and write the page again.';
+const BY_HAND = '`gbrain repair fences` (read-only) lists the exact edit.';
 
 type Base = Pick<FenceReasonSpec, 'stage' | 'tier' | 'manualOnly' | 'autoRetry'>;
 const tier3: Base = { stage: 'screen', tier: 'llm', manualOnly: false, autoRetry: true };
@@ -79,11 +79,11 @@ const SPECS: Record<FenceReason, Omit<FenceReasonSpec, 'docs'>> = {
   prepare_time: entry(prepared, 'The {fence} fence passed the screen but its rows were refused while the write was prepared. ' + REPAIR),
   normalizer_failed: entry({ ...prepared, autoRetry: false, tier: 'manual' }, 'The fence normalizer failed on the {fence} fence in the {section}; the page is held as it was. Run `gbrain doctor --json` and report it; a gbrain upgrade re-screens it.'),
   llm_unavailable: entry(run(true), 'The repair model was unavailable (timeout, rate limit or server error). The next repair run retries.'),
-  llm_empty: entry(run(false), 'The repair model returned nothing for the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_refused: entry(run(false), 'The repair model declined to repair the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_malformed: entry(run(false), 'The repair model did not return a single table for the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_truncated: entry(run(false), 'The repair model stopped before finishing the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_disabled: entry(run(false), 'Model repair is off (`fences.repair.llm`). Fix row(s) {rows} by hand, or ask the user before running `gbrain config set fences.repair.llm true`.', { paid: true }),
+  llm_empty: entry(run(false), 'The repair model returned nothing for the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_refused: entry(run(false), 'The repair model declined to repair the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_malformed: entry(run(false), 'The repair model did not return a single table for the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_truncated: entry(run(false), 'The repair model stopped before finishing the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_disabled: entry(run(false), 'Model repair is off (`fences.repair.llm`). Fix row(s) {rows} by hand (' + BY_HAND + '), or ask the user before running `gbrain config set fences.repair.llm true`.', { paid: true }),
   budget_exhausted: entry(run(true), 'The daily fence-repair budget is spent; repairs resume after 00:00 UTC. Raising it is the user\'s call: `gbrain config set fences.repair.max_usd_per_day <usd>`.', { paid: true }),
   no_pricing: entry(run(false), 'A spend cap is set but gbrain has no price for the repair model. Look up its price and run `gbrain pricing set <model> --input <usd> --output <usd>` on the brain host.', { paid: true }),
   ledger_unavailable: entry(run(true), 'The spend ledger could not be read, so no model call was made. The next repair run retries.'),

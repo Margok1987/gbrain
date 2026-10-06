@@ -10,8 +10,13 @@
  * Each run first advances the stored census within a bounded scan
  * (`GBRAIN_DOCTOR_FENCE_TIMEOUT_MS`, default 10 s), then reports the stored
  * summary. A census the scan did not finish is `partial` and never reports
- * ok; the next run resumes where it stopped. Output is location only: slugs,
- * paths, fences, rows, reasons and tiers, never a cell value.
+ * ok; the next run resumes where it stopped. The fix is the read-only
+ * `gbrain repair fences --source <id>` preview for holds, stored pages and
+ * files alike; what the next maintenance run repairs automatically is said
+ * so (only while one is active and `fences.repair.enabled` is on), and why
+ * model-tier fences wait when `fences.repair.llm` is off or today's budget is
+ * spent. Output is location only: slugs, paths, fences, rows, reasons and
+ * tiers, never a cell value.
  */
 import type { BrainEngine } from '../../../core/engine.ts';
 import type { Check } from '../../doctor.ts';
@@ -21,6 +26,7 @@ import { runFenceCensus, summarizeFenceCensus, type SourceCensus, type TierCount
 import { readTrend, type TrendEntry } from '../../../core/fence-repair/census-store.ts';
 import { readFenceRepairCaps } from '../../../core/fence-repair/config.ts';
 import { STRUCTURED_WRITE_ADVICE } from '../../../core/fence-repair/report.ts';
+import { fencePreviewArgv, readFenceAutoRepair, type FenceAutoRepair } from '../../../core/fence-repair/hold-fix.ts';
 import { dailyLedger, FENCE_REPAIR_LEDGER } from '../../../core/budget/daily-ledger.ts';
 
 /**
@@ -56,28 +62,43 @@ function sourceLine(census: SourceCensus, now: number): string {
   return `${census.source_id}: ${parts.join(', ')} (by tier: ${tiers(census.by_tier)})${age}`;
 }
 
-/** The next step for one source, from the PR1/PR2 contract: holds and files are edited and synced, stored pages are read and written again. */
-function sourceFix(census: SourceCensus) {
-  if (census.holds.total) {
-    return agentFix(['gbrain', 'sources', 'status', census.source_id, '--json'], `Lists each held file of ${census.source_id} with the fence, section, rows and reason; `
-      + `read its page with gbrain get --source ${census.source_id} -- <slug>, edit that fence in the file, commit, then run gbrain sync --source ${census.source_id} --no-pull.`,
-    'fence_integrity', { docs: DOCS });
-  }
-  const page = census.sample.find(c => c.bucket === 'page');
-  if (census.pages.total && page) {
-    return agentFix(['gbrain', 'get', '--source', census.source_id, '--', page.key], `Reads ${page.key}; write it again with put_page so gbrain normalizes a fixable fence `
-      + `(it reports fences_normalized), or correct the fence the refusal names first. ${STRUCTURED_WRITE_ADVICE}`, 'fence_integrity', { docs: DOCS });
-  }
-  return agentFix(['gbrain', 'sync', '--source', census.source_id, '--no-pull'], `Syncs ${census.source_id}: a fixable fence is rewritten and committed, and any other `
-    + 'is held with its fence, rows and reason (gbrain sources status names them) so you can edit that fence and sync again.', 'fence_integrity', { docs: DOCS });
+/** Whether the maintenance run repairs fences by itself: "repaired automatically by the next maintenance run", or why not. */
+function automaticRepair(auto: FenceAutoRepair): string {
+  if (auto.active) return 'repaired automatically by the next maintenance run';
+  return `not repaired automatically (${auto.enabled ? 'no maintenance run has completed in the last 24 h' : 'fences.repair.enabled is false'})`;
 }
 
-/** The check's verdict after a bounded census scan. */
-export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutMs?: number; now?: () => Date } = {}): Promise<Omit<Check, 'name'>> {
+/**
+ * The next step for one source: the read-only `gbrain repair fences --source <id>` preview for holds, stored pages and files alike.
+ * With no active maintenance run, `then` applies the plan (the preview prints the `--expect <hash>` form).
+ */
+function sourceFix(census: SourceCensus, auto: FenceAutoRepair) {
+  const preview = fencePreviewArgv(census.source_id);
+  const manual = census.by_tier.manual;
+  const why = `Previews the repair of each malformed fence of ${census.source_id} (read-only, no model call): its planned tier and diff, the estimated model cost, or the exact edit for a fence gbrain will not guess; it prints the apply command with --expect <hash>. `
+    + (auto.active ? `Everything but the manual ones is ${automaticRepair(auto)}, so no action is needed for those.` : `They are ${automaticRepair(auto)}, so apply the plan with the command the preview prints.`)
+    + (manual ? ` ${manual} need a manual edit: make the edit the preview names in the file (or the page), commit, then sync.` : '');
+  return agentFix(preview, why, 'fence_integrity', { docs: 'docs/guides/repair.md#fences',
+    ...(auto.active ? {} : { then: agentFix([...preview, '--apply'], `Applies the current repair plan of ${census.source_id}; the command the preview prints adds --expect <hash>, which applies exactly what it showed.`, 'fence_integrity') }) });
+}
+
+/** Why model-tier fences wait, or the caps when nothing stops them. */
+function modelRepairSentence(caps: { perPageUsd: number; perDayUsd: number }, today: { committedUsd: number; reservedUsd: number } | null, auto: FenceAutoRepair, llm: number): string {
+  if (!auto.llm) return `Model repair (Tier 3) is off (fences.repair.llm false), so ${llm} model-tier fence(s) wait for a manual edit; turning it on is the user's call (gbrain config set fences.repair.llm true).`;
+  if (caps.perDayUsd === 0) return 'Model repair spend is off (fences.repair.max_usd_per_day 0).';
+  if (today && today.committedUsd + today.reservedUsd >= caps.perDayUsd) {
+    return `Today's model repair budget is spent ($${today.committedUsd.toFixed(2)} of $${caps.perDayUsd.toFixed(2)}), so ${llm} model-tier fence(s) wait until after 00:00 UTC; `
+      + 'raising it is the user\'s call (gbrain config set fences.repair.max_usd_per_day <usd>).';
+  }
+  return `Model repair caps: $${caps.perPageUsd.toFixed(2)} per page, $${caps.perDayUsd.toFixed(2)} per day${today ? ` ($${today.committedUsd.toFixed(2)} spent today)` : ''}.`;
+}
+
+/** The check's verdict after a bounded census scan (`sourceIds`: only those sources, for a scoped remote caller). */
+export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutMs?: number; now?: () => Date; sourceIds?: string[] } = {}): Promise<Omit<Check, 'name'>> {
   const now = opts.now ?? (() => new Date());
   const timeoutMs = opts.timeoutMs ?? fenceScanTimeoutMs();
-  const runs = await runFenceCensus(engine, { deadline: now().getTime() + timeoutMs, now });
-  const census = await summarizeFenceCensus(engine, undefined, runs);
+  const runs = await runFenceCensus(engine, { deadline: now().getTime() + timeoutMs, now, ...(opts.sourceIds ? { sourceIds: opts.sourceIds } : {}) });
+  const census = await summarizeFenceCensus(engine, opts.sourceIds, runs);
   const from = new Date(now().getTime() - (TREND_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
   const trendRows = await readTrend(engine, census.map(c => c.source_id), from);
   const trend = census.map(c => sourceTrend(c.source_id, trendRows.get(c.source_id) ?? []));
@@ -95,14 +116,16 @@ export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutM
   if (!total && !partial.length && !noisy.length) {
     return { status: 'ok', details, message: census.length ? `No malformed facts or takes fence is held, stored or waiting in a checkout (${census.length} source(s) scanned).` : 'No sources to scan.' };
   }
+  const auto = await readFenceAutoRepair(engine, now());
   const at = now().getTime();
   const sentences: string[] = [];
   if (total) {
+    const manual = waiting.reduce((sum, c) => sum + c.by_tier.manual, 0);
     sentences.push(`${total} malformed facts or takes fence(s) wait: ${waiting.map(c => sourceLine(c, at)).join('; ')}. `
-      + 'Deterministic ones are rewritten losslessly the next time the file syncs or the page is written; the others need the named fence edited (none of them blocks a sync).');
-    if (waiting.some(c => c.by_tier.llm)) sentences.push(caps.perDayUsd === 0
-      ? 'Model repair spend is off (fences.repair.max_usd_per_day 0).'
-      : `Model repair caps: $${caps.perPageUsd.toFixed(2)} per page, $${caps.perDayUsd.toFixed(2)} per day${today ? ` ($${today.committedUsd.toFixed(2)} spent today)` : ''}.`);
+      + `${manual < total ? `The ${auto.llm ? 'deterministic, resolver and model-tier' : 'deterministic and resolver'} ones are ${automaticRepair(auto)}` : 'All of them need a manual edit'}`
+      + `${manual && manual < total ? `; ${manual} need the manual edit the preview names` : ''}. None of them blocks a sync. Preview: ${waiting.map(c => fencePreviewArgv(c.source_id).join(' ')).join('; ')}.`);
+    const llm = waiting.reduce((sum, c) => sum + c.by_tier.llm, 0);
+    if (llm) sentences.push(modelRepairSentence(caps, today, auto, llm));
   }
   if (noisy.length) {
     sentences.push(`Writers keep sending malformed fences: ${noisy.map(t => `${t.source_id} had ${t.normalized_7d} normalized in ${TREND_DAYS} days`
@@ -114,11 +137,16 @@ export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutM
       + 'run gbrain doctor --only fence_integrity again to resume it (raise GBRAIN_DOCTOR_FENCE_TIMEOUT_MS for a larger share per run).');
   }
   const first = waiting[0];
-  const fix = first ? sourceFix(first)
+  const fix = first ? sourceFix(first, auto)
     : partial.length ? agentFix(['gbrain', 'doctor', '--only', 'fence_integrity', '--json'], 'Resumes the fence census where the last scan stopped and reports what it found.', 'fence_integrity', { docs: DOCS })
       : agentFix(['gbrain', 'sources', 'status', noisy[0]!.source_id, '--json'], `Shows ${noisy[0]!.source_id}'s recent sync result, including fences_normalized with sample paths, so you can find what writes the malformed fences.`,
         'fence_integrity', { docs: DOCS });
-  return { status: 'warn', details, fix, message: sentences.join(' ') };
+  return { status: 'warn', details: { ...details, auto_repair: auto }, fix, message: sentences.join(' ') };
+}
+
+/** The wave check (`WAVE_CHECKS`): the same verdict, scoped to `sourceIds` when a remote caller is. */
+export async function fenceIntegrityCheck(engine: BrainEngine, sourceIds?: string[]): Promise<Check> {
+  return { name: 'fence_integrity', ...await fenceIntegrityResult(engine, sourceIds ? { sourceIds } : {}) };
 }
 
 async function runFenceIntegrity(ctx: DoctorContext): Promise<Check[]> {
