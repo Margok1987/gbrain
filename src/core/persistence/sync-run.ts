@@ -41,6 +41,7 @@ import { fenceReceiptLocation } from '../fence-repair/refusal.ts';
 import { faultPoint } from './fault-points.ts';
 import { withCoordinatedWrite } from './context.ts';
 import { principalAttribution } from './attribution.ts';
+import { flushSyncFenceTrend } from '../fence-repair/census-store.ts';
 import { addFencesNormalized, addRecovered, buildHoldReport, clearGitHold, clearGitHoldRetryPaths, fencesNormalizedReport, readSyncHoldPolicy, recordSyncConversion, recoveredReport, writeGitHold, type FencesTally } from './sync-holds.ts';
 
 export interface ManagedSyncWriteDiagnostic {
@@ -716,6 +717,8 @@ export async function performManagedSync(engine: BrainEngine, opts: SyncOpts, sl
       screened: 'entries' in (cursor ?? {}) ? (cursor as Cursor).entries.slice(0, cursor!.index).filter(entry => entry.action === 'import').length : 0 });
     const recovered = state.remote ? undefined : recoveredReport(state.sourceId, cursor?.counts.recovered);
     const fences = fencesNormalizedReport(state.sourceId, cursor?.counts.fences, state.remote === true);
+    const tally = cursor?.counts.fences;
+    await flushSyncFenceTrend(engine, { sourceId: state.sourceId, runId: cursor?.runId, tally: tally && { count: tally.count, by_class: tally.by_class, writers: tally.dirs } });
     return { ...synced, ...report, ...(!state.remote && cursor?.convertedFromFailed?.length ? { converted_from_failed: cursor.convertedFromFailed } : {}),
       ...(recovered ? { recovered_frontmatter: recovered } : {}), ...(fences ? { fences_normalized: fences } : {}) };
   } catch {

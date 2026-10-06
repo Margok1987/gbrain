@@ -33,6 +33,7 @@ import { classifyMirrorPage, sourceMirrorReadOnly } from './mirror-read-only.ts'
 import { databaseRefusal, withAttempt, type PublicationFailure, type PublicationFailureDetail, type PublicationStage } from './publication-failure.ts';
 import { fenceFailureDetail } from '../fence-repair/refusal.ts';
 import { faultPoint, withFaultPoints } from './fault-points.ts';
+import { recordPublicationFenceTrend } from '../fence-repair/census-store.ts';
 
 interface PreparedMutationBase {
   sourceExclusive?: boolean;
@@ -335,6 +336,7 @@ export async function publishMutation(engine: BrainEngine, row: WriteRequest, pr
       if (prepared.databaseOnlyReason === 'mirror_read_only') await classifyMirrorPage(tx, row);
       const final = skill ? null : await publicationPostimage(tx, row, prepared);
       decoratePublicationOutcome(row, prepared, outcome, final, files.length, skill);
+      await recordPublicationFenceTrend(tx, row, outcome);
       await queuePublicationEffects(tx, row, final, outcome, prepared);
       await hooks.boundary?.('before_commit', row);
       const committed = await completeWrite(tx, current, 'committed', outcome, undefined, current);
