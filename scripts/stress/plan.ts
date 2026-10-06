@@ -51,7 +51,10 @@ export const SPECIAL_FILES: Record<string, Partial<Profile>> = {
   'test/entity-card-perf.slow.test.ts': { timeoutMs: 300_000 },
   'test/eval-brainbench-e2e.slow.test.ts': { timeoutMs: 300_000 },
   'test/persistence-skill-old-binary.slow.test.ts': { timeoutMs: 180_000, prereq: 'old-binary' },
-  'test/reconcile-crash.slow.test.ts': { timeoutMs: 180_000 },
+  'test/reconcile-crash-unactivated-1.slow.test.ts': { timeoutMs: 180_000 },
+  'test/reconcile-crash-unactivated-2.slow.test.ts': { timeoutMs: 180_000 },
+  'test/reconcile-crash-activated-1.slow.test.ts': { timeoutMs: 180_000 },
+  'test/reconcile-crash-activated-2.slow.test.ts': { timeoutMs: 180_000 },
   'test/persistence-crash-robot.slow.test.ts': { timeoutMs: 300_000 },
 };
 

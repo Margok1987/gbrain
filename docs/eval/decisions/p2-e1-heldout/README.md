@@ -23,13 +23,16 @@ CIs are paired bootstraps over probes (10,000 draws, seed 42), in points.
 | seed 3, keyword | +3.6 (+2.8, +4.5) | −2.8 (−3.6, −2.1) | −2.3 (−2.9, −1.7) | −36.2 (−53.0, −19.9) | −1.0 (−3.8, +1.4) | 2, 3, 4 |
 | seed 2, hybrid (valid rows only) | +1.0 (+0.3, +1.9) | +0.4 (−1.2, +2.6) | −0.9 (−1.6, −0.3) | −24.5 (−42.6, −8.2) | +0.3 (−4.6, +5.2) | 1, 2, 3 |
 | seed 2, hybrid (no-op rows counted as off) | +0.3 (+0.1, +0.6) | +0.6 (−0.3, +1.6) | −0.5 (−1.2, +0.2) | −24.5 (−42.6, −8.2) | +0.2 (−3.0, +3.5) | 1, 2, 3 |
-| seed 3, hybrid | not run (see below) | | | | | |
+| seed 3, hybrid (valid rows only) | +1.2 (+0.4, +2.1) | +0.7 (−0.4, +2.4) | −0.3 (−0.5, −0.04) | −10.0 (−20.2, −1.2) | +0.8 (−3.6, +5.1) | 2, 3 |
+| seed 3, hybrid (no-op rows counted as off) | +0.35 (+0.1, +0.6) | +0.5 (−0.4, +1.5) | −0.1 (−0.8, +0.5) | −10.0 (−20.2, −1.2) | +0.5 (−2.4, +3.5) | 1, 2, 3 |
 
 On the keyword workloads, dampening lifts concept retrieval, but both rivals lift it more. It also costs between a quarter
 and a third of hub-as-answer nDCG@5, against a −0.5 guard.
 
-**Missing cells.** Ten of the 12 cells ran. The seed-3 hybrid candidate and cap cells did not finish. They cannot change
-the verdict: hub-as-answer would need a gain of about +89 points there to bring even a pooled delta to −0.5.
+**All 12 cells ran.** All 12 preregistered cells ran. The seed-3 hybrid candidate and cap cells confirm FAIL:
+hub-as-answer −10.0 (−20.2, −1.2), and the capped rival still wins on concept. The full table is in gbrain-evals
+[`p2.md`](https://github.com/garrytan/gbrain-evals/blob/48dd47bd8/docs/benchmarks/2026-10-05-heldout-program/p2.md)
+(merged in gbrain-evals#81, `48dd47bd8`).
 
 **Hybrid telemetry.** In seed-2 hybrid, 346 of 625 H = 32 probe rows (299 concept, 47 one-hop) carried no hub-dampening
 stamp. On those queries the lexical metadata-boost gate skipped the backlink and graph-signal stages, so dampening had

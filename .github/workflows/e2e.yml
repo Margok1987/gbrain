@@ -364,7 +364,7 @@ jobs:
         # Excluded from the selected matrix (scripts/e2e-matrix.ts) so they
         # run once. Named files only, no glob.
         shell: bash
-        run: bash scripts/run-e2e.sh test/e2e/graduation-cli.test.ts test/e2e/graduation-clients.test.ts test/e2e/graduation-crash.test.ts test/e2e/graduation-faults.test.ts test/e2e/graduation-legacy-copy.test.ts
+        run: bash scripts/run-e2e.sh test/e2e/graduation-cli.test.ts test/e2e/graduation-cli-topologies.test.ts test/e2e/graduation-cli-history.test.ts test/e2e/graduation-cli-zero-mutation-1.test.ts test/e2e/graduation-cli-zero-mutation-2.test.ts test/e2e/graduation-cli-zero-mutation-3.test.ts test/e2e/graduation-clients.test.ts test/e2e/graduation-clients-serve.test.ts test/e2e/graduation-crash-run-1.test.ts test/e2e/graduation-crash-run-2.test.ts test/e2e/graduation-crash-run-3.test.ts test/e2e/graduation-crash-rollback-1.test.ts test/e2e/graduation-crash-rollback-2.test.ts test/e2e/graduation-faults.test.ts test/e2e/graduation-legacy-copy.test.ts
         env:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/gbrain_test
           GBRAIN_PGBOUNCER_URL: postgresql://postgres:postgres@localhost:55433/gbrain_test?prepare=false
@@ -754,7 +754,7 @@ jobs:
       - run: bun test test/export-scale.slow.test.ts --timeout=900000 --coverage --coverage-reporter=lcov --coverage-dir=${{ runner.temp }}/coverage/slow-e
         env:
           GBRAIN_TEST_EXPORT_SCALE_PAGES: '10001'
-      - run: bun test test/reconcile-crash.slow.test.ts --timeout=180000 --coverage --coverage-reporter=lcov --coverage-dir=${{ runner.temp }}/coverage/slow-f
+      - run: bun test test/reconcile-crash-*.slow.test.ts --timeout=180000 --coverage --coverage-reporter=lcov --coverage-dir=${{ runner.temp }}/coverage/slow-f
       - name: Write coverage lane manifest
         run: |
           printf '{"lane":"slow","sha":"%s","lcovCount":%s,"complete":true}\n' \

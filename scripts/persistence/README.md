@@ -315,7 +315,7 @@ backups, ordinary mutations after repair, and competing publications.
 HTTP and stdio PGLite owners before and after activation, restarts the owner, and
 independently reads the newly remembered private fact and provenance.
 
-`test/reconcile-crash.slow.test.ts` and `test/e2e/reconcile-crash*.test.ts` kill real
+`test/reconcile-crash-*.slow.test.ts` and `test/e2e/reconcile-crash*.test.ts` kill real
 processes at all eight publication boundaries with activation off/on. PostgreSQL
 uses one file per activation state to stay within the unchanged per-file cap. Optional
 `GBRAIN_TEST_RECONCILE_CRASH_MANIFEST_DIR` retains executed-case evidence.
@@ -551,17 +551,23 @@ seed and size (`GBRAIN_GRADUATION_FIXTURE_CACHE`, default
 `~/.cache/gbrain-graduation-fixtures`). A restore re-homes paths and owner
 stamps and marks sources synced, so the source doctor stays green.
 
-The E2E suites drive the real CLI in child processes:
-`graduation-crash` (SIGKILL at every run and rollback boundary),
-`graduation-faults` (ENOSPC on a tmpfs tablespace, which needs Docker;
-password rotation; DDL route mismatch), `graduation-clients` (older
-releases, respawned and resident serve, stale CLI and MCP configs) and
-`graduation-cli` (agent flow, zero-mutation `--plan`/`--status`, `--force`,
-PgBouncer through `GBRAIN_PGBOUNCER_URL`, a NOSUPERUSER role, the 1k round
-trip). Kill and pause points come from `graduationBoundary()` hooks that only
+The E2E suites drive the real CLI in child processes, each split into files
+of about two minutes or less so CI queues spread them:
+`graduation-crash-run-N` and `graduation-crash-rollback-N` (SIGKILL at every
+run and rollback boundary), `graduation-faults` (ENOSPC on a tmpfs
+tablespace, which needs Docker; password rotation; DDL route mismatch),
+`graduation-clients` (older releases) and `graduation-clients-serve`
+(respawned and resident serve, stale CLI and MCP configs), and
+`graduation-cli` (agent flow, `--force`), `graduation-cli-topologies`
+(PgBouncer through `GBRAIN_PGBOUNCER_URL`, a NOSUPERUSER role),
+`graduation-cli-history` (the 1k round trip) and
+`graduation-cli-zero-mutation-N` (zero-mutation `--plan`/`--status`, each
+file probing a share of the custody boundaries). Kill and pause points come
+from `graduationBoundary()` hooks that only
 `test/helpers/graduation-hooks-preload.ts` registers. Older release binaries
-are built once per tag under `GBRAIN_OLDER_RELEASE_DIR`. The crash suite takes
-about 40 seconds per case, so run it with `GBRAIN_E2E_FILE_TIMEOUT=3600`.
+are built once per tag under `GBRAIN_OLDER_RELEASE_DIR`. A crash case takes
+about 16 seconds; `scripts/run-e2e.sh` gives every graduation file four times
+its per-file cap.
 `scripts/persistence/graduation-ttv.ts` records the commands and wall time
 from the first plan to a green doctor, the run's phase timings and query
 p50/p95 on both engines. The 1k-page gate is five minutes;

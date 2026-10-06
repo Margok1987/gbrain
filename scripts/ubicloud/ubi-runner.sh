@@ -355,20 +355,43 @@ cmd_down() {
   done
 }
 
+# slim_git SRC DIR: build DIR/.git holding only the objects HEAD and
+# origin/master reach, with SRC's branch, index and config, so a checkout that
+# fetched many branches does not upload all of them to every VM. Fails (and
+# the caller ships SRC's own .git) on anything unexpected.
+slim_git() {
+  local src=$1 dir=$2 git_dir common branch specs
+  git_dir=$(git -C "$src" rev-parse --absolute-git-dir) || return 1
+  common=$(cd "$src" && cd "$(git rev-parse --git-common-dir)" && pwd) || return 1
+  branch=$(git -C "$src" symbolic-ref -q HEAD) || branch=""
+  specs=("+HEAD:${branch:-refs/heads/ubi-pack-head}")
+  if git -C "$src" rev-parse -q --verify refs/remotes/origin/master >/dev/null; then
+    specs+=("+refs/remotes/origin/master:refs/remotes/origin/master")
+  fi
+  git init -q "$dir" &&
+    git -C "$dir" fetch -q --update-shallow --no-tags --no-write-fetch-head "$src" "${specs[@]}" &&
+    cp "$common/config" "$dir/.git/config" &&
+    { [ ! -f "$git_dir/index" ] || cp "$git_dir/index" "$dir/.git/index"; } &&
+    if [ -n "$branch" ]; then git -C "$dir" symbolic-ref HEAD "$branch"; else git -C "$dir" update-ref --no-deref HEAD "$(git -C "$src" rev-parse HEAD)"; fi
+}
+
 # pack SRC: write a gzipped checkout tarball to stdout (tracked + untracked
-# files that are not ignored, plus .git; a non-git directory is taken whole).
+# files that are not ignored, plus a slim .git; a non-git directory is taken whole).
 cmd_pack() {
-  local src
+  local src tmp
   src=$(cd "${1:-.}" && pwd)
   if git -C "$src" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    tmp=$(mktemp -d)
     (
       cd "$src"
-      { git ls-files -z -co --exclude-standard; printf '.git\0'; } \
+      if slim_git "$src" "$tmp/repo" >&2; then git_from=(-C "$tmp/repo" .git); else git_from=(.git); fi
+      git ls-files -z -co --exclude-standard \
         | while IFS= read -r -d '' f; do
-            if [ -e "$f" ] || [ -L "$f" ]; then printf '%s\0' "$f"; fi
+            if { [ -e "$f" ] || [ -L "$f" ]; } && [ "$f" != .git ]; then printf '%s\0' "$f"; fi
           done \
-        | tar --null -T - -czf -
+        | tar --null -T - "${git_from[@]}" -czf -
     )
+    rm -rf "$tmp"
   else
     tar -C "$src" -czf - .
   fi
@@ -471,7 +494,7 @@ usage: ubi-runner.sh <command> [args]
                          create a VM and wait for SSH; prints its name
   ssh NAME [COMMAND]     shell or login-shell command on the VM (user ubi, passwordless sudo)
   sync NAME [SRC] [DEST] stream a checkout (tracked + untracked-unignored + .git)
-  pack [SRC]             write that checkout tarball to stdout
+  pack [SRC]             write that checkout tarball to stdout (with a slim .git: HEAD + origin/master)
   unpack NAME DEST       extract a tarball from stdin into DEST on the VM
   pull NAME REMOTE_GLOB LOCAL_DIR
                          copy matching remote entries into LOCAL_DIR

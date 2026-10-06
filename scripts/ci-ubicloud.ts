@@ -7,11 +7,14 @@
  *   bun run ci:ubicloud:diff            # doc-only diff: doc checks + gitleaks; any other diff: the full gate
  *
  * Options:
- *   --vms N            VMs to provision in parallel (default 4: 64 vCPUs of the
- *                      project quota that pull-request CI shares)
+ *   --vms N            VMs to provision in parallel (default: burst-sized from
+ *                      `ubi-runner.sh usage`; 4 when the quota is busy)
  *   --size SIZE        Ubicloud size (default standard-16)
  *   --slots N          concurrent work slots per VM (default: half of --size's vCPUs)
  *   --location LOC     Ubicloud location (default eu-central-h1)
+ *   --image IMAGE      boot image (default: UBI_CI_IMAGE, else stock Ubuntu 24.04);
+ *                      gbrain-ci@latest is the prebaked machine image
+ *                      scripts/ubicloud/build-ci-image.sh builds
  *   --lanes a,b        subset of gitleaks,verify,serial,slow,unit,e2e (default all)
  *   --diff             doc-only diffs run only the doc checks and gitleaks (ci:local --diff)
  *   --record-weights   write measured durations to scripts/ubicloud/weights.json
@@ -23,7 +26,8 @@
  * are tested.
  *
  * Each VM runs scripts/ubicloud/setup-ci-vm.sh (bun, test prerequisites, one
- * pgvector server + PgBouncer per slot, PGLite snapshots). The first VM to
+ * pgvector server + PgBouncer per slot, PGLite snapshots), streamed over SSH
+ * while the checkout uploads. The first VM to
  * finish setup runs the machine-level items in order (gitleaks, verify, the
  * serial lane's machine-exclusive files) and then joins the pool. Every other
  * test file is an item in one global heaviest-first queue that idle slots pull
@@ -45,7 +49,9 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
   buildItems,
+  burstVms,
   parseItemLog,
+  parseUsageTotal,
   readWeightTable,
   sortQueue,
   takeBatch,
@@ -59,6 +65,9 @@ import {
 const ROOT = resolve(import.meta.dir, "..");
 const RUNNER = join(ROOT, "scripts/ubicloud/ubi-runner.sh");
 const REMOTE_DIR = "work/gbrain";
+// Written once the checkout is unpacked; setup-ci-vm.sh waits for it before the steps that need the checkout.
+const UNPACKED_MARKER = "work/gbrain.unpacked";
+const SETUP_SCRIPT = join(ROOT, "scripts/ubicloud/setup-ci-vm.sh");
 const COMMITTED_WEIGHTS = join(ROOT, "scripts/ubicloud/weights.json");
 const LOCAL_WEIGHTS = join(ROOT, ".context/ci-ubicloud/weights.json");
 const ALL_LANES = ["gitleaks", "verify", "serial", "slow", "unit", "e2e"] as const;
@@ -69,12 +78,24 @@ const HEAVY_MS = 60_000;
 // VMs still in setup count toward heavy spreading for this long after the
 // first VM is ready, so the first VM does not claim every long pole.
 const HEAVY_SETUP_GRACE_MS = 45_000;
+// Fleet size without --vms: the default when the shared quota is busy, up to
+// BURST_MAX_VMS when it is free, never past BURST_CEILING_VCPUS of the
+// project's 512 (the rest is headroom for pull-request runners `usage` can't see).
+const DEFAULT_VMS = 4;
+const BURST_MAX_VMS = 10;
+const BURST_CEILING_VCPUS = 448;
+// A VM whose slots would each get less than this much weighted work is not worth its setup.
+const MIN_SLOT_WORK_S = 120;
+const vcpusOf = (size: string) => Number(/(\d+)$/.exec(size)?.[1] ?? 16);
 
 interface Opts {
+  /** 0 until sized: --vms N, or the burst decision from `ubi-runner.sh usage`. */
   vms: number;
   size: string;
   slots: number;
   location: string;
+  /** A machine image (NAME@VERSION) or "stock". */
+  image: string;
   lanes: Set<string>;
   diff: boolean;
   recordWeights: boolean;
@@ -83,10 +104,11 @@ interface Opts {
 
 function parseArgs(argv: string[]): Opts {
   const opts: Opts = {
-    vms: 4,
+    vms: 0,
     size: "standard-16",
     slots: 0,
     location: "eu-central-h1",
+    image: process.env.UBI_CI_IMAGE || "stock",
     lanes: new Set(ALL_LANES),
     diff: false,
     recordWeights: false,
@@ -103,6 +125,7 @@ function parseArgs(argv: string[]): Opts {
     else if (arg === "--size") opts.size = value();
     else if (arg === "--slots") opts.slots = Number(value());
     else if (arg === "--location") opts.location = value();
+    else if (arg === "--image") opts.image = value();
     else if (arg === "--lanes") opts.lanes = new Set(value().split(","));
     else if (arg === "--diff") opts.diff = true;
     else if (arg === "--record-weights") opts.recordWeights = true;
@@ -110,18 +133,18 @@ function parseArgs(argv: string[]): Opts {
     else usage(`unknown argument ${arg}`);
   }
   for (const lane of opts.lanes) if (!(ALL_LANES as readonly string[]).includes(lane)) usage(`unknown lane ${lane}`);
-  if (!Number.isInteger(opts.vms) || opts.vms < 1) usage("--vms must be a positive integer");
+  if (!Number.isInteger(opts.vms) || opts.vms < 0 || (opts.vms === 0 && argv.includes("--vms"))) usage("--vms must be a positive integer");
   // One slot per two vCPUs: the whole corpus still fits inside the longest
   // single file's runtime at the default fleet size, and the headroom keeps
   // timing-sensitive files (and that longest file) from starving for CPU.
-  if (!opts.slots) opts.slots = Math.max(1, Math.round(Number(/(\d+)$/.exec(opts.size)?.[1] ?? 16) / 2));
+  if (!opts.slots) opts.slots = Math.max(1, Math.round(vcpusOf(opts.size) / 2));
   if (!Number.isInteger(opts.slots) || opts.slots < 1) usage("--slots must be a positive integer");
   return opts;
 }
 
 function usage(message: string): never {
   console.error(`ci-ubicloud: ${message}`);
-  console.error("usage: bun run scripts/ci-ubicloud.ts [--vms N] [--size SIZE] [--slots N] [--location LOC] [--lanes a,b] [--diff] [--record-weights] [--keep]");
+  console.error("usage: bun run scripts/ci-ubicloud.ts [--vms N] [--size SIZE] [--slots N] [--location LOC] [--image IMAGE] [--lanes a,b] [--diff] [--record-weights] [--keep]");
   process.exit(2);
 }
 
@@ -177,6 +200,8 @@ interface Vm {
   setupMs?: number;
   busySlots: number;
   heavy: number;
+  /** Running the machine-level control items; takes no queue items meanwhile. */
+  control: boolean;
 }
 
 async function main() {
@@ -233,12 +258,26 @@ async function main() {
   const totalItems = queue.length + control.reduce((n, c) => n + Math.max(c.files.length, 1), 0);
   const estimate = queue.reduce((s, i) => s + i.weight, 0) / 1000;
   log(`${totalItems} items (${Object.entries(inventory).filter(([l]) => opts.lanes.has(l)).map(([l, f]) => `${l} ${f.length}`).join(", ")}, control ${control.map((c) => c.lane).join("+") || "none"}); ~${Math.round(estimate)}s of weighted work`);
-  log(`provisioning ${opts.vms} × ${opts.size} in ${opts.location}, ${opts.slots} slots each; logs in ${runDir}`);
+  if (!opts.vms) {
+    const usageReport = await runner(["usage"], { timeoutMs: 120_000 });
+    const decision = burstVms({
+      usedVcpus: usageReport.code === 0 ? parseUsageTotal(usageReport.stdout) : null,
+      vmVcpus: vcpusOf(opts.size),
+      defaultVms: DEFAULT_VMS,
+      maxVms: BURST_MAX_VMS,
+      ceilingVcpus: BURST_CEILING_VCPUS,
+      workVms: Math.max(1, Math.ceil(estimate / (opts.slots * MIN_SLOT_WORK_S))),
+    });
+    opts.vms = decision.vms;
+    log(`fleet: ${decision.reason} (pass --vms N to override)`);
+  }
+  log(`provisioning ${opts.vms} × ${opts.size} in ${opts.location} (${opts.image === "stock" ? "stock Ubuntu 24.04" : `image ${opts.image}`}), ${opts.slots} slots each; logs in ${runDir}`);
 
-  // ── Checkout tarball, packed once ────────────────────────────────────────
+  // ── Checkout tarball, packed once while the VMs boot ─────────────────────
   const tarball = join(tmpdir(), `gbrain-ci-ubicloud-${process.pid}.tgz`);
-  const packed = await runner(["pack", ROOT], { out: tarball });
-  if (packed.code !== 0) throw new Error("packing the checkout failed");
+  const packed = runner(["pack", ROOT], { out: tarball });
+  // Faster create and SSH polling than the runner's interactive default.
+  process.env.UBI_POLL_SECONDS ??= "2";
 
   const bunVersion = process.env.GBRAIN_CI_BUN_TAG
     ?? /oven\/bun:\$\{GBRAIN_CI_BUN_TAG:-([^}]+)\}/.exec(readFileSync(join(ROOT, "docker-compose.ci.yml"), "utf8"))?.[1]
@@ -254,6 +293,7 @@ async function main() {
     infraErrors: 0,
     busySlots: 0,
     heavy: 0,
+    control: false,
   }));
   // Memoized: the signal handler and main's finally must await the same
   // teardown, or main exits while its `down` calls are still running.
@@ -302,17 +342,22 @@ async function main() {
   let controlDone = control.length === 0;
   let controlClaimed = false;
   let batchSeq = 0;
-  const totalSlots = () => vms.filter((vm) => vm.state === "ready").length * opts.slots;
+  const totalSlots = () => vms.filter((vm) => vm.state === "ready" && !vm.control).length * opts.slots;
   let firstReadyAt = 0;
   const skipHeavy = (vm: Vm) => (item: Item) => {
     if (item.weight < HEAVY_MS) return false;
     const inGrace = Date.now() - firstReadyAt < HEAVY_SETUP_GRACE_MS;
-    const peers = vms.filter((v) => v.state === "ready" || (inGrace && (v.state === "setup" || v.state === "provisioning")));
+    // The control VM holds no heavy items until it joins the pool; counting it would cap every other VM at one.
+    const peers = vms.filter((v) => !v.control && (v.state === "ready" || (inGrace && (v.state === "setup" || v.state === "provisioning"))));
     return vm.heavy > Math.min(...peers.map((v) => v.heavy));
   };
 
+  // Every item has a result: VMs still waiting for capacity have nothing left to do, and teardown reaps them.
+  let allRecorded = () => {};
+  const recorded = new Promise<void>((done) => (allRecorded = done));
   const record = (vm: Vm, slot: number, result: ItemResult) => {
     results.set(weightKey(result.lane as Lane, result.file), { ...result, vm: vm.name, slot });
+    if (results.size === totalItems) allRecorded();
     if (result.rc !== 0) {
       const path = join(runDir, "failures", `${result.lane}__${result.file.replace(/[\\/]/g, "__")}.log`);
       writeFileSync(path, result.output + "\n");
@@ -365,6 +410,7 @@ async function main() {
   };
 
   const runControl = async (vm: Vm) => {
+    vm.control = true;
     for (const step of control) {
       log(`control on ${vm.name}: ${step.lane}${step.files.length ? ` (${step.files.length} exclusive files, sequential)` : ""}`);
       const { parsed, logPath } = await runBatch(vm, 1, step.lane, step.files);
@@ -375,6 +421,7 @@ async function main() {
       }
     }
     controlDone = true;
+    vm.control = false;
   };
 
   const vmLifecycle = async (vm: Vm, index: number) => {
@@ -383,7 +430,7 @@ async function main() {
     if (tornDown) return;
     vm.requested = true;
     appendFileSync(ledger, `${vm.name} ${opts.location}\n`);
-    const up = await runner(["up", "-n", vm.name, "-s", opts.size, "-l", opts.location], { out: setupLog });
+    const up = await runner(["up", "-n", vm.name, "-s", opts.size, "-l", opts.location, ...(opts.image === "stock" ? [] : ["-b", opts.image])], { out: setupLog });
     if (tornDown) return;
     if (up.code !== 0) {
       vm.state = "failed";
@@ -394,11 +441,19 @@ async function main() {
       return;
     }
     vm.state = "setup";
+    // System packages, Bun and image pulls need no checkout: setup starts now
+    // and waits for the marker the upload writes when it lands.
+    const env = `SLOTS=${opts.slots} BUN_VERSION=${quote(bunVersion)} GITLEAKS=${opts.lanes.has("gitleaks") ? 1 : 0} CHECKOUT=${REMOTE_DIR} CHECKOUT_MARKER=${UNPACKED_MARKER}`;
+    const setupRun = runner(["ssh", vm.name, `${env} bash -s`], { input: SETUP_SCRIPT, out: `${setupLog}.bootstrap`, timeoutMs: 15 * 60 * 1000 });
+    if ((await packed).code !== 0) throw new Error("packing the checkout failed");
     const unpack = await runner(["unpack", vm.name, REMOTE_DIR], { input: tarball });
-    const env = `SLOTS=${opts.slots} BUN_VERSION=${quote(bunVersion)} GITLEAKS=${opts.lanes.has("gitleaks") ? 1 : 0}`;
-    const setup = unpack.code === 0
-      ? await runner(["ssh", vm.name, `cd ${REMOTE_DIR} && ${env} bash scripts/ubicloud/setup-ci-vm.sh`], { out: `${setupLog}.bootstrap`, timeoutMs: 15 * 60 * 1000 })
-      : unpack;
+    const marked = unpack.code === 0 ? await runner(["ssh", vm.name, `touch ${UNPACKED_MARKER}`]) : unpack;
+    if (marked.code !== 0) {
+      vm.state = "failed";
+      log(`VM ${vm.name} checkout upload failed: ${marked.stdout.trim().split("\n").slice(-2).join(" | ")}`);
+      return;
+    }
+    const setup = await setupRun;
     if (setup.code !== 0) {
       vm.state = "failed";
       log(`VM ${vm.name} setup failed (see ${setupLog}.bootstrap)`);
@@ -424,7 +479,7 @@ async function main() {
 
   let exitCode = 0;
   try {
-    await Promise.all(vms.map((vm, i) => vmLifecycle(vm, i)));
+    await Promise.race([Promise.all(vms.map((vm, i) => vmLifecycle(vm, i))), recorded]);
     if (control.length && !controlDone) throw new Error("no VM became ready to run gitleaks/verify/exclusive items");
     if (queue.length) throw new Error(`${queue.length} items never ran: every VM failed`);
   } catch (error) {

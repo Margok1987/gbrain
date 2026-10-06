@@ -9,7 +9,7 @@
  *
  * Fails if the extraction stops chunking or writes outside
  * maintenanceTransaction. Runs on PGLite (`bun run test:slow`), and on
- * Postgres through test/e2e/write-attribution-postgres.test.ts.
+ * Postgres through test/e2e/write-attribution-timeline-10k-postgres.test.ts.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';

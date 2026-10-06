@@ -73,7 +73,7 @@ receipts_init unit
 # keep-in-matrix bar.
 # export-scale.slow.test.ts (571s at its 100,001-page master scale) rides the
 # slow-entity-resolve-perf job, which sets GBRAIN_TEST_EXPORT_SCALE_PAGES per
-# event. reconcile-crash.slow.test.ts (244s) is not duplicated here: the
+# event. reconcile-crash-*.slow.test.ts (244s) is not duplicated here: the
 # persistence-validation invariants job already runs it on PGLite for every
 # event, before and after activation.
 # evals/ is included: its *.test.ts files (eval-harness unit tests) were
@@ -88,7 +88,7 @@ ALL_FILES=$(find test evals -name '*.test.ts' \
   -not -name 'entity-card-perf.slow.test.ts' \
   -not -name 'eval-brainbench-e2e.slow.test.ts' \
   -not -name 'export-scale.slow.test.ts' \
-  -not -name 'reconcile-crash.slow.test.ts' \
+  -not -name 'reconcile-crash-*.slow.test.ts' \
   -not -path 'test/e2e/*' | sort)
 
 if [ -z "$ALL_FILES" ]; then

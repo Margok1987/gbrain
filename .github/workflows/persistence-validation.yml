@@ -417,7 +417,7 @@ jobs:
           if [ '${{ matrix.engine }}' = 'postgres' ]; then
             bun --no-env-file test --timeout=180000 test/e2e/reconcile-crash.test.ts test/e2e/reconcile-crash-unactivated.test.ts
           else
-            env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun --no-env-file test --timeout=180000 test/reconcile-crash.slow.test.ts
+            env -u DATABASE_URL -u GBRAIN_DATABASE_URL bun --no-env-file test --timeout=180000 test/reconcile-crash-*.slow.test.ts
           fi
       - name: Upload reconciliation crash manifests
         if: always()
