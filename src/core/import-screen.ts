@@ -2,9 +2,10 @@
  * #5988: the one content screen every ingestion path shares. It decides,
  * without preparing or writing anything, whether content is importable or a
  * deterministic content refusal (size, unreadable or ambiguous frontmatter,
- * a frontmatter slug that names another page, a content-sanity reject).
- * Managed sync freezes, managed sync and import publication, and
- * `importFromContent` (put_page, capture, legacy import) all call it, so a
+ * a frontmatter slug that names another page, a content-sanity reject, and on
+ * coordinated paths a facts or takes fence the canonical projection would
+ * refuse, #6188). Managed sync freezes, managed sync and import publication,
+ * and `importFromContent` (put_page, capture, legacy import) all call it, so a
  * file is held or refused for the same reason everywhere.
  */
 import type { BrainEngine } from './engine.ts';
@@ -15,6 +16,9 @@ import { classifyImportHold, contentSizeHold, parseMarkdown, type ContentHold, t
 import { isCodeFilePath } from './sync.ts';
 import { opError, type OperationError } from './ops/contract.ts';
 import type { Action } from './agent-output.ts';
+import { fenceFixText, fenceLocationFromMessage, fenceRefusal, scanCanonicalFences } from './fence-repair/refusal.ts';
+import type { FenceMessageLocation } from './fence-repair/reasons.ts';
+import type { FenceReason } from './fence-repair/types.ts';
 
 export const MAX_FILE_SIZE = 5_000_000; // 5MB
 
@@ -66,9 +70,15 @@ export function assessImportSanity(page: Pick<ParsedMarkdown, 'compiled_truth' |
   });
 }
 
-/** A refusal the screen returns: a hold code, or `content_rejected` for an operator-configured sanity reject. */
-export interface ContentRefusal extends Omit<ContentHold, 'code'> {
-  code: ContentHold['code'] | 'content_rejected';
+/**
+ * A refusal the screen returns: a hold code, `content_rejected` for an
+ * operator-configured sanity reject, or `invalid_fence` (coordinated paths)
+ * with its location-only `fence`.
+ */
+export interface ContentRefusal extends Omit<ContentHold, 'code' | 'reason'> {
+  code: ContentHold['code'] | 'content_rejected' | 'invalid_fence';
+  reason?: ContentHold['reason'] | FenceReason;
+  fence?: FenceMessageLocation;
 }
 
 export interface ImportScreenInput {
@@ -90,6 +100,14 @@ export interface ImportScreenInput {
   published?: () => boolean;
   /** Pre-loaded config: a junk hit under `junk_disposition: reject` refuses as `content_rejected`. */
   sanity?: ImportSanityConfig;
+  /**
+   * #6188 (E8): `coordinated` writers (managed sync, managed import, managed
+   * file repair) refuse a fence the canonical projection would refuse as
+   * `invalid_fence`; `lenient` (the default: legacy sync, `importFromFile`,
+   * put_page) screens no fence. Coordinated put_page refuses the same fence
+   * typed at its projection, after the remote hidden-row merge.
+   */
+  fences?: 'coordinated' | 'lenient';
 }
 
 export type ImportScreenResult =
@@ -106,6 +124,10 @@ export function screenImportContent(input: ImportScreenInput): ImportScreenResul
   const parsed = parseMarkdown(input.content, input.path, { validate: true, ...(input.activePack ? { activePack: input.activePack } : {}) });
   const hold = classifyImportHold(parsed, { expectedSlug: input.expectedSlug, slugExempt: input.slugExempt, slugConflictMessage: input.slugConflictMessage });
   if (hold) return { status: 'refused', refusal: hold };
+  if (input.fences === 'coordinated') {
+    const [defect] = scanCanonicalFences(parsed).defects;
+    if (defect) return { status: 'refused', refusal: fenceRefusal(defect) };
+  }
   if (input.sanity && !input.sanity.disabled && input.sanity.junkDisposition === 'reject') {
     const result = assessImportSanity(parsed, input.sanity);
     if (result.shouldQuarantine) return { status: 'refused', refusal: { code: 'content_rejected', message: `Content rejected by sanity gate: ${result.reason_messages.join('; ')}` } };
@@ -133,6 +155,9 @@ export function contentRefusalError(refusal: ContentRefusal, suggestion: string,
 export function contentRefusalFromReceipt(code: string | null | undefined, message: string | null | undefined): (Omit<ContentRefusal, 'message'> & { suggestion: string }) | null {
   if (!isContentRefusal(code, message)) return null;
   const text = message ?? '';
+  const fence = fenceLocationFromMessage(code, text);
+  if (fence) return { code: 'invalid_fence', reason: fence.reason, ...(fence.fence && fence.section ? { fence: fence as FenceMessageLocation } : {}),
+    suggestion: `The content itself was refused, so resubmitting it unchanged refuses again. ${fenceFixText(fence)} Then submit the corrected content with a new request_id.` };
   const key = /key "([^"\n]{1,200})"/.exec(text)?.[1];
   const lineText = /\bat line (\d+)/.exec(text)?.[1];
   const line = lineText === undefined ? undefined : Number(lineText);
@@ -166,14 +191,16 @@ const LEGACY_CONTENT_MESSAGES: Array<[code: string, pattern: RegExp]> = [
 
 /**
  * True when a stored refusal (receipt `error_code` + `error_message`) is a
- * deterministic content refusal no retry can fix: the new typed codes, and
- * the exact strings older gbrain versions stored for the same causes.
- * Cursor-size and admission-capacity `request_too_large`, and every transient
- * or conflict code, never match.
+ * deterministic content refusal no retry can fix: the new typed codes, the
+ * #6188 fence grammar (`Fence <reason>: ...` under wire `invalid_params` or
+ * `take_row_collision`), and the exact strings older gbrain versions stored
+ * for the same causes. Cursor-size and admission-capacity
+ * `request_too_large`, every transient or conflict code, and any other
+ * `invalid_params` message never match.
  */
 export function isContentRefusal(code: string | null | undefined, message: string | null | undefined): boolean {
   if (!code) return false;
   if (CONTENT_REFUSAL_CODES.has(code)) return true;
   const text = message ?? '';
-  return LEGACY_CONTENT_MESSAGES.some(([legacy, pattern]) => legacy === code && pattern.test(text));
+  return LEGACY_CONTENT_MESSAGES.some(([legacy, pattern]) => legacy === code && pattern.test(text)) || fenceLocationFromMessage(code, text) !== null;
 }

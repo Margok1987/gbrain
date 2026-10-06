@@ -24,6 +24,7 @@ import type { BrainEngine } from '../engine.ts';
 import type { Action } from '../agent-output.ts';
 import type { ContentRefusal } from '../import-screen.ts';
 import type { InvalidFrontmatterReason } from '../markdown.ts';
+import type { FenceReason } from '../fence-repair/types.ts';
 import type { SyncRename } from './sync-discovery.ts';
 
 export const GIT_HOLD_OP = 'sync-hold';
@@ -44,7 +45,7 @@ export const GIT_HOLD_ESCALATE_MIN_SCREENED = 40;
 type Exec = Pick<BrainEngine, 'executeRaw'>;
 
 export type GitHoldCode = ContentRefusal['code'] | 'rename_held' | 'parser_regression' | 'managed_image_sync_unsupported';
-export type GitHoldReason = InvalidFrontmatterReason | 'rename_source_changed';
+export type GitHoldReason = InvalidFrontmatterReason | 'rename_source_changed' | FenceReason;
 
 export interface GitHoldMeta {
   reason?: GitHoldReason;

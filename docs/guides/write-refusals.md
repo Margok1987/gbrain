@@ -149,6 +149,71 @@ with each file and fix the ones that need no guessing."*
 | <a id="sync_parser_regression"></a>`sync_parser_regression` | Sync stopped without advancing because it would hold a file whose exact bytes imported before (default `sync.parser_regression=stop`). This is a gbrain bug, not a content problem. | Report it with the gbrain version, the file and the code; upgrade or pin the last good version, then `gbrain sync --source <source> --no-pull --retry-failed`. To keep syncing meanwhile, `gbrain config set sync.parser_regression hold` (ask the user). |
 | <a id="changed_since_preview"></a>`changed_since_preview` | A `gbrain repair frontmatter --apply` found a file, its proposed change or its page different from what the preview showed, so that file was not written. | Preview again, show the user the new diff and approve its new hash. |
 
+<a id="invalid_fence"></a>
+### Fence holds (`invalid_fence`)
+
+A page's facts and takes fences are its structured rows. A coordinated write
+(managed sync, managed `gbrain import`, `put_page` on a managed brain, managed
+file repair) refuses a fence it cannot import without dropping or guessing
+rows: code `invalid_fence`, wire `error` `invalid_params` (`take_row_collision`
+for a stored-row collision). During managed sync the file is **held** instead
+and the rest of the source syncs. The message reads
+`Fence <reason>: in the <facts|takes> fence (<body|timeline>), row(s) N, column(s) C, at line L.`
+(the parts that apply; the line counts within the section), then the fix. It
+names fence, section, row numbers, column names and lines only, never a claim,
+holder or cell. Holds carry the same location as
+`fence: { reason, fence, section, rows, columns, line }`; a failed receipt
+keeps it in `write_error_detail.fence` (row numbers stay on the brain host).
+
+Legacy (unmanaged) sync, `importFromFile` and legacy `put_page` still import
+such a page as before (bad rows skipped) and never hold it. Two documented
+exceptions keep blocking with the typed refusal instead of holding:
+`sync.holds=fail`, and company-brain sources, which never hold and never
+rewrite repository files (fix the fence in the repository and commit).
+
+**Say to your agent:** *"Sync held a page because of its facts table. Show me
+which rows are wrong and fix them."*
+
+Fix: read the page (`gbrain get --source <source> -- <slug>`), edit only the
+named fence in the file (never the frontmatter), commit, then
+`gbrain sync --source <source> --no-pull`. `gbrain sources status <source>`
+lists every fence hold with its location. To add rows without hand-editing a
+table, use `remember` (facts) or `takes_add` (takes).
+
+| `invalid_fence` reason | What it means | Recovery |
+| --- | --- | --- |
+| <a id="fence-repeated_marker"></a>`repeated_marker` | A body or timeline section has a second begin or end marker for the same fence outside code. | Keep one begin and one end marker per fence in that section, with every row in one table. |
+| <a id="fence-missing_begin"></a>`missing_begin` | An end marker has no begin marker before it. | Add the begin marker above the table, or delete the stray end marker. |
+| <a id="fence-marker_near_miss"></a>`marker_near_miss` | A takes marker uses the two-dash form (`<!-- gbrain:takes:begin -->`) instead of the three-dash marker, or a line mentions it outside a fence. | Use the exact three-dash markers around the takes table, or wrap a mere mention in backticks. |
+| <a id="fence-unparseable"></a>`unparseable` | The fence does not parse cleanly: most often it has no end marker, or a row number is not a positive whole number (`column #`). | Add the end marker directly after the last table row, or fix the named row number. |
+| <a id="fence-no_header"></a>`no_header` | The fence has table rows but no header row naming `claim` and `kind`. | Add the canonical header (below) as the first table line. |
+| <a id="fence-row_before_header"></a>`row_before_header` | Rows sit above the header row. | Move them below the header. |
+| <a id="fence-short_row"></a>`short_row` | A row has too few cells, so its columns are ambiguous. | Add the missing cells so every column lines up. |
+| <a id="fence-extra_cells"></a>`extra_cells` | A row has more cells than the header, often an unescaped `\|` in a cell. | Escape the pipe as `\|` or remove the extra cell. |
+| <a id="fence-enum_unmapped"></a>`enum_unmapped` | A facts `kind`, `visibility` or `notability` cell holds a value outside the allowed list (the message names the column and the allowed values). | Use one of the allowed values. |
+| <a id="fence-takes_kind_unsupported"></a>`takes_kind_unsupported` | A takes `kind` is not fact, take, bet or hunch. gbrain never chooses a takes kind for you. | Use one of the four kinds. |
+| <a id="fence-confidence_out_of_range"></a>`confidence_out_of_range` | A facts `confidence` is not a number from 0 to 1. | Write it as a decimal such as 0.8. |
+| <a id="fence-claim_value_invalid"></a>`claim_value_invalid` | A facts `claim_value` is not a number. | Write a number (1,234 separators and a k/M/B suffix are allowed) or leave it empty. |
+| <a id="fence-weight_missing"></a>`weight_missing` | A takes `weight` is missing or not a number. Takes have no default weight. | Add a weight from 0 to 1. |
+| <a id="fence-holder_unresolved"></a>`holder_unresolved` | A takes `who` cell is not `world`, `brain`, `people/<slug>` or `companies/<slug>`. | Write one of those forms. |
+| <a id="fence-row_collision"></a>`row_collision` | Two rows of the same fence kind share a row number, in one fence or across the body and timeline (`rows` lists the numbers). | Give one row a new number above every number used on the page. |
+| <a id="fence-quoted_fence_rows"></a>`quoted_fence_rows` | A fence sits inside a code block or inline code span, so readers treat it as an example and importing would remove the stored rows it holds. | Move the fence out of the code, or delete the fence to remove its rows. |
+| <a id="fence-stored_row_collision"></a>`stored_row_collision` | A new takes row's number already names a different stored take that is not in the page's fence (wire `take_row_collision`). | Renumber the new row, or add the stored take back to the fence. |
+| <a id="fence-withdrawn_claim_in_malformed_fence"></a>`withdrawn_claim_in_malformed_fence` | A facts fence that does not parse holds a claim the user withdrew, so gbrain cannot tell whether the row should stay withdrawn. | Repair the fence so it parses; the withdrawn row then stays withdrawn. |
+| <a id="fence-prepare_time"></a>`prepare_time` | Hold only: the file passed the content screen, but its fence was refused while it was prepared against the stored page (a stored-row collision, a withdrawn claim, rows quoted in code). `fence.reason` names which. Managed sync holds it in the same run instead of blocking. | Fix it as its `fence.reason` says. After a database-side fix (for example removing the conflicting take), `gbrain sources retry-held <source>` re-checks the file. |
+
+Fence format. Markers are `<!--- gbrain:facts:begin -->` / `<!--- gbrain:facts:end -->`
+and `<!--- gbrain:takes:begin -->` / `<!--- gbrain:takes:end -->` (three dashes).
+The first table row is a header naming `claim` and `kind`.
+
+- Facts rows: `| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context |` (10 cells; 9 when the trailing context is empty; 14 with `claim_metric`, `claim_value`, `claim_unit`, `claim_period`). `kind` is event, preference, commitment, belief, fact or idea; `visibility` private or world; `notability` high, medium or low; `confidence` a number from 0 to 1.
+- Takes rows: `| # | claim | kind | who | weight | since | source |` (7 cells; 6 without source; 13 with `resolved`, `quality`, `evidence`, `value`, `unit`, `by`). `kind` is fact, take, bet or hunch; `who` is world, brain, `people/<slug>` or `companies/<slug>`; `weight` a number.
+- Row numbers are positive whole numbers, unique per fence kind across the whole page.
+
+A managed source a fence refusal blocked before this release recovers on its
+next sync with no command: the file is held and the rest imports
+(`gbrain sync --source <source> --no-pull` does it now).
+
 A source that a gbrain older than v0.60.47.0 blocked on one of these refusals
 recovers on its next sync (scheduled or manual) with no ledger surgery: the blocked request is
 converted in place and reported as `converted_from_failed`. To do it now run
