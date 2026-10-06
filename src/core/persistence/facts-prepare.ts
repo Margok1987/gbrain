@@ -1,4 +1,5 @@
 import type { BrainEngine, NewFact } from '../engine.ts';
+import { attributionCompatible } from '../facts/attribution.ts';
 import type { GBrainConfig } from '../config.ts';
 import { OperationError, opError } from '../ops/contract.ts';
 import { readFix } from '../ops/op-fix.ts';
@@ -123,13 +124,13 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
   const [maximum] = await engine.executeRaw<{ n: number }>('SELECT COALESCE(MAX(row_num),0)::int AS n FROM facts WHERE source_id=$1 AND source_markdown_slug=$2', [row.source_id, row.slug]);
   let nextRow = Math.max(maximum?.n ?? 0, ...parsed.facts.map(fact => fact.rowNum)) + 1;
   const entries: Array<{ fact: typeof facts[number]; duplicateId: number | null; rowNum?: number; duplicateOf?: number; supersedes?: FactCandidate }> = [];
-  const seen = new Map<string, number>();
+  const seen = new Map<string, number[]>();
   for (const fact of facts) {
     await assertFactNotWithdrawn(engine, row.source_id, fact);
     const key = JSON.stringify([fact.fact, fact.visibility, fact.entity_slug]);
-    const earlier = seen.get(key);
+    const earlier = (seen.get(key) ?? []).find(i => attributionCompatible(entries[i].fact.attributed_to, fact.attributed_to));
     if (earlier !== undefined) { entries.push({ fact, duplicateId: null, duplicateOf: earlier }); continue; }
-    seen.set(key, entries.length);
+    seen.set(key, [...(seen.get(key) ?? []), entries.length]);
     const decision = await decideSingleFact(engine, row.source_id, fact, dedupEmbedding(fact), fact.embedding_model, fact.source);
     const supersedes = p.supersede === true && decision.status === 'superseded' ? decision.candidate! : undefined;
     if (decision.candidate && !supersedes) { entries.push({ fact, duplicateId: decision.candidate.id }); continue; }
@@ -138,7 +139,8 @@ export async function prepareManagedFactsMutation(engine: BrainEngine, row: Writ
       confidence: fact.confidence ?? 1, notability: fact.notability ?? 'medium', source: fact.source, context: fact.context ?? undefined,
       validFrom: formatFenceDate(fact.valid_from!), validUntil: fact.valid_until ? formatFenceDate(fact.valid_until) : undefined,
       claimMetric: fact.claim_metric ?? undefined, claimValue: fact.claim_value ?? undefined,
-      claimUnit: fact.claim_unit ?? undefined, claimPeriod: fact.claim_period ?? undefined }).body;
+      claimUnit: fact.claim_unit ?? undefined, claimPeriod: fact.claim_period ?? undefined,
+      ...(fact.attributed_to ? { attributedTo: fact.attributed_to } : {}) }).body;
     // Strike the superseded row in this page's fence, as the remember mutation does.
     if (supersedes && rowNum !== undefined && supersedes.source_markdown_slug === row.slug && supersedes.row_num != null) {
       body = replaceOrInsertFactsFence(body, renderFactsTable(parseFactsFence(body).facts.map(f => f.rowNum === Number(supersedes.row_num)

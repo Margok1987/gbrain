@@ -7,7 +7,9 @@
  * caller's token_budget or the one evidence delivery resolves (return_unit,
  * including the default auto). With the key off, without a cue or with no
  * budget at all (chunk unit, no token_budget), the result is byte-identical to
- * the build without the reserve. PGLite, keyword-only, no network.
+ * the build without the reserve. With #6020's defaults (date grounding on), a
+ * fact whose valid_from the extractor grounded is ranked and rendered with that
+ * date. PGLite, keyword-only, stub chat transport, no network.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -16,6 +18,8 @@ import { MAX_RESERVE_ROWS, TEMPORAL_FACT_RESERVE_KEY, TEMPORAL_RESERVE_ROW_SHARE
 import { resultTokens } from '../src/core/search/token-budget.ts';
 import type { SearchResult } from '../src/core/types.ts';
 import { newSource, page, putPage } from './helpers/pinned-questions-fixture.ts';
+import { configureGateway, resetGateway, __setChatTransportForTests, type ChatResult } from '../src/core/ai/gateway.ts';
+import { extractFactsFromTurnWithOutcome, getExtractorVariant } from '../src/core/facts/extract.ts';
 
 let engine: PGLiteEngine;
 let sourceId: string;
@@ -85,5 +89,32 @@ describe('temporal fact reserve', () => {
         expect(f.chunk_text.match(/\[observed /g)?.length).toBe(1);
       }
     } finally { await engine.executeRaw(`DELETE FROM config WHERE key = 'search.evidence_date_header'`); }
+  });
+
+  test('with #6020 defaults, date grounding is on and a grounded valid_from is what the reserve ranks and renders', async () => {
+    expect((await getExtractorVariant(engine)).dateGrounding).toBe(true);
+    resetGateway();
+    configureGateway({ chat_model: 'anthropic:claude-sonnet-4-6', env: { ANTHROPIC_API_KEY: 'sk-ant-test' } });
+    const reply = JSON.stringify({ facts: [
+      { fact: 'The Kestrel launch review was moved to the Denver office', kind: 'event', notability: 'high', entity: 'kestrel', valid_from: '2025-04-22' },
+      { fact: 'The Kestrel launch review needs a projector', kind: 'fact', notability: 'high', entity: 'kestrel' },
+    ] });
+    __setChatTransportForTests(async () => ({ text: reply, blocks: [{ type: 'text', text: reply }], stopReason: 'end',
+      usage: { input_tokens: 1, output_tokens: 1, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-sonnet-4-6', providerId: 'anthropic' }) as ChatResult);
+    try {
+      const outcome = await extractFactsFromTurnWithOutcome({ turnText: 'User (2025-04-23): we moved the Kestrel launch review to Denver yesterday; it needs a projector.',
+        source: 'conversation', variant: await getExtractorVariant(engine), observationDate: { date: '2025-04-23', source: 'filename' }, embedding: null });
+      expect(outcome.ok).toBe(true);
+      const facts = outcome.ok ? outcome.facts : [];
+      expect(facts[0]!.valid_from?.toISOString()).toBe('2025-04-22T00:00:00.000Z');
+      for (const f of facts) await engine.insertFact({ fact: f.fact, kind: f.kind, entity_slug: 'kestrel', source: 'conversation', visibility: 'world', ...(f.valid_from ? { valid_from: f.valid_from } : {}) }, { source_id: sourceId });
+    } finally {
+      __setChatTransportForTests(null);
+      resetGateway();
+    }
+    const rows = await withKey('true', () => query('When was the Kestrel launch review moved?', { token_budget: 4000, limit: 10 }));
+    const kestrel = rows.filter(r => r.result_type === 'fact' && r.chunk_text.includes('Kestrel'));
+    expect(kestrel[0]!.chunk_text.split('\n')[0]).toBe('[observed unknown; valid 2025-04-22 to unknown]');
+    expect(kestrel[0]!.chunk_text).toContain('moved to the Denver office');
   });
 });

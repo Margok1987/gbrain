@@ -447,6 +447,10 @@
       },
       {
         "category": "brain",
+        "name": "extraction_date_grounding"
+      },
+      {
+        "category": "brain",
         "name": "integrity"
       },
       {

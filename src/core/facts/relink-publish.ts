@@ -72,6 +72,7 @@ function fenceRow(v: Record<string, unknown>, rowNum: number, context: string) {
     ...(v.claim_value != null ? { claimValue: Number(v.claim_value) } : {}),
     ...(v.claim_unit ? { claimUnit: String(v.claim_unit) } : {}),
     ...(v.claim_period ? { claimPeriod: String(v.claim_period) } : {}),
+    ...(v.attributed_to === 'user' || v.attributed_to === 'assistant' || v.attributed_to === 'other' ? { attributedTo: v.attributed_to as 'user' | 'assistant' | 'other' } : {}),
   };
 }
 

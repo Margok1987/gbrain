@@ -10,6 +10,43 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.94.0] - 2026-10-06
+
+**Saved facts keep their real dates and remember who said them, and search can explain its own ranking.**
+
+When a conversation says "we shipped it last week", the fact gbrain saved used to keep the words "last week", which mean nothing a month later. Fact extraction now writes the actual date, worked out from when the text was written, and so do dream synthesis, atom extraction and take proposals. Saved facts also record who said them. Before this release, an assistant's suggestion could be saved as if it were the user's own plan. Now it is saved as the assistant's claim, and recall shows the speaker.
+
+In held-out tests, saved facts with an unresolved relative date fell from 8.95% to 2.05% on 7 sealed LoCoMo conversations, while answers from saved facts stayed as accurate on temporal questions and improved overall (53.6 → 54.7). Answers about what the assistant said rose from 44.1% to 95.8%, with no loss on what the user said.
+
+### How to use it
+
+```bash
+gbrain search "acme-example renewal terms" --explain --json   # how each result was scored
+gbrain config set extraction.date_grounding false             # off switch for date rewriting
+gbrain config set facts.attribution false                     # off switch for speaker attribution
+```
+
+Say to your agent: *"Why didn't search find my note about the acme-example renewal?"* The `query` tool's `explain_target` names the stage that lost the page and the next step to take.
+
+### Measured and shipped off
+
+Dampening the ranking boost of very heavily linked pages was built and tested on a held-out hub-heavy brain. It lifted concept retrieval by 3.3 to 3.6 nDCG@5 points on keyword search, but simply removing or capping the backlink boost lifted it more, and it cost 24.5 to 36.2 points on questions whose answer is the hub page itself. It failed its bar and is not in this release; search ranking is unchanged.
+
+### Things to watch
+
+- About 41% more facts are saved per conversation with speaker attribution on, because the assistant's answers and recommendations are now saved as their own facts. Storage, extraction output tokens and hot-memory volume grow by about that much on assistant-heavy conversations.
+- The upgrade adds one nullable column (`facts.attributed_to`, migration v215). Facts saved earlier keep their wording and have no speaker; re-extracting a source is a previewed action that needs the user's consent (`gbrain extract-conversation-facts --source-id <id> --dry-run`).
+- Life chronicle events keep their current prompt: their events already carry absolute dates, so they missed the per-prompt bar. `gbrain config set extraction.date_grounding true` opts them in.
+- Facts extracted from a dated page are stored at the page date instead of the sync time.
+
+### Itemized changes
+
+- **Date grounding.** `src/core/ai/date-grounding.ts` (observation, validity and recorded dates; one relative-date rule); `extraction.date_grounding` (on for fact extraction, dream synthesis, `extract_atoms` and `propose_takes`; chronicle only when `true`), `isConsumerDateGroundingOn` in `src/core/facts/extract.ts`. Each conversation segment gets its own observation date. Held-out record: `docs/eval/decisions/p2-e2-heldout/`.
+- **Speaker attribution.** `facts.attributed_to` (`user` | `assistant` | `other`; migration `v215-facts-attributed-to.ts`, `facts_attributed_to`); `facts.attribution` (on). Fact fences carry the speaker in a 15th cell only on rows that have one; facts from different known speakers are never deduplicated together; `consolidate` never promotes an assistant claim into the user's takes; context packs render "(assistant said)". Held-out record: `docs/eval/decisions/p2-e3-heldout/`.
+- **Search explain.** `query` with `explain: true` returns `score_details` per row (arms and ranks, RRF attribution, blend, every boost, rerank, final); `explain_target` diagnoses a missing page (`src/core/search/explain-target.ts`); both params are on the full MCP surface only. CLI `gbrain search --explain --json`. Guide: `docs/guides/search-explain.md`.
+- **Doctor.** `extraction_date_grounding` reports which prompts resolve relative dates.
+- **Hub dampening.** Held-out FAIL (`docs/eval/decisions/p2-e1-heldout/`); nothing ships. The `hubWeight` helper the multi-hop chain executor uses is unchanged.
+
 ## [0.60.93.0] - 2026-10-06
 
 **Links to pages you haven't written yet are no longer lost. gbrain keeps them, lists them, and connects them the moment the page exists.**

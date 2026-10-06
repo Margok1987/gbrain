@@ -32,6 +32,8 @@ import { bumpLastRetrievedAt } from '../last-retrieved.ts';
 import { applySnippetCap, DEFAULT_AGENT_SNIPPET_CHARS } from '../search/snippet-cap.ts';
 import { redactRetrievalOutput } from '../search/output-redaction.ts';
 import { projectRows, resultRowsFor } from '../search/lean-rows.ts';
+import { buildScoreDetails } from '../search/explain-formatter.ts';
+import { TargetTrace, diagnoseProbe, diagnoseTrace, probeTarget, type ExplainTargetDiagnosis } from '../search/explain-target.ts';
 import { assembleEvidenceForHits, capDeliveredSnippets, deliverEvidence, effectivePlan, pagePlanHits, resolveEvidencePlan, unsupportedDelivery, type DeliveryMeta, type DeliveryScope, type EvidencePlan, type FrozenHit, type ReturnUnit } from '../search/evidence-delivery.ts';
 import { privateProvenanceFilterFragment, resolveExcludePrivatePages } from '../search/private-visibility.ts';
 import { AUDIT_ROW_SOURCES } from '../facts/audit-sources.ts';
@@ -86,6 +88,8 @@ type SourceScope = { sourceId?: string; sourceIds?: string[] };
 function searchOutput(ctx: OperationContext, p: Record<string, unknown>, results: SearchResult[], meta: Record<string, unknown>, snippetCap: number,
   evidence?: { delivery: DeliveryMeta; explicitSnippet: boolean }): SearchResult[] {
   const rows = resultRowsFor(ctx, p.fields);
+  // `explain: true` — every row carries its score breakdown (kept in lean rows).
+  if (p.explain === true) for (const r of results) r.score_details = buildScoreDetails(r);
   // The shape is reported where it can vary: remote callers, or an explicit `fields`.
   const shown = ctx.remote !== false || p.fields !== undefined ? { rows } : {};
   if (!evidence) {
@@ -505,6 +509,81 @@ const TYPES_PARAM_DESCRIPTION = "Page types, e.g. ['person'].";
 
 const SOURCE_ID_PARAM_DESCRIPTION = "One source, or '__all__'.";
 const SALIENCE_PARAM = { type: 'string' as const, enum: ['off', 'on', 'strong'], description: 'Boost emotional pages (default: auto).' };
+
+/**
+ * Ranking explanation params, declared on `query` only and advertised on the
+ * full MCP surface only: every declared param is re-sent to the model on each
+ * turn, so the cheap `search` tool and the starter list stay lean (a starter
+ * session reaches them with `request_tools {surface: 'full'}`). The local CLI
+ * passes them to `search` too (`gbrain search --explain`).
+ */
+const EXPLAIN_PARAMS = {
+  explain: { type: 'boolean' as const, description: 'Per-row score_details.', fullSurfaceOnly: true },
+  explain_target: { type: 'string' as const, description: 'Expected page (slug or source:slug): why it is missing.', fullSurfaceOnly: true },
+};
+
+/** `explain_target` is `slug` or `source_id:slug` (slugs never contain ':'). */
+function parseExplainTarget(raw: string): { slug: string; sourceId?: string } {
+  const at = raw.indexOf(':');
+  return at > 0 ? { sourceId: raw.slice(0, at), slug: raw.slice(at + 1) } : { slug: raw };
+}
+
+/**
+ * explain_target, before the search: resolve the target among the pages this
+ * caller can read (one probe under the same scope and visibility the search
+ * uses). Returns the trace to thread into the search, or an early diagnosis
+ * (not visible / ambiguous) that needs no trace.
+ */
+async function prepareExplainTarget(
+  ctx: OperationContext, p: Record<string, unknown>, scope: SourceScope, excludePrivate: boolean, tool: 'search' | 'query',
+): Promise<{ trace?: TargetTrace; early?: ExplainTargetDiagnosis } | null> {
+  if (typeof p.explain_target !== 'string' || p.explain_target.trim() === '') return null;
+  const { slug, sourceId } = parseExplainTarget(p.explain_target.trim());
+  const retry = { tool, arguments: explainRetryArgs(p) };
+  let probe;
+  try {
+    probe = await probeTarget((sql, params) => ctx.engine.executeRaw(sql, params), slug,
+      { ...scope, excludePrivate, requireSafeChunks: ctx.remote !== false });
+  } catch {
+    return { trace: new TargetTrace({ slug, sourceId }) };
+  }
+  const early = diagnoseProbe({ slug, sourceId }, probe, { requireSafeChunks: ctx.remote !== false, retry });
+  if (early && (early.code === 'target_not_found_or_not_visible' || early.code === 'target_ambiguous')) return { early };
+  const resolvedSource = sourceId ?? (probe.length === 1 ? probe[0].source_id : undefined);
+  return { trace: new TargetTrace({ slug, sourceId: resolvedSource }), ...(early ? { early } : {}) };
+}
+
+/** The caller's search arguments, minus explain params, so every fix is a complete retry call. */
+function explainRetryArgs(p: Record<string, unknown>): Record<string, unknown> {
+  const { explain: _e, explain_target: _t, ...rest } = p;
+  return rest;
+}
+
+/** Adds the explain_target diagnosis to the retrieval meta when one was requested. */
+function withExplainTarget(meta: Record<string, unknown>, diagnosis: ExplainTargetDiagnosis | undefined): Record<string, unknown> {
+  return diagnosis ? { ...meta, explain_target: diagnosis } : meta;
+}
+
+/** explain_target, after the search: diagnose, refine an unretrieved target with the probe, and emit the fix as a notice. */
+function finishExplainTarget(
+  ctx: OperationContext, p: Record<string, unknown>, prep: { trace?: TargetTrace; early?: ExplainTargetDiagnosis } | null,
+  results: SearchResult[], tool: 'search' | 'query',
+): ExplainTargetDiagnosis | undefined {
+  if (!prep) return undefined;
+  let diag = prep.early;
+  if (prep.trace) {
+    const traced = diagnoseTrace(prep.trace, results, { tool, arguments: explainRetryArgs(p) });
+    // A probe finding (no chunks / stale projection / unsealed) explains an unretrieved page better than "no arm found it".
+    diag = traced.state === 'not_retrieved' && prep.early ? { ...prep.early, stages: traced.stages } : traced;
+  }
+  if (diag?.fix) {
+    const notice: Notice = { code: diag.code, kind: 'info', why: diag.why, fix: diag.fix };
+    ctx.emitNotice?.(notice);
+  }
+  if (!diag) return undefined;
+  const { fix: _fix, ...wire } = diag;
+  return wire as ExplainTargetDiagnosis;
+}
 const RECENCY_PARAM = { type: 'string' as const, enum: ['off', 'on', 'strong'], description: "Boost recent pages (default: auto)." };
 
 const SNIPPET_CHARS_PARAM_DESCRIPTION = 'Max chars per chunk_text (0 = full).';
@@ -635,6 +714,7 @@ const search: Operation = {
     // Cheap-hybrid (D4/D15): full vector+keyword+RRF+pool+title+alias, but
     // expansion OFF (no per-call LLM cost). `query` op is the full-control variant.
     let capturedMeta: HybridSearchMeta | null = null;
+    const explainPrep = await prepareExplainTarget(ctx, p, scope, excludePrivate, 'search');
     const searchOpts = {
       limit,
       offset,
@@ -650,7 +730,9 @@ const search: Operation = {
       recency: p.recency as 'off' | 'on' | 'strong' | undefined,
       decide: { remote: ctx.remote !== false },
     };
-    const primary = await hybridSearchCached(ctx.engine, queryText, { ...searchOpts, onMeta: (m) => { capturedMeta = m; } });
+    const primary = await hybridSearchCached(ctx.engine, queryText, {
+      ...searchOpts, onMeta: (m) => { capturedMeta = m; }, explain: p.explain === true, explainTarget: explainPrep?.trace,
+    });
     const declarations = new DeclarationMemo();
     let results = (await withDeclaredNameFanOut(primary, queryText, declarations,
       (alt, altLimit) => hybridSearchCached(ctx.engine, alt, { ...searchOpts, limit: altLimit, offset: 0 }))).map(r => ({ ...r }));
@@ -661,7 +743,7 @@ const search: Operation = {
     maybeCaptureSearch(ctx, queryText, results, latency_ms, true, capturedMeta);
     // #3800: cap AFTER capture/meta so eval + cache see the real payload.
     return evidenceOutput(ctx, p, results, plan, { ...scope, excludePrivate }, capturedMeta, snippetCap,
-      rows => buildRetrievalResponseMeta(ctx, scope, queryText, rows, capturedMeta, { conceptHint: true, types, typeFilterNotice: typeFilter.notice, declarations, feedbackOp: 'search' }));
+      async rows => withExplainTarget(await buildRetrievalResponseMeta(ctx, scope, queryText, rows, capturedMeta, { conceptHint: true, types, typeFilterNotice: typeFilter.notice, declarations, feedbackOp: 'search' }), finishExplainTarget(ctx, p, explainPrep, results, 'search')));
   },
   scope: 'read', mutating: false,
   cliHints: { name: 'search', positional: ['query'] },
@@ -730,6 +812,7 @@ const query: Operation = {
     adaptive_return: { type: 'boolean', description: 'true when one answer is wanted (fewer rows; never returns empty); omit for breadth.' },
     autocut: { type: 'boolean', description: 'Default on (never returns empty); false gives full top-K for breadth, unlike adaptive_return.' },
     relational: { type: 'boolean', description: 'Relationship-graph arm (default on).' },
+    ...EXPLAIN_PARAMS,
   },
   handler: async (ctx, p) => {
     const startedAt = Date.now();
@@ -834,6 +917,7 @@ const query: Operation = {
     const typeFilter = await reconcileTypeFilter(ctx, querySourceScope, excludePrivate, types);
     types = typeFilter.types;
     let capturedMeta: HybridSearchMeta | null = null; let queryEmbedding: Float32Array | null = null;
+    const explainPrep = await prepareExplainTarget(ctx, p, querySourceScope, excludePrivate, 'query');
     // v0.32.x search-lite: route the query op through hybridSearchCached so
     // token budget and intent weighting apply at the operation boundary.
     // Semantic cache reuse is suspended in the wrapper.
@@ -891,6 +975,7 @@ const query: Operation = {
       autocut: typeof p.autocut === 'boolean' ? (p.autocut as boolean) : pagePlanHits(plan).autocut,
       // v0.43 — relational recall override. Omitted = smart default (mode bundle).
       relationalRetrieval: typeof p.relational === 'boolean' ? (p.relational as boolean) : undefined,
+      explain: p.explain === true, explainTarget: explainPrep?.trace,
     });
     const declarations = new DeclarationMemo();
     results = await applyQueryArms(ctx.engine, p, queryText, await withDeclaredNameFanOut(results, queryText, declarations, (alt, altLimit) => hybridSearchCached(ctx.engine, alt, {
@@ -1056,7 +1141,7 @@ const query: Operation = {
     // #3800: cap AFTER capture/meta/CRAG so every internal consumer graded
     // and recorded the real payload; only the returned envelope is snipped.
     return evidenceOutput(ctx, p, results, plan, { ...querySourceScope, excludePrivate, detail }, capturedMeta, snippetCap,
-      async rows => ({ ...(await buildRetrievalResponseMeta(ctx, querySourceScope, queryText, rows, capturedMeta, { types, typeFilterNotice: typeFilter.notice, declarations, feedbackOp: 'query' })), crag }));
+      async rows => withExplainTarget({ ...(await buildRetrievalResponseMeta(ctx, querySourceScope, queryText, rows, capturedMeta, { types, typeFilterNotice: typeFilter.notice, declarations, feedbackOp: 'query' })), crag }, finishExplainTarget(ctx, p, explainPrep, results, 'query')));
   },
   scope: 'read', mutating: false,
   cliHints: { name: 'query', positional: ['query'] },

@@ -129,11 +129,20 @@ export async function fuseArms(
     },
   });
 
+  // explain_target: per-arm presence (keyword before and after relaxed-row demotion).
+  const trace = opts?.explainTarget;
+  if (trace) {
+    trace.observe('arm:keyword_raw', keywordResults);
+    trace.observe('arm:title_raw', titleResults);
+    for (const entry of allLists) trace.observe(`arm:${entry.arm ?? 'list'}`, entry.list);
+  }
+
   // issue #160: stamp unverified auto-extracted stubs across ALL candidate
   // arms BEFORE fusion so the compiled-truth authority boost skips them.
   await stampUnverifiedExtractions(engine, allLists.flatMap((l) => l.list), opts);
 
-  let fused = rrfFusionWeighted(allLists, ctBoost);
+  const attribute = opts?.explain === true || trace !== undefined;
+  let fused = rrfFusionWeighted(allLists, ctBoost, attribute);
 
   // Cosine re-scoring before dedup so semantically better chunks survive.
   // v0.36 (D9): hydrate from the active embedding column so rescore happens
@@ -145,6 +154,7 @@ export async function fuseArms(
     fused = await cosineReScore(
       engine, fused, queryEmbedding, unifiedDone ? 'embedding_multimodal' : resolvedCol.name,
       imageQueryEmbedding && !unifiedDone ? { queryEmbedding: imageQueryEmbedding, column: 'embedding_image' } : undefined,
+      attribute,
     );
   }
 
@@ -171,6 +181,7 @@ export async function fuseArms(
     await applyIdentityBoosts(req, fused);
     fused.sort((a, b) => b.score - a.score);
   }
+  trace?.observe('fused', fused);
   return { fused, relaxedDropped, keywordArmConfidence, metadataBoostGate };
 }
 
@@ -442,11 +453,13 @@ export async function finalizeHybridResults(
 ): Promise<SearchResult[]> {
   const { engine, opts, resolvedMode, resolvedCol, limit, offset, suggestions, detailResolved, degraded } = req;
   const sliced = returnPool.slice(offset, offset + limit);
+  opts?.explainTarget?.observe('limit_slice', sliced);
   // v0.32.3 search-lite: budget enforcement at the main return path.
   // hybridSearchCached used to be the only place this fired; now bare
   // hybridSearch enforces it too so eval-replay + eval-longmemeval see
   // the same budget behavior as the production query op.
   const { results: budgeted, meta: budgetMeta } = enforceTokenBudget(sliced, resolvedMode.tokenBudget);
+  opts?.explainTarget?.observe('token_budget', budgeted);
   await stampContentFlags(engine, budgeted, opts);
   req.lastResultsCount = budgeted.length;
   req.lastRank1Score = budgeted[0] ? (budgeted[0].base_score ?? budgeted[0].score) : undefined;
