@@ -26,7 +26,7 @@ import {
 import { resolveSourceId } from '../core/source-resolver.ts';
 import { resolveOwnerHolder } from '../core/owner-holder.ts';
 import { embedStaleTakes } from '../core/embed-takes.ts';
-import { assertEmbeddingEnabled } from '../core/embedding-dim-check.ts';
+import { assertBrainEmbeddingEnabled } from '../core/embedding-dim-check.ts';
 import { loadConfig } from '../core/config.ts';
 import { embedQuery } from '../core/embedding.ts';
 import {
@@ -179,7 +179,7 @@ async function cmdSearch(engine: BrainEngine, args: string[]): Promise<void> {
   const limit = parseInt(flagValue(args, '--limit') ?? '30', 10);
   let hits;
   if (semantic) {
-    assertEmbeddingEnabled(loadConfig());
+    await assertBrainEmbeddingEnabled(engine, loadConfig());
     const { validateEmbeddingCreds } = await import('../core/embed-preflight.ts');
     validateEmbeddingCreds();
     const queryEmbedding = await embedQuery(query);
@@ -212,7 +212,7 @@ async function cmdEmbed(engine: BrainEngine, args: string[]): Promise<void> {
   }
 
   if (!dryRun) {
-    assertEmbeddingEnabled(loadConfig());
+    await assertBrainEmbeddingEnabled(engine, loadConfig());
     const { validateEmbeddingCreds } = await import('../core/embed-preflight.ts');
     validateEmbeddingCreds();
   }

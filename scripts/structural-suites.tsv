@@ -56,7 +56,7 @@ test/canonical-writer-inventory.test.ts	(file-level)	4	readFileSync
 test/chat-key-plane.test.ts	#3944 both planner surfaces share the helper (source guard)	2	readFileSync,source-surface-helper
 test/check-bootstrap-guards.test.ts	check-grok-pin.sh	9	readFileSync
 test/check-bootstrap-guards.test.ts	check-opencode-pin.sh	6	readFileSync
-test/check-bootstrap-guards.test.ts	verify + workflow wiring	4	readFileSync
+test/check-bootstrap-guards.test.ts	verify + workflow wiring	5	readFileSync
 test/check-update.test.ts	check-update CLI	3	source-surface-helper
 test/child-worker-supervisor.test.ts	issue #1801 — restartCurrentChild + killChild liveness fix	4	readFileSync
 test/chronicle-extract.test.ts	runChronicleExtract	9	readFileSync
@@ -265,7 +265,7 @@ test/scripts/ci-local-rendering.test.ts	ci-local execution coverage	5	readFileSy
 test/scripts/ci-local-rendering.test.ts	local test configuration through run-e2e	2	readFileSync
 test/scripts/ci-local-rendering.test.ts	required PgBouncer execution through run-e2e	1	readFileSync
 test/scripts/ci-manifest-diff.test.ts	test.yml dependency-audit scope	2	readFileSync
-test/scripts/ci-pr-scope.test.ts	pull-request CI scope	9	readFileSync
+test/scripts/ci-pr-scope.test.ts	pull-request CI scope	11	readFileSync
 test/scripts/ci-runner-routing.test.ts	CI runner routing	7	readFileSync
 test/scripts/classify-tests.test.ts	classify-tests detectors	23	bun-file,doctor-source-helper,exec-scan,readFileSync,source-surface-helper
 test/scripts/coverage-diff-gate.test.ts	exemptions	3	readFileSync
@@ -279,13 +279,22 @@ test/scripts/e2e-wiring.test.ts	(file-level)	12	readFileSync
 test/scripts/fix-wave-gate.test.ts	fix-wave gate workflow	3	readFileSync
 test/scripts/heavy-door-workflow.test.ts	heavy door supply chain and coverage gates	8	readFileSync
 test/scripts/native-lock-prebuilds.test.ts	native lock distribution integrity	2	readFileSync
+test/scripts/nightly-e2e.test.ts	full E2E shard classification (#6040)	2	readFileSync
 test/scripts/nightly-e2e.test.ts	nightly E2E scheduling	4	readFileSync
 test/scripts/nightly-issue.test.ts	.github/nightly-known-red.tsv	2	readFileSync
+test/scripts/nightly-issue.test.ts	master-red: push-to-master runs	19	readFileSync
+test/scripts/nightly-issue.test.ts	nightly-watch coverage ratchet	1	readFileSync
 test/scripts/nightly-issue.test.ts	nightly-watch incidents	9	readFileSync
-test/scripts/postgres-lane-coverage.test.ts	check-postgres-lane-coverage.ts	6	readFileSync
+test/scripts/nightly-issue.test.ts	nightly-watch routing and guard	9	readFileSync
+test/scripts/nightly-issue.test.ts	operator messages carry docs anchors that resolve	1	readFileSync
+test/scripts/postgres-lane-coverage.test.ts	check-postgres-lane-coverage.ts	9	readFileSync
 test/scripts/regen-all.test.ts	regen:all	4	readFileSync
 test/scripts/run-verify-parallel.test.ts	guard registration ⇒ execution coverage	1	readFileSync
+test/scripts/run-verify-parallel.test.ts	run-verify-parallel.sh — no-timeout-binary fallback rc capture (regression)	7	readFileSync
 test/scripts/serial-files.test.ts	scripts/serial-files.tsv (serial lane manifest)	5	readFileSync
+test/scripts/stress-gate.test.ts	docs anchors	1	readFileSync
+test/scripts/stress-gate.test.ts	gate plan	5	readFileSync
+test/scripts/stress-plan.test.ts	execution profiles	3	readFileSync
 test/scripts/test-env-opt-ins-guard.test.ts	check-test-env-opt-ins	2	readFileSync
 test/scripts/test-shard.slow.test.ts	test-shard.sh — LPT balance contract	5	readFileSync
 test/scripts/test-shard.slow.test.ts	test-shard.sh — exclusion contract	7	readFileSync

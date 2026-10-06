@@ -446,9 +446,10 @@ const recall: Operation = {
       // untrusted callers (matches the facts arms' world-only filter above).
       const { resolveExcludePrivatePages } = await import('../search/private-visibility.ts');
       const excludePrivate = await resolveExcludePrivatePages(ctx.engine, ctx.remote);
-      if (!isAvailable('embedding')) {
+      const keywordOnly = await recallKeywordOnlyReason(ctx);
+      if (keywordOnly) {
         searchResults = await keylessRecallRows(ctx, queryText, limit, excludePrivate, searchScope);
-        searchDegraded = 'keyword_only_no_embedding_provider';
+        searchDegraded = keywordOnly;
       } else {
         searchResults = await hybridSearchCached(ctx.engine, queryText, {
           limit,
@@ -1220,6 +1221,13 @@ export function parseTtlParam(raw: unknown): Date | null {
 export const factsOperations: Operation[] = [
   extract_facts, recall, context_pack, delta, forget_fact,
 ];
+
+/** Why recall's page-search arm runs keyword-only, or null: the brain opted out (no query text sent), or no provider. */
+async function recallKeywordOnlyReason(ctx: OperationContext): Promise<string | null> {
+  const { factEmbeddingDisabled } = await import('../embedding-disabled.ts');
+  if (await factEmbeddingDisabled(ctx.engine, ctx.config)) return (await import('../interop-notices.ts')).RECALL_KEYWORD_ONLY_OPTED_OUT;
+  return isAvailable('embedding') ? null : 'keyword_only_no_embedding_provider';
+}
 
 /**
  * Keyless recall's page arm: direct keyword FTS, except that a planned

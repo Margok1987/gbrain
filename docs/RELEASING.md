@@ -88,7 +88,8 @@ re-check, and a "Next step for the agent" block plus a JSON block.
   A matching cell keeps the issue open with the `known-red` label; a new failure in
   the same job opens a new incident; a passed review-by date asks for a fix again.
 - **Closing:** nightly-watch closes the issue only when a later scheduled run is
-  green and every previously failing job executed. A skipped job never closes it.
+  green with complete evidence and every previously failing job executed. A
+  skipped job never closes it.
 - **Re-check after a fix:** `gh workflow run <workflow>.yml --ref master`, then
   `gh workflow run nightly-watch.yml -f run_id=<that scheduled run id>` to preview
   (`-f dry_run=true`) or apply the issue update.
@@ -96,6 +97,26 @@ re-check, and a "Next step for the agent" block plus a JSON block.
   `bun.lock`, `admin/bun.lock`, `patches/` or a package.json dependency field, or
   carry the `dependency-audit` label; pushes and the nightly run always block, so a
   new upstream advisory shows up as one red nightly instead of every open PR.
+
+## Master-red issues
+
+nightly-watch keeps one `master-red` issue per workflow (`Master red: Test`,
+`Master red: E2E Tests`) for push-to-master runs; scheduled runs stay in
+`nightly-red`. The body names each failing job, every failing test file with
+its `bun run test:stress` reproduce line, and the suspect range (last green
+push SHA, first red SHA, merged PRs). Labels, close rules and recovery steps:
+[CI red runbook](ci-red-runbook.md#ci-issue-labels).
+
+- **Owner:** the agent on release duty owns every open `master-red` issue, as
+  for `nightly-red`; Garry is the escalation for owner-only actions.
+- **First response within 1 hour:** a comment or a linked repair PR. CI health
+  measures it; nothing enforces it.
+- **Response:** a repair PR whose body says `Fixes #<issue>`. Known-red rows
+  never apply to push runs. A master-red repair PR is fast-tracked when Garry
+  asks.
+- **Closing:** nightly-watch closes the issue on a green push run where every
+  previously failing job (E2E Tests: every failing test file) ran and passed
+  with complete evidence. Without a merged repair PR it opens `flake` issues.
 
 ## Merge queue
 
@@ -127,8 +148,8 @@ in the plan file at `~/.claude/plans/`, not in the CHANGELOG. One unified entry
 per branch, covering what the branch added vs the base branch.
 
 **Never edit a CHANGELOG entry that already landed on master.** If master has
-v0.18.2 and your branch adds features, bump to the next version (v0.19.0, not
-editing master's v0.18.2). When merging master into your branch, master may
+v0.18.2.0 and your branch adds features, bump to the next PATCH version
+(v0.18.3.0, never MINOR) instead of editing master's v0.18.2.0. When merging master into your branch, master may
 bring new CHANGELOG entries above yours — push your entry above master's
 latest and verify:
 
@@ -159,6 +180,80 @@ If any answer is no, fix it before continuing.
 - Numbers that mean something to the user: TTHW, commands that timed out before, detection counts.
 - Upgrade instructions: `gbrain upgrade` + any manual step if needed.
 - Credit to external contributors when a community PR was incorporated.
+
+## Release restamp
+
+`bun run release:restamp` makes a branch next-to-merge in one command. Run it
+when your PR is next in the merge line, not earlier: the merge coordinator
+merges one PR at a time, so restamping at that moment allocates the version
+and migration numbers without races. Preview first with `--dry-run`, which
+prints every planned edit, predicted merge conflict, migration renumbering
+and the commit it would make, and changes nothing.
+
+**Say to your agent:** *"Restamp this branch onto master, it's next to merge."*
+
+1. Refuses a dirty working tree (commit or `git stash -u` first) and a
+   failed fetch (offline: `git fetch origin master`, then rerun).
+2. Captures the branch's CHANGELOG entry (the sections above the newest entry
+   it shares with master; one entry per branch) and its migration inventory.
+3. Merges `origin/master` with a merge commit. Version-only hunks in the stamp
+   files, `CHANGELOG.md` and generated files (migration registry,
+   `migrations/records.json`, `llms*.txt`, plugin trees, the template repo,
+   `bun.lock`) resolve mechanically; any other conflict stops with the file
+   list.
+4. Sets VERSION to master's `MAJOR.MINOR.(PATCH+1).0` and rewrites every
+   required row of the CLAUDE.md "Version locations" table: VERSION,
+   `package.json`, the three plugin manifests, the BOOTSTRAP runbook stamp,
+   the CHANGELOG entry (re-stamped on top of master's entries with today's
+   date), and branch-added TODOS lines naming the old version.
+5. Renumbers the branch's own schema migrations (files `origin/master` does
+   not have) consecutively from master's latest + 1, in their original order.
+   It changes only the filename, the `export const v<NNN>` name and the
+   `version:` literal, and proves the rest of the file is token-identical.
+   Published migrations are never renumbered or edited; a branch file whose
+   payload matches a migration master already published under another number
+   (squash-merged or cherry-picked) stops with the `git rm` fix.
+6. Regenerates the migration registry, `migrations/records.json` (when the
+   branch has migrations), `bun.lock`, the bootstrap template repo and
+   everything `bun run regen:all` covers.
+7. Lists every line the branch added that still names an old migration number
+   (`v209`, `v209-name`, `migration 209`, `schema_version ... 209`,
+   `version: 209`) and stops: such a line may mean the moved migration or the
+   published one that now owns the number, so it is never rewritten. Edit each
+   line (an edited line is not listed again), or pass `--accept-references`
+   with `--continue` when a line means the published migration.
+8. Runs the drift checks (version stamps and CHANGELOG agree, bootstrap
+   stamp, plugin tree, template repo, migration registry and order), commits
+   once as `v<new> chore(release): restamp onto master v<master>`, and prints
+   the old-to-new migration mapping with the collision-recovery steps, the
+   golden-regeneration reason for the PR body, the PR title and
+   `bun run verify`.
+
+Every stop prints what happened, why, and the fix, saves its state, and ends
+with `bun run release:restamp --continue` (after you fix it) or `--abort`
+(back to the pre-run commit). `--no-commit` leaves the restamp edits staged.
+A second run with nothing to change commits nothing. It renumbers source
+only and never touches a database: if you applied an old number locally,
+follow "Collision recovery" in [TESTING.md](TESTING.md#schema-migration-registry)
+(disposable DB: rebuild and replay; retained data: explicit `schema_version`
+reconciliation).
+
+**Why stamps are not derived at build time.** Several readers take the
+version from committed files with no build step: `bun install -g
+github:garrytan/gbrain` installs from source, `gbrain bootstrap status`
+compares the BOOTSTRAP runbook stamp with the installed binary, the plugin
+manifests and generated trees are published as committed, and `release.yml`
+fires on a VERSION change. A build-time value would leave those copies
+wrong, so the files stay stamped and one command rewrites them.
+
+**Why migration IDs stay sequential.** A brain records one integer,
+`schema_version`, and the runner applies every migration above it in order.
+A migration numbered at or below master's latest is skipped forever on
+current brains, which `check:schema-migration-order` rejects. Unordered IDs
+(timestamps, hashes) would need a per-migration applied-set table and a
+bookkeeping migration for every existing brain. Renumbering at merge time,
+serialized by the merge coordinator, keeps the counter correct with no
+schema change. Build on `release:restamp` rather than a second restamp tool.
 
 ## CHANGELOG voice + release-summary format
 
@@ -444,10 +539,27 @@ already-published bad binaries; an affected release needs its own explicitly
 approved recovery and asset verification. The template and plugin publishing
 jobs pin the same Bun version.
 
+### Release CI gate
+
+The `ci-gate` job (`scripts/release-gate.ts`) holds build, publication and the
+`latest-stable` move until the push-to-master runs of Test and E2E Tests both
+succeed on the release commit.
+
+- **Failed run:** nothing is published and the job fails with the run and the
+  master-red issue. After master is green again, publish the current VERSION
+  with `gh workflow run release.yml --ref master`.
+- **Run cancelled by a newer push:** the gate follows the next master commit.
+  If it contains the release commit and carries the same VERSION, that commit
+  is gated and published. If VERSION moved on, this version is skipped and the
+  newer VERSION's release run publishes.
+- **Backfill:** `gh workflow run release.yml --ref master` gates and publishes
+  master HEAD's VERSION. Other refs are refused.
+- The gate waits up to 110 minutes, then fails with the backfill command.
+
 ### The `latest-stable` tag
 
 The **final step of the release job** force-advances the `latest-stable` tag to
-the release commit (`git push origin "+${GITHUB_SHA}:refs/tags/latest-stable"`).
+the gated release commit (`git push origin "+${RELEASE_SHA}:refs/tags/latest-stable"`).
 `latest-stable` is the single sanctioned distribution ref: the README paste
 block, the `BOOTSTRAP_FOR_AGENTS.md` fetch URL, and
 `bun install -g github:garrytan/gbrain#latest-stable` all reference it

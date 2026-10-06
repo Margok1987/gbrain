@@ -883,6 +883,16 @@ More: [docs/guides/retrieval-feedback.md#feedback_not_authorized](../../docs/gui
 
 More: [docs/guides/write-refusals.md#fetch_failed](../../docs/guides/write-refusals.md#fetch_failed)
 
+### file_removed_during_scan
+
+<a id="file_removed_during_scan"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| A file lint listed was removed before lint read it, so it was not linted. | Another process deleted or renamed the file during the run; lint reports it and continues with the remaining files. | Re-run gbrain lint on the same target; it lints the files present now. | agent | `repeat the read that failed` | 1 | yes |
+
+More: [docs/guides/repair.md#file-removed-during-scan](../../docs/guides/repair.md#file-removed-during-scan)
+
 ### file_too_large
 
 <a id="file_too_large"></a>
@@ -1592,6 +1602,16 @@ More: [docs/guides/google-connect.md#troubleshooting](../../docs/guides/google-c
 | Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
 |---|---|---|---|---|---|---|
 | No page with that slug exists in the selected source. | The request itself was wrong or no longer matches the brain; nothing was changed. | Correct the request using the message above, then retry. Run: gbrain get --source '{source_id}' -- '{slug}' | agent | `repeat the read that failed` | 1 | no |
+
+### page_projection_conflict
+
+<a id="page_projection_conflict"></a>
+
+| Meaning | Why | Next step | Who acts · consent | Verify | Exit | Retryable |
+|---|---|---|---|---|---|---|
+| Another worker installed a newer search projection of the page while this command prepared its own. | The projection guard keeps the newer installation instead of overwriting it; the canonical page revision did not change. | Re-run the same command; it re-reads the current projection. If it conflicts again, wait for the other worker to finish. | agent | `repeat the read that failed` | 1 | yes |
+
+More: [docs/guides/repair.md#page-projection-conflict](../../docs/guides/repair.md#page-projection-conflict)
 
 ### parse_error
 

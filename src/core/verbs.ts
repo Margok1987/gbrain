@@ -506,7 +506,7 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
           },
         },
       },
-      search_degraded: { type: 'string', description: 'Present when the search arm fell back to keyword-only (no embedding provider).' },
+      search_degraded: { type: 'string', description: 'Present when the search arm fell back to keyword-only: keyword_only_no_embedding_provider (no embedding provider) or keyword_only_embedding_disabled (embeddings off by choice; no query text sent to a provider).' },
       budget_tokens: { type: 'integer', description: 'Present for a positive finite numeric budget, including when its floor is zero.' },
       budget_used: { type: 'integer' },
       dropped_count: { type: 'integer' },

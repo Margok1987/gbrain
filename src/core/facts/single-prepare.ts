@@ -12,10 +12,10 @@ export interface FactDecision { status: 'inserted' | 'duplicate' | 'superseded';
 export interface SingleFactIntent {
   fact: string; kind: FactRow['kind']; visibility: FactRow['visibility']; entity_slug: string | null;
 }
-/** Provider work belongs to preparation, never to a page/source transaction. */
-export async function prepareFactEmbedding(fact: string, signal?: AbortSignal): Promise<{ embedding: Float32Array | null; embedding_model: string | null; degraded: boolean }> {
+/** Provider work belongs to preparation, never to a page/source transaction. `disabled`: the brain opted out of embedding. */
+export async function prepareFactEmbedding(fact: string, signal?: AbortSignal, disabled = false): Promise<{ embedding: Float32Array | null; embedding_model: string | null; degraded: boolean }> {
   signal?.throwIfAborted();
-  if (isAvailable('embedding')) {
+  if (!disabled && isAvailable('embedding')) {
     try {
       const model = getEmbeddingModel();
       return { embedding: await embedOne(fact, { abortSignal: signal, embeddingModel: model, inputType: 'document' }), embedding_model: model, degraded: false };

@@ -17,7 +17,7 @@ import { operationsByName } from '../../src/core/operations.ts';
 import { parseFactsFence } from '../../src/core/facts-fence.ts';
 import { parseTakesFence } from '../../src/core/takes-fence.ts';
 import { isRegistryCode } from '../../src/core/error-catalogue.ts';
-import { CONNECTOR_SLUG, contextFor, type OpDescriptor, type OpKind, type OpObservation, type World } from './ops.ts';
+import { CONNECTOR_SLUG, contextFor, retryingRead, type OpDescriptor, type OpKind, type OpObservation, type World } from './ops.ts';
 
 /**
  * How the generator reaches each effect kind's mid-effect seam: the op that
@@ -34,17 +34,6 @@ export const EFFECT_SEAMS = {
   'facts-backstop': { op: 'put_page', point: EFFECT_FAULT_POINTS['facts-backstop'] },
   links: { op: 'put_page', point: EFFECT_FAULT_POINTS.links },
 } as const satisfies Record<EffectKind, { op: OpKind; point: FaultPoint }>;
-
-/** Retry a harness read across a dropped connection (the pooler_disconnect fault); other errors propagate. */
-export async function retryingRead<T>(read: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; ; attempt++) {
-    try { return await read(); } catch (error) {
-      const text = `${(error as { code?: string }).code ?? ''} ${String((error as Error).message)}`;
-      if (attempt >= 8 || !/CONNECTION_CLOSED|CONNECTION_ENDED|ECONNRESET|57P01|08P01|08006|server conn crashed|terminating connection|Connection terminated/i.test(text)) throw error;
-      await Bun.sleep(150 * (attempt + 1));
-    }
-  }
-}
 
 /** Non-error outcomes a sync or connector run reports as its status (not error codes). */
 const EXTERNAL_RESULT_CODES = new Set(['blocked_by_failures', 'dry_run']);
@@ -272,11 +261,11 @@ export class ReferenceModel {
 
   /** Read surfaces an agent uses, under a given actor. */
   /**
-   * The oracle's own reads retry a dropped connection (the pooler_disconnect
-   * fault terminates sessions between statements); only the system under test
-   * is judged on such errors.
+   * The oracle's own reads retry a session drop the robot injected (the
+   * pooler_disconnect fault); only the system under test is judged on such
+   * errors, and any other close fails the run.
    */
-  private retrying<T>(read: () => Promise<T>): Promise<T> { return retryingRead(read); }
+  private retrying<T>(read: () => Promise<T>): Promise<T> { return retryingRead(this.world, read); }
   q<R = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<R[]> {
     return this.retrying(() => this.world.engine.executeRaw<R>(sql, params));
   }
@@ -407,11 +396,11 @@ const pageWrite = (kind: 'put' | 'edit'): Fold => async (m, d, o) => {
   }
   else if (page.lastMarker && !markersIn(String(read.content)).includes(page.lastMarker)) m.violate({ class: 'untrue_receipt', op: d.id, detail: `committed ${d.kind} marker ${page.lastMarker} not visible` });
 };
+/** A write that moves a page's revision. A page the model has not seen committed (its put may still be pending) stays untracked. */
 const touch = (slugOf: (d: OpDescriptor) => string): Fold => async (m, d, o) => {
   const k = key(d.source, slugOf(d)); m.touched.add(k);
-  const page = m.page(d.source, slugOf(d));
-  if (o.values.revision) page.revision = o.values.revision;
-  else page.revision = null;
+  const page = m.pages.get(k);
+  if (page) page.revision = o.values.revision ?? null;
 };
 
 /** A file edit picked up by sync, or a connector item: the page now carries its marker. */
@@ -448,7 +437,8 @@ export const MODEL: Record<OpKind, Fold> = {
     if (fact) {
       if (fact.source !== d.source) m.violate({ class: 'source_isolation', op: d.id, detail: `forget in ${d.source} expired fact ${id} of ${fact.source}` });
       fact.withdrawn = true; m.reasserted.delete(`${fact.source}\u0000${fact.text}`);
-      m.touched.add(key(fact.source, fact.entity)); m.page(fact.source, fact.entity).revision = null;
+      const k = key(fact.source, fact.entity); m.touched.add(k);
+      const page = m.pages.get(k); if (page) page.revision = null;
     }
   },
   takes_add: touch(d => String(d.args.slug)),

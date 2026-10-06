@@ -122,6 +122,11 @@ function discardStoppedService(engine: BrainEngine, service: Service): void {
 export function foregroundWriteCompletions(engine: BrainEngine, worktreeId: string): number {
   return services.get(engine)?.consumer.foregroundCompletions(worktreeId) ?? 0;
 }
+/** The config this process's consumer prepares writes with (its first caller's); undefined when none is running. */
+export function persistenceConsumerConfig(engine: BrainEngine): GBrainConfig | undefined {
+  const service = services.get(engine);
+  return service && !service.stopping ? service.consumer.config : undefined;
+}
 export function persistenceConsumerStatus(engine: BrainEngine) {
   const service = services.get(engine);
   return service ? { state: service.stopping ? 'closing' : 'open', ...service.consumer.status() }

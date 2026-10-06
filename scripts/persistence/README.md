@@ -107,6 +107,11 @@ database dropped every 400 ms, and the owner killed right after a
 `facts-absorb` job's extraction commits (deterministic chat and embedding
 stubs); the job then runs again and every absorbed fact must be active
 exactly once.
+The robot records each session-drop round it injects. Its own reads (oracle
+checks, drain polls, `$current` revision lookups, token re-verification)
+retry a closed connection only after a round that began before the error
+terminated a session; any other close fails the run with the next step,
+so a database, pooler or product-side close is never retried away.
 
 The reference model (`model.ts`) checks: a committed receipt is visible at
 once and later revisions move only through committed ops; a late receipt

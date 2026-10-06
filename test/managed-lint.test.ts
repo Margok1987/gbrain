@@ -17,10 +17,11 @@ import { runPhaseLint } from '../src/core/cycle.ts';
 import { claimWorktree } from '../src/core/persistence/ownership.ts';
 import { submitPageMutation } from '../src/core/persistence/page-mutations.ts';
 import { writeGitHold } from '../src/core/persistence/sync-holds.ts';
-import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
+import { disposePersistenceConsumer, startPersistenceConsumer } from '../src/core/persistence/service.ts';
 import { configureGateway, resetGateway } from '../src/core/ai/gateway.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { withEnv } from './helpers/with-env.ts';
+import { waitFor } from './helpers/wait-for.ts';
 
 const PREAMBLE = 'Of course. Here is a detailed brain page for Jane Doe.\n\n';
 const BODY = '# Jane Doe\n\nContent that stays.\n';
@@ -279,7 +280,7 @@ test('a canonical file removed between scan and repair is pending as canonical_f
     await seed(engine, sourceId);
     const file = join(root, `${JANE}.md`);
     await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
-    const restore = interceptSnapshot(engine, JANE, 'before', async () => { unlinkSync(file); });
+    const restore = await interceptSnapshot(engine, sourceId, JANE, 'before', async () => { unlinkSync(file); });
     try {
       const { result, pending } = await lintCollecting(engine, sourceId, root);
       expect(result.fix_pending).toBe(1);
@@ -289,13 +290,46 @@ test('a canonical file removed between scan and repair is pending as canonical_f
   });
 }, 60_000);
 
-/** Runs `effect` once, around lint's first revision read of `slug`: before it (the read sees the effect) or after it. */
-function interceptSnapshot(engine: BrainEngine, slug: string, when: 'before' | 'after', effect: () => Promise<void>): () => void {
+test('a listed canonical file removed before its scan read: managed --fix reports canonical_file_missing, report-only reports file_removed_during_scan', async () => {
+  for (const fix of [true, false]) {
+    await fixture(async (engine, sourceId, root) => {
+      await seed(engine, sourceId, BOB, PAGE.replace(/Jane Doe/g, 'Bob Example'));
+      await seed(engine, sourceId);
+      await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
+      const byFile = new Map<string, LintIssue[]>();
+      let scanned = 0;
+      const result = await runLintCore({ target: root, fix, engine, sourceId, onPageIssues: (rel, issues) => byFile.set(rel, issues),
+        onPageScanned: () => { if (scanned++ === 0) unlinkSync(join(root, `${JANE}.md`)); } });
+      expect(result.pages_scanned).toBe(2);
+      if (fix) {
+        expect(result.fix_pending).toBe(1);
+        expect(result.pending_issues).toEqual([expectPendingContract(byFile.get(`${JANE}.md`)?.[0], 'canonical_file_missing')]);
+        expect(await body(engine, sourceId, JANE)).toContain('Of course');
+        expect(await body(engine, sourceId, BOB)).not.toContain('Of course');
+      } else {
+        expect(result.fix_pending).toBe(0);
+        expect(byFile.get(`${JANE}.md`)).toEqual([expect.objectContaining({ rule: 'file-removed-during-scan', code: 'file_removed_during_scan', fixable: false,
+          fix: expect.objectContaining({ argv: ['gbrain', 'lint', root] }) })]);
+      }
+    });
+  }
+}, 60_000);
+
+/**
+ * Runs `effect` once, around lint's first revision read of `slug` (in publishLintFix, after the scan read):
+ * before it (the read sees the effect) or after it. The persistence consumer reads page snapshots through the
+ * same engine (the seeded page's git and embedding effects), so the seed's effects settle first and only
+ * lint's own read counts: a background read must never fire the effect.
+ */
+async function interceptSnapshot(engine: BrainEngine, sourceId: string, slug: string, when: 'before' | 'after', effect: () => Promise<void>): Promise<() => void> {
+  startPersistenceConsumer(engine, { engine: engine.kind });
+  await waitFor(async () => (await engine.executeRaw(`SELECT 1 FROM persistence_effects e JOIN persistence_requests r ON r.id=e.request_id
+    WHERE r.source_id=$1 AND e.state IN ('queued','running')`, [sourceId])).length === 0, { label: `${engine.kind}: effects of ${slug} settled before interception` });
   const original = engine.readPageSnapshot;
   let fired = false;
   // A transaction handle inherits this property, so the read keeps its own receiver.
   engine.readPageSnapshot = async function (this: BrainEngine, s: string, opts?: Parameters<BrainEngine['readPageSnapshot']>[1]) {
-    if (fired || s !== slug) return original.call(this, s, opts);
+    if (fired || s !== slug || !new Error().stack?.includes('publishLintFix')) return original.call(this, s, opts);
     fired = true;
     if (when === 'before') await effect();
     const snapshot = await original.call(this, s, opts);
@@ -311,7 +345,7 @@ test('a publication after the scan but before lint reads the revision is repaire
   await fixture(async (engine, sourceId, root) => {
     await seed(engine, sourceId);
     await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
-    const restore = interceptSnapshot(engine, JANE, 'before', () => seed(engine, sourceId, JANE, NEWER));
+    const restore = await interceptSnapshot(engine, sourceId, JANE, 'before', () => seed(engine, sourceId, JANE, NEWER));
     try {
       const { result } = await lintCollecting(engine, sourceId, root);
       expect(result.fix_pending).toBe(0);
@@ -327,7 +361,7 @@ test('a publication between the revision read and the submission is refused as r
   await fixture(async (engine, sourceId, root) => {
     await seed(engine, sourceId);
     await engine.executeRaw('UPDATE persistence_brain SET enabled=true WHERE singleton=1');
-    const restore = interceptSnapshot(engine, JANE, 'after', () => seed(engine, sourceId, JANE, NEWER));
+    const restore = await interceptSnapshot(engine, sourceId, JANE, 'after', () => seed(engine, sourceId, JANE, NEWER));
     try {
       const { result, pending } = await lintCollecting(engine, sourceId, root);
       expect(result.fix_pending).toBe(1);

@@ -638,6 +638,10 @@ export async function extractFactsFromTurnWithOutcome(
 
   const facts: ExtractedFact[] = [];
   let junkSkipped = 0;
+  // A caller that resolved the brain's signature passes it (or null); otherwise a brain that opted out of embedding
+  // never has its fact text sent to the provider.
+  const { factEmbeddingDisabled } = await import('../embedding-disabled.ts');
+  const embedFacts = input.embedding !== null && (input.embedding !== undefined || !await factEmbeddingDisabled(input.engine));
   for (const candidate of parsedRaw.slice(0, cap)) {
     if (input.abortSignal?.aborted) {
       const e = new Error('aborted');
@@ -673,7 +677,7 @@ export async function extractFactsFromTurnWithOutcome(
     let embedding: Float32Array | null = null;
     let embeddingModel: string | null = null;
     try {
-      if (input.embedding !== null) {
+      if (embedFacts) {
         embeddingModel = input.embedding?.model ?? getEmbeddingModel();
         embedding = await embedOne(factText, { abortSignal: input.abortSignal, inputType: 'document', embeddingModel,
           ...(input.embedding ? { embeddingModel: input.embedding.model, dimensions: input.embedding.dimensions } : {}) });

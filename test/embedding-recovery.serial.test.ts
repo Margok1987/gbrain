@@ -8,7 +8,7 @@ import { resetPgliteState } from './helpers/reset-pglite.ts';
 import { configureGateway, getEmbeddingModel, resetGateway, __setEmbedTransportForTests } from '../src/core/ai/gateway.ts';
 import { applyEmbeddingMigration, planEmbeddingMigration, runSchemaTransition, verifyMigrationComplete, readMigrationState, reconcilePageSignatures, verifySearchRoundTrip } from '../src/core/embedding-migration.ts';
 import { readContentChunksEmbeddingDim } from '../src/core/embedding-dim-check.ts';
-import { readProjectionSnapshot } from '../src/core/page-state/projections.ts';
+import { installPageProjection, readProjectionSnapshot, rebuildPendingPageProjections } from '../src/core/page-state/projections.ts';
 import { embedStaleForSource } from '../src/core/embed-stale.ts';
 import { embedStaleFacts } from '../src/core/embed-facts.ts';
 import { countStaleFactEmbeddings } from '../src/core/facts/embedding-identity.ts';
@@ -542,6 +542,58 @@ for (const kind of backends) {
           });
         }
       }
+    });
+    describe('chunkless embed racing the resident projection rebuild', () => {
+      /** Runs `intervene` after each of the next `times` projection reads of `slug`, once the read released its guard. */
+      function afterProjectionReads(slug: string, times: number, intervene: () => Promise<void>): () => void {
+        const original = engine.transaction;
+        let left = times, busy = false;
+        engine.transaction = async function<T>(this: BrainEngine, run: (tx: BrainEngine) => Promise<T>): Promise<T> {
+          const result = await original.call(this, run) as T;
+          const read = result as { indexingContext?: string; snapshot?: { page: { slug: string } } };
+          if (!busy && left > 0 && read?.indexingContext !== undefined && read.snapshot?.page.slug === slug) {
+            left--; busy = true;
+            try { await intervene(); } finally { busy = false; }
+          }
+          return result;
+        };
+        return () => { engine.transaction = original; };
+      }
+      const slug = 'resident-race';
+      const seedChunkless = () => engine.putPage(slug, { type: 'note', title: 'Resident race', compiled_truth: 'Synthetic resident race payload.' });
+
+      test('the embed re-reads and embeds the chunks the resident sealed instead of recording an unavailable page', async () => {
+        await seedChunkless();
+        const restore = afterProjectionReads(slug, 1, async () => {
+          expect((await rebuildPendingPageProjections(engine, 100, { pages: { sourceId: 'default', slugs: [slug] } })).rebuilt).toBe(1);
+        });
+        try {
+          const result = await runEmbedCore(engine, { slug, sourceId: 'default', quiet: true });
+          expect(result.failure_samples).toEqual([]);
+          expect(result.failures).toBe(0);
+          expect(result.embedded).toBeGreaterThan(0);
+        } finally { restore(); }
+        const chunks = await engine.getChunks(slug, { sourceId: 'default' });
+        expect(chunks.length).toBeGreaterThan(0);
+        expect(chunks.every(c => c.embedded_at)).toBe(true);
+      });
+
+      test('an embed that keeps losing reports page_projection_conflict after the bounded retries', async () => {
+        await seedChunkless();
+        let competing = 0;
+        const restore = afterProjectionReads(slug, 4, async () => {
+          const read = (await readProjectionSnapshot(engine, slug, 'default', { allowUnsealed: true }))!;
+          await installPageProjection(engine, read, [{ chunk_index: 0, chunk_source: 'compiled_truth', chunk_text: `competing ${++competing}` }]);
+        });
+        try {
+          const result = await runEmbedCore(engine, { slug, sourceId: 'default', quiet: true });
+          expect(competing).toBe(4);
+          expect(result.failures).toBe(1);
+          expect(result.failure_samples).toHaveLength(1);
+          expect(result.failure_samples[0]).toStartWith(`${slug}: [page_projection_conflict] The search projection of ${slug} (source default) changed during preparation (chunk_digest)`);
+          expect(result.failure_samples[0]).toContain('Re-run gbrain embed; it re-reads the current projection.');
+        } finally { restore(); }
+      });
     });
     async function seedLegacyContentDrift() {
       const otherSource = 'synthetic-legacy-drift';

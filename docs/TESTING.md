@@ -30,6 +30,8 @@ log's absolute path. A failing `bun run verify` keeps each failed check's log
 and prints it. In CI, each red job's step summary lists the failing tests with a
 `bun test … -t` reproduce command.
 
+**Red CI on master:** [CI red runbook](ci-red-runbook.md).
+
 | File suffix or location | Lane | Command | Runs in PR CI |
 |---|---|---|---|
 | `*.test.ts` | unit (parallel shards) | `bun run test` | yes, 8 weighted shards |
@@ -76,20 +78,15 @@ the decision rule is critical path first, vCPU-minutes second.
 `test/scripts/ci-runner-routing.test.ts` pins capacity and platform routing;
 `.github/actionlint.yaml` declares the exact custom runner labels.
 
-### Pull request, master and nightly scope
+### Event parity
 
 Every test file runs on every push to master, on the nightly schedule and on
-manual dispatch. Pull requests and merge-queue runs (`merge_group`, which use
-the PR profile) run a narrower matrix of the same files:
-
-| Lane | Pull request | Push to master, nightly, manual |
-| --- | --- | --- |
-| Security regressions | Linux, macOS and Windows on Bun 1.4.2 | Also Bun 1.4.0 |
-| Persistence read latency, deployment matrix, soak, reconciliation crashes | Bun 1.4.2 | Bun 1.4.0 and 1.4.2 |
-| Persistence soak size | 2,500 writes | 10,000 writes |
-| Native writer locks, native paths changed | Every target on Bun 1.4.2, musl, both Windows probes, OpenClaw | Every target, musl and Windows probe on Bun 1.4.0 and 1.4.2, OpenClaw |
-| Native writer locks, other changes | `linux-x64-glibc / Bun 1.4.2` smoke cell (full native step list) | Same as above |
-| `test/export-scale.slow.test.ts` | 10,001 pages | 100,001 pages |
+manual dispatch, and pull requests and merge-queue runs (`merge_group`) run
+every Bun-version cell too. Each narrower PR behavior is a named exception
+whose comment names the scheduled run that covers it
+(`test/scripts/ci-pr-scope.test.ts` fails on an unclassified one). Table,
+dependency-audit rule and cost: [docs/ci-event-parity.md](ci-event-parity.md). Required checks stay keyed on
+the `test-status` and `e2e-status` aggregators.
 
 The `changes` job classifies a pull request's changed files with
 `scripts/ci-native-scope.sh`: native lock sources, the native toolchain, IPC,
@@ -275,15 +272,21 @@ only where a Postgres lane names it. Those lanes are: a workflow step that
 runs with `DATABASE_URL` and names the file, a `test/e2e/` wrapper that
 imports it (`registerPostgresTests`), a `tests/heavy/` script that names it,
 or a row in `scripts/e2e-backend-matrix.txt`. Unit-lane files with no other
-Postgres owner run in `persistence-validation.yml`'s `unit-postgres-arms` job
-(two shards against a pgvector service, newest Bun on PRs, both supported
-versions elsewhere). Each file runs in its own Bun process, so a failing file
-cannot leak environment or global state into later files, and each failure
-prints an `::error file=…` line with its reproduce command.
-`bun run check:postgres-lanes` (in `verify`) fails on every arm with no lane.
-An arm deliberately left out is an `ALLOWLIST` row in
+Postgres owner are listed in `test/postgres-unit-arms.txt`, read by
+`persistence-validation.yml`'s `unit-postgres-arms` job (one Bun process per
+file), the [race hunt](#race-hunt) and the lane guard.
+`bun run check:postgres-lanes` (in `verify`) fails on every arm with no lane
+and on a bad list row. An arm deliberately left out is an `ALLOWLIST` row in
 `scripts/check-postgres-lane-coverage.ts` naming its reason and TODO; a row
 for a file that is laned, has no arm or is gone fails.
+### Stress gate
+
+`stress-changed-tests` (in `test-status`) runs each touched test file 10x on fresh databases; local twin `bun run test:stress`. Details: [scripts/stress/README.md](../scripts/stress/README.md).
+
+### Race hunt
+
+Nightly: every listed Postgres arm 10x ([details](../scripts/stress/README.md#race-hunt)).
+
 ### Scale tier
 
 The gate shape and cadence are defined once, by O-CEO-16 (with O-ENG-16 and
@@ -406,7 +409,7 @@ Test command tiers, each with a clear scope:
 | Command | What it runs | Wallclock | When to use |
 |---|---|---|---|
 | `bun run test` | Parallel unit loop (`scripts/run-unit-parallel.sh`): weighted shards (CPU-detected, 4 by default, at most 8; CI uses 8), then the serial pass. Excludes `*.slow.test.ts` and `test/e2e/*`; no typecheck. Builds the PGLite schema snapshot first and exports `GBRAIN_PGLITE_SNAPSHOT` (opt out: `GBRAIN_NO_SNAPSHOT=1`). Caps total concurrency to available memory at `GBRAIN_TEST_MEM_PER_FILE_MB` (default 1536) per slot, shedding intra-shard width before shards. Shards that fail with the WASM out-of-memory signature or are killed externally get one serial rescue pass: phantoms go green with an `oom_rescued` note, real failures stay red. Knobs: `GBRAIN_TEST_NO_MEM_ADAPT=1`, `GBRAIN_TEST_NO_OOM_FALLBACK=1`, `GBRAIN_TEST_MAX_CONCURRENCY` (default 4), `GBRAIN_TEST_SHARD_TIMEOUT` / `GBRAIN_TEST_SHARD_KILL_AFTER`, `--shards N` / `--max-concurrency N` / `--dry-run`. | a few minutes on a laptop | Inner edit loop. Default. |
-| `bun run verify` | CI's authoritative pre-test gate set, fanned out by `scripts/run-verify-parallel.sh` through a bounded worker pool (default `detect_cpus`; override `GBRAIN_VERIFY_MAX_PARALLEL`) with the heavy checks ordered first (typecheck, the two compile-embed checks, admin build, fuzz bundles, guard self-tests, whole-tree greps). `check:eval-chronicle` and `check:eval-canary` are deliberately NOT in the battery (their test-file twins `test/eval-chronicle.test.ts` and `test/eval-canary.test.ts` run the identical evals in the unit matrix, and CI's verify job and matrix always run together — the package scripts stay for on-demand runs, so `verify`-only local callers should know both evals ride the unit lane instead). The `CHECKS` array in that script is the single source of truth — CI literally calls `bun run verify` in a dedicated job. | ~50s (pool-bounded; longest check dominates) | Before pushing; before `/ship`. |
+| `bun run verify` | CI's authoritative pre-test gate set, fanned out by `scripts/run-verify-parallel.sh` through a bounded worker pool (default `detect_cpus`; override `GBRAIN_VERIFY_MAX_PARALLEL`) with the heavy checks ordered first (typecheck, the two compile-embed checks, admin build, fuzz bundles, whole-tree greps), then the self-timed `SOLO_CHECKS` alone ([why](operations/verify-and-nightly-e2e.md#verify-solo-checks)). Two evals ride the unit lane instead ([why](operations/verify-and-nightly-e2e.md#evals-in-the-unit-lane)). The `CHECKS` array in that script is the single source of truth — CI literally calls `bun run verify` in a dedicated job. | ~65-85s | Before pushing; before `/ship`. |
 | `bun run test:full` | `verify && bun run test && bun run test:slow && [smart e2e]`. Smart e2e runs only when `DATABASE_URL` is set and propagates its failure; otherwise it prints a skip notice to stderr. Use `ci:local` to provision the databases and require PgBouncer execution. | ~3-5min depending on slow + e2e | Pre-merge sanity, before opening a PR. |
 | `bun run ci:local` | Independent host gitleaks scans, then frozen dependencies, guards/typecheck, the complete serial and slow lanes, and four unit/E2E shards inside Docker. Each E2E shard has its own pgvector database; selected PgBouncer tests must execute against the transaction-mode pooler. Unit, serial, and slow lanes have database URL overrides unset. Any failed stage fails the command. Complete shard logs survive container teardown under `.context/ci-local-shards/`. `ci:local:diff` runs only gitleaks and the doc checks on a doc-only diff and the full gate otherwise; `--no-shard` runs unit/E2E sequentially. Doc-only diffs still require successful gitleaks scans. | Depends on the full corpus | Full local gate before shipping. |
 | `bun run ci:ubicloud` | The `ci:local` lanes (gitleaks, guards/typecheck, serial, slow, unit, all E2E with required PgBouncer execution) fanned out across ephemeral Ubicloud VMs from one heaviest-first work queue; `ci:ubicloud:diff` takes the same doc-only fast path as `ci:local:diff`. Needs `UBICLOUD_API_KEY` or `UBICLOUD_API_TOKEN`, no local Docker. See "Ubicloud fan-out" below. | ~5 min (floor: the longest single file) | Full gate before shipping when a Ubicloud token is available. |
@@ -434,7 +437,7 @@ array in `scripts/run-verify-parallel.sh` is the single execution list
 `check:no-legacy-getconnection`). The guard REGISTRY is `scripts/guards-manifest.tsv` (see "Guard registry and
 self-test" below).
 
-`bun run typecheck` uses TypeScript's native incremental analysis in
+`bun run typecheck` ([heap ceiling](operations/verify-and-nightly-e2e.md#typecheck-heap)) uses TypeScript's native incremental analysis in
 `node_modules/.cache/gbrain-typecheck.tsbuildinfo`. Every invocation still runs
 the compiler; source, root-file, configuration and dependency changes invalidate
 the affected analysis, and cached diagnostics remain failures. The cache is local
@@ -808,7 +811,9 @@ Two guards run in `bun run verify`:
 Collision recovery: an unapplied branch migration is renumbered (`git mv`, edit
 `version`, regenerate); one already applied to a disposable dev DB means rebuilding
 that DB and replaying; one applied to retained data needs explicit `schema_version`
-reconciliation, never just a counter edit. Pinned by
+reconciliation, never just a counter edit. `bun run release:restamp` does the
+renumbering at merge time and prints the old-to-new mapping with these steps
+([RELEASING.md](RELEASING.md#release-restamp)). Pinned by
 `test/scripts/build-schema-migrations.test.ts` and `test/migrations-golden.test.ts`.
 
 ### Schema generator freshness
@@ -1303,6 +1308,8 @@ artifacts, duplicates, wrong commits, omitted or repeated files, failures and
 cancellations cannot report complete execution, and the report refuses to
 publish without that evidence. Receipts prove file execution, not every
 optional assertion within a file.
+
+Shard cancellation versus failure in `coverage-full-report`: [full-corpus report states](operations/verify-and-nightly-e2e.md#full-corpus-report-states).
 
 **Merge** (`scripts/merge-lcov.ts`) sums DA hits per file and line across the
 input directories, normalizes paths, and emits a merged lcov plus a summary

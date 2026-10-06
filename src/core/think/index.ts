@@ -533,6 +533,27 @@ async function renderThinkPages(engine: BrainEngine, opts: RunThinkOpts, pages: 
 }
 
 /**
+ * The question embedding gather may use, or undefined. A brain that opted out
+ * of embedding never sends the question to a provider (warning
+ * QUESTION_EMBED_SKIPPED_EMBEDDING_DISABLED); a failing embedder degrades to
+ * QUESTION_EMBED_FAILED with the raw error on stderr only (D6).
+ */
+async function embedThinkQuestion(engine: BrainEngine, opts: RunThinkOpts, warnings: string[]): Promise<Float32Array | undefined> {
+  if (!opts.embedQuestion) return undefined;
+  const { factEmbeddingDisabled } = await import('../embedding-disabled.ts');
+  if (await factEmbeddingDisabled(engine)) {
+    warnings.push((await import('../interop-notices.ts')).QUESTION_EMBED_OPTED_OUT);
+    return undefined;
+  }
+  try {
+    return (await opts.embedQuestion(opts.question)) ?? undefined;
+  } catch (e) {
+    warnings.push('QUESTION_EMBED_FAILED');
+    process.stderr.write(`[think] question embed failed: ${e instanceof Error ? e.message : String(e)}\n`);
+    return undefined;
+  }
+}
+/**
  * Run the think pipeline. Returns a ThinkResult — caller decides whether
  * to print, persist as synthesis page, or surface as MCP response.
  */
@@ -567,18 +588,8 @@ export async function runThink(
     }
   }
 
-  // Optional question embedding — caller decides whether to pay the embedder.
-  let questionEmbedding: Float32Array | undefined;
-  if (opts.embedQuestion) {
-    try {
-      const e = await opts.embedQuestion(opts.question);
-      if (e) questionEmbedding = e;
-    } catch (e) {
-      // D6: code-only on the wire; raw exception text goes to server logs.
-      warnings.push('QUESTION_EMBED_FAILED');
-      process.stderr.write(`[think] question embed failed: ${e instanceof Error ? e.message : String(e)}\n`);
-    }
-  }
+  // Optional question embedding — caller decides whether to pay the embedder; an opted-out brain never does.
+  const questionEmbedding = await embedThinkQuestion(engine, opts, warnings);
 
   const thinkDecide = await startThinkDecide(engine, opts, classifyIntent(opts.question)).catch(() => undefined); // System One S2/S4; undefined when both are off
   // GATHER

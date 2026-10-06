@@ -42,7 +42,8 @@ import { heldFileDiagnostic, writeFailureDiagnostic } from '../core/persistence/
 import { loadActivePackForEngine } from '../core/schema-pack/engine-resolution.ts';
 import { OperationError, opError } from '../core/ops/contract.ts';
 import { readFix } from '../core/ops/op-fix.ts';
-import { cliRenderContext, docsUrl, toAgentError, type RenderedAction } from '../core/agent-output.ts';
+import { ERROR_CATALOGUE } from '../core/error-catalogue.ts';
+import { cliRenderContext, docsUrl, renderAction, toAgentError, type RenderedAction } from '../core/agent-output.ts';
 import type { ParseOpts } from '../core/markdown.ts';
 
 export interface LintIssue {
@@ -51,8 +52,8 @@ export interface LintIssue {
   rule: string;
   message: string;
   fixable: boolean;
-  /** A managed-brain repair that waits (`managed-write-pending`): the stable machine code. */
-  code?: 'managed_write_pending';
+  /** The stable machine code: a managed-brain repair that waits, or a listed file removed before lint read it. */
+  code?: 'managed_write_pending' | 'file_removed_during_scan';
   /** Why it waits: the coordinator refusal's reason (`file_database_drift`, `held_file`, `canonical_file_missing`, ...), `revision_changed` or `not_indexed`. */
   reason?: string;
   /** The coordinator refusal's own next step, rendered for the CLI; lint never adds one of its own. */
@@ -604,6 +605,15 @@ function pendingIssue(file: string, slug: string, reason: string, error: Operati
     ...(envelope?.fix ? { fix: envelope.fix } : {}), docs: docsUrl(MANAGED_LINT_DOCS) };
 }
 
+/** A file the scan listed was gone by its scan read (deleted or renamed concurrently); the rest of the run continues. */
+function removedDuringScanIssue(file: string, target: string): LintIssue {
+  return { file, line: 1, rule: 'file-removed-during-scan', fixable: false, code: 'file_removed_during_scan',
+    message: `${file} was removed after lint listed it and before lint read it, so it was not linted. Re-run lint to check the files that exist now.`,
+    fix: renderAction({ argv: ['gbrain', 'lint', target], consent: [], actor: 'agent', requires_exclusive: false,
+      why: 'Lists the tree again and lints the files present now.' }, cliRenderContext()),
+    docs: docsUrl(ERROR_CATALOGUE.file_removed_during_scan.docs) };
+}
+
 function refusalReason(error: OperationError): string {
   if (error.code === 'revision_conflict') return 'revision_changed';
   if (heldFileDiagnostic(error.message)) return 'held_file';
@@ -754,8 +764,25 @@ export async function runLintCore(opts: LintOpts): Promise<LintResult> {
       if (isAborted(opts.signal)) break;
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
-    const content = readSourceFileSync(page, 'utf-8');
     const relPath = isSingleFile ? page : relative(opts.target, page);
+    let content: string;
+    try {
+      content = readSourceFileSync(page, 'utf-8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      // #5180: a managed --fix run asks the coordinator, which reports the page's missing canonical file as pending.
+      const pending = maintenance ? await publishLintFix(opts.engine!, maintenance, managedRoot, page, activePack) : null;
+      const issue = pending && pending !== 'published' ? pending : removedDuringScanIssue(relPath, opts.target);
+      opts.onPageScanned?.();
+      pagesWithIssues++;
+      totalIssues++;
+      if (issue.code === 'managed_write_pending') {
+        fixPending++;
+        if (pendingIssues.length < MAX_PENDING_ISSUES) pendingIssues.push(issue);
+      }
+      opts.onPageIssues?.(relPath, [issue], 0);
+      continue;
+    }
     const issues = lintContent(content, relPath, lintOpts);
     opts.onPageScanned?.();
     if (issues.length === 0) continue;
@@ -867,6 +894,8 @@ export async function runLint(args: string[]) {
       for (const issue of issues) {
         const fixLabel = issue.fixable ? ' [fixable]' : '';
         console.log(`  L${issue.line} ${issue.rule}: ${issue.message}${fixLabel}`);
+        if (issue.fix?.command) console.log(`    Fix: ${issue.fix.command}`);
+        if (issue.docs) console.log(`    Docs: ${issue.docs}`);
       }
       if (fixedCount > 0) {
         console.log(`  ${dryRun ? '(dry run) ' : ''}Fixed ${fixedCount} issue(s)`);
