@@ -245,7 +245,7 @@ export interface Tier3CallOptions {
   signal?: AbortSignal;
 }
 
-/** One gateway call (no tools, no fallback model, temperature 0), classified. */
+/** One gateway call (no tools, no fallback model, thinking off; no temperature, which reasoning models refuse), classified. */
 export async function callTier3(req: Tier3Request, opts: Tier3CallOptions): Promise<Tier3Answer> {
   const prompt = buildTier3Prompt(req);
   const messages: ChatMessage[] = [{ role: 'user', content: prompt.user }];
@@ -253,7 +253,7 @@ export async function callTier3(req: Tier3Request, opts: Tier3CallOptions): Prom
   const budget = tier3TokenBudget(req, opts.correction ? { answer: opts.correction.answer } : undefined);
   let result: ChatResult;
   try {
-    result = await chat({ model: opts.model, system: prompt.system, messages, maxTokens: budget.maxOutputTokens, temperature: 0, allowFallback: false,
+    result = await chat({ model: opts.model, system: prompt.system, messages, maxTokens: budget.maxOutputTokens, allowFallback: false,
       thinking: 'off', purpose: 'fence_repair', ...(opts.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}), ...(opts.signal ? { abortSignal: opts.signal } : {}) });
   } catch (error) {
     return { ok: false, reason: 'llm_unavailable', error: error instanceof Error ? error.name : 'Error' };

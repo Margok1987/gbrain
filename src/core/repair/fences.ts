@@ -379,7 +379,7 @@ export const fencesRepair: RepairHandler = {
     const shown = opts.diff ? d.diffs : Object.values(d.samples);
     for (const diff of shown) lines.push(`  ${diff.tier}: ${diff.item} (${diff.classes.join(', ')})`, ...diff.diff.split('\n').map(line => `    ${line}`));
     if (!opts.diff && d.diffs.length > shown.length) lines.push(`  (one sample diff per tier; --diff or --json shows all ${d.diffs.length})`);
-    for (const llm of d.llm_items) lines.push(`  llm: ${llm.item} rows ${llm.rows.join(', ') || '?'} (${llm.reasons.join(', ')}): rewritten by ${d.model} at apply time, gated by (a)-(g); est. $${llm.estimate_usd.toFixed(4)}`);
+    for (const llm of d.llm_items) lines.push(`  llm: ${llm.item}${llm.rows.length ? ` rows ${llm.rows.join(', ')}` : ''} (${llm.reasons.join(', ')}): rewritten by ${d.model} at apply time, gated by (a)-(g); est. $${llm.estimate_usd.toFixed(4)}`);
     for (const h of d.held) lines.push(`  held ${h.item} [${h.reason}${h.gate ? `, gate ${h.gate}` : ''}]: ${h.resolution}`);
     for (const action of d.next_actions) lines.push(`  next: ${shellQuote(action.argv!)}`);
     return lines;

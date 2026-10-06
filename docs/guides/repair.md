@@ -822,18 +822,17 @@ step. Per-file outcomes report `written`, `imported`, `hold_cleared` and
 <a id="fences"></a>
 ### Fences
 
-`gbrain repair fences` repairs malformed facts and takes fences: files sync
-held with `invalid_fence`, stored pages whose fence does not parse, and
-checkout files not yet synced. The maintenance run applies the same repair
-automatically (phase `fence_repair`), so a fence hold usually clears with no
-command. The preview is read-only and makes no model call; applying needs no
-extra consent. What each reason means and who acts:
-[fence holds](write-refusals.md#invalid_fence); the format and every rule:
-[fence format](fence-format.md).
+DRAFT
 
-```bash
-gbrain repair fences --source <id>                          # preview: tiers, rows, estimated model cost, apply command
-gbrain repair fences --source <id> --apply --expect <hash>  # apply exactly the previewed set
+```console
+$ gbrain post-upgrade
+$ gbrain sync --source notes --no-pull
+$ gbrain sources status notes
+$ gbrain repair fences --source notes
+$ gbrain repair fences --source notes --apply --expect <hash>
+$ gbrain sync --source notes --no-pull
+$ git -C ~/brain/notes log --format=%s -4
+$ gbrain doctor --only fence_integrity
 ```
 
 ## Resume

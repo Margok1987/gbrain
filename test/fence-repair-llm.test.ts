@@ -115,7 +115,7 @@ describe('the gateway call', () => {
     expect(calls[0]!.tools).toBeUndefined();
     expect(calls[0]!.allowFallback).toBe(false);
     expect(calls[0]!.model).toBe('anthropic:claude-fable-5');
-    expect(calls[0]!.temperature).toBe(0);
+    expect(calls[0]!.thinking).toBe('off');
     const spliced = spliceTier3(normalized.page, requests[0]!, (answer as Extract<typeof answer, { ok: true }>).table)!;
     expect(spliced.compiled_truth.startsWith(`${PROSE}\n\n${FB}\n${NARROW}\n${SEP}\n| 1 | ${VALID} |`)).toBe(true);
     const final = safeNormalizeFences(spliced, { pageVisibility: 'private' });
