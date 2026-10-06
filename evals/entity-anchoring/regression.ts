@@ -21,10 +21,13 @@ import { loadNamedThingQuestions, seedNamedThingCorpus } from '../../test/fixtur
 import { RELATIONAL_QUESTIONS, seedRelationalCorpus } from '../../test/fixtures/retrieval-quality/relational/corpus.ts';
 
 const KEY = (() => { const i = process.argv.indexOf('--key'); return i >= 0 ? process.argv[i + 1]! : 'search.entity_anchoring'; })();
-type Row = { slug: string; entity_anchored?: string; result_type?: string };
+const TOKEN_BUDGET = (() => { const i = process.argv.indexOf('--token-budget'); return i >= 0 ? Number(process.argv[i + 1]) : undefined; })();
+type Row = { slug: string; entity_anchored?: string; result_type?: string; chunk_text?: string };
 /** Page rows only: an added fact row is not a page hit for recall. */
 const pagesOf = (rows: Row[]) => rows.filter(r => r.result_type !== 'fact');
-const fired = (rows: Row[]) => rows.some(r => r.entity_anchored || r.result_type === 'fact');
+/** The key's own rows: anchored pages, facts-arm rows, or (temporal reserve) date-headed fact rows. */
+const fired = (rows: Row[]) => rows.some(r => r.entity_anchored
+  || (r.result_type === 'fact' && (KEY !== 'search.temporal_fact_reserve' || r.chunk_text?.startsWith('[observed '))));
 const dump: Record<string, unknown> = {};
 
 async function freshEngine(): Promise<PGLiteEngine> {
@@ -36,7 +39,7 @@ async function freshEngine(): Promise<PGLiteEngine> {
 
 async function ranked(engine: PGLiteEngine, query: string, on: boolean, label: string): Promise<Row[]> {
   await engine.setConfig(KEY, on ? 'true' : 'false');
-  const rows = await handleToolCall(engine, 'query', { query, limit: 10, expand: false, use_cache: false }) as Row[];
+  const rows = await handleToolCall(engine, 'query', { query, limit: 10, expand: false, use_cache: false, ...(TOKEN_BUDGET ? { token_budget: TOKEN_BUDGET } : {}) }) as Row[];
   if (!on) dump[`${label}::${query}`] = rows;
   return rows;
 }
@@ -99,13 +102,15 @@ if (import.meta.main) {
       await seed(engine);
       reports.push(await scoreCorpus(name, engine, [...questions]));
       reports.push(await scoreCorpus(`${name}+now`, engine, withCue([...questions])));
-      if (KEY === 'search.query_facts_arm') {
+      if (KEY === 'search.query_facts_arm' || KEY === 'search.temporal_fact_reserve') {
         // Diagnostic: one saved fact restating each question's answer, so fact rows take page slots.
         for (const q of questions) {
           const answer = q.relevant?.[0];
           if (answer) await engine.insertFact({ fact: `${q.query.replace(/[?.!\s]+$/, '')}: ${answer}`, kind: 'fact', entity_slug: q.seed ?? null, source: 'regression diagnostic', visibility: 'world' }, { source_id: 'default' });
         }
         reports.push(await scoreCorpus(`${name}+facts`, engine, [...questions]));
+        // Not a gate: the same questions with a temporal cue, so the reserve fires.
+        if (KEY === 'search.temporal_fact_reserve') reports.push(await scoreCorpus(`${name}+facts+when`, engine, questions.map(q => ({ ...q, query: `${q.query.replace(/[?.!\s]+$/, '')}, and when?` }))));
       }
     } finally {
       await engine.disconnect();
@@ -114,8 +119,8 @@ if (import.meta.main) {
   const lme = new URL('../../test/fixtures/longmemeval-nightly.jsonl', import.meta.url).pathname;
   reports.push(await longMemEval(lme, false), await longMemEval(lme, true));
   const asWritten = reports.filter(r => !r.corpus.endsWith('+now') && !r.corpus.endsWith('+facts'));
-  const withFacts = reports.filter(r => !r.corpus.endsWith('+now'));
-  const out = { mode: 'hermetic', keyword_only: true, key: KEY, pass: asWritten.every(r => r.recall10_lower.length === 0),
+  const withFacts = reports.filter(r => !r.corpus.endsWith('+now') && !r.corpus.endsWith('+when'));
+  const out = { mode: 'hermetic', keyword_only: true, key: KEY, token_budget: TOKEN_BUDGET ?? null, pass: asWritten.every(r => r.recall10_lower.length === 0),
     pass_with_facts_diagnostics: withFacts.every(r => r.recall10_lower.length === 0), reports };
   const dumpPath = flag('--dump-off');
   if (dumpPath) writeFileSync(dumpPath, JSON.stringify(dump, null, 2));

@@ -1386,6 +1386,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'search.evidence_date_header', // C1: one-line date header per delivered block (default off; search/evidence-date.ts)
   'search.entity_anchoring', // entity-anchored retrieval for entity-scoped current-state query/search (default off; search/entity-anchor.ts)
   'search.query_facts_arm', // query adds matching active facts as rows in spare capacity (default on; search/facts-arm.ts)
+  'search.temporal_fact_reserve', // temporal-cue queries reserve up to 15% of the token budget for question-ranked dated facts (default off; search/facts-arm.ts)
   'think.return_unit',
   // Models tier system (v0.31.12)
   'models.default',

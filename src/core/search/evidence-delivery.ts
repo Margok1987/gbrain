@@ -910,7 +910,7 @@ export async function deliverEvidence(
     }
   }
   const headerFor = (hit: SearchResult): string => !dateHeaders ? ''
-    : hit.fact_row ? `${factDateHeader(hit.fact_row)}\n` : `${dateHeaders.get(hit.page_id) ?? pageDateHeader(null)}\n`;
+    : hit.fact_row ? (hit.chunk_text?.startsWith('[observed ') ? '' : `${factDateHeader(hit.fact_row)}\n`) : `${dateHeaders.get(hit.page_id) ?? pageDateHeader(null)}\n`;
 
   const planned: Block[] = [];
   for (const g of groups) {

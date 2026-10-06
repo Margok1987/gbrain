@@ -1,8 +1,29 @@
 # Temporal fact reserve in query: preregistered gates
 
-Not built and not measured. The gates below are written before any code or gated run. The change sits behind
-`search.temporal_fact_reserve`, which is off by default. With the key off, and for every query without a temporal
-cue, `query` returns exactly what it returns today.
+Built behind `search.temporal_fact_reserve`, which is off by default. Gate 2 passed, but the reserve never fires on
+those sets as written; gate 1 waits on the harness lane. With the key off, and for every query without a temporal
+cue, `query` returns exactly what it returned before.
+
+## Gate 2 result
+
+Gate 2 ran on the bounded build (row share 30%), hermetic and keyword-only, with the key on and off. No question's
+recall@10 is lower with the key on, in any of the five sets, with or without `token_budget: 8000`. That makes gate 2
+a pass.
+
+The pass is close to vacuous. None of the five sets has a temporal cue in its questions, so the reserve fired 0
+times in each. A diagnostic outside the gate appends ", and when?" to the questions of the two fact copies:
+
+- NamedThingBench: the reserve fired on 11 of 12 questions with no recall loss (0.833 both ways).
+- Relational fixture: the reserve fired on 38 of 38, but the appended words already drop page recall to 0 with the
+  key off, so this copy shows nothing.
+
+With the key off, `query` output on these sets matches garrytan/gbrain@eb696b3df, apart from wall-clock recency
+scores. The facts arm's own gate-2 numbers are unchanged.
+
+Gate 1 (BEAM dev, harness lane) has not run.
+
+## Preregistration
+
 
 ## Why
 
@@ -25,8 +46,9 @@ With the key on, a `query` whose text carries a temporal cue gives saved facts a
 - **Budget.** The reserve applies only when the call has a token budget: the caller's `token_budget`, or the budget
   evidence delivery resolves for `return_unit`. Without one, `query` behaves as today (the facts arm's spare-capacity
   rows).
-- **Share.** Facts take at most 15% of that budget, counted with the search token estimator, and at most 20 rows.
-  Pages fill the rest. The row count never grows: a fact row takes a free row, else the lowest page row.
+- **Share.** Facts take at most 15% of that budget, counted with the search token estimator, and at most 30% of the
+  caller's row count (at least 1, at most 20 rows). Pages fill the rest. The row count never grows: a fact row takes
+  a free row, else the lowest page row.
 - **Candidates.** Active facts only, under the same read policy as the facts arm (source scope, world facts only for
   remote callers, audit rows excluded): the 50 nearest by the query embedding `query` already computed, plus the 50
   best keyword matches, plus the named entity's facts.
@@ -58,3 +80,8 @@ owns its spend. The spend cap for this lane's own runs is $10.
 ## Changelog
 
 - 2026-10-06: gates preregistered before any code or gated run.
+- 2026-10-06: before gate 1 ran, the row bound changed from "at most 20 rows" to "at most 30% of the row count (1-20)".
+  The first build let reserved facts fill every row of a `limit: 10` call under the default `auto` budget. The gate 2
+  runs made on that build are void and were rerun on the bounded build. The token share and both gates are
+  unchanged.
+- 2026-10-06: built; gate 2 passed on the bounded build (the reserve never fired on the sets as written).

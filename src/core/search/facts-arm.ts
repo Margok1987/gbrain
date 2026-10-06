@@ -25,6 +25,7 @@ import { privateProvenanceFilterFragment } from './private-visibility.ts';
 import { namedEntity } from './entity-anchor.ts';
 import { pageReadFilter } from './read-policy-sql.ts';
 import { enforceTokenBudget, resultTokens } from './token-budget.ts';
+import { factDateHeader } from './evidence-date.ts';
 
 export const QUERY_FACTS_ARM_KEY = 'search.query_facts_arm';
 /** Fact rows added per query at most. */
@@ -34,6 +35,27 @@ export const FACT_COSINE_MIN = 0.6;
 /** Share of the query's content terms a fact's text and entity must hold to match by keyword. */
 const TERM_SHARE_MIN = 0.5;
 
+/** Temporal fact reserve (docs/eval/decisions/temporal-fact-reserve/): off by default. */
+export const TEMPORAL_FACT_RESERVE_KEY = 'search.temporal_fact_reserve';
+/** Share of the caller's token budget reserved facts may take. */
+export const TEMPORAL_RESERVE_SHARE = 0.15;
+export const MAX_RESERVE_ROWS = 20;
+/** Share of the caller's row count reserved facts may take (at least one row). */
+export const TEMPORAL_RESERVE_ROW_SHARE = 0.3;
+const RESERVE_COSINE_MIN = 0.5;
+const RESERVE_TERM_SHARE_MIN = 0.34;
+const DATED_BONUS = 0.1;
+/** valid_from this far from created_at means the writer supplied the date. */
+const DATED_MIN_MS = 24 * 60 * 60 * 1000;
+const MONTHS = 'january|february|march|april|may|june|july|august|september|october|november|december';
+const TEMPORAL_CUE = new RegExp(`\\b(when|before|after|since|until|till|during|ago|earlier|later|earliest|latest|first|last|previous|next|dates?|day|week|month|year|order|sequence|${MONTHS})\\b`
+  + `|\\bhow (long|many (days|weeks|months|years))\\b|\\bwhat time\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b`, 'i');
+
+/** Whether `query` carries a deterministic temporal cue (the preregistered word, phrase, ISO date and month-name list). */
+export function hasTemporalCue(query: string): boolean {
+  return TEMPORAL_CUE.test(query);
+}
+
 const STOPWORDS = new Set(['the', 'and', 'for', 'who', 'what', 'when', 'where', 'which', 'with', 'from', 'that', 'this', 'are', 'was', 'were', 'our', 'your', 'their',
   'now', 'current', 'currently', 'should', 'does', 'did', 'has', 'have', 'how', 'any', 'all', 'about', 'into', 'its', 'next', 'use', 'uses', 'tell']);
 
@@ -41,7 +63,7 @@ export interface FactsArmScope { sourceId?: string; sourceIds?: string[]; remote
 
 interface FactCandidate {
   id: number; fact: string; kind: string; entity_slug: string | null; source_id: string; source: string;
-  valid_from: Date | string; valid_until: Date | string | null; claim_metric: string | null; claim_period: string | null;
+  valid_from: Date | string; valid_until: Date | string | null; created_at?: Date | string | null; claim_metric: string | null; claim_period: string | null;
 }
 
 export function queryTerms(query: string): string[] {
@@ -50,16 +72,30 @@ export function queryTerms(query: string): string[] {
 
 const day = (v: Date | string | null) => (v ? new Date(v).toISOString().slice(0, 10) : null);
 
-/** The active facts that match `query`, newest valid_from first (at most MAX_FACT_ROWS). */
-export async function matchQueryFacts(engine: BrainEngine, query: string, scope: FactsArmScope, queryEmbedding?: Float32Array | null): Promise<FactCandidate[]> {
+type ScoredCandidate = FactCandidate & { similarity?: number; matched: number; terms: number; entity: boolean };
+
+/**
+ * Active facts near `query` under the caller's read policy: the keyword
+ * matches (with how many query terms each holds), the `cosineLimit` nearest by
+ * the query embedding (with their similarity), and the named entity's newest
+ * `entityLimit` facts.
+ */
+async function collectFactCandidates(engine: BrainEngine, query: string, scope: FactsArmScope, queryEmbedding: Float32Array | null | undefined,
+  limits: { cosine: number; entity: number }): Promise<ScoredCandidate[]> {
   const terms = queryTerms(query);
   const sources = scope.sourceIds?.length ? scope.sourceIds : [scope.sourceId ?? 'default'];
   const params: unknown[] = [sources, [...AUDIT_ROW_SOURCES]];
   const base = `f.source_id = ANY($1::text[]) AND f.expired_at IS NULL AND f.superseded_by IS NULL
     AND (f.valid_until IS NULL OR f.valid_until > now()) AND f.source != ALL($2::text[])
     ${scope.remote ? `AND f.visibility = 'world' AND ${privateProvenanceFilterFragment('f')}` : ''}`;
-  const cols = 'f.id, f.fact, f.kind, f.entity_slug, f.source_id, f.source, f.valid_from, f.valid_until, f.claim_metric, f.claim_period';
-  const found = new Map<number, FactCandidate>();
+  const cols = 'f.id, f.fact, f.kind, f.entity_slug, f.source_id, f.source, f.valid_from, f.valid_until, f.created_at, f.claim_metric, f.claim_period';
+  const found = new Map<number, ScoredCandidate>();
+  const add = (r: FactCandidate & { haystack?: string; similarity?: number }, entity = false) => {
+    const prev = found.get(Number(r.id));
+    const haystack = r.haystack ?? `${r.fact} ${r.entity_slug ?? ''}`.toLowerCase();
+    found.set(Number(r.id), { ...r, similarity: r.similarity !== undefined ? Number(r.similarity) : prev?.similarity,
+      matched: terms.filter(t => haystack.includes(t)).length, terms: terms.length, entity: entity || !!prev?.entity });
+  };
   if (terms.length) {
     const rows = await engine.executeRaw<FactCandidate & { haystack: string }>(
       `WITH q AS (SELECT NULLIF(replace(plainto_tsquery($3::regconfig, $4)::text, ' & ', ' | '), '')::tsquery AS q)
@@ -68,8 +104,7 @@ export async function matchQueryFacts(engine: BrainEngine, query: string, scope:
          AND to_tsvector($3::regconfig, f.fact || ' ' || replace(COALESCE(f.entity_slug, ''), '-', ' ')) @@ q.q
        ORDER BY ts_rank_cd(to_tsvector($3::regconfig, f.fact || ' ' || replace(COALESCE(f.entity_slug, ''), '-', ' ')), q.q) DESC, f.valid_from DESC
        LIMIT 50`, [...params, getFtsLanguage(), terms.join(' ')]);
-    const need = Math.max(Math.min(2, terms.length), Math.ceil(terms.length * TERM_SHARE_MIN));
-    for (const r of rows) if (terms.filter(t => r.haystack.includes(t)).length >= need) found.set(Number(r.id), r);
+    for (const r of rows) add(r);
   }
   if (queryEmbedding && queryEmbedding.length) {
     const model = getEmbeddingModel();
@@ -78,17 +113,24 @@ export async function matchQueryFacts(engine: BrainEngine, query: string, scope:
       `SELECT ${cols}, 1 - (f.embedding <=> $3::vector) AS similarity FROM facts f
        WHERE ${base} AND f.embedding IS NOT NULL AND f.embedding_model = $4 AND f.embedded_text_hash = md5(f.fact)
          AND vector_dims(f.embedding) = $5
-       ORDER BY f.embedding <=> $3::vector LIMIT 10`, [...params, lit, model, queryEmbedding.length]).catch(() => []);
-    for (const r of rows) if (Number(r.similarity) >= FACT_COSINE_MIN) found.set(Number(r.id), r);
+       ORDER BY f.embedding <=> $3::vector LIMIT ${limits.cosine}`, [...params, lit, model, queryEmbedding.length]).catch(() => []);
+    for (const r of rows) add(r);
   }
   const entity = await namedEntity(engine, query, { sourceIds: sources, excludePrivate: scope.remote }).catch(() => null);
   if (entity) {
     const rows = await engine.executeRaw<FactCandidate>(
-      `SELECT ${cols} FROM facts f WHERE ${base} AND f.entity_slug = $3 ORDER BY f.valid_from DESC, f.id DESC LIMIT ${MAX_FACT_ROWS}`,
+      `SELECT ${cols} FROM facts f WHERE ${base} AND f.entity_slug = $3 ORDER BY f.valid_from DESC, f.id DESC LIMIT ${limits.entity}`,
       [...params, entity.slug]);
-    for (const r of rows) found.set(Number(r.id), r);
+    for (const r of rows) add(r, true);
   }
-  return [...found.values()]
+  return [...found.values()];
+}
+
+/** The active facts that match `query`, newest valid_from first (at most MAX_FACT_ROWS). */
+export async function matchQueryFacts(engine: BrainEngine, query: string, scope: FactsArmScope, queryEmbedding?: Float32Array | null): Promise<FactCandidate[]> {
+  const candidates = await collectFactCandidates(engine, query, scope, queryEmbedding, { cosine: 10, entity: MAX_FACT_ROWS });
+  return candidates
+    .filter(c => c.entity || (c.similarity ?? -1) >= FACT_COSINE_MIN || (c.terms > 0 && c.matched >= Math.max(Math.min(2, c.terms), Math.ceil(c.terms * TERM_SHARE_MIN))))
     .sort((a, b) => new Date(b.valid_from).getTime() - new Date(a.valid_from).getTime() || Number(b.id) - Number(a.id))
     .slice(0, MAX_FACT_ROWS);
 }
@@ -187,6 +229,63 @@ export async function applyFactsArm(engine: BrainEngine, query: string, results:
     return merged;
   } catch {
     return results;
+  }
+}
+
+const isDated = (f: FactCandidate) => !!f.created_at && Math.abs(new Date(f.valid_from).getTime() - new Date(f.created_at).getTime()) > DATED_MIN_MS;
+
+/**
+ * Temporal fact reserve: for a query with a temporal cue and a token budget,
+ * the facts that best match the question (cosine + term share, +0.1 when the
+ * fact carries a real date) take up to TEMPORAL_RESERVE_SHARE of the budget and
+ * TEMPORAL_RESERVE_ROW_SHARE of the row count (1 to MAX_RESERVE_ROWS rows), rendered with their date header and ordered oldest
+ * first after the pages. The row count never grows (a fact takes a free row,
+ * else the lowest page row) and pages fill the rest of the budget. No match or
+ * any error: the results unchanged.
+ */
+export async function applyTemporalFactReserve(engine: BrainEngine, query: string, results: SearchResult[], opts: FactsArmOpts & { budget: number }): Promise<SearchResult[]> {
+  try {
+    const candidates = await collectFactCandidates(engine, query, opts, opts.queryEmbedding, { cosine: 50, entity: MAX_RESERVE_ROWS });
+    const scored = candidates
+      .map(c => ({ c, share: c.terms ? c.matched / c.terms : 0, cos: c.similarity ?? 0 }))
+      .filter(x => x.cos >= RESERVE_COSINE_MIN || x.share >= RESERVE_TERM_SHARE_MIN)
+      .map(x => ({ c: x.c, score: x.cos + x.share + (isDated(x.c) ? DATED_BONUS : 0) }))
+      .sort((a, b) => b.score - a.score || Number(b.c.id) - Number(a.c.id));
+    if (!scored.length) return results;
+    const rowCap = Math.max(results.length, (await opts.rowCap?.().catch(() => 0)) ?? 0);
+    const pageSlugs = await readableEntityPages(engine, scored.map(x => x.c), opts.readScope).catch(() => new Set<string>());
+    const pagesFloor = results.reduce((m, r) => (Number.isFinite(r.score) && r.score < m ? r.score : m), results[0]?.score ?? 1);
+    let left = Math.floor(opts.budget * TEMPORAL_RESERVE_SHARE);
+    const chosen: Array<{ c: FactCandidate; row: SearchResult }> = [];
+    for (const { c } of scored) {
+      if (chosen.length >= Math.min(MAX_RESERVE_ROWS, Math.max(1, Math.floor(rowCap * TEMPORAL_RESERVE_ROW_SHARE)))) break;
+      const row = factRow(c, 0, c.entity_slug && pageSlugs.has(`${c.source_id}\u0000${c.entity_slug}`) ? c.entity_slug : undefined);
+      row.chunk_text = `${factDateHeader(c)}\n${c.fact}`;
+      const cost = resultTokens(row);
+      if (cost > left) continue;
+      left -= cost;
+      chosen.push({ c, row });
+    }
+    if (!chosen.length) return results;
+    chosen.sort((a, b) => new Date(a.c.valid_from).getTime() - new Date(b.c.valid_from).getTime() || Number(a.c.id) - Number(b.c.id));
+    const rows = chosen.map(({ row }, i) => ({ ...row, score: pagesFloor - (i + 1) * 1e-6 }));
+    let pages = results.slice(0, Math.max(0, Math.min(results.length, rowCap - rows.length))).map(r => ({ ...r }));
+    if (opts.tokenBudget) pages = enforceTokenBudget(pages, Math.max(1, opts.tokenBudget - rows.reduce((n, r) => n + resultTokens(r), 0))).results;
+    const merged = [...pages, ...rows];
+    await stampSupersededClaims(engine, merged, chosen.map(x => x.c)).catch(() => undefined);
+    return merged;
+  } catch {
+    return results;
+  }
+}
+
+/** `search.temporal_fact_reserve` is on ('true' | 'on' | '1' | 'yes'); off by default and on any read error. */
+export async function temporalFactReserveEnabled(engine: { getConfig(key: string): Promise<string | null> }): Promise<boolean> {
+  try {
+    const raw = (await engine.getConfig(TEMPORAL_FACT_RESERVE_KEY))?.trim().toLowerCase();
+    return raw === 'true' || raw === 'on' || raw === '1' || raw === 'yes';
+  } catch {
+    return false;
   }
 }
 

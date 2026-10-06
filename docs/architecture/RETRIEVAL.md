@@ -311,6 +311,14 @@ Two cross-cutting seams sit around the pipeline rather than inside it:
   with correction-dated writes it lifted forget-then-remember from 92% to 100%
   correct. `search.query_facts_arm=false` turns it off. Verdict and gates:
   `docs/eval/decisions/query-facts-arm/`.
+- **Temporal fact reserve (default off).** With `search.temporal_fact_reserve=true`,
+  a `query` with a deterministic temporal cue (when, before, after, how long,
+  since, until, ordinal-time words, ISO dates, month names) and a token budget
+  (`token_budget`, or the one evidence delivery resolves) gives facts ranked by
+  the question (cosine + term share, +0.1 for a real date) up to 15% of the
+  budget and 30% of the rows. They render with their date header, oldest first
+  after the pages, in place of the facts arm. No model call. Gates:
+  `docs/eval/decisions/temporal-fact-reserve/`.
 
 ### Use-attributed feedback
 
