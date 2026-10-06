@@ -32,6 +32,7 @@ import { assertBundleRecoveryBinding, bundleFileHash, prepareBundleRecovery, pub
 import { assertKnowledgePublicationAllowed } from '../shared-skills/knowledge-guard.ts';
 import { classifyMirrorPage, sourceMirrorReadOnly } from './mirror-read-only.ts';
 import { databaseRefusal, withAttempt, type PublicationFailure, type PublicationFailureDetail, type PublicationStage } from './publication-failure.ts';
+import { fenceFailureDetail } from '../fence-repair/refusal.ts';
 import { faultPoint, withFaultPoints } from './fault-points.ts';
 
 interface PreparedMutationBase {
@@ -112,7 +113,11 @@ function publishFile(file: PageMutationFile, stagingPath?: string, afterStagingF
 // its own recovery record and native root capability.
 export { fileHash as persistenceFileHash, publishFile as publishPersistenceFile };
 function requestError(error: unknown): PublicationFailure {
-  if (error instanceof OperationError) return { code: error.code, message: error.message };
+  if (error instanceof OperationError) {
+    // #6188: a typed fence refusal keeps its location in the bounded detail, which outlives receipt compaction.
+    const fence = fenceFailureDetail(error);
+    return { code: error.code, message: error.message, ...(fence ? { detail: fence } : {}) };
+  }
   const refusal = databaseRefusal(error);
   if (refusal) return refusal;
   const code = (error as { code?: string })?.code;

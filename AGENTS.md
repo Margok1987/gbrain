@@ -127,7 +127,11 @@ writing or reviewing an operation, consult `src/core/operations.ts` for the cont
   next sync (`gbrain sync --source <id> --no-pull` does it now). Write brain
   files through `put_page`/`capture` or a YAML serializer and check generated
   content with `gbrain frontmatter validate --stdin --path <p>`. Walkthrough:
-  [held files](docs/guides/repair.md#held-files).
+  [held files](docs/guides/repair.md#held-files). A hold with code
+  `invalid_fence` is a facts or takes table, not frontmatter: read the page
+  (`gbrain get --source <id> -- <slug>`), edit only the fence the hold names,
+  commit, then `gbrain sync --source <id> --no-pull`
+  ([fence holds](docs/guides/write-refusals.md#invalid_fence)).
 - **Migrate / upgrade:** `gbrain upgrade` (binary self-update + schema migrations + post-upgrade prompts),
   [`docs/UPGRADING_DOWNSTREAM_AGENTS.md`](./docs/UPGRADING_DOWNSTREAM_AGENTS.md),
   [`skills/migrations/`](./skills/migrations/), `gbrain apply-migrations --yes --no-autopilot-install` (manual migration orchestration without service installation).

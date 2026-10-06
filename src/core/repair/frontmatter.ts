@@ -53,6 +53,7 @@ import { isReservedSkillBundlePath } from '../skill-reserved-paths.ts';
 import { digest, sha256 } from '../persistence/digest.ts';
 import { managedPersistenceEnabled } from '../persistence/ownership.ts';
 import { clearGitHold, readGitSourceHolds, type GitHoldRecord } from '../persistence/sync-holds.ts';
+import { fenceWhere } from '../fence-repair/refusal.ts';
 import type { SyncRename } from '../persistence/sync-discovery.ts';
 import { canonicalRepairFields, confinedRepairTarget, managedRepairRoot, prepareRepairPublication, repairScreenConfig, submitManagedFileRepair } from '../persistence/file-repair.ts';
 import { clearApprovedSet, loadApprovedSet, previewChangedError, previewHash, saveApprovedSet } from '../persistence/preview-approval.ts';
@@ -163,10 +164,12 @@ export function frontmatterCandidates(content: string, path: string, ctx: SlugCo
 }
 
 /** The exact manual fix for a file no rule repairs. */
-function resolution(hold: Pick<ContentRefusal, 'code' | 'reason' | 'key' | 'line'> | null, path: string): string {
+function resolution(hold: Pick<ContentRefusal, 'code' | 'reason' | 'key' | 'line' | 'fence'> | null, path: string): string {
   if (!hold) return `Edit the frontmatter of ${path} by hand (one line per key, the whole value quoted), then preview again.`;
   const where = `${hold.line !== undefined ? `line ${hold.line}` : 'the frontmatter'}${hold.key ? ` (key "${hold.key}")` : ''} of ${path}`;
   switch (hold.code) {
+    // #6188: frontmatter repair never rewrites a fence; the named fence is edited by hand, then synced.
+    case 'invalid_fence': return `Edit ${fenceWhere(hold.fence)} of ${path} by hand (${hold.fence?.reason ?? hold.reason ?? 'invalid_fence'}; gbrain sources status names the problem), commit, then sync the source; frontmatter repair does not change fences.`;
     case 'file_too_large': return `Split ${path} into files under ${MAX_FILE_SIZE} bytes and commit, or leave it out of the source with sync.exclude.`;
     case 'frontmatter_slug_conflict': return `Remove the slug: line of ${path} (the path decides the slug), or move the file to the path its slug names.`;
     case 'content_rejected': return `Remove the junk the content-sanity gate matched in ${path}, or ask the user whether junk_disposition should stay reject.`;
@@ -297,7 +300,8 @@ async function analyzeFile(ctx: FileContext, path: string, hold: GitHoldRecord |
   if (candidates.interpretive) return { pending: candidates.interpretive };
   if (hold && unchanged) return { proposal: { content, fixes: [`Import ${path} as it is now`], class: 'safe', ...withRename } };
   if (!found.hold && !hold && !found.errors.length) return null;
-  const blocking = found.hold ?? (hold ? { code: hold.code as ContentHold['code'], reason: hold.meta.reason as ContentHold['reason'], key: hold.meta.key, line: hold.meta.line, message: hold.message } : null);
+  const blocking = found.hold ?? (hold ? { code: hold.code as ContentRefusal['code'], reason: hold.meta.reason as ContentRefusal['reason'], key: hold.meta.key, line: hold.meta.line,
+    fence: hold.meta.fence, message: hold.message } : null);
   return review(blocking?.code ?? 'invalid_frontmatter', resolution(blocking, path), {
     ...(blocking?.reason ? { reason: blocking.reason } : {}), ...(blocking?.key ? { key: blocking.key } : {}), ...(blocking?.line !== undefined ? { line: blocking.line } : {}), ...heldBefore });
 }

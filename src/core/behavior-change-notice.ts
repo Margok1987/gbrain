@@ -255,6 +255,7 @@ export const BEHAVIOR_CHANGES: ReadonlyArray<{ since: string; text: ChangeText }
   { since: '0.60.97.0', text: 'With `facts.default_visibility` set to `world`, facts extracted from conversations are written world-visible; they were always private before.' },
   { since: '0.60.97.0', text: 'The take sanitizer no longer redacts the name or word "dan"; the uppercase acronym DAN, "dan mode" in any case and "do anything now" are still redacted.' },
   { since: '0.60.97.0', text: 'Google Calendar sync writes only events between `historyDays` back and 60 days ahead; `gbrain sync --full` removes pages for in-window events the calendar no longer lists (more than 200 is refused and reported partial).' },
+  { since: '0.60.98.0', text: 'Managed sync now holds a file whose facts or takes fence cannot be imported (code `invalid_fence`; `gbrain sources status <id>` names the fence, section and rows) instead of blocking the whole source, and a source such a fence blocked before recovers on its next sync. Coordinated writes refuse such a fence with `invalid_fence` (wire `error` stays `invalid_params`, or `take_row_collision`). `gbrain config set sync.holds fail` keeps fail-closed blocking.' },
 ];
 
 /** The newest disclosed change's release: the notice id moves only when a release adds rows. */

@@ -10,6 +10,45 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.98.0] - 2026-10-06
+
+**A broken facts or takes table in one page no longer stops a managed sync: that one file is held, everything else imports, and the hold says which table, section and rows to fix.**
+
+A page's facts and takes tables are its structured rows. When one of them did not parse cleanly (an unknown kind, a holder that is not `world`, `brain`, `people/<slug>` or `companies/<slug>`, a missing end marker, a row number used twice), managed sync refused that page and the refusal blocked the whole source until someone found the file and ran a retry by hand. One brain sat blocked for about 40 hours on a single table. Managed sync now checks tables the same way the import does. A table it would refuse is held up front, and a table refused only once it meets the stored page (for example a takes row number that a stored take already uses) is held in the same run from its failed write. The sync finishes, the checkpoint advances, and the rest of the source is current. A source a table blocked before this release recovers on its next sync, with no command.
+
+### How to fix a held table
+
+```bash
+gbrain sources status <source>               # each hold: file, table, section, rows, reason
+gbrain get --source <source> -- <slug>       # read the page
+# edit only the named table in the file, commit, then:
+gbrain sync --source <source> --no-pull      # imports the fixed file and clears the hold
+```
+
+`gbrain repair frontmatter` does not touch tables, and no fix gbrain prints suggests it for one. To add rows without editing a table by hand, use `remember` (facts) or `takes_add` (takes).
+
+### What you see
+
+| Where | What changed |
+|---|---|
+| Managed sync | Finishes (`synced` / `first_sync`) and prints `Held <path>: invalid_fence (<reason>) in the <facts\|takes> fence (<section>), row N, column C, at line L`, then the read, edit and sync steps. `--dry-run` lists the same holds in `would_hold`. |
+| Refusals | Every coordinated table refusal is typed: code `invalid_fence` with a `reason` (`unparseable`, `enum_unmapped`, `holder_unresolved`, `row_collision`, `repeated_marker`, `quoted_fence_rows`, `stored_row_collision`, `withdrawn_claim_in_malformed_fence`, ...). The wire `error` stays `invalid_params` (`take_row_collision` for a stored-row collision), so scripts and connector item holds keep classifying it as content. |
+| Privacy | Holds, refusals, receipts and logs name the table, section, row numbers, columns and lines only, never a claim, holder or cell. |
+| Unchanged | Legacy (unmanaged) sync, file import and legacy `put_page` still import such a page with its bad rows skipped and never hold it. `sync.holds=fail` and company-brain sources keep failing closed, now with the typed `invalid_fence` refusal. |
+
+### Itemized changes
+
+- One table check, `scanCanonicalFences` (`src/core/fence-repair/refusal.ts`), serves the content screen (`fences: 'coordinated'`) and `compileCanonicalProjections`, so a file is held at the screen exactly when preparation would refuse it. Locations come from the raw-row view, never from parser warning strings. Reasons, docs anchors and fix sentences come from one table (`src/core/fence-repair/reasons.ts`).
+- Every table refusal site is typed `invalid_fence`: the projection checks, the quoted-fence publication guard, the stored take collision and the import-preparation withdrawal guard. `CODES.invalid_fence` lists the reasons; `docs/guides/write-refusals.md#invalid_fence` has an anchor per reason and the table format.
+- A failed write keeps the table location in a bounded, versioned `error_detail.fence` that survives receipt compaction (row numbers stay on the brain host). Stored receipts are read back from that detail, the message, or the exact message an older release stored; an arbitrary `invalid_params` is never treated as a table hold.
+- Managed sync holds a refused table at freeze and in the dry run. A table refused against stored rows is held from its failed receipt (reason `prepare_time`) at the start of a run, and in the same run at the failed-write step for the single path and a bulk group's failed member, after the source's other writes settle within the run's wait budget (otherwise the run returns `partial`). A converted write gets no failure-ledger row and is logged as a conversion.
+- One hold-repair router behind sync results, `gbrain sources status`, doctor `git_held_files`, `get_page` (`file_held`), the `held_files` read notice, `gbrain sources retry-held`, held-file write refusals, write-failure diagnostics and help: table holds read the page, edit the named table and sync; frontmatter holds keep their repair preview; a mixed source names both. Remote callers are told to ask the brain host operator. A new `fence_holds:` line in `gbrain post-upgrade` names sources a table blocked.
+- Managed discovery and legacy sync share one re-screen rule, which also re-screens a table hold written by an older table check.
+
+### For contributors
+
+- `test/persistence-sync-fence-holds.test.ts` (PGLite, with a Postgres arm in `test/postgres-unit-arms.txt`) covers the never-block run, a table that passes the screen and fails preparation held in one run, legacy and compacted receipt conversion, `sync.holds=fail`, the dry run and a bulk group's failed member. `test/fence-refusal.test.ts` covers the shared check, the receipt grammar, docs anchors and that no message names a command that has not shipped; `test/fence-hold-surfaces.test.ts` covers every routed surface.
+
 ## [0.60.97.0] - 2026-10-06
 
 **Fix wave 10: 68 community fixes land as reviewed, rewritten code, and gbrain stops overspending, mislabeling and silently skipping in a long list of everyday paths.**

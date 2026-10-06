@@ -100,8 +100,8 @@ test('every way of quoting a real fence in code is refused instead of dropping i
   for (const [i, wrap] of wraps.entries()) {
     const slug = `quoted-${i}`;
     await put(slug, `Intro\n\n${fences('Example belief', 'Example fact')}`);
-    // Refused either as a quoted fence or as an unbalanced one; the rows are kept both ways.
-    await expect(put(slug, wrap(fences('Example belief', 'Example fact')))).rejects.toThrow(/inside markdown code|cannot be parsed losslessly/);
+    // Refused either as a quoted fence or as an unbalanced one (#6188 typed reasons); the rows are kept both ways.
+    await expect(put(slug, wrap(fences('Example belief', 'Example fact')))).rejects.toThrow(/^Fence (quoted_fence_rows|missing_begin|unparseable): in the (facts|takes) fence \((body|timeline)\)/);
     expect(await rows(slug)).toEqual({ takes: 1, facts: 1 });
   }
 });

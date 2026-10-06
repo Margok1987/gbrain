@@ -158,6 +158,7 @@ test/facts-backstop-remedy-verb.test.ts	facts backstop thin-client-fallback reme
 test/facts-relink.test.ts	relink reasons	1	readFileSync
 test/features.test.ts	CLI routing	2	source-surface-helper
 test/fence-extraction.test.ts	Layer 8 D2 — markdown fence extraction	18	readFileSync
+test/fence-refusal.test.ts	no PR1 message or fix names a command that has not shipped	3	readFileSync
 test/files.test.ts	collectFiles (production import)	9	readFileSync
 test/files.test.ts	files upload-raw git-storage branch (#2297)	6	readFileSync
 test/files.test.ts	files verify git lane (per-source root resolution)	1	readFileSync

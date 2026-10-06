@@ -16,7 +16,7 @@ import { contentRefusalError } from '../import-screen.ts';
 import { ContentSanityBlockError } from '../content-sanity.ts';
 import { assertPageRevision, type PageSnapshot } from '../page-state/types.ts';
 import { gitHoldFix, readGitHold } from './sync-holds.ts';
-import { hostOperatorFix } from './held-reads.ts';
+import { hostOperatorFix, recordRoute } from './held-reads.ts';
 import { heldFileMessage } from './verb-errors.ts';
 import { isWriteTargetContained } from '../path-confine.ts';
 import { recordedPathFromFileUri, scannerSlugRootMode, scannerSourcePath } from '../write-through.ts';
@@ -207,7 +207,7 @@ async function heldFileRefusal(engine: BrainEngine, row: Pick<WriteRequest, 'sou
     const error = opError('source_changed', heldFileMessage(kind, hold.code),
       `Sync holds this page's canonical file in source ${row.source_id} (${hold.code}${hold.meta.reason ? `, ${hold.meta.reason}` : ''}) because gbrain cannot import it, `
       + `so ${effect} is read-only for put_page until the brain host operator repairs the file; retrying this write refuses the same way. Relay the fix to the user, then submit the intended write with a new request_id. Neither copy was overwritten.`,
-      { fix: hostOperatorFix([row.source_id], `The canonical file of page ${row.slug} is held (${hold.code}): only the brain host operator can inspect and repair it.`) });
+      { fix: hostOperatorFix([{ source_id: row.source_id, route: recordRoute(hold) }], `The canonical file of page ${row.slug} is held (${hold.code}): only the brain host operator can inspect and repair it.`) });
     if (kind === 'drift') error.detail = 'file_database_drift';
     return error;
   }

@@ -69,6 +69,7 @@ test/persistence-physical-root-device.test.ts
 test/persistence-skill-bundles.serial.test.ts
 test/persistence-skill-crash.slow.test.ts
 test/persistence-sync-cursor-options.test.ts
+test/persistence-sync-fence-holds.test.ts
 test/persistence-sync-holds.test.ts
 test/persistence-writer-fences.test.ts
 test/repair-embedding-effects.test.ts

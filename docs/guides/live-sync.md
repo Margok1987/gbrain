@@ -257,11 +257,13 @@ vars — incident-time escape hatches, not everyday knobs.
    server is down when a push happens, that sync is missed. Pair webhooks
    with a cron fallback that catches anything the webhook missed.
 
+<a id="held-files"></a>
 4. **One broken file never blocks a sync: it is held.** When a file's content
    refuses deterministically (frontmatter gbrain cannot read without guessing,
-   a frontmatter `slug:` naming another page, a file over the size limit, or
-   content the operator's `content_sanity.junk_disposition=reject` refuses),
-   sync holds that file and keeps going: every other file imports, the
+   a frontmatter `slug:` naming another page, a file over the size limit,
+   content the operator's `content_sanity.junk_disposition=reject` refuses, or
+   on managed sync a facts or takes fence that cannot be imported without
+   dropping rows), sync holds that file and keeps going: every other file imports, the
    checkpoint advances, and the run reports the hold (`Held <path>: <code> …
    Next: <command>`; JSON `held`, `held_count`, `holds_outstanding`). Files
    gbrain can read exactly after quoting an unquoted value (`author: a (b)
@@ -281,14 +283,27 @@ vars — incident-time escape hatches, not everyday knobs.
    gbrain repair frontmatter --source <source-id>    # preview; writes nothing
    ```
 
+   A fence hold (`invalid_fence`) names the fence, section, reason and row
+   numbers, never a cell. Fix it by reading the page
+   (`gbrain get --source <source-id> -- <slug>`), editing that fence in the
+   file, committing, and running `gbrain sync --source <source-id> --no-pull`;
+   frontmatter repair does not touch fences. A fence refused only while being
+   prepared against the stored page (for example a takes row number a stored
+   take already uses) is held in the same run as `prepare_time`. See
+   [fence holds](write-refusals.md#invalid_fence).
+
    Walkthrough with real output: [held files](repair.md#held-files); codes:
    [content refusals](write-refusals.md#held-files-and-content-refusals).
-   Managed and legacy sync behave the same, and holds never count toward the
+   Managed and legacy sync behave the same for frontmatter, size and content
+   holds; for fences, legacy sync keeps importing the page with its bad rows
+   skipped and never holds it. Holds never count toward the
    legacy auto-skip streak below. A source blocked by such a file before this
    release recovers on its next sync, or now with
    `gbrain sync --source <source-id> --no-pull`. Teams that want fail-closed
-   blocking set `gbrain config set sync.holds fail`. Company-brain profile
-   sources never hold: their approved manifest keeps blocking.
+   blocking set `gbrain config set sync.holds fail` (a fence refusal then
+   blocks with its typed `invalid_fence` text). Company-brain profile
+   sources never hold: their approved manifest keeps blocking, and a fence
+   refusal there is fixed in the repository and committed.
 
    Other failures still fail closed. In legacy sync a file that fails the
    same way `GBRAIN_SYNC_AUTOSKIP_AFTER` consecutive syncs (default 3, set `0`

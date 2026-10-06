@@ -12,14 +12,15 @@
  * for every held file; the next sync adds those paths to its manifest even if
  * Git did not touch them, imports each one that now passes and keeps the rest
  * held. Most holds re-screen by themselves (changed or deleted file, newer
- * gbrain); the request covers causes outside the file.
+ * gbrain); the request covers causes outside the file (#6188: a prepare-time
+ * fence hold whose stored-row conflict was fixed in the database).
  */
 import type { BrainEngine } from '../core/engine.ts';
 import type { Action } from '../core/agent-output.ts';
 import { OperationError } from '../core/ops/contract.ts';
 import { managedBrain, readAllSourceHolds, readHoldRetryKeys, requestHoldRetry, writeHeldRetryPointer } from '../core/connectors/item-holds-store.ts';
 import { isConnectorSourceKind } from '../core/persistence/connector-identity.ts';
-import { readGitHoldRetryPaths, readGitSourceHolds, requestGitHoldRetry } from '../core/persistence/sync-holds.ts';
+import { holdRepairSteps, readGitHoldRetryPaths, readGitSourceHolds, requestGitHoldRetry } from '../core/persistence/sync-holds.ts';
 
 export interface RetryHeldReceipt {
   source_id: string;
@@ -68,8 +69,9 @@ function gitNextStep(sourceId: string, dryRun: boolean, scheduled: Scheduled): {
   if (dryRun) return { text: `${count} held file(s) would be scheduled for a re-screen; run: gbrain sources retry-held ${sourceId}. ${automatic}`,
     fix: { argv: ['gbrain', 'sources', 'retry-held', sourceId], consent: [], actor: 'agent', requires_exclusive: false, verify,
       why: `Schedules a re-screen of ${count} held file(s) on the next sync of ${sourceId}; nothing runs now.` } };
+  const fences = scheduled.items.filter(item => item.code === 'invalid_fence').length;
   return { text: `${count} held file(s) scheduled for a re-screen; none has run yet. ${automatic} Run it now with: ${sync}, then verify with: gbrain sources status ${sourceId}. `
-      + `A file that still refuses stays held; preview its fix with: gbrain repair frontmatter --source ${sourceId}`,
+      + `A file that still refuses stays held; ${fences ? holdRepairSteps(sourceId, { fences, others: count - fences }).text : `preview its fix with: gbrain repair frontmatter --source ${sourceId}`}`,
     fix: { argv: scheduled.sync, consent: [], actor: 'agent', requires_exclusive: false, verify,
       why: `The sync re-screens the ${count} scheduled file(s): each one that now passes imports and its hold clears; the rest stay held without blocking the sync.` } };
 }

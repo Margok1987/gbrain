@@ -1,12 +1,16 @@
 import type { SyncResult } from './sync.ts';
 import type { GitHoldItem } from '../core/persistence/sync-holds.ts';
+import { fenceWhere } from '../core/fence-repair/refusal.ts';
 
 const HOLD_LINES = 20;
 
 export function holdLine(item: GitHoldItem, verb: string): string {
   const where = [item.line !== undefined ? `line ${item.line}` : '', item.key ? `key "${item.key}"` : ''].filter(Boolean).join(', ');
   const page = item.stale ? 'its page keeps its last good revision and is read-only for put_page until the file is repaired' : 'its page is missing until the file imports';
-  return `  ${verb} ${item.path}: ${item.code}${item.reason ? ` (${item.reason})` : ''}${where ? ` at ${where}` : ''}; ${page}. Next: ${item.fix.argv?.join(' ') ?? item.fix.why} (${item.docs})`;
+  // #6188: a fence hold names fence, section, rows, columns and line (never a cell), then the edit-and-sync step.
+  const fence = item.fence ? ` in ${fenceWhere(item.fence)}${item.reason === 'prepare_time' ? ` (${item.fence.reason})` : ''}` : '';
+  const then = item.fix.then?.argv ? `, then ${item.fix.then.argv.join(' ')}` : '';
+  return `  ${verb} ${item.path}: ${item.code}${item.reason ? ` (${item.reason})` : ''}${fence}${where ? ` at ${where}` : ''}; ${page}. Next: ${item.fix.argv?.join(' ') ?? item.fix.why}${then} (${item.docs})`;
 }
 
 /**
@@ -24,7 +28,7 @@ export function printHoldNotes(result: SyncResult, write: (line: string) => void
   const shown = Math.min(result.held?.length ?? 0, HOLD_LINES);
   if ((result.held_count ?? 0) > shown) write(`  ... and ${(result.held_count ?? 0) - shown} more held this run (--json lists ${result.holds_truncated ? 'the first ones' : 'them all'}).`);
   const fix = result.holds_fix;
-  if (fix) write(`  ${result.holds_escalated ? 'HOLDS ESCALATED: ' : ''}${fix.user_message ?? `${fix.why} Preview the repair: ${fix.argv!.join(' ')}`}`);
+  if (fix) write(`  ${result.holds_escalated ? 'HOLDS ESCALATED: ' : ''}${fix.user_message ?? `${fix.why} ${fix.argv?.[1] === 'repair' ? 'Preview the repair' : 'Next'}: ${fix.argv!.join(' ')}`}`);
   if (result.converted_from_failed?.length) write(`  Converted ${result.converted_from_failed.length} failed request(s) of the blocked cursor in place: ${result.converted_from_failed.join(', ')}.`);
   const recovered = result.recovered_frontmatter?.fix;
   if (recovered) write(`  ${recovered.why} Preview: ${recovered.argv!.join(' ')}`);

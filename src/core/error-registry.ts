@@ -13,6 +13,7 @@
  * `docs/guides/error-codes.md#<code>`.
  */
 import type { Action, Actor, Effect, ErrorClass } from './agent-output.ts';
+import { FENCE_REASON_CODES } from './fence-repair/reasons.ts';
 
 export interface CodeEntry {
   class: ErrorClass;
@@ -194,6 +195,7 @@ export const CODES = {
   invalid_acknowledgment: { class: 'caller', summary: "The shared-skills delivery acknowledgment does not match a batch issued to this enrollment.", docs: 'docs/guides/shared-brain-skills.md#troubleshoot-leave-and-recover' },
   invalid_client: { class: 'caller', summary: "Google connect credential error: invalid client.", docs: 'docs/guides/google-connect.md#troubleshooting' },
   invalid_connector_text: { class: 'caller', summary: "Invalid connector text." },
+  invalid_fence: { class: 'caller', summary: "A facts or takes fence in the page cannot be imported without dropping or guessing rows, so the page (or the file) was not written.", why: "Facts and takes fences are the page's structured rows. Importing a fence that does not parse, repeats a marker or reuses a row number would silently drop or renumber rows, so coordinated writers refuse it and managed sync holds the one file while the rest of the source syncs.", reasons: FENCE_REASON_CODES, legacy_error: 'invalid_params', docs: 'docs/guides/write-refusals.md#invalid_fence', suggestion: 'Fix the fence the message names (fence, section and rows; the reason says what is wrong), then write the page again or commit the file and sync.' },
   invalid_frontmatter: { class: 'caller', summary: "The file's YAML frontmatter cannot be read without guessing, so it was not imported.", why: "gbrain imports frontmatter it can read exactly (quoting an unquoted value at most). Guessing could store a wrong title, merge a duplicate, or read a protected key such as `visibility` as a broader value.", reasons: ['yaml_parse', 'needs_interpretation', 'ambiguous_identity_key', 'ambiguous_protected_key'], suggestion: 'Fix the named line in the file (one line per key, the whole value quoted), then commit and sync or import again.' },
   invalid_grant_clock_skew: { class: 'caller', summary: "Google connect credential error: invalid grant clock skew.", docs: 'docs/guides/google-connect.md#troubleshooting' },
   invalid_grant_revoked: { class: 'caller', summary: "Google connect credential error: invalid grant revoked.", docs: 'docs/guides/google-connect.md#troubleshooting' },
