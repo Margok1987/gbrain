@@ -9,7 +9,12 @@
 import { describe, expect, test } from 'bun:test';
 import { compileCanonicalProjections } from '../src/core/persistence/canonical-projections.ts';
 import { screenImportContent, isContentRefusal, contentRefusalFromReceipt } from '../src/core/import-screen.ts';
-import { fenceMessage, FENCE_REASON_CODES } from '../src/core/fence-repair/reasons.ts';
+import { fenceMessage, FENCE_REASON_CODES, type FenceMessageLocation } from '../src/core/fence-repair/reasons.ts';
+import type { FenceReason } from '../src/core/fence-repair/types.ts';
+import { gitHoldFix, holdRepairSteps } from '../src/core/persistence/sync-holds.ts';
+import { prepareTimeFenceHold } from '../src/core/persistence/sync-screen.ts';
+import { writeFailureDiagnostic } from '../src/core/persistence/verb-errors.ts';
+import { RECOVERY_VERSION } from '../src/core/markdown.ts';
 import { CODES } from '../src/core/error-registry.ts';
 import { completeFenceLocation, fenceFailureDetail, fenceLocationFromDetail, fenceLocationFromMessage, fenceOperationError, fenceReceiptLocation,
   parseFenceMessage, scanCanonicalFences } from '../src/core/fence-repair/refusal.ts';
@@ -82,6 +87,35 @@ describe('the shared fence check', () => {
 
   test('the registry entry lists every reason of the shared table and keeps the frozen wire value', () => {
     expect(CODES.invalid_fence).toMatchObject({ class: 'caller', legacy_error: 'invalid_params', reasons: FENCE_REASON_CODES });
+  });
+});
+
+/**
+ * Every reason PR1 can put in a refusal, hold or receipt. `gbrain repair fences`
+ * ships in a later release, so none of their messages or fixes may name it.
+ */
+const PR1_REASONS: readonly FenceReason[] = ['repeated_marker', 'missing_begin', 'marker_near_miss', 'unparseable', 'no_header', 'row_before_header',
+  'short_row', 'extra_cells', 'enum_unmapped', 'takes_kind_unsupported', 'confidence_out_of_range', 'claim_value_invalid', 'weight_missing',
+  'holder_unresolved', 'row_collision', 'quoted_fence_rows', 'stored_row_collision', 'withdrawn_claim_in_malformed_fence', 'prepare_time'];
+const UNSHIPPED = /repair fences|repair pass/;
+
+describe('no PR1 message or fix names a command that has not shipped', () => {
+  test('every reason the screen and the projection emit is one PR1 accounts for', () => {
+    for (const [, body, timeline] of cases) expect(PR1_REASONS).toContain(scanCanonicalFences(page(body, timeline)).defects[0]!.reason);
+  });
+
+  test('messages, suggestions and fixes for every PR1 reason point at the page read, the fence edit and the sync', () => {
+    for (const reason of PR1_REASONS) {
+      const location: FenceMessageLocation = { reason, fence: 'takes', section: 'body', rows: [2], columns: ['who'], line: 5 };
+      const error = fenceOperationError(location, 'notes/example', 'default');
+      const receipt = contentRefusalFromReceipt('invalid_params', error.message);
+      const hold = prepareTimeFenceHold({ path: 'notes/example.md', sourcePath: 'notes/example.md', working: false }, 'notes/example', 1, location, 'Body.', null);
+      const fix = gitHoldFix({ source_id: 'default', path: 'notes/example.md', code: 'invalid_fence', slug: 'notes/example', page_id: 1,
+        meta: { reason, recovery_version: RECOVERY_VERSION, fence: location } });
+      const texts = [error.message, error.suggestion, JSON.stringify(error.fix), receipt?.suggestion, hold.message, JSON.stringify(fix),
+        writeFailureDiagnostic('invalid_params', error.message).suggestion, holdRepairSteps('default', { fences: 1, others: 0 }).text];
+      for (const text of texts) expect(text ?? '').not.toMatch(UNSHIPPED);
+    }
   });
 });
 

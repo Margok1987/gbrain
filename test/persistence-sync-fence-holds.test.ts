@@ -114,6 +114,8 @@ test('a malformed fence among clean files: the sync finishes, holds that file wi
   // Privacy sentinel: no claim, holder or kind text in holds, results, printed output or status.
   const rows = await engine.executeRaw<{ completed_keys: unknown }>("SELECT completed_keys FROM op_checkpoints WHERE op LIKE 'sync-hold%' AND fingerprint LIKE $1", [`${s.id}:%`]);
   for (const blob of [JSON.stringify(rows), JSON.stringify(result), text, lines, JSON.stringify(status)]) expectNoSecrets(blob);
+  // `gbrain repair fences` has not shipped: nothing PR1 prints may send an agent to it.
+  for (const blob of [JSON.stringify(result), text, lines]) expect(blob).not.toMatch(/repair fences|repair pass/);
   // Doctor routes a fence-only source to the status read and the sync, never to frontmatter repair.
   const doctor = await gitHeldFilesCheck(engine, [s.id]);
   expect(doctor).toMatchObject({ status: 'warn', fix: { argv: ['gbrain', 'sources', 'status', s.id, '--json'] } });
@@ -154,7 +156,7 @@ test('forced probe: a fence that passes the screen but collides with a stored ta
   expect((await engine.readPageSnapshot('people/probe', { sourceId: s.id }))!.revision).toBe(before);
   expect(await engine.executeRaw('SELECT row_num,claim FROM takes k JOIN pages p ON p.id=k.page_id WHERE p.source_id=$1 AND p.slug=$2 ORDER BY row_num', [s.id, 'people/probe']))
     .toEqual([{ row_num: 1, claim: 'Synthetic take' }, { row_num: 2, claim: 'Database-only take' }]);
-  for (const blob of [JSON.stringify(result), printed(result), JSON.stringify(failed)]) expectNoSecrets(blob);
+  for (const blob of [JSON.stringify(result), printed(result), JSON.stringify(failed)]) { expectNoSecrets(blob); expect(blob).not.toMatch(/repair fences|repair pass/); }
   // The next run neither re-admits the held bytes nor mints another receipt.
   expect(await s.sync()).toMatchObject({ status: 'up_to_date', holds_outstanding: 1 });
   expect(await s.failedRequests()).toHaveLength(1);
