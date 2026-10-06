@@ -10,7 +10,7 @@
 
 import type { RemediationStep } from '../remediation-step.ts';
 import type { RepairPlanStep, RepairPreviewFailure, RepairStepResult } from './repairs.ts';
-import type { ExplicitRepairNotice } from '../repair/registry.ts';
+import type { ExplicitRepairNotice, RepairKindSpec } from '../repair/registry.ts';
 import type { CapSource } from '../consent.ts';
 
 /**
@@ -100,9 +100,10 @@ export interface RemediationOpts {
    * Doctor CLI only. Plans the registered repair kinds as PROTECTED steps and
    * runs them when `include` is true (the user's `--include-repairs`
    * agreement) and the caller is trusted local (`remote === false`). A
-   * remote caller asking to include repairs is refused.
+   * remote caller asking to include repairs is refused. `registry` replaces
+   * the registered repair kinds (tests register stub specs).
    */
-  repairs?: { include: boolean; remote: boolean; noEmbed?: boolean };
+  repairs?: { include: boolean; remote: boolean; noEmbed?: boolean; registry?: readonly RepairKindSpec[] };
 }
 
 /**
