@@ -1411,8 +1411,7 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'models.dream.triage',
   'models.drift',
   'models.auto_think',
-  'models.think',
-  'models.fence_repair', // #6188: Tier 3 fence repair model (fence-repair/llm.ts), tier deep
+  'models.think', 'models.fence_repair', // models.fence_repair: #6188 Tier 3 fence repair model (fence-repair/llm.ts), tier deep
   'models.subagent',
   'models.expansion',
   'models.contextual_synopsis',
@@ -1653,10 +1652,8 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'sync.hold_escalate_pct',
   'sync.parser_regression',
   'fences.normalize', // #6188: inline Tier 1 fence normalization (fence-repair/config.ts); default on
-  'fences.repair.enabled', // #6188: the maintenance cycle's fence_repair phase (fence-repair/config.ts); default on
-  'fences.repair.llm', // #6188: Tier 3 model repair of residual fence rows; default on
-  'fences.repair.max_usd_per_page', // #6188: Tier 3 fence repair caps (fence-repair/config.ts); 0 = no model spend
-  'fences.repair.max_usd_per_day',
+  'fences.repair.enabled', 'fences.repair.llm', // #6188: the fence_repair cycle phase and its Tier 3 model step (fence-repair/config.ts); default on
+  'fences.repair.max_usd_per_page', 'fences.repair.max_usd_per_day', // #6188: Tier 3 fence repair caps; 0 = no model spend
   // #2179: clamp window for DCR-requested per-client token TTLs. Read by
   // `gbrain serve --http` at startup; unset min defaults to 300s, unset max
   // defaults fail-closed to max(--token-ttl, min).

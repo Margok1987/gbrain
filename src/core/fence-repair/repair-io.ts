@@ -132,7 +132,7 @@ export async function readFenceTarget(engine: BrainEngine, src: FenceSource, can
   if (cand.path && src.root) {
     const abs = join(src.root, cand.path);
     if (existsSync(abs)) {
-      try { confinedRepairTarget(src.root, cand.path, src.id); } catch (error) {
+      try { confinedRepairTarget(src.root, cand.path, src.id, 'fences'); } catch (error) {
         if (error instanceof OperationError) return { ok: false, reason: 'unsafe_path' };
         throw error;
       }
@@ -240,7 +240,7 @@ export async function writeFenceRepair(ctx: OperationContext, src: FenceSource, 
       const outcome = await submitManagedFileRepair(local, { sourceId: src.id,
         requestId: await repairRequestId(local, 'fences', { source_id: src.id, slug: target.slug }, `${receipt.before_sha256}:${receipt.after_sha256}`),
         slug: target.slug, path: target.path!, sourcePath: target.sourcePath!, content: fileContent!, beforeHash: target.before, resultDigest: publication.digest,
-        ...(target.snapshot && !target.snapshot.page.deleted_at ? { expected_revision: target.snapshot.revision } : {}), noEmbed: !opts.embed, fenceRepair: receipt } as Parameters<typeof submitManagedFileRepair>[1]);
+        ...(target.snapshot && !target.snapshot.page.deleted_at ? { expected_revision: target.snapshot.revision } : {}), noEmbed: !opts.embed, fenceRepair: receipt });
       await clearCensus();
       const persistence = outcome.persistence as { git_state?: string } | undefined;
       return { ok: true, after_sha256: receipt.after_sha256, detail: { mode: 'managed', path: target.path, imported: outcome.status, hold_cleared: outcome.hold_cleared === true,
@@ -255,7 +255,7 @@ export async function writeFenceRepair(ctx: OperationContext, src: FenceSource, 
   if (target.mode === 'legacy') {
     const root = src.root!;
     let abs: string;
-    try { abs = confinedRepairTarget(root, target.path!, src.id); } catch (error) {
+    try { abs = confinedRepairTarget(root, target.path!, src.id, 'fences'); } catch (error) {
       if (error instanceof OperationError) return { ok: false, reason: 'unsafe_path', message: `${target.path} is a symlink, sits under one, or resolves outside the source root; gbrain never writes through one.` };
       throw error;
     }
