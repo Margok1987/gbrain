@@ -21,10 +21,9 @@
  * so it counts a crash, and MAX_CRASHES_PER_MEMO crashes reject the memo.
  *
  * Records carry location and reason codes only (gate letter, row numbers),
- * never claim text, holder names or cell values. The 7-day op_checkpoints
- * purge (`purgeStaleCheckpoints`) does not yet exempt this op; the record
- * carries `source_id` and `incarnation` so it can join the sync-hold
- * exemption, which keeps a row while its source incarnation lives.
+ * never claim text, holder names or cell values. The record carries
+ * `source_id` and `incarnation`, so the 7-day op_checkpoints purge
+ * (`purgeStaleCheckpoints`) keeps it while its source incarnation lives.
  */
 import { randomUUID } from 'node:crypto';
 import type { BrainEngine } from '../engine.ts';
