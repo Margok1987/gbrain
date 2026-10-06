@@ -7307,6 +7307,7 @@
           "model?: string | undefined",
           "modelExplicit?: boolean | undefined",
           "question: string",
+          "referenceDate?: string | undefined",
           "remote?: boolean | undefined",
           "rounds?: number | undefined",
           "save?: boolean | undefined",
@@ -7361,6 +7362,7 @@
           "synthesisOk?: boolean | undefined",
           "synthesis_status?: ThinkSynthesisStatus | undefined",
           "takesGathered: number",
+          "temporal?: { reference_date: string; time_zone: string; } | undefined",
           "unverified_quotes?: { text: string; reason: string; }[] | undefined",
           "usage?: { input_tokens: number; output_tokens: number; } | null | undefined",
           "warnings: string[]"

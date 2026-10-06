@@ -129,6 +129,8 @@ import {
 } from '../core/search/mode.ts';
 import { buildCaptureExtras } from '../eval/longmemeval/capture.ts';
 import * as decideLane from '../eval/longmemeval/decide-lane.ts';
+import * as retrievalArms from '../eval/longmemeval/retrieval-arms.ts';
+import * as synopsisTier from '../eval/longmemeval/synopsis-tier.ts';
 import { resolveModel } from '../core/model-config.ts';
 import type { ThinkLLMClient } from '../core/think/index.ts';
 import { createProgress } from '../core/progress.ts';
@@ -206,7 +208,7 @@ interface ParsedArgs {
   judgeConcurrency: number;
   allowIncompleteJudgments: boolean;
   /** System One arm (`--decide*`, src/eval/decide-eval-flags.ts) and the eval-only `--eval-pool-depth`. */
-  decide: decideLane.DecideEvalOptions; evalPoolDepth?: number;
+  decide: decideLane.DecideEvalOptions; evalPoolDepth?: number; arms: retrievalArms.RetrievalArmOptions; synopsis: synopsisTier.SynopsisTierOptions;
 }
 
 interface LmeFlag {
@@ -386,6 +388,7 @@ const LME_FLAGS: LmeFlag[] = [
       '--judge --resume-from FILE until all three are 0.'],
     apply: (o) => { o.allowIncompleteJudgments = true; } },
   ...decideLane.LME_DECIDE_FLAGS,
+  ...retrievalArms.LME_RETRIEVAL_ARM_FLAGS, ...synopsisTier.LME_SYNOPSIS_FLAGS,
 ];
 
 function parseArgs(args: string[]): ParsedArgs {
@@ -410,7 +413,7 @@ function parseArgs(args: string[]): ParsedArgs {
     yes: false,
     judgeConcurrency: 1,
     allowIncompleteJudgments: false,
-    decide: decideLane.newDecideEvalOptions(),
+    decide: decideLane.newDecideEvalOptions(), arms: retrievalArms.newRetrievalArmOptions(), synopsis: synopsisTier.newSynopsisTierOptions(),
   };
   const byName = new Map(LME_FLAGS.map(f => [f.name, f]));
   for (let i = 0; i < args.length; i++) {
@@ -544,6 +547,7 @@ interface RunContext {
    */
   embedTxn: <T>(fn: () => Promise<T>) => Promise<T>;
   decide: decideLane.DecideEvalRun | null;
+  factKeys: { arm: retrievalArms.FactKeyArm; spend: retrievalArms.FactKeySpend } | null; synopsis: synopsisTier.SynopsisTier | null;
 }
 
 interface QuestionOutcome {
@@ -587,6 +591,7 @@ function resolvePins(opts: ParsedArgs, runOpts: RunOpts, trajectoryEnabled: bool
     trajectory: trajectoryEnabled,
     ...(searchPins ? { search_pins: searchPins } : {}),
     ...(opts.evalPoolDepth ? { eval_pool_depth: opts.evalPoolDepth } : {}), ...(decide ? { decide: decide.runConfig } : {}),
+    ...retrievalArms.armPins(opts.arms),
   };
   return { pins, knobs };
 }
@@ -668,6 +673,7 @@ export async function runEvalLongMemEval(args: string[], runOpts: RunOpts = {}):
 
   const trajectoryEnabled = !opts.noTrajectory;
   const { pins, knobs } = resolvePins(opts, runOpts, trajectoryEnabled, decideRun);
+  const synopsis = await synopsisTier.resolveSynopsisTier(knobs, opts.keywordOnly, opts.synopsis, pins);
   const knobsHashValue = knobsHash(knobs);
   // D33 + review: the hash covers the pins AND the resolved knobs hash, so a
   // resume cannot merge runs whose injected snapshot differs in a non-pin knob.
@@ -757,6 +763,7 @@ export async function runEvalLongMemEval(args: string[], runOpts: RunOpts = {}):
       const c = st.cacheReceipt;
       process.stderr.write(`[longmemeval] embed cache: ${c.hits} hits, ${c.misses} misses, ${c.bypassed} bypassed, ${c.infra_faults} infra fault(s) (canonical ${c.canonical_sha256.slice(0, 12)})\n`);
     }
+    if (synopsisTier.reportSynopsisRunEnd(synopsis, st.questionsRun)) exitCode = 1;
     const incomplete = st.qaRows.filter(row => typeof row.error === 'string' && String(row.error).startsWith('reader_')).length;
     if (incomplete > 0) {
       process.stderr.write(`[longmemeval] ${incomplete} incomplete reader completion(s); partial, empty or unknown answers are errors and cannot count as completed.\n`);
@@ -1111,6 +1118,7 @@ export async function runEvalLongMemEval(args: string[], runOpts: RunOpts = {}):
 
   const ctx: RunContext = {
     opts, model, readerConfig, readerHash, client, trajectoryEnabled, extractorClient, extractorModel, decide: decideRun,
+    factKeys: await retrievalArms.resolveFactKeyArm(opts.arms, extractorClient), synopsis,
     expandFn: runOpts.expandFn ?? expandQuery,
     replay,
     retrievalConfigHash: retrievalHash,
@@ -1278,6 +1286,7 @@ export async function runEvalLongMemEval(args: string[], runOpts: RunOpts = {}):
         if (process.env.GBRAIN_LME_DEBUG === '1') {
           process.stderr.write(`[longmemeval] ${q.question_id} ${Date.now() - qStart}ms\n`);
         }
+        if (synopsis?.spend.exhausted()) { synopsis.stoppedAtCap = true; break; }
       }
     } finally {
       await brains.close();
@@ -1385,6 +1394,7 @@ async function runOneQuestion(
   const aliasMap: AliasMap = makeAliasMap();
 
   let meta: HybridSearchMeta | undefined;
+  const extra0: Record<string, unknown> = {};
   const decideBefore = await decideLane.lmeSpendBefore(engine, ctx.decide);
   let pool: SearchResult[] | undefined;
   let preRerank: SearchResult[] | undefined;
@@ -1410,9 +1420,11 @@ async function runOneQuestion(
         });
       }
     }
+    if (ctx.synopsis) Object.assign(extra0, { contextual_synopsis: await synopsisTier.applySynopsisTier(engine, adapterPages, ctx.synopsis) });
+    if (ctx.factKeys) Object.assign(extra0, { fact_keys: await retrievalArms.applyFactKeyArm(engine, adapterPages, ctx.factKeys.arm, ctx.factKeys.spend) });
     if (opts.keywordOnly) return engine.searchKeyword(q.question, { limit: opts.topK });
     const searchOpts: HybridSearchOpts = {
-      limit: opts.topK,
+      limit: opts.arms.timeScope ? Math.max(opts.topK, opts.arms.timeScopePool) : opts.topK,
       // Per-call wins over the bundle: expansion fires ONLY with --expansion.
       expansion: opts.expansion,
       ...(expandFn ? { expandFn } : {}),
@@ -1422,7 +1434,7 @@ async function runOneQuestion(
         ? { onRerankPool: (p: readonly SearchResult[], pre?: readonly SearchResult[]) => { pool = [...p]; preRerank = pre ? [...pre] : undefined; } }
         : {}),
     };
-    return hybridSearch(engine, q.question, searchOpts);
+    return retrievalArms.scopeResults(await hybridSearch(engine, q.question, searchOpts), opts.arms, { q, pageMeta, slugToRaw, gold, k: opts.topK, extra: extra0 });
   });
 
   // Trajectory routing for temporal / knowledge_update intents. Skips for
@@ -1481,6 +1493,7 @@ async function runOneQuestion(
   searchMeta.reranked = results.some(r => Number.isFinite(r.rerank_score)) && !rerankerSkipped;
 
   const extra: Record<string, unknown> = {
+    ...extra0,
     retrieval_config_hash: ctx.retrievalConfigHash,
     ...readerFields,
     search_meta: searchMeta,

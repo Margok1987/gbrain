@@ -20,31 +20,17 @@
  *
  * Seam: `pageObservationDate` mirrors `resolveObservationDate` from
  * src/core/ai/date-grounding.ts (#6020); once that lands, call it here
- * instead. `formatBrainDay` is the rendering rule think's `<page date>`
- * attribute uses, so both surfaces print the same day.
+ * instead. Days render through `formatBrainDay` (effective-date.ts), the
+ * same function think's `<page date>` attribute uses, so both surfaces print
+ * the same day. The header's `observed` is when the text was written or
+ * said, never the event date think shows as content date.
  */
-import { computeEffectiveDate, isValidTimeZone } from '../effective-date.ts';
+import { computeEffectiveDate, formatBrainDay } from '../effective-date.ts';
 
 export const EVIDENCE_DATE_HEADER_KEY = 'search.evidence_date_header';
 export const UNKNOWN_DATE = 'unknown';
 
 const OBSERVATION_SOURCES = new Set(['filename', 'date', 'published', 'created']);
-
-/**
- * YYYY-MM-DD for a stored instant: exactly midnight UTC is a day-only date
- * and renders as written; any other instant renders in `timeZone`
- * (`brain.timezone`; UTC when unset or invalid). Null for a missing or
- * invalid value.
- */
-export function formatBrainDay(value: Date | string | null | undefined, timeZone?: string | null): string | null {
-  if (value === null || value === undefined || value === '') return null;
-  const d = value instanceof Date ? value : new Date(value);
-  if (!Number.isFinite(d.getTime())) return null;
-  const iso = d.toISOString();
-  if (iso.endsWith('T00:00:00.000Z')) return iso.slice(0, 10);
-  const zone = timeZone && isValidTimeZone(timeZone) ? timeZone : 'UTC';
-  return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
-}
 
 /** When the page's text was written or said; null when it states no such date. Never a row timestamp. */
 export function pageObservationDate(page: {

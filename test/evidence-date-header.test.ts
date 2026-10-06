@@ -13,8 +13,9 @@ import { installFixtureChunks } from './helpers/page-projection.ts';
 import type { SearchResult } from '../src/core/types.ts';
 import { countEvidenceTokens, deliverEvidence, type EvidencePlan } from '../src/core/search/evidence-delivery.ts';
 import {
-  EVIDENCE_DATE_HEADER_KEY, factDateHeader, formatBrainDay, pageDateHeader, pageObservationDate,
+  EVIDENCE_DATE_HEADER_KEY, factDateHeader, pageDateHeader, pageObservationDate,
 } from '../src/core/search/evidence-date.ts';
+import { formatBrainDay } from '../src/core/effective-date.ts';
 
 const HEADER_LINE = /^\[observed (\d{4}-\d{2}-\d{2}|unknown)\]\n/;
 

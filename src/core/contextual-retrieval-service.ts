@@ -289,6 +289,8 @@ export interface ReembedPageArgs {
    * calls. Embedding remains one batch after all synopses succeed.
    */
   chunkConcurrency?: number;
+  /** @internal Synopsis generator seam (benchmark caching/metering); production callers omit this. */
+  generateSynopsis?: typeof generatePerChunkSynopsis;
 }
 
 /**
@@ -631,7 +633,7 @@ async function buildWrappedChunkText(opts: {
       }
       leaseAcquired = true;
     }
-    synopsisResult = await generatePerChunkSynopsis({
+    synopsisResult = await (args.generateSynopsis ?? generatePerChunkSynopsis)({
       documentText: sourceText,
       chunkText: c.chunk_text,
       pageTitle: page.title,
