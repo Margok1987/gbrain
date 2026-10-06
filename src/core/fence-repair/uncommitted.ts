@@ -75,3 +75,20 @@ export async function readUncommittedFenceRepairs(engine: Exec, sourceIds?: read
   }
   return out;
 }
+
+/** What `gbrain sources status` shows per source (JSON `fence_repairs_uncommitted`); a read error shows nothing. */
+export interface UncommittedFenceRepairView { path: string; repaired_at: string; backup: string | null; commit_step: string; classes: string[] }
+
+export async function uncommittedFenceRepairsBySource(engine: Exec, sourceIds: readonly string[]): Promise<Map<string, UncommittedFenceRepairView[]>> {
+  const out = new Map<string, UncommittedFenceRepairView[]>();
+  for (const notice of await readUncommittedFenceRepairs(engine, sourceIds).catch(() => [])) {
+    out.set(notice.source_id, [...(out.get(notice.source_id) ?? []),
+      { path: notice.path, repaired_at: notice.repaired_at, backup: notice.backup, commit_step: notice.commit_step, classes: notice.receipt.classes }]);
+  }
+  return out;
+}
+
+export function uncommittedFenceRepairLines(sourceId: string, notices: readonly UncommittedFenceRepairView[]): string[] {
+  return [`  ${sourceId}: ${notices.length} uncommitted fence repair(s); gbrain rewrote and imported them (backups kept), commit each when you are ready:`,
+    ...notices.map(notice => `    ${notice.path} (${notice.classes.join(', ')}): ${notice.commit_step}`)];
+}

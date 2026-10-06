@@ -15,9 +15,9 @@
  * Why new: the Tier 3 module is new in PR4.
  * Seams: the gateway's chat transport seam (__setChatTransportForTests).
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { __setChatTransportForTests, configureGateway, type ChatOpts, type ChatResult } from '../src/core/ai/gateway.ts';
+import { __setChatTransportForTests, configureGateway, resetGateway, type ChatOpts, type ChatResult } from '../src/core/ai/gateway.ts';
 import { buildTier3Prompt, callTier3, correctionMessage, extractSingleTable, FENCE_REPAIR_PROMPT_VERSION, spliceTier3, tier3Requests } from '../src/core/fence-repair/llm.ts';
 import { safeNormalizeFences } from '../src/core/fence-repair/normalize.ts';
 import { validateFenceRepair } from '../src/core/fence-repair/validate.ts';
@@ -55,6 +55,7 @@ function residualOf(text: string) {
 }
 
 afterEach(() => __setChatTransportForTests(null));
+afterAll(() => resetGateway());
 
 describe('Tier 3 requests and prompt', () => {
   test('a row-level issue sends the header and that row only; a fence-level issue sends every row; page prose never', () => {
