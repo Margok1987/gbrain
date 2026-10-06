@@ -99,6 +99,9 @@ export function writeFailureDiagnostic(code: string, message?: string | null): {
   if (fence) return { reason: 'invalid_fence', message: message!,
     suggestion: `Edit ${fenceWhere(fence)} in the file as the message says and commit the change; never edit the frontmatter for it. `
       + 'A managed sync with sync.holds=hold holds such a file instead of blocking; under sync.holds=fail and on company-brain sources it blocks until the file is fixed.' };
+  // #6188 (UC3): a company-brain source names the fence correction it will not write; the repository commit is the fix.
+  if (code === 'source_writeback_required' && message?.startsWith('Canonical preparation would normalize a facts or takes fence (')) return { reason: code, message,
+    suggestion: 'A company-brain source never rewrites repository files: fix the named fence in the repository, commit it, and resume the sync.' };
   const replaces = code === 'invalid_params' ? REPLACES_REFUSAL.exec(message ?? '') : null;
   if (replaces) return { reason: code, message: message!, suggestion: REPLACES_SUGGESTION[replaces[1]!]! };
   return { reason: isWriteErrorCode(code) ? code : 'storage_error', message: 'The write did not commit. Inspect its durable request on the source host.',

@@ -116,7 +116,8 @@ export async function importCompanyBrainFile(engine: BrainEngine, filePath: stri
       if (digest(canonical(parsed, parsed.tags)) !== digest(canonical(ready.parsedPage, tags))) {
         // #6188 (UC3): a fence Tier 1 would normalize is named by location; the repository commit is the only fix.
         const fences = ready.result.fences_normalized ?? [];
-        throw opError('source_writeback_required', 'Canonical preparation requires a source-content correction; this profile never writes repository files.',
+        throw opError('source_writeback_required', fences.length ? `Canonical preparation would normalize a facts or takes fence (${describeFixes(fences)}); this profile never writes repository files.`
+          : 'Canonical preparation requires a source-content correction; this profile never writes repository files.',
           fences.length ? `${path} has a facts or takes fence gbrain would normalize (${describeFixes(fences)}), and this profile never edits repository files. Fix the fence in the repository and commit, then resume with ${resumeCommand(sourceId)}.`
             : `${path} would change when published canonically (for example normalized frontmatter or tags), and this profile never edits repository files. Review the needed correction with the user, commit it, then resume with ${resumeCommand(sourceId)}.`);
       }

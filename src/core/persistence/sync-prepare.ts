@@ -197,7 +197,9 @@ async function settledSyncScreen(engine: BrainEngine, input: SyncImportScreenInp
 
 /** UC3: a company-brain source never rewrites repository files; a fence Tier 1 would normalize is named by location. */
 function companyWritebackRefusal(row: WriteRequest, p: SyncIntent, fenceFixes: readonly FenceFix[]): OperationError {
-  return syncPublicationRefusal('source_writeback_required', 'Canonical preparation requires a source-content correction; this profile never writes repository files.', row, p,
+  const message = fenceFixes.length ? `Canonical preparation would normalize a facts or takes fence (${describeFixes(fenceFixes)}); this profile never writes repository files.`
+    : 'Canonical preparation requires a source-content correction; this profile never writes repository files.';
+  return syncPublicationRefusal('source_writeback_required', message, row, p,
     fenceFixes.length ? `${p.sourcePath} has a facts or takes fence gbrain would normalize (${describeFixes(fenceFixes)}), and a company-brain source never rewrites repository files; fix the fence in the repository and commit.`
       : `The file of ${row.slug} needs a canonical correction, and a company-brain source never rewrites repository files; correct it in the repository and commit.`);
 }

@@ -138,6 +138,19 @@ describe('put_page', () => {
   }));
 });
 
+test('put_pages reports one batch-level fences_normalized and one notice for the pages Tier 1 rewrote', () => withEnv(env, async () => {
+  const notices: Notice[] = [];
+  const result = await op('put_pages').handler(ctx({ notices }), { request_id: crypto.randomUUID(), pages: [
+    { slug: 'people/batch-fixable', content: page('Batch fixable', factsFence(fact(0, 'Zero row claim'))) },
+    { slug: 'people/batch-clean', content: page('Batch clean', factsFence(fact(1, 'Clean claim'))) },
+  ] }) as Record<string, any>;
+  expect(result.state).toBe('committed');
+  expect(result.fences_normalized).toMatchObject({ count: 1, by_class: { renumber: 1 } });
+  expect(result.pages.map((p: Record<string, unknown>) => !!p.fences_normalized)).toEqual([true, false]);
+  expect(notices.filter(n => n.code === 'fence_normalized')).toHaveLength(1);
+  expect(parseFactsFence(await stored('people/batch-fixable')).facts.map(f => f.rowNum)).toEqual([1]);
+}));
+
 describe('append verbs normalize their target fence in the same write (D20)', () => {
   test('remember on a page whose facts fence lost its end marker saves the fact and reports close_fence', () => withEnv(env, async () => {
     const slug = 'people/remember-target';
