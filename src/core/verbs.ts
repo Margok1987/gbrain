@@ -83,6 +83,7 @@ const remember: Operation = {
     valid_from: {
       type: 'string',
       description: 'When said or true (ISO).',
+      fullSurfaceOnly: true,
     },
     entity: {
       type: 'string',
