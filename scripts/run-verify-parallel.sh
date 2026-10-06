@@ -96,6 +96,8 @@ CHECKS=(
   # `bun run test` keeps it.
   "check:bootstrap-templates"
   "check:skill-brain-first"
+  # A-NEW-3: bundled SKILL.md files pass the shared-skill publication parser.
+  "check:skill-publication"
   "check:conversation-parser"
   "check:resolver"
   "check:privacy"
@@ -110,6 +112,8 @@ CHECKS=(
   # C2: weight maps name only existing files; the unweighted share per lane
   # warns (step summary) and fails only on the scheduled run.
   "check:weight-coverage"
+  # X1 (wave 9 lane A): every recipe model is priced or marked unpriced_models.
+  "check:recipe-pricing"
   # ── light tail (sub-second greps; historical order) ──
   "check:proposal-pii"
   "check:jsonb"

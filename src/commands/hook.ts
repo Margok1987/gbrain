@@ -69,6 +69,7 @@ import {
   bankWritebackTurn,
   decideCorpusMode,
   gcCorpusArtifacts,
+  gcCorpusTurnFiles,
   CORPUS_PROGRESS_SUFFIX,
   CORPUS_PROGRESS_LOCK_SUFFIX,
   HARVEST_RECEIPT_SUFFIX,
@@ -1720,6 +1721,12 @@ async function hookSessionEnd(io: HookIo): Promise<number> {
           /* status telemetry best-effort */
         }
       } else if (turnsN > 0) {
+        // E-N4: assistant turns with not one user turn is how #5163 (a host
+        // renamed its user-turn record) banked half-sessions silently. The
+        // corpus is still written; the heartbeat says the human side is gone.
+        // Whole-file reads only: a bounded tail of a long agentic run can
+        // legitimately hold assistant turns alone.
+        if (parsed.genuineUserTurnIndexes.length === 0 && bytesN >= conf.size) degrade('no_user_turns');
         const dir = await corpusDir(cfg);
         // #4618: the seat is recorded BEFORE any corpus file of this session
         // is renamed into place, so a sweep never sees one without its seat.
@@ -1811,7 +1818,7 @@ async function hookSessionEnd(io: HookIo): Promise<number> {
           }
         }
         const retentionMs = corpusRetentionDays(cfg) * 24 * 60 * 60 * 1000;
-        gcOldFiles(dir, retentionMs); // [G15]
+        gcCorpusTurnFiles(dir, retentionMs); // [G15]; un-ingested turns kept longer (E-N1)
         gcCorpusArtifacts(dir, retentionMs, [
           CORPUS_INGESTED_SUFFIX,
           CORPUS_CLAIM_SUFFIX,

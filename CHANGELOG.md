@@ -10,6 +10,168 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.74.0] - 2026-10-05
+
+**Fix wave 9: cost caps hold under concurrency and bound what DeepSeek really bills, stopping a job supervisor no longer leaves work running, the nightly quality probe uses your models and tells the truth, email threads and synced fact sections reach your facts, long filenames and images stop blocking writes and sync, and OAuth access tokens can no longer live forever.**
+
+This wave fixes 47 reported issues across spending, background jobs, facts, session capture, auth and skills. The ones most people hit: a cost cap could let two paid calls through at once because a small call that finished first freed the larger call's hold, and the shipped DeepSeek output prices were about a quarter of DeepSeek's peak rate, so a cap could let up to about 4.5x the intended spend through. Stopping the job supervisor said "drained" while its worker was killed mid-job, and shell jobs left their child processes running. The nightly quality probe ignored your model settings, billed Anthropic models even on brains routed elsewhere, ran half its work with no cap, and reported a panel of one model voting twice as a real verdict. On a brain without managed persistence, a `## Facts` section that arrived through `gbrain sync` never reached the facts index. OAuth access tokens could be issued with lifetimes of years.
+
+Each fix has a test that fails on the previous release.
+
+| After upgrading | Before | After |
+| --- | --- | --- |
+| Two paid calls in flight under one cost cap | a small call finishing first freed the big call's hold | each call settles its own hold |
+| DeepSeek V4 Flash output price used by caps and estimates | $0.28 per 1M tokens | $1.20 (DeepSeek's peak rate) |
+| `gbrain jobs supervisor stop` while a job runs | says `drained`, worker killed, job stuck `active`, children orphaned | drains, hands the job back, says `drained` only when verified |
+| A shell job that started `cmd &` | the process outlived the job | terminated with the job (SIGKILL after 5 s if it ignores SIGTERM) |
+| Nightly quality probe on a brain routed to claude-cli | paid for Sonnet, Haiku and Opus over the API | uses your reader, extractor and judge settings |
+| Nightly probe panel of sonnet/opus/sonnet | pass or fail | `inconclusive` with the slot-key command to fix it |
+| `## Facts` section imported by a standalone `gbrain sync` | never indexed | indexed by the next cycle (250 pages per run) |
+| Gmail thread with replies | parsed to nothing, retried every run | one turn per message (brains without managed persistence) |
+| A page filename near the 255-byte limit | write fails with ENAMETOOLONG | writes |
+| One image in a managed source with multimodal embedding on | the whole sync refused | the image is held, everything else imports |
+| OAuth access token lifetime | whatever a client or `--token-ttl` asked for | at most 90 days |
+| A subagent turn on a slow or thinking model | cut off at 5 minutes, retried into the same wall | up to 30 minutes, bounded by the job's deadline |
+
+Thanks to the contributors whose work is folded in: @andreineacsu (#5959, #6005, #5973, #5940, #5975, #5515), @kvnloo (#5972) and @Masashi-Ono0611 (#5257).
+
+## To take advantage of v0.60.74.0
+
+`gbrain upgrade` installs the binary and runs three schema migrations: v209 adds the empty `page_facts_reconcile` table, v210 clamps stored OAuth token lifetimes and shortens outstanding access tokens to 90 days after issue, v211 pins `search_path` on every gbrain database function. Upgraded brains show a one-time notice listing the behavior changes below; `gbrain doctor --only behavior_changes` shows it again.
+
+1. **Restart every `gbrain serve --http`, autopilot and worker** after upgrading, so token issuance and the new shutdown handling take effect.
+2. **Reconnect OAuth clients that stop working.** Access tokens older than 90 days stop working; clients with a refresh token get a new one, a native OAuth client without one reconnects. `gbrain auth clients` marks clients whose lifetime was clamped.
+3. **Check scripts that read these outputs:** `gbrain jobs work` exit codes (0 after a clean SIGTERM drain, 17 when running work had to be handed back), `gbrain jobs supervisor stop --json` (`drained`, `checks`, reason `timeout`), and `gbrain sources writer status --json` (`local_process_ingress` replaces `ingress`).
+4. **Codex users:** preview restoring the user side of older sessions with `gbrain transcripts recover codex`, then `--apply`.
+5. **If you set `autopilot.nightly_quality_probe.max_usd`** and the probe routes through a model gbrain has no price for, register the rate with the `gbrain pricing set` command the audit row names, or unset `max_usd`.
+6. **Verify:**
+   ```bash
+   gbrain doctor
+   gbrain auth clients
+   gbrain models    # shows the nightly probe's routes
+   ```
+7. **If any step fails,** file an issue at https://github.com/garrytan/gbrain/issues with the output of `gbrain doctor` and `~/.gbrain/upgrade-errors.jsonl` if it exists.
+
+### Behavior changes (the one-time notice lists the first six)
+
+- **Shell jobs terminate the processes they leave behind.** On Linux and macOS a shell job runs in its own process group; when the job ends, is cancelled or times out, or the worker shuts down, everything in its group is terminated. A job that intentionally starts a daemon with `cmd &` and no `wait` loses it: start long-lived processes under your service manager, or detach them with `setsid`.
+- **Brains whose schema pack declares `extract_atoms` start receiving the daily atom auto-drain on Postgres autopilot.** It used to skip them, so their atoms were never extracted. Spend stays inside the existing `autopilot.auto_drain.max_usd_per_day` cap (default $2) and one slot per source per UTC day. Opt out: `gbrain config set autopilot.auto_drain.enabled false`.
+- **OAuth access tokens are capped at 90 days** (7,776,000 seconds) whatever a client's stored lifetime, `oauth.dcr_ttl_max_seconds` or `serve --http --token-ttl` says; `serve --token-ttl` refuses values outside 60..7776000 at startup instead of silently using 3600. The upgrade clamps stored lifetimes and shortens already-issued access tokens; refresh tokens and machine bearer tokens are untouched. Every change writes an `oauth_grant_audit` row.
+- **`gbrain sources writer status --json` renames `ingress` to `local_process_ingress`,** with a `scope` note: it always described the process that answered (a one-shot CLI reports `not_running`), never whether the brain's owner is down. Ownership stays under `worktrees` and `bindings`.
+- **`gbrain jobs work` exits 0 after a SIGTERM drain (was 143),** and 17 when claims still running after 30 s had to be handed back to the queue.
+- **Unextracted session files stay longer.** Corpus retention removes a captured session file nothing has extracted only at 3x `dream.synthesize.corpus_retention_days` (90 days by default, was 30), so the corpus directory can use more disk. `gbrain doctor` `memory_writeback` names the backlog and the `gbrain sweep --once --budget-ms 600000` that clears it.
+- **brainstorm, lsd and skillopt run on a model gbrain has no price for** under the default $5 cap, with a warning; an explicit `--max-usd N` refuses it before any work and names the `gbrain pricing set` command.
+- **One cost-cap flag: `--max-usd N|off`** on `brainstorm`, `lsd`, `skillopt`, `enrich`, `onboard` and `eval longmemeval`. `--max-cost`, `--max-cost-usd` and `--no-max-cost` still work. A malformed value, a bare `0` or two disagreeing cap flags are refused before any paid call (`enrich` and `onboard` used to ignore them). `skillopt --max-cost-usd 0` is still uncapped, with a deprecation note.
+- **A remote `run_skillopt` caller must pass a positive `max_cost_usd`;** 0 (uncapped) is host-only.
+- **The nightly quality probe follows your brain's model settings** and one `max_usd` budget covers the whole run. A set `max_usd` refuses unpriced models and a `max_usd` of 0 is a $0 cap. A collapsed judge panel reports `inconclusive`. Compiled installs start running both nightly probes. New audit outcome `skipped` means the probe could not run.
+- **Eval judges (takes-quality, cross-modal, synthesize triage) turn thinking off** on Anthropic, DeepSeek and OpenRouter DeepSeek routes. Takes-quality receipts are `protocol_version: 2`: a malformed judge reply gets one correction, recorded in `corrections`; `regress` flags a protocol change.
+- **A provider 404 for a missing model reads `model_not_found`** (facts logs `gateway_model_not_found`) instead of `auth`. Fix the model id (`gbrain models`), not the key.
+- **With `chat_fallback_on_refusal false`, an HTTP 400 content-policy refusal is not sent to the next model,** the `edge_contradictions` judge keeps its own model, and a cancel during a refusal returns the refusal.
+- **Subagent turns run up to `ai.chat.per_turn_timeout_ms`** (default 30 minutes) or the job's deadline, whichever is first. Calls outside a job keep the 300 s backstop.
+- **On brains without managed persistence, the first cycles after upgrading reconcile facts** for fence pages whose index is behind (250 pages per cycle within 60 s; `gbrain dream --phase extract_facts` does all at once). New fact rows embed under your existing setup; keyless brains make no calls.
+- **Meeting-note labels (`**Attendees:**`, `**Date:**`) are never speakers.** On brains without managed persistence a prose meeting or email page, a one-message email and a page with time-only turns and no date leave the conversation-facts backlog until they change. Managed brains skip those pages and multi-message email threads without writing and retry them.
+- **`synthesize_concepts` ignores `## Facts` and `## Takes` when deciding whether a concept changed;** concepts hashed the old way are rehashed without a model call.
+- **Atom and concept files are opt-in:** `gbrain config set cycle.extract_atoms.write_through true` / `cycle.synthesize_concepts.write_through true` (brains without managed persistence).
+- **`--source` on `timeline-add`, `ontology-add` and `takes add|update|supersede` is always provenance,** on every route. Scripts that used it to pick the destination source: use `GBRAIN_SOURCE=<id>` or `.gbrain-source`.
+- **`config set embedding_disabled` writes both config planes,** and `set false`/`unset` really re-enable embedding. `config get/show schema_pack` print the pack the runtime resolves (default `gbrain-base`).
+- **Doctor `rls` warns instead of failing** for a missing-RLS table on plain Postgres with no PostgREST roles or Supabase URL.
+- **Assistant-only session files count as drift:** `gbrain transcripts ingest` holds the `--since last` watermark and the session-end hook heartbeats `degraded` / `no_user_turns`. Harvest error reasons carry a code (`operationerror:<code>`).
+- **`gbrain serve --http` sweeps the session corpus** every 10 minutes while a captured file is unextracted (one 60 s sweep, up to 20 files). Keyless brains spend nothing; `GBRAIN_SWEEP=0` turns it off. A `gbrain sweep --once` budget now stops between files and can run past the budget by one extraction call.
+- **Managed sync holds images** (`managed_image_sync_unsupported`, a durable hold doctor's `git_held_files` warns on and never escalates) instead of refusing the run when multimodal embedding is on.
+- **Staging files are hidden `.<sha256>.tmp.<uuid>` siblings.** Recovery still reads the old names.
+- **On a managed brain `gbrain reindex --markdown` runs the projection repairs** (`repair safe-chunks`, then `contextual-mode` unless `--no-embed`) and refuses `--type`.
+- **New doctor check `git_convergence`:** a source checkout with commits not on its upstream warns after 6 hours and fails after 24. `bootstrap_push_health` warns while the workspace is ahead of origin.
+- **Shared skills published without `tools:` list the caller's brain tools as `usable_tools`;** an empty SKILL.md is refused; one skill-pack adoption may write 128 files; `gbrain skillpack sync` appends what it scaffolds to an existing `skills/manifest.json`.
+- **Plugin skills carry a `when_to_use` line** for Claude Code.
+- **Every gbrain database function pins `search_path`.** Bulk fact inserts through the withdrawal trigger take a little longer (10,000 rows: PGLite 1.31-1.46 s to 1.45-1.69 s, Postgres 531-536 ms to 565-604 ms).
+
+### Numbers that change
+
+- **Cost caps and estimates on DeepSeek** use peak rates: `deepseek-flash` and `deepseek-v4-flash` $0.30 / $1.20 per 1M tokens (were $0.14 / $0.28), `deepseek-v4-pro` $1.32 / $3.96 (were $0.435 / $0.87). A run that fit a cap before may now stop at it. Estimates say `(DeepSeek at peak rates, an upper bound; off-peak bills half)`. OpenRouter's `deepseek/deepseek-v4-flash-0731` is $0.0152 / $1.28.
+- **Doctor:** `minions_migration` goes from fail to warn after a `--force-retry` and gains a warn for a skipped host migration; `rls` goes from fail to warn on plain Postgres (doctor score rises); `extract_health` reads "last halt Nd ago"; `extract_atoms_backlog` may warn on declaring-pack brains until the phase runs once; `git_convergence` is new; `memory_writeback` warns when more than 20% of at least 10 harvests failed in 7 days and before unextracted files reach their deletion day; `nightly_quality_probe_health` and `conversation_parser_probe_health` count `skipped` runs.
+- **OAuth `expires_in`** drops to 7,776,000 for clients configured above it.
+- **Nightly probe audit rows** gain `chat_cost_usd`, `unpriced_chat_calls`, `cap_usd`, `cap_source`, the judge panel, per-judge scores of failing questions and `receipt_dir`; non-pass runs keep their receipts under `~/.gbrain/audit/nightly-probe/` (newest 7).
+- **Takes-quality receipts** gain `protocol_version: 2`, `correction_selection_rule` and `corrections`.
+- **Corpus retention** of unextracted session files: 30 days to 90 by default.
+
+### Itemized changes
+
+**Spending and caps**
+- Each budget reservation is settled by its own id: `BudgetTracker.reserve()` returns an id, `record()` settles only that id and `release()` frees an attempt that never billed (unknown provider, invocation policy refusal). One price resolver, `priceFor()` in `src/core/budget/reservation-cost.ts`, serves reservations and preflights.
+- `deepseek-flash` row added and the DeepSeek and OpenRouter DeepSeek rows corrected (#5847); the recipe lists `deepseek-flash` first.
+- `gbrain brainstorm` and `gbrain lsd` run unpriced models under the default cap, reach `pricing.overrides`, count unpriced calls at Sonnet rates in the estimate and mid-run checks, and refuse them under an explicit cap; `brainstorm_health` names an unpriced model (#5873). Builds on #5959, contributed by @andreineacsu.
+- `gbrain skillopt`'s preflight uses `pricing.overrides` and the claude-cli sibling rate instead of inventing Sonnet rates, and shows `Est. cost: unpriced (...)` (#5563).
+- `gbrain pricing set 'claude-cli:*' --rate 0` prices every model of a subscription-billed provider at once; `gbrain pricing list` names the covered models.
+- `synthesize_concepts` meters claude-cli and overridden models correctly and lists fallback-metered models in `details.pricing_fallback_models` (#5166).
+- The nightly quality probe's run budget settles each call's reservation.
+- Remote `run_skillopt` with `max_cost_usd` 0, negative or non-finite is `invalid_params`.
+
+**Routing, judges and timeouts**
+- `chat({ thinking: 'off' })` per-call switch (`src/core/ai/thinking-off.ts`), used by the takes-quality, cross-modal and synthesize triage judges (#5331). Call-scoped override test from #5972, contributed by @kvnloo.
+- Takes-quality: one same-model correction per malformed slot, priced against `--budget-usd` before it is sent (#5325).
+- `model_not_found` error class for provider 404s, with a rename hint for `deepseek:deepseek-v4-flash`.
+- Fallback chain: edge judge pinned, content-policy 400s honor `chat_fallback_on_refusal false`, cancel during refusal returns the refusal.
+- `ai.chat.per_turn_timeout_ms` (default 1,800,000) bounds each subagent turn; the oneshot synthesis call gets a quarter of the job's remaining time (#4921).
+
+**Nightly quality probe**
+- Reader follows `models.eval.longmemeval` then the reasoning tier, the extractor the utility tier, the judges `models.eval.cross_modal.slot_a/b/c`; `gbrain models` prints the routes (#5872, contributed by @andreineacsu, #6005).
+- One run-level budget over LongMemEval and the judges; `budget_exceeded`, never `fail`.
+- Collapsed panel is `inconclusive` with `reason: panel_collapsed`; non-pass runs keep evidence (#5506, contributed by @andreineacsu, #6005).
+- Fixtures embedded in the binary, so compiled installs run both probes; an unreadable fixture records `skipped` (#5187; skip reporting reworked from @Masashi-Ono0611's #5257).
+- The probe keeps the daemon's gateway and no longer swaps the process-wide embedding transport.
+
+**Workers and jobs**
+- The supervisor and `jobs work` own their termination signals: one ordered shutdown keeps the queue lock through the drain, stops the worker (SIGTERM, 35 s, SIGKILL), hands interrupted claims back without burning an attempt, then emits `stopped` with `drained`, `worker_forced`, `worker_exit_code` and `lock_released`; `stop` verifies all of it (#5062).
+- Shell jobs run in their own process group; cancel, timeout and shutdown reach every descendant (#5062).
+- The extract_atoms auto-drain runs for declaring packs; `extract_atoms_backlog` reads `last_extract_atoms_at` (#5028).
+- Already-synthesized transcripts are excluded before triage on every path; synthesize details gain `synthesis_state` (#5145).
+- `cycle.consolidate.cluster_threshold` (default 0.85, (0, 1]); typed-claim facts share a take only when metric, unit and period match (#5363).
+- `gbrain eval <subcommand> --help` prints that subcommand's usage.
+
+**Facts**
+- Facts watermark: migration v209 `page_facts_reconcile`; each cycle reconciles fence pages whose facts are behind; `extract_health` names unreconciled and unreadable fences (#5151).
+- Email thread pages parse into one turn per message (pattern `email-thread-heading`) and count as one conversation; a one-message thread is an email (#5025).
+- Meeting-note labels are rejected as speakers; prose and undated pages get a not-extractable outcome on brains without managed persistence (#5025).
+- `synthesize_concepts` change check and prompt ignore fence sections; re-synthesis keeps fences, timeline, tags and frontmatter.
+- Opt-in write-through for generated atoms and concepts (#5041).
+
+**Session capture**
+- Codex 0.153+ `item_completed` UserMessage records are read; a turn recorded both ways is kept once (#5163). `gbrain transcripts recover codex` restores older imports (preview, `--apply`).
+- Busy-writer harvests retry after 5, 15 and 45 s; `memory_writeback` warns on a high failure rate (#5557, contributed by @andreineacsu, #5973).
+- `serve --http` runs the corpus drain; sweep budgets stop between files; unextracted files kept 3x longer.
+- `mentions.exclude_slugs` keeps listed pages out of mention linking; the next sweep removes their mention links; the unused `extraIgnore` option is gone (#5829).
+
+**Auth, CLI and config**
+- OAuth access-token cap, `--token-ttl` validation, migration v210 (#5040).
+- `--source` is provenance for ops that own it, on every route (#5087).
+- Local CLI reaches `get_skill_retention`, `prune_skill_revisions`, `retain_skill_revision`, `import_skill_proposal` and `gbrain takes remove` while `gbrain serve` owns a PGLite brain (#5864).
+- Every `gbrain import` refusal says why and what to run (#5268; thanks @andreineacsu, #5515).
+- `embedding_disabled` and `schema_pack` config commands report and change the runtime value (#5253).
+- Doctor `rls` warn on plain Postgres (#4939); `extract_health` dates by last halt (#5863); the migration ledger row matches `get_health`.
+- Remote code reads stay suspended with an error that names the follow-up (#5052).
+- Migration v211 pins `search_path` on gbrain plpgsql functions; the fact fingerprint functions qualify built-ins and stay inlinable (#5190).
+
+**Writes, sync and skills**
+- Short hidden staging names for atomic and journaled writes and timeline write-through (#5861; reporter @PurposeGateway's patch adapted).
+- Managed sync holds images as `managed_image_sync_unsupported` (#5493, reworked from @andreineacsu's #5975).
+- `gbrain sources set-path` repairs a stale `local_path`; the 0.53.0 migration retakes an incomplete inventory (#5569).
+- Skill-pack adoption bound 128 files; `--accept-reviewed-inventory <source>=<digest>` acceptance (#5476).
+- Portable canonical skills inherit usable tools (#5150); empty SKILL.md refused.
+- Managed `reindex --markdown` delegates to projection repairs (#5377).
+- `writer status` `local_process_ingress`.
+- Doctor `git_convergence`; `bootstrap_push_health` checks the workspace against origin; `scripts/smoke-test.sh` accepts a configured database URL and keyless embedding (#5063).
+- `gbrain takes rebuild <slug>` and `gbrain takes remove <slug> --row N` (local-only `takes_remove`) (#5167); accepted proposals record `take_proposals#<id>` (edited accepts add `(edited)`) (#5214).
+- Bundled capture and schema-author skills pass the publication parser; new `inbox/` filing rule.
+- `gbrain skillpack sync` registers scaffolded skills in an existing manifest (#4831).
+- Upgrade reinstall hints use `bun remove -g gbrain && bun add -g github:garrytan/gbrain#v<version>` (#5034).
+- Plugin and persona skill trees add `when_to_use` (#5858, reworked from @andreineacsu's #5940).
+- Skill and doc corrections: gbrain-upgrade migration playbook precedence (#5038), perplexity-research on the Agent API (#5534), automatic-capture opt-in gating in ingest, eiirp and operational-disciplines (#5101), recommended-schema frontmatter claims (#5335), contradiction probe schedule (#5559), `extract_facts` attestation receipts (#5278), autopilot env-file secrets (#5196), v0.28.0 playbook commands.
+
+### For contributors
+
+- New guards in `bun run verify`: `check:recipe-pricing` (every recipe model priced or declared unpriced) and `check:skill-publication` (every bundled SKILL.md passes the shared-skill parser).
+- `test/helpers/managed-connector-job-contract.ts` gains `extract_conversation_facts_thread`.
+
 ## [0.60.73.0] - 2026-10-05
 
 **A managed Postgres brain far from its database now catches up a sync backlog at about 150 pages a minute: a 10,000-file backlog takes about 1.2 hours instead of 5.4 (#5984).**

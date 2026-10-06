@@ -78,6 +78,7 @@
     "check:doc-history": "bash scripts/check-key-files-current-state.sh",
     "check:resolver": "bun src/cli.ts check-resolvable --strict --skills-dir skills/",
     "check:skill-brain-first": "bash scripts/check-skill-brain-first.sh",
+    "check:skill-publication": "bun scripts/check-skill-publication.ts",
     "check:plugin-tree": "bash scripts/check-plugin-tree.sh",
     "check:wasm": "bash scripts/check-wasm-embedded.sh",
     "check:pglite-embedded": "bash scripts/check-pglite-embedded.sh",
@@ -120,6 +121,7 @@
     "check:test-env-opt-ins": "bun scripts/check-test-env-opt-ins.ts",
     "check:postgres-lanes": "bun scripts/check-postgres-lane-coverage.ts",
     "check:weight-coverage": "bun scripts/check-weight-coverage.ts",
+    "check:recipe-pricing": "bun scripts/check-recipe-pricing.ts",
     "check:fuzz-purity": "bash scripts/check-fuzz-purity.sh",
     "check:operations-filter-bypass": "bash scripts/check-operations-filter-bypass.sh",
     "check:fixture-privacy": "bash scripts/check-fixture-privacy.sh",
@@ -219,7 +221,7 @@
     "bun": ">=1.4.0"
   },
   "license": "MIT",
-  "version": "0.60.73.0",
+  "version": "0.60.74.0",
   "overrides": {
     "@ai-sdk/provider-utils": "4.0.56",
     "@hono/node-server": "^2.0.5",

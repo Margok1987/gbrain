@@ -384,7 +384,7 @@ export async function recoverPublication(engine: BrainEngine, id: string, hostId
         WHERE id=$1::uuid AND recovery IS NOT NULL AND state IN ('running','recovering') AND ${PERSISTENCE_PROTOCOL_PREDICATE} RETURNING *`, [id]);
       return blocked ?? row;
     }
-    if (row.recovery.version === 1 && !row.recovery.staging && !isTerminal(row)) await upgradeRecoveryStaging(engine, 'persistence_requests', id, row.worktree_id!, 'restore');
+    if (!isTerminal(row)) await upgradeRecoveryStaging(engine, 'persistence_requests', id, row.worktree_id!, 'restore');
     row = await engine.transaction(async tx => {
       await declareDurablePersistence(tx);
       await tx.executeRaw('SELECT id FROM persistence_worktrees WHERE id=$1::uuid FOR SHARE', [row!.worktree_id]);

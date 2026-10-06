@@ -69,6 +69,7 @@ export const contractCases = [
   'cycle_extract_loops_race',
   'cycle_extract_facts',
   'extract_conversation_facts',
+  'extract_conversation_facts_thread',
   'facts_absorb',
   'atom_drain_opted_out',
   'atom_drain_default_on',
@@ -153,6 +154,8 @@ const CHAT_MODEL = 'anthropic:claude-sonnet-4-6';
 const FAKE_ENV = { ANTHROPIC_API_KEY: 'sk-ant-contract-fake', OPENAI_API_KEY: 'sk-contract-fake', VOYAGE_API_KEY: undefined };
 const THREAD_ID = '17aa00000000c001';
 const MESSAGE_ID = '18c2f4a9b3d20001';
+const REPLY_ID = '18c2f4a9b3d20002';
+const REPLY_BODY = 'Sure, I will send the quarterly plan on Thursday with the finance appendix attached to the first draft.';
 const EMAIL_BODY = [
   'Hi, can you send me the quarterly plan by Friday? I will review it on Monday.',
   '',
@@ -442,9 +445,12 @@ async function connectorSource(brain: ContractBrain): Promise<CaseState> {
 }
 
 /** The managed Gmail sweep with the autopilot sync defaults (noExtract: true, as the sync handler sets it). */
-async function gmailSweep(state: CaseState) {
+async function gmailSweep(state: CaseState, opts: { reply?: boolean } = {}) {
   const cfg = parseGoogleSourceConfig({ ...googleConfig, g_services: 'gmail', g_history_days: 7 }, state.dir);
   const sent = Date.now() - 3 * 3600_000;
+  const reply = opts.reply ? [{ id: REPLY_ID, threadId: THREAD_ID, labelIds: ['SENT'], internalDate: String(sent + 3600_000),
+    payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: `Owner Example <${cfg.account}>` }, { name: 'To', value: 'Alice Example <alice@example.invalid>' },
+      { name: 'Subject', value: 'Re: Quarterly plan' }], body: { data: b64url(REPLY_BODY) } } }] : [];
   let listed = false;
   const fetcher = async (url: string) => {
     const u = new URL(url);
@@ -459,7 +465,7 @@ async function gmailSweep(state: CaseState) {
     if (/\/users\/me\/threads\/[^/]+$/.test(u.pathname)) {
       return json({ id: THREAD_ID, messages: [{ id: MESSAGE_ID, threadId: THREAD_ID, labelIds: ['INBOX'], internalDate: String(sent),
         payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Alice Example <alice@example.invalid>' }, { name: 'To', value: cfg.account },
-          { name: 'Subject', value: 'Quarterly plan' }], body: { data: b64url(EMAIL_BODY) } } }] });
+          { name: 'Subject', value: 'Quarterly plan' }], body: { data: b64url(EMAIL_BODY) } } }, ...reply] });
     }
     return json({ error: { message: `unexpected fixture route ${u.pathname}` } }, 400);
   };
@@ -607,6 +613,18 @@ const cases: Record<ContractCase, (state: CaseState) => Promise<void>> = {
     await gmailSweep(state);
     const [job] = await runJobs(state.brain.engine, [{ name: 'extract-conversation-facts', data: { sourceId: state.sourceId } }]);
     requireCompleted([job]);
+  },
+
+  /**
+   * #5025: a multi-message Gmail thread parses into turns. Replacing a page's
+   * conversation facts has no persistence request, so on a managed brain the
+   * page is skipped without writing and stays retryable.
+   */
+  async extract_conversation_facts_thread(state) {
+    await gmailSweep(state, { reply: true });
+    const [job] = await runJobs(state.brain.engine, [{ name: 'extract-conversation-facts', data: { sourceId: state.sourceId } }]);
+    requireCompleted([job]);
+    expect((await changesSince(state)).filter(c => c.tbl === 'facts')).toEqual([]);
   },
 
   async facts_absorb(state) {
@@ -805,7 +823,7 @@ const cases: Record<ContractCase, (state: CaseState) => Promise<void>> = {
 };
 
 const ATOM_CASES: ReadonlySet<ContractCase> = new Set(['atom_drain_opted_out', 'atom_drain_default_on', 'atom_dispatch']);
-const FACTS_CASES: ReadonlySet<ContractCase> = new Set(['cycle_extract_facts', 'extract_conversation_facts', 'facts_absorb']);
+const FACTS_CASES: ReadonlySet<ContractCase> = new Set(['cycle_extract_facts', 'extract_conversation_facts', 'extract_conversation_facts_thread', 'facts_absorb']);
 
 async function runCase(brain: ContractBrain, id: ContractCase): Promise<void> {
   const { model, dimensions } = brain.embedding;

@@ -1228,6 +1228,7 @@ export async function initPGLite(opts: {
     // disables embedding at runtime.
     if (!opts.aiOpts?.noEmbedding && resolvedModel && resolvedDim) {
       delete config.embedding_disabled;
+      await engine.unsetConfig('embedding_disabled');
     }
     // PR1: new installs publish their skill catalog over MCP by default
     // (existing config wins on re-init, so a prior opt-out is preserved).
@@ -1566,6 +1567,7 @@ export async function initPostgresCore(opts: {
     // disables embedding at runtime.
     if (!opts.aiOpts?.noEmbedding && resolvedModel && resolvedDim) {
       delete config.embedding_disabled;
+      await engine.unsetConfig('embedding_disabled');
     }
     // PR1: new installs publish their skill catalog over MCP by default
     // (existing config wins on re-init, so a prior opt-out is preserved).

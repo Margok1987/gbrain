@@ -30,7 +30,7 @@ import { normalizeTokenScopes } from '../core/legacy-token-scope.ts';
 import { sqlQueryForEngine, type SqlQuery } from '../core/sql-query.ts';
 import { readClientGrant, rescopeClientGrant, resolveGrantProfile, type GrantPatch } from '../core/grants/service.ts';
 import { parseClientRescopeArgs, parseRescopeGrantArgs, splitRescopeTarget, type RescopeGrantArgs } from '../core/grants/cli.ts';
-import { GRANT_PROFILES, GrantError, grantFromClient } from '../core/grants/model.ts';
+import { GRANT_PROFILES, GrantError, TOKEN_TTL_MAX_SECONDS, TOKEN_TTL_MIN_SECONDS, grantFromClient } from '../core/grants/model.ts';
 import { cliRenderContext, renderAction, type RenderedAction } from '../core/agent-output.ts';
 import { migrateLegacyTokens, parseRescopeTokenArgs, renderLegacyGrantAxis, rescopeLegacyToken, resolveRescopeTarget, type MigrateLegacyResult, type RescopeTokenResult } from '../core/grants/legacy-token.ts';
 
@@ -384,11 +384,10 @@ export interface RegisterClientArgs {
   tokenTtlSeconds: number | undefined;
 }
 
-/** --token-ttl bounds: 1 minute .. 90 days. The SERVER default for CLI-minted
+/** --token-ttl bounds: 1 minute .. 90 days (defined in src/core/grants/model.ts). The SERVER default for CLI-minted
  * access tokens is 3600s (oauth-provider.ts tokenTtl) — NOT 30 days; callers
  * that promise long-lived tokens must write oauth_clients.token_ttl. */
-export const TOKEN_TTL_MIN_SECONDS = 60;
-export const TOKEN_TTL_MAX_SECONDS = 7_776_000;
+export { TOKEN_TTL_MIN_SECONDS, TOKEN_TTL_MAX_SECONDS };
 
 /**
  * Shared --token-ttl value parser (auth register-client + agent register).
@@ -1039,6 +1038,19 @@ export async function listClientRows(engine: BrainEngine): Promise<ClientRow[]> 
   return bare.map(r => ({ ...r, surface: null, surface_set_by: null, source_id: null, federated_read: null }));
 }
 
+/** Clients whose stored or outstanding access-token lifetime an upgrade brought inside the 90-day maximum. */
+export async function tokenLifetimeClampedClients(engine: BrainEngine): Promise<Set<string>> {
+  try {
+    const rows = await engine.executeRaw<{ client_id: string }>(
+      `SELECT DISTINCT client_id FROM oauth_grant_audit WHERE actor = 'migration' AND action IN ('clamp_token_ttl', 'shorten_access_tokens')`,
+    );
+    return new Set(rows.map(r => r.client_id));
+  } catch (e) {
+    if (isUndefinedTableError(e)) return new Set();
+    throw e;
+  }
+}
+
 async function clientsCmd(args: string[]) {
   const usageLine = 'Usage: auth clients [--usage] [--days N] [--json]';
   let parsed: { usage: boolean; days: number; json: boolean };
@@ -1054,6 +1066,7 @@ async function clientsCmd(args: string[]) {
       // Degrade ladder lives in listClientRows: a pre-migration brain still
       // gets the listing (missing columns render as null) instead of an error.
       const clients = await listClientRows(engine);
+      const lifetimeClamped = await tokenLifetimeClampedClients(engine);
 
       const { readClientOpUsage } = await import('../core/mcp-usage.ts');
       const usage = parsed.usage ? await readClientOpUsage(engine, { days: parsed.days }) : [];
@@ -1075,6 +1088,7 @@ async function clientsCmd(args: string[]) {
             federated_read: c.federated_read,
             ...clientOperationsView(c),
             revoked_at: c.deleted_at ?? null,
+            token_lifetime_clamped: lifetimeClamped.has(c.client_id),
             usage: usageByToken.get(c.client_id) ?? null,
           })),
           // Legacy bearer tokens seen in the window (no oauth_clients row).
@@ -1098,6 +1112,7 @@ async function clientsCmd(args: string[]) {
         console.log(`  scopes: ${c.scope ?? '<none>'}    surface: ${surfaceStr}`);
         console.log(`  write source: ${c.source_id ?? '<none>'}    federated reads: ${(c.federated_read ?? []).join(', ') || '<none>'}`);
         for (const line of clientOperationsLines(c)) console.log(line);
+        if (lifetimeClamped.has(c.client_id)) console.log('  access-token lifetime: clamped to the 90-day maximum by an upgrade (docs/mcp/ADMIN.md#access-token-lifetime)');
         if (parsed.usage) {
           if (u) {
             const auto = u.likely_automation ? '    [automation-shaped: >90% context_pack/delta]' : '';

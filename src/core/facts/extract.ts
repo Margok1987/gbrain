@@ -417,7 +417,7 @@ export type ExtractFactsOutcome =
  * Bounded diagnostic breadcrumb for the message: the cause's CONSTRUCTOR name
  * (validated as a plain identifier — never `.name`, never `.message`) plus
  * the whole-run class `classifyGlobalLlmError` derives from the cause chain
- * (`auth` / `billing` / `rate_limit`, the same vocabulary ingest_log uses).
+ * (`auth` / `billing` / `rate_limit` / `model_not_found`, the same vocabulary ingest_log uses).
  * Both are closed vocabularies with no interpolated provider text, so a 4xx
  * body echoing a key / org id cannot ride through. Defense-in-depth, not a
  * hard boundary: anything unexpected is dropped (never substituted), and a

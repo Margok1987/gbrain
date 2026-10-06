@@ -34,9 +34,10 @@ import { z } from 'zod';
 
 import { DEFAULT_CHARS_PER_TOKEN, DEFAULT_SAFETY_FACTOR, embedRequestMaxInputTokens, planEmbedRequests, rerankRequestMaxInputTokens, truncateEmbedInputs } from './embed-batch-plan.ts';
 export { splitByTokenBudget, capBatchItems, NO_BATCH_CAP_SUB_BATCH_ITEMS } from './embed-batch-plan.ts';
-import { BudgetTracker, type BudgetKind } from '../budget/budget-tracker.ts';
+import { BudgetTracker, type BudgetReservation } from '../budget/budget-tracker.ts';
 import { failedCallUsage, recordOnTracker } from './budget-record.ts';
 import { chatWithFallback, normalizeChatFallbackChain } from './chat-fallback.ts';
+import { applyThinkingOff, thinkingOffMaxOutputTokens } from './thinking-off.ts';
 import type {
   AIGatewayConfig,
   EmbedMultimodalOpts,
@@ -1564,21 +1565,6 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
   const { model, recipe, modelId } = await resolveEmbeddingProvider(resolveTarget);
   const truncated = truncateEmbedInputs(texts);
 
-  // Reserve up front for the worst-case batch token count. Embeddings have
-  // no output rate, so maxOutputTokens=0. record() at the end uses the
-  // actual total reported by the SDK across all sub-batches.
-  if (tracker) {
-    const charsPerToken = recipe.touchpoints?.embedding?.chars_per_token ?? DEFAULT_CHARS_PER_TOKEN;
-    const totalChars = truncated.reduce((s, t) => s + t.length, 0);
-    const estimatedInputTokens = Math.ceil(totalChars / Math.max(charsPerToken, 1));
-    tracker.reserve({
-      modelId: `${recipe.id}:${modelId}`,
-      estimatedInputTokens,
-      maxOutputTokens: 0,
-      kind: 'embed',
-      label: 'gateway.embed',
-    });
-  }
   // Dim override (D10) — when caller passes `dimensions`, use it. Otherwise
   // fall back to the global cfg default. dimsProviderOptions throws a
   // clear AIConfigError when a Voyage flexible-dim model gets an
@@ -1600,6 +1586,14 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
   // #4616: empty inputs never reach the provider; screenEmbeddings refuses them per item.
   const sent = sendableEmbeddingInputs(truncated);
   const batches = sent.length ? planEmbedRequests(sent.map(i => truncated[i]!), recipe, effectiveSafetyFactor(recipe), envCap) : [];
+
+  // Reserve the worst-case batch tokens after every preflight that can throw
+  // (dims, batch planning), so a config error leaves no hold; record() below settles it.
+  const charsPerToken = recipe.touchpoints?.embedding?.chars_per_token ?? DEFAULT_CHARS_PER_TOKEN;
+  const totalChars = truncated.reduce((s, t) => s + t.length, 0);
+  const reservation = tracker?.reserve({
+    modelId: `${recipe.id}:${modelId}`, estimatedInputTokens: Math.ceil(totalChars / Math.max(charsPerToken, 1)), maxOutputTokens: 0, kind: 'embed', label: 'gateway.embed',
+  });
 
   const allEmbeddings: Float32Array[] = [];
   let _embedThrew = false;
@@ -1629,10 +1623,9 @@ export async function embed(texts: string[], opts?: EmbedOpts): Promise<Float32A
       const measured = !_embedThrew && reportedTokens !== null && reportedTokens > 0
         ? reportedTokens
         : null;
-      const charsPerToken = recipe.touchpoints?.embedding?.chars_per_token ?? DEFAULT_CHARS_PER_TOKEN;
-      const totalChars = truncated.reduce((s, t) => s + t.length, 0);
       recordOnTracker(tracker, {
         modelId: `${recipe.id}:${modelId}`,
+        reservation,
         requestedModelId: resolveTarget,
         inputTokens: measured ?? Math.ceil(totalChars / Math.max(charsPerToken, 1)),
         outputTokens: 0,
@@ -3038,6 +3031,12 @@ export interface ChatOpts {
   temperature?: number;
   abortSignal?: AbortSignal;
   /**
+   * Replaces the default chat backstop (`GBRAIN_AI_CHAT_TIMEOUT_MS`, 300 s)
+   * for this call; `abortSignal` still composes (shorter wins). Set by
+   * callers that own a longer budget, such as a subagent turn (#4921).
+   */
+  timeoutMs?: number;
+  /**
    * Per-call provider options keyed by recipe id, deep-merged LAST — after
    * the derived cache markers and configured `provider_chat_options` — so a
    * call site can pin provider behavior it depends on (e.g. the triage judge
@@ -3066,6 +3065,13 @@ export interface ChatOpts {
   responseSchema?: { name: string; description?: string; schema: Record<string, unknown> };
   /** Caller purpose (`skillopt.judge`, …) stamped on the BudgetTracker ledger row. */
   purpose?: string;
+  /**
+   * `'off'` turns thinking off for this call on routes with a per-call switch
+   * (native Anthropic, DeepSeek, OpenRouter DeepSeek), replacing a configured
+   * thinking object; elsewhere a thinking-by-default model keeps thinking and
+   * gets the thinking output headroom instead (see `thinking-off.ts`).
+   */
+  thinking?: 'off';
   /**
    * `false` pins the call to its own model: `chat_fallback_chain` is not
    * consulted (see `chat-fallback.ts`). Judge, critic and eval call sites set
@@ -3459,22 +3465,27 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
     }
   }
   const estimatedInputTokens = estimateChatInputTokens(opts);
-  const maxOutputTokens = opts.maxTokens ?? defaultMaxOutputTokens(modelStrEarly);
-  const chatRecord = { requestedModelId: modelStrEarly, purpose: opts.purpose, label: 'gateway.chat' };
+  const maxOutputTokens = thinkingOffMaxOutputTokens(modelStrEarly, opts.maxTokens ?? defaultMaxOutputTokens(modelStrEarly), opts.thinking === 'off' && isThinkingModel(modelStrEarly), THINKING_MODEL_MAX_OUTPUT_TOKENS);
 
-  // TX5: reserve BEFORE the provider call. Throws BudgetExhausted on cost,
-  // runtime, or no_pricing (when cap is set). Pre-resolution model id is
-  // fine here — resolveChatProvider would map aliases the same way for the
-  // cost lookup. record() below uses the real result.model.
-  if (tracker) {
-    tracker.reserve({
-      modelId: modelStrEarly,
-      estimatedInputTokens,
-      maxOutputTokens,
-      kind: 'chat' as BudgetKind,
-      label: 'gateway.chat',
-    });
+  // TX5: reserve BEFORE the provider call (BudgetExhausted on cost, runtime,
+  // or no_pricing under a user cap) with the pre-resolution model id. record()
+  // settles the reservation by id; the finally frees an attempt that never
+  // billed (provider resolution failed, an invocation policy refused it).
+  const reservation = tracker?.reserve({ modelId: modelStrEarly, estimatedInputTokens, maxOutputTokens, kind: 'chat', label: 'gateway.chat' });
+  const chatRecord = { requestedModelId: modelStrEarly, purpose: opts.purpose, label: 'gateway.chat', reservation };
+  try {
+    return await chatAdmitted(opts, { tracker, modelStrEarly, estimatedInputTokens, maxOutputTokens, chatRecord });
+  } finally {
+    tracker?.release(reservation);
   }
+}
+
+/** One admitted chat attempt: the provider call plus its budget record. */
+async function chatAdmitted(opts: ChatOpts, admitted: {
+  tracker: BudgetTracker | null; modelStrEarly: string; estimatedInputTokens: number; maxOutputTokens: number;
+  chatRecord: { requestedModelId: string; purpose?: string; label: string; reservation?: BudgetReservation };
+}): Promise<ChatResult> {
+  const { tracker, modelStrEarly, estimatedInputTokens, maxOutputTokens, chatRecord } = admitted;
 
   // Test seam: when a test transport is installed, route through it without
   // touching provider resolution, AI SDK, or any network. See
@@ -3502,9 +3513,12 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
       threw = err;
       throw err;
     } finally {
-      recordOnTracker(tracker, res
-        ? { ...chatRecord, modelId: res.model ?? modelStrEarly, inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens }
-        : { ...chatRecord, modelId: modelStrEarly, ...failedCallUsage(threw, { inputTokens: estimatedInputTokens, outputTokens: maxOutputTokens }) });
+      // A policy refusal never reached the provider: chat() releases its hold.
+      if (res || threw) {
+        recordOnTracker(tracker, res
+          ? { ...chatRecord, modelId: res.model ?? modelStrEarly, inputTokens: res.usage.input_tokens, outputTokens: res.usage.output_tokens }
+          : { ...chatRecord, modelId: modelStrEarly, ...failedCallUsage(threw, { inputTokens: estimatedInputTokens, outputTokens: maxOutputTokens }) });
+      }
     }
   }
 
@@ -3568,6 +3582,7 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
   applyConfiguredChatProviderOptions(providerOptions, cfg, recipe.id, modelId);
   // Call-scoped options merge last so they win over configured siblings.
   providerOptions = deepMergeRecords(providerOptions, opts.providerOptions);
+  if (opts.thinking === 'off') applyThinkingOff(providerOptions, `${recipe.id}:${modelId}`);
 
   // Derive ONE canonical cache-control value AFTER config merging and reuse
   // it for every breakpoint (system block, last tool def, call-level). If
@@ -3640,13 +3655,13 @@ export async function chat(opts: ChatOpts): Promise<ChatResult> {
     system: systemParam,
     messages: toModelMessages(repairToolPairing(opts.messages)) as any,
     tools: opts.tools && opts.tools.length > 0 ? tools : undefined,
-    maxOutputTokens: opts.maxTokens ?? defaultMaxOutputTokens(modelStr),
+    maxOutputTokens,
     ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
     output: out,
     // v0.42.20.0 — default a chat timeout (composes with the caller's signal,
     // shorter wins). Covers native-anthropic (the default provider + facts Haiku).
     // Fresh signal per attempt so the schemaless retry gets its own timeout.
-    abortSignal: withDefaultTimeout(opts.abortSignal, AI_CHAT_TIMEOUT_MS),
+    abortSignal: withDefaultTimeout(opts.abortSignal, opts.timeoutMs ?? AI_CHAT_TIMEOUT_MS),
     providerOptions: Object.keys(providerOptions).length > 0 ? providerOptions : undefined,
     ...(requestHeaders ? { headers: requestHeaders } : {}),
   });
@@ -3807,6 +3822,8 @@ export interface ToolLoopOpts {
   purpose?: string;
   /** Forwarded to every `chat()` turn; see `ChatOpts.allowFallback`. */
   allowFallback?: boolean;
+  /** Forwarded to every `chat()` turn as `ChatOpts.timeoutMs`. */
+  turnTimeoutMs?: number;
 
   /** Crash-replay state. When set, the loop resumes from the recorded position. */
   replayState?: ToolLoopReplayState;
@@ -3957,6 +3974,7 @@ export async function toolLoop(opts: ToolLoopOpts): Promise<ToolLoopResult> {
         cacheSystem: opts.cacheSystem,
         purpose: opts.purpose,
         allowFallback: opts.allowFallback,
+        timeoutMs: opts.turnTimeoutMs,
       });
     } catch (err) {
       if (isAIInvocationPolicyError(err)) throw err;
@@ -4292,19 +4310,14 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
   // leaking one projection per search on a keyless brain under a cost cap.
   // Reranker pricing resolves through the embedding pricing table (the default
   // model is priced); an unpriced custom reranker still hits the warn-once
-  // (no cap) / TX2 hard-fail (cap set) path. record() below settles it.
-  if (tracker) {
-    const totalChars = input.query.length + input.documents.reduce((s, d) => s + d.length, 0);
-    tracker.reserve({
-      modelId: modelStr,
-      // Honor the recipe's tokenizer density (Voyage declares ~1 char/token on
-      // dense payloads) so a cap cannot be under-reserved ~4× by CJK/JSON docs.
-      estimatedInputTokens: Math.ceil(totalChars / (recipe.touchpoints.embedding?.chars_per_token ?? 4)),
-      maxOutputTokens: 0,
-      kind: 'rerank',
-      label: 'gateway.rerank',
-    });
-  }
+  // (no cap) / TX2 hard-fail (cap set) path. record() below settles it by
+  // id; a policy refusal releases it in the finally. The estimate honors the
+  // recipe's tokenizer density (Voyage declares ~1 char/token on dense
+  // payloads) so a cap cannot be under-reserved ~4× by CJK/JSON docs.
+  const rerankChars = input.query.length + input.documents.reduce((s, d) => s + d.length, 0);
+  const reservation = tracker?.reserve({
+    modelId: modelStr, estimatedInputTokens: Math.ceil(rerankChars / (recipe.touchpoints.embedding?.chars_per_token ?? 4)), maxOutputTokens: 0, kind: 'rerank', label: 'gateway.rerank',
+  });
 
   // Timeout via AbortController; merges with caller-supplied signal.
   const ctrl = new AbortController();
@@ -4322,6 +4335,7 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
     const totalChars = input.query.length + input.documents.reduce((s, d) => s + d.length, 0);
     recordOnTracker(tracker, {
       modelId: modelStr,
+      reservation,
       inputTokens: Math.ceil(totalChars / 4),
       outputTokens: 0,
       kind: 'rerank',
@@ -4390,6 +4404,7 @@ export async function rerank(input: RerankInput): Promise<RerankResult[]> {
     throw new RerankError(`rerank: ${msg}`, 'network');
   } finally {
     clearTimeout(t);
+    tracker?.release(reservation);
   }
 }
 

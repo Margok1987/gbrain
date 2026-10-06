@@ -872,12 +872,11 @@ export async function runEmbed(engine: BrainEngine, args: string[], selectedConf
   // background block so we never queue a job that can only fail. stderr only;
   // stdout stays empty like every other embed outcome (embed has no JSON
   // result surface — do not invent one here).
-  if (isKeylessStaleRefusal(args, loadConfig()?.embedding_disabled)) {
-    process.stderr.write(
-      '[embed] Embeddings are disabled on this brain (keyless install). '
-      + 'Nothing to backfill; keyword search keeps working. '
-      + 'Enable later: set embedding_model via gbrain config, then re-run gbrain init with the force flag.\n',
-    );
+  const keylessConfig = loadConfig();
+  if (isKeylessStaleRefusal(args, keylessConfig?.embedding_disabled)) {
+    const enable = (await import('../core/readiness.ts')).embeddingEnablement(keylessConfig!).argv ?? ['gbrain', 'init', '--force', '--embedding-model', '<provider:model>'];
+    process.stderr.write('[embed] Embeddings are disabled on this brain (keyless install). Nothing to backfill; keyword search keeps working. '
+      + `Turn on semantic search (pages and facts are kept): ${(await import('../core/agent-output.ts')).shellQuote(enable)}\n`);
     return {
       embedded: 0, skipped: 0, would_embed: 0, total_chunks: 0,
       pages_processed: 0, failures: 0, failure_samples: [], dryRun: false,

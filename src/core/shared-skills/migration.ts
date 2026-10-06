@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isThinClient } from '../config.ts';
@@ -10,6 +11,7 @@ import type { DatabaseContentExportReceipt } from './migration-export.ts';
 import { inspectSharedMemberMigration, type SharedMemberMigration } from './migration-members.ts';
 import { sharedSkillSourcePolicyOrPreserve } from './setup-source-policy.ts';
 import { INVENTORY_LIMIT_CEILINGS, readInventoryLimits, type InventoryLimits } from './inventory-limits.ts';
+import { SHARED_SKILL_LIMITS } from './model.ts';
 
 export type MigrationPublication = 'disabled' | 'prose_only' | 'consent_required';
 export interface SharedMigrationStage {
@@ -66,6 +68,15 @@ export function parkedReason(sourceId: string, parked: SharedSourceParked): stri
     + 'See docs/guides/shared-brain-skills.md#oversized-skill-packs.';
 }
 
+/** The digest an operator echoes to accept a reviewed inventory change (#5476): the sorted path/hash list. */
+export function inventoryDigest(hashes: Record<string, string>): string {
+  return createHash('sha256').update(JSON.stringify(Object.keys(hashes).sort().map(path => [path, hashes[path]]))).digest('hex');
+}
+
+function changedInventoryPaths(before: Record<string, string>, after: Record<string, string>): string[] {
+  return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(path => before[path] !== after[path]).sort();
+}
+
 export async function legacyPublication(ctx: OperationContext): Promise<MigrationPublication> {
   const dbValue = await ctx.engine.getConfig('mcp.publish_skills');
   const value = dbValue === null ? ctx.config.mcp?.publish_skills : dbValue;
@@ -74,7 +85,7 @@ export async function legacyPublication(ctx: OperationContext): Promise<Migratio
   return 'consent_required';
 }
 
-export async function runSharedSkillsMigration(ctx: OperationContext, options: { dryRun?: boolean } = {}): Promise<SharedMigrationReport> {
+export async function runSharedSkillsMigration(ctx: OperationContext, options: { dryRun?: boolean; acceptReviewedInventory?: Record<string, string> } = {}): Promise<SharedMigrationReport> {
   if (ctx.remote !== false) {
     throw opError('permission_denied', 'Shared-skills migration requires the trusted local host.',
       'The shared-skills migration runs only from gbrain apply-migrations on the brain host; a remote connection cannot run it.');
@@ -154,18 +165,32 @@ export async function runSharedSkillsMigration(ctx: OperationContext, options: {
       }
       row.inventory = inventorySkillpack(row.root, limits);
       if (prior && (prior.source_incarnation !== source.incarnation || prior.root !== row.root)) {
-        throw opError('local_conflict', 'The source root changed since migration inventory.',
-          `Source ${source.id} was recreated or moved since its migration inventory was taken; review the checkpoint with the user before continuing the migration.`);
+        // #5569: an inventory that never completed has nothing to preserve, so it is taken again at the current root.
+        if (prior.stages?.some(stage => stage.stage === 'inventory' && stage.status === 'complete')) {
+          throw opError('local_conflict', 'The source root changed since migration inventory.',
+            `Source ${source.id} was recreated or moved since its migration inventory was taken; review the checkpoint with the user before continuing the migration.`);
+        }
+        prior = null;
       }
       if (prior?.inventory && (!row.inventory || !sameInventory(prior.inventory.hashes, row.inventory.hashes))) {
         const original = { ...prior.inventory.hashes }, current = { ...row.inventory?.hashes };
         delete original['skillpack.json']; delete current['skillpack.json'];
         const [sealed] = await ctx.engine.executeRaw<{ manifest_hash: string }>('SELECT manifest_hash FROM shared_skill_packs WHERE source_id=$1 AND source_incarnation=$2::uuid', [source.id, source.incarnation]);
-        if (!row.inventory || !sameInventory(original, current) || sealed?.manifest_hash !== row.inventory.hashes['skillpack.json']) {
+        const digest = row.inventory ? inventoryDigest(row.inventory.hashes) : null;
+        if ((!row.inventory || !sameInventory(original, current) || sealed?.manifest_hash !== row.inventory.hashes['skillpack.json'])
+          && (digest === null || options.acceptReviewedInventory?.[source.id] !== digest)) {
+          const changed = changedInventoryPaths(prior.inventory.hashes, row.inventory?.hashes ?? {});
           row.inventory = prior.inventory;
-          throw opError('local_conflict', 'Files changed since migration inventory; preserve edits and review the checkpoint before retrying.',
-            `Skill files under ${row.root} changed since the migration inventory. Keep the edits, review them with the user, then run the migration again.`);
+          throw opError('local_conflict', `Files changed since migration inventory; preserve edits and review the checkpoint before retrying. Changed: ${changed.slice(0, 20).join(', ')}${changed.length > 20 ? ` and ${changed.length - 20} more` : ''}.`
+            + (digest ? ` After the user reviews these changes, accept exactly this inventory with gbrain apply-migrations --migration 0.53.0 --accept-reviewed-inventory ${source.id}=${digest} --yes.` : ''),
+            `Skill files under ${row.root} changed since the migration inventory. Keep the edits and review them with the user; only after they agree, accept the reviewed inventory with the command in the message (a later edit changes the digest and is refused again).`);
         }
+      }
+      // A-NEW-4: one canonical adoption writes one SKILL.md per declared skill plus skillpack.json.
+      if (row.inventory && row.inventory.names.length + 1 > SHARED_SKILL_LIMITS.packFiles) {
+        await pending('inventory', `payload_too_large: source ${source.id} declares ${row.inventory.names.length} skills, but one canonical adoption publishes at most ${SHARED_SKILL_LIMITS.packFiles} files (one SKILL.md per skill plus skillpack.json). `
+          + `Split the pack across sources or remove skills from skillpack.json, then run gbrain apply-migrations --migration 0.53.0 --yes. See docs/guides/shared-brain-skills.md#oversized-skill-packs.`);
+        continue;
       }
     } catch (error) {
       if (error instanceof OperationError && error.code === 'payload_too_large' && error.detail) {

@@ -13,7 +13,8 @@ import type { BrainEngine } from '../../core/engine.ts';
 import { LATEST_VERSION } from '../../core/migrate.ts';
 import { loadConfig } from '../../core/config.ts';
 import { loadCompletedMigrations } from '../../core/preferences.ts';
-import { isFreshInstallStamp } from '../../core/migration-ledger.ts';
+import { indexCompletedEntries, isFreshInstallStamp, migrationLedgerSummary, trailingPartialCount } from '../../core/migration-ledger.ts';
+import { VERSION } from '../../version.ts';
 import { pendingFreshInstallCheck } from './checks/pending-fresh-install.ts';
 import { compareVersions } from '../migrations/index.ts';
 import { resolveHoursEnv } from '../../core/env-number.ts';
@@ -229,18 +230,24 @@ export async function doctorReportRemote(
     }
     // Fresh-install stamps are not forward progress (same rule as the local doctor).
     const completedVersions = Array.from(byVersion.entries()).filter(([, s]) => s.ran).map(([v]) => v);
+    // A trailing retry marker makes the version pending (same rule as the local doctor and get_health).
+    const history = indexCompletedEntries(completed);
     const stuck = Array.from(byVersion.entries())
       .filter(([v, s]) => {
         if (!s.partial || s.complete) return false;
+        if (history.get(v)?.at(-1)?.status === 'retry') return false;
         const supersededBy = completedVersions.find(cv => compareVersions(cv, v) >= 0);
         return supersededBy === undefined;
       })
       .map(([v]) => v);
     const wedged: string[] = [];
     for (const v of stuck) {
-      const partialCount = completed.filter(e => e.version === v && e.status === 'partial').length;
+      const partialCount = trailingPartialCount(history.get(v) ?? []);
       if (partialCount >= 3) wedged.push(v);
     }
+    const newestRun = completedVersions.reduce<string | null>((a, v) => (a === null || compareVersions(v, a) > 0 ? v : a), null);
+    const pending = completed.length === 0 ? [] : migrationLedgerSummary(VERSION).pending.filter(v =>
+      (newestRun !== null && compareVersions(v, newestRun) < 0) || history.get(v)?.at(-1)?.status === 'retry');
     if (wedged.length > 0) {
       const cmd = wedged.map(v => `gbrain apply-migrations --force-retry ${v}`).join(' && ');
       checks.push({
@@ -253,6 +260,13 @@ export async function doctorReportRemote(
         name: 'minions_migration',
         status: 'fail',
         message: `MINIONS HALF-INSTALLED on brain host: ${stuck.join(', ')}. Run on the host: gbrain apply-migrations --yes`,
+      });
+    } else if (pending.length > 0) {
+      checks.push({
+        name: 'minions_migration',
+        status: 'warn',
+        message: `${pending.length} host migration(s) not run yet on brain host: ${pending.join(', ')}. Run on the host: gbrain apply-migrations --yes`,
+        details: { pending },
       });
     } else {
       const setup = pendingFreshInstallCheck();

@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 208464,
-    "stdoutSha256": "1dfdfca690c16604904833bf24c76b2b606a9d966e109301a238df26e72cdf87",
+    "stdoutBytes": 209923,
+    "stdoutSha256": "2408faacf21919b46b1ffaccbe328fb42483d4b6c72d75f495c893e6af2a5a6b",
     "toolNames": [
       "remember",
       "entity",
@@ -102,6 +102,7 @@
       "takes_update",
       "takes_resolve",
       "takes_supersede",
+      "takes_remove",
       "whoami",
       "sources_add",
       "sources_list",
@@ -4213,6 +4214,46 @@
         "scope": "write"
       },
       {
+        "description": "Remove one take row from a page's takes fence and the takes table together. Local-only. Other rows keep their numbers. Refuses a resolved row, a row another row cites as \"superseded by\" it, and a row whose database copy disagrees with the fence (run `gbrain takes rebuild <slug>` first). CLI: `gbrain takes remove <slug> --row N`.",
+        "idempotent": true,
+        "local_only": true,
+        "mutating": true,
+        "name": "takes_remove",
+        "parameters": {
+          "local_dir": "string?",
+          "request_id": "string?",
+          "row_num": "number",
+          "slug": "string"
+        },
+        "required_scopes": [],
+        "schema": {
+          "properties": {
+            "local_dir": {
+              "description": "Trusted CLI directory hint; must equal the registered source root.",
+              "type": "string"
+            },
+            "request_id": {
+              "description": "UUID; retry with it on timeout.",
+              "type": "string"
+            },
+            "row_num": {
+              "description": "Take row number to remove (from takes_list).",
+              "type": "number"
+            },
+            "slug": {
+              "description": "Page slug.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "slug",
+            "row_num"
+          ],
+          "type": "object"
+        },
+        "scope": "write"
+      },
+      {
         "description": "Your identity: transport, scopes and, over OAuth, client, source_id and federated_read.",
         "idempotent": true,
         "local_only": false,
@@ -6223,7 +6264,7 @@
               "type": "number"
             },
             "max_cost_usd": {
-              "description": "Default 5.00",
+              "description": "Default 5.00 (an unpriced model then warns and runs). When set, an unpriced model is refused with no_pricing. Remote callers must pass a positive value; 0 (uncapped) is host-only.",
               "type": "number"
             },
             "no_mutate": {

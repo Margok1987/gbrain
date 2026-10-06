@@ -816,17 +816,19 @@ describe('buildGazetteer — engine integration', () => {
     expect(g.has('box')).toBe(false);
   });
 
-  test('extraIgnore — user-supplied additional ignore tokens', async () => {
+  test('operator levers for a title the CK12 rule keeps: mentions.exclude_slugs (the removed extraIgnore never applied to titles)', async () => {
     await engine.putPage('people/john', {
       type: 'person', title: 'John', compiled_truth: 'b', timeline: '', frontmatter: {},
     });
-    // No companies/john exists, so adding John to extraIgnore should suppress.
     const g1 = await buildGazetteer(engine);
-    expect(g1.has('john')).toBe(true); // baseline: in gazetteer
-    const g2 = await buildGazetteer(engine, { extraIgnore: ['John'] });
-    // But title "John" IS the entity title — existingTitles.has('John') is true.
-    // Per CK12 rule, gazetteer presence wins → John IS still in.
-    expect(g2.has('john')).toBe(true);
+    expect(g1.has('john')).toBe(true); // baseline: a user-created page's title is in the gazetteer
+    await engine.setConfig('mentions.exclude_slugs', 'people/john');
+    try {
+      const g2 = await buildGazetteer(engine);
+      expect(g2.has('john')).toBe(false);
+    } finally {
+      await engine.unsetConfig('mentions.exclude_slugs');
+    }
   });
 
   test('LINKABLE_ENTITY_TYPES exposes the hardcoded contract', () => {

@@ -497,13 +497,13 @@
         },
         {
           "category": "ops",
-          "message": "RLS enabled on 117/117 public tables",
+          "message": "RLS enabled on 118/118 public tables",
           "name": "rls",
           "status": "ok"
         },
         {
           "category": "meta",
-          "message": "Version 209 (latest: 209)",
+          "message": "Version 212 (latest: 212)",
           "name": "schema_version",
           "status": "ok"
         },
@@ -1718,7 +1718,7 @@
         },
         {
           "category": "brain",
-          "message": "No retrieval-affecting files changed in working tree.",
+          "message": "1 retrieval-affecting file(s) changed since HEAD: src/core/chunkers/recursive.ts. Re-run `gbrain eval run-all` after committing these changes.",
           "name": "eval_drift",
           "status": "ok"
         },

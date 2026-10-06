@@ -832,7 +832,9 @@ guards are exempt-with-reason, not fixture-tested).
 `bun run verify`) proves every `selftest=yes` scanner CAN fail: it runs each
 one against known-bad (must exit non-zero) and known-good (must pass) fixture
 trees under `test/fixtures/guards/<guard>/{bad,good}/` via the
-`GBRAIN_GUARD_ROOT` env seam, and enforces manifest completeness — a new
+`GBRAIN_GUARD_ROOT` env seam (guards run 4 at a time, `GUARD_SELF_TEST_JOBS`
+overrides; results print in manifest order; the whole pass must finish inside
+its 30 s budget), and enforces manifest completeness — a new
 `scripts/check-*` script that isn't registered in the manifest fails the
 build. A guard whose pattern rots into a permanently-green no-op fails CI
 instead of masquerading as coverage.

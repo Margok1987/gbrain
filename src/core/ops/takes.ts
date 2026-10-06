@@ -482,11 +482,38 @@ const takes_resolve: Operation = {
   },
 };
 
+const takes_remove: Operation = {
+  name: 'takes_remove',
+  idempotent: true,
+  outputRedaction: 'no_stored_text',
+  description:
+    'Remove one take row from a page\'s takes fence and the takes table together. Local-only. ' +
+    'Other rows keep their numbers. Refuses a resolved row, a row another row cites as "superseded by" it, ' +
+    'and a row whose database copy disagrees with the fence (run `gbrain takes rebuild <slug>` first). ' +
+    'CLI: `gbrain takes remove <slug> --row N`.',
+  params: {
+    request_id: WRITE_REQUEST_PARAM,
+    local_dir: { type: 'string', description: 'Trusted CLI directory hint; must equal the registered source root.' },
+    slug: { type: 'string', required: true, description: 'Page slug.' },
+    row_num: { type: 'number', required: true, description: 'Take row number to remove (from takes_list).' },
+  },
+  scope: 'write',
+  mutating: true,
+  localOnly: true,
+  area: 'takes',
+  handler: async (ctx, p) => {
+    const slug = p.slug as string;
+    validatePageSlug(slug);
+    if (ctx.dryRun) return { dry_run: true, action: 'takes_remove', slug, row_num: p.row_num };
+    return submitPageMutation(ctx, { operation: 'takes_remove', params: p });
+  },
+};
+
 // Ops in EXACTLY the canonical `operations` array order: the v0.28 trio
 // (takes_list, takes_search, think), the v0.30 calibration aggregates, then
 // the gap-closure write verbs.
 export const takesOperations: Operation[] = [
   takes_list, takes_search, think,
   takes_scorecard, takes_calibration,
-  takes_add, takes_update, takes_resolve, takes_supersede,
+  takes_add, takes_update, takes_resolve, takes_supersede, takes_remove,
 ];

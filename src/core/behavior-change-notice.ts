@@ -1,5 +1,5 @@
 /**
- * One-time disclosure of four behavior changes an upgrade turns on (safety
+ * One-time disclosure of the behavior changes an upgrade turns on (safety
  * notice `behavior_changes`, agent operator contract v1). Disclosure only:
  * every change stays on, nothing waits for an answer, and delivery is never
  * recorded as the user's consent.
@@ -14,6 +14,10 @@
  *   (c) transcript re-ingest makes smaller parts and re-embeds once
  *       (`TRANSCRIPT_REINGEST_MULTIPLIER`).
  *   (d) the mention linker rebuilds its resume state once.
+ *   (e) fix wave 9: shell jobs reap leftover processes, the declaring-pack
+ *       extract_atoms auto-drain, the 90-day OAuth access-token cap, the
+ *       writer-status `local_process_ingress` rename, `jobs work` exit codes
+ *       and the longer retention of unextracted corpus files.
  *
  * Identity: notice id (`behavior_changes@<BEHAVIOR_NOTICE_SINCE>`) × brain ×
  * channel, plus the authenticated client on HTTP. Eligibility: a brain that
@@ -222,6 +226,12 @@ export function behaviorChangesNotice(chain: ChainDisclosure | null, opts: { rem
   items.push('On a managed brain, autopilot\'s lint phase now writes its repairs instead of only reporting them; `gbrain config set cycle.lint_fix false` turns that off.');
   items.push(`Transcript re-ingest now splits transcripts into smaller parts (45,000-byte target, previously 300,000 bytes): ${TRANSCRIPT_REINGEST_MULTIPLIER} as many part pages and about 9% more embedding tokens (measured on a 1 MB session), and each re-ingested transcript re-embeds once.`);
   items.push('The mention linker rebuilds its gazetteer resume state once, so the first mention-extraction run after upgrading rescans pages.');
+  items.push('A shell job\'s leftover processes (`cmd &` with no `wait`) are now terminated when the job ends; start long-lived processes under a service manager or detach them with `setsid`.');
+  items.push('On Postgres autopilot, a brain whose schema pack declares extract_atoms now gets the daily atom auto-drain, spending within autopilot.auto_drain.max_usd_per_day (default $2); `gbrain config set autopilot.auto_drain.enabled false` opts out.');
+  items.push('OAuth access tokens now last at most 90 days: stored client lifetimes were clamped and already-issued access tokens shortened to 90 days after issue, so a client with no refresh token reconnects; restart any running `gbrain serve --http`.');
+  items.push('`gbrain sources writer status --json` renamed `ingress` to `local_process_ingress`; it describes only the process that answered.');
+  items.push('`gbrain jobs work` exits 0 after a SIGTERM drain (was 143) and 17 when running claims had to be handed back.');
+  items.push('Captured session files nothing has extracted are kept up to 3x dream.synthesize.corpus_retention_days (90 days by default, was 30), so the corpus directory can use more disk; `gbrain sweep --once --budget-ms 600000` clears that backlog.');
   const why = `gbrain v${BEHAVIOR_NOTICE_SINCE} changed ${items.length} behaviors on this brain. All stay on; this is a one-time disclosure, not a request for consent. ` +
     items.map((t, i) => `(${i + 1}) ${t}`).join(' ') +
     ' gbrain doctor --only behavior_changes shows this again.';

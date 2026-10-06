@@ -12,6 +12,7 @@ import { getWriteRequest, admitWriteInTransaction, receiptFor } from './journal.
 import { retryWriteAdmission } from './admission-retry.ts';
 import { assertPersistenceAccepting, awaitWrite, foregroundWriteCompletions, startPersistenceConsumer, type WriteWait } from './service.ts';
 import { assertSyncEntryOrigin, discoverManagedSync, resolveManagedSyncContext, readSyncContent, readSyncFile, syncGit, type SyncDiscovery } from './sync-discovery.ts';
+import { isImageFilePath } from '../sync.ts';
 import { assertSyncPageOrigin, sameSyncOrigin, syncOriginScope } from './sync-origin.ts';
 import { assertManagedSyncActive, assertSyncDispatchActive, managedSyncAuthority, validateSyncAuthority, validateManagedSyncOptions, syncProcessingOptions, SYNC_PROCESSING_KEYS, type SyncAuthority, type SyncProcessingOptions } from './sync-authority.ts';
 import { prepareManagedSyncMutation, type SyncCursorOptions, type SyncIntent } from './sync-prepare.ts';
@@ -35,7 +36,7 @@ import { cancelWindow } from './sync-window.ts';
 import { lanePolicy, openLanes } from './sync-lanes.ts';
 import { isContentRefusal } from '../import-screen.ts';
 import { SYNC_READ_BOUND, type TreeBlob } from './sync-blobs.ts';
-import { dryRunScreen, isSyncReadBound, loadSyncScreenRun, pinnedBlob, screenFrozenImport, type HeldEntry, type SyncScreenRun } from './sync-screen.ts';
+import { dryRunScreen, isSyncReadBound, loadSyncScreenRun, managedImageHold, pinnedBlob, screenFrozenImport, type HeldEntry, type SyncScreenRun } from './sync-screen.ts';
 import { faultPoint } from './fault-points.ts';
 import { addRecovered, buildHoldReport, clearGitHold, clearGitHoldRetryPaths, readSyncHoldPolicy, recordSyncConversion, recoveredReport, writeGitHold } from './sync-holds.ts';
 
@@ -245,6 +246,12 @@ async function freezeEntry(engine: BrainEngine, cursor: Cursor, key: string, ass
   let blob: TreeBlob | null = null, oversize: { size: number | null } | undefined;
   if (entry) {
     assertSyncEntryOrigin(cursor, entry);
+    if (entry.action === 'import' && !cursor.companyPlan && isImageFilePath(entry.path)) {
+      const imageBlob = entry.working ? null : pinnedBlob(cursor, entry.path);
+      let bytes: Buffer | null = null;
+      if (!imageBlob) { try { bytes = readSyncFile(cursor.root, entry.path); } catch (error) { if (!isSyncReadBound(error)) throw error; } }
+      return { hold: managedImageHold(entry, bytes === null ? null : bytes.toString('utf8'), imageBlob) };
+    }
     const originScope = syncOriginScope(cursor);
     // #5522: another cursor of this source may have imported this new file since enumeration.
     const occupant = await alreadyImportedAtOrigin(engine, cursor, entry, originScope);

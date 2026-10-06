@@ -25,7 +25,8 @@
  * The chain stops on a gbrain policy refusal (an invocation-guard denial or a
  * BudgetTracker `BudgetExhausted`: budget, caps and pricing describe gbrain's
  * own accounting, and the next model is billed by the same ledger)
- * and once the caller's own abort signal has fired. When every model fails,
+ * and once the caller's own abort signal has fired, including a cancel that
+ * lands while an attempt is refusing (the refusal is returned, not forwarded). When every model fails,
  * a refusal from an earlier attempt is returned in preference to a later
  * attempt's error; otherwise the call's own model's error is thrown, so retry
  * and halt classification (a 429 stays a rate limit) follow the configured
@@ -116,7 +117,7 @@ export async function chatWithFallback(
     const next = models[i + 1];
     try {
       const result = await attempt({ ...opts, model, allowFallback: false });
-      if (next === undefined || !isStructuralRefusal(result) || !onRefusal) return answered(result, model);
+      if (next === undefined || !isStructuralRefusal(result) || !onRefusal || opts.abortSignal?.aborted) return answered(result, model);
       refused ??= answered(result, model);
       console.warn(`[ai.gateway] chat ${result.model} stopped with ${result.stopReason}; trying ${next} from chat_fallback_chain`);
       queueFirstHop(result.model, next, `stopReason ${result.stopReason}`, true);

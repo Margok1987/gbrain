@@ -70,7 +70,9 @@ chain on its own.
   `chat_fallback_hop` safety notice naming the model that failed and the one
   that received the request.
 - A refusal (a `refusal` / `content_filter` stop reason, or a provider
-  content block) also moves on by default, so content one provider refused
+  content block, including an HTTP 400 that refuses the prompt on content
+  policy: OpenAI `invalid_prompt`, Azure OpenAI `content_filter`, DeepSeek
+  "Content Exists Risk") also moves on by default, so content one provider refused
   goes to the next. To keep outage fallback but never forward refused
   content:
 
@@ -81,10 +83,14 @@ chain on its own.
   The same key works as `GBRAIN_CHAT_FALLBACK_ON_REFUSAL=false` or
   `"chat_fallback_on_refusal": false` in `config.json`, with the same
   precedence as the chain.
-- A gbrain budget refusal or your own cancel stops the chain. When every
+- A gbrain budget refusal or your own cancel stops the chain. A cancel that
+  lands while a model is refusing returns that refusal; the content is not
+  sent on. When every
   entry fails, the call's own model's error is reported, so retry and halt
   decisions follow the configured model.
-- Judges, critics, evals, the `models doctor` / `providers test` probes,
+- Judges, critics, evals (including the `edge_contradictions` judge, whose
+  apply mode depends on which model it certified), the `models doctor` /
+  `providers test` probes,
   `decide()`, `think --model` and `auto_think` pin their model and never use
   the chain.
 - A fallback call is billed by the entry's provider; budget caps price each

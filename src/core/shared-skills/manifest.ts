@@ -127,6 +127,22 @@ export function normalizeSkillFiles(name: string, input: unknown): StoredSkillFi
   }
   return files;
 }
+/**
+ * #5150: whether a stored skill declared its tools. Revisions published before
+ * `tools_declared` was recorded are re-read from their SKILL.md; unreadable
+ * frontmatter counts as declared, so the reader fails closed.
+ */
+export function skillToolsDeclared(metadata: Pick<SkillMetadata, 'tools_declared' | 'requirements'>, body: string | null): boolean {
+  if (metadata.tools_declared !== undefined) return metadata.tools_declared;
+  if (body === null || metadata.requirements.some(requirement => requirement.startsWith('tool:'))) return true;
+  const normalized = body.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  if (!/^---[ \t]*\n/.test(normalized)) return false;
+  const match = normalized.match(/^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/);
+  try {
+    const parsed: unknown = match ? safeLoad(match[1], { schema: FAILSAFE_SCHEMA }) : undefined;
+    return !(parsed && typeof parsed === 'object' && !Array.isArray(parsed)) || Object.hasOwn(parsed, 'tools');
+  } catch { return true; }
+}
 export function skillMetadata(name: string, files: StoredSkillFile[], params: Record<string, unknown>): SkillMetadata {
   const body = Buffer.from(files.find(f => f.path === `skills/${name}/SKILL.md`)!.content, 'base64').toString('utf8');
   const normalized = body.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
@@ -154,6 +170,10 @@ export function skillMetadata(name: string, files: StoredSkillFile[], params: Re
     throw opError('invalid_params', 'Frontmatter name must match the skill key.',
       `Set name: ${name} in skills/${name}/SKILL.md's frontmatter (or remove the name key), then resubmit.`);
   }
+  if (!normalized.trim()) {
+    throw opError('invalid_params', 'SKILL.md is empty.',
+      `Write skills/${name}/SKILL.md with frontmatter (name, description) and the instructions, then resubmit.`);
+  }
   const description = params.description ?? (typeof fm.description === 'string' ? fm.description.replace(/\s+/g, ' ').trim() : fm.description) ?? '';
   if (typeof description !== 'string' || description.length > 2048 || /[\x00-\x1f\x7f]/.test(description)) {
     throw opError('invalid_params', 'Invalid skill description.',
@@ -172,8 +192,9 @@ export function skillMetadata(name: string, files: StoredSkillFile[], params: Re
     }
     markers.set(canonical, ['true', 'yes'].includes(value.toLowerCase()));
   }
-  return { description, triggers: stringList(params.triggers ?? fm.triggers, 'triggers'),
-    requirements: stringList([...stringList(params.requirements, 'requirements'), ...stringList(fm.requires, 'requires'), ...stringList(fm.tools, 'tools').map(t => `tool:${t}`)], 'requirements'),
+  const requirements = stringList([...stringList(params.requirements, 'requirements'), ...stringList(fm.requires, 'requires'), ...stringList(fm.tools, 'tools').map(t => `tool:${t}`)], 'requirements');
+  return { description, triggers: stringList(params.triggers ?? fm.triggers, 'triggers'), requirements,
+    tools_declared: Object.hasOwn(fm, 'tools') || requirements.some(requirement => requirement.startsWith('tool:')),
     private: params.private === true || markers.get('private') === true || markers.get('publish') === false || markers.get('mcp_publish') === false,
     audience: files.find(f => f.path === `skills/${name}/SKILL.md`)!.audience,
     writes_pages: markers.get('writes_pages') ?? false, mutating: markers.get('mutating') ?? false,

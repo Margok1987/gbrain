@@ -144,6 +144,12 @@ for (const backend of testBackends()) {
         expect(plain.why).toContain('cycle.lint_fix false');
         expect(plain.why).toContain('about 6.75x');
         expect(plain.why).toContain('mention linker');
+        expect(plain.why).toContain('`setsid`');
+        expect(plain.why).toContain('autopilot.auto_drain.enabled false');
+        expect(plain.why).toContain('at most 90 days');
+        expect(plain.why).toContain('local_process_ingress');
+        expect(plain.why).toContain('exits 0 after a SIGTERM drain (was 143) and 17');
+        expect(plain.why).toContain('gbrain sweep --once --budget-ms 600000');
         expect(plain.why).toContain('not a request for consent');
         expect(plain.fix?.argv).toEqual(['gbrain', 'doctor', '--only', 'behavior_changes', '--json']);
       });

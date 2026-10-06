@@ -460,6 +460,27 @@ without re-reading the pack. Resume it in one of three ways, then run
 
 `gbrain doctor` warns `shared_skills_sources` while a source is parked.
 
+A pack whose adoption could never publish is refused at inventory instead of
+after it: one canonical adoption writes one `SKILL.md` per declared skill plus
+`skillpack.json`, at most 128 files (the persistence bundle bound), so a pack
+declaring 128 or more skills reports `payload_too_large` as an action (not a
+conflict) until it is split across sources or trimmed (#5476). This is separate
+from the per-skill bound of 64 declared files.
+
+### Reviewed changes after inventory
+
+When skill files change after the migration inventory, the inventory stage
+reports a conflict that lists the changed paths and the exact acceptance
+command with a digest of the current files. Review the changes with the user;
+only after they agree run
+`gbrain apply-migrations --migration 0.53.0 --accept-reviewed-inventory <source>=<digest> --yes`.
+A later edit changes the digest, so the old command is refused again. Hashes
+are byte-exact, so a checkout that rewrites line endings (CRLF on Windows)
+counts as a change: pin `*.md text eol=lf` in `.gitattributes` before
+inventorying. An inventory that never completed (for example, the root was
+missing or wrong when it ran) is simply taken again at the corrected root; a
+completed inventory whose root moved still refuses (#5569).
+
 An install whose 0.53.0 migration already shows as wedged (three partial runs
 before parking existed) resumes with
 `gbrain apply-migrations --force-retry 0.53.0`, then

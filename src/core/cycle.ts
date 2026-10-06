@@ -1448,6 +1448,7 @@ async function runPhaseExtractFacts(
     const { runExtractFacts } = await import('./cycle/extract-facts.ts');
     const result = await runExtractFacts(engine, {
       slugs: changedSlugs,
+      drain: {},
       dryRun,
       sourceId,
       brainDir: brainDir ?? undefined,
@@ -2397,7 +2398,7 @@ export async function runCycle(
         });
       } else {
         progress.start('cycle.extract_atoms');
-        const { runPhaseExtractAtoms } = await import('./cycle/extract-atoms.ts');
+        const { runPhaseExtractAtomsStamped: runPhaseExtractAtoms } = await import('./cycle/extract-atoms-stamp.ts');
         const xaSourceId = cycleSourceId ?? 'default';
         // v0.41.2.1 (D9 #5): union sync + synthesize affected slugs so the
         // incremental discovery path doesn't miss pages just-written by the
