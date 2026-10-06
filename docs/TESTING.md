@@ -291,7 +291,9 @@ O-CEO-9) in the Foundations 1 plan; `scripts/scale/gates.ts` and
 `.github/workflows/scale-tier.yml` implement it. This section says how to run it.
 
 How to run it, what it measures, exit codes, the watchdog and the large-brain
-ceilings: [scripts/scale/README.md](../scripts/scale/README.md).
+ceilings: [scripts/scale/README.md](../scripts/scale/README.md). The import-rate
+gate times PGLite by the import process's CPU time and Postgres by wall time;
+the README says why.
 
 ### Authoring gate
 
@@ -855,17 +857,30 @@ of every script, workflow, helper and doc that names a split file is
 #### Layering guard
 
 `scripts/check-layering.ts` (`bun run check:layering`, in `bun run verify`)
-parses every file under `src/core/engine-sql/` and `src/core/schema-migrations/`
-and fails on any import, type-only included, of an engine façade
-(`pglite-engine.ts`, `postgres-engine.ts`, `engine-factory.ts`) from
-engine-sql, or of `src/core/migrate.ts` from schema-migrations. Those
-directories are loaded by the engines and by `migrate.ts`, so an import back
-up is an ESM cycle that can fail with a temporal-dead-zone error at module
-load. Take the executor as a parameter and import types from
-`src/core/engine.ts`; migration helpers live in `schema-migrations/helpers.ts`
-and the `Migration` type in `schema-migrations/types.ts`. Fixtures:
+parses every file under `src/core/engine-sql/`, `src/core/schema-migrations/`
+and `src/core/persistence/` and fails on any import, type-only included, of an
+engine façade (`pglite-engine.ts`, `postgres-engine.ts`, `engine-factory.ts`)
+from engine-sql, of `src/core/migrate.ts` from schema-migrations, or of
+`src/core/ai/gateway.ts` from persistence. The first two directories are loaded
+by the engines and by `migrate.ts`, so an import back up is an ESM cycle that
+can fail with a temporal-dead-zone error at module load. Take the executor as a
+parameter and import types from `src/core/engine.ts`; migration helpers live in
+`schema-migrations/helpers.ts` and the `Migration` type in
+`schema-migrations/types.ts`; persistence embeds via `src/core/embedding.ts`. Fixtures:
 `test/fixtures/guards/check-layering.ts/`; forms are driven in
 `test/scripts/layering.test.ts`.
+
+#### Write-path model guards
+
+`scripts/check-ai-sdk-importers.ts` (in `bun run verify`) fails when a file
+outside `scripts/ai-sdk-importers.allowlist` imports a provider SDK (`ai`,
+`@ai-sdk/*`, `@anthropic-ai/sdk`, `openai`) as a value, so every model call
+goes through `invokeAI`. Each mutating op has a
+write-inference class (`src/core/ops/write-inference.ts`).
+`test/write-path-zero-llm.serial.test.ts` asserts no generative call before
+commit and only attributed facts extraction after it.
+`test/write-path-no-egress.serial.test.ts`: keyless CLI writes open no
+connection. Helper: `test/helpers/ai-tripwire.ts`.
 
 #### Durable-flush guard
 

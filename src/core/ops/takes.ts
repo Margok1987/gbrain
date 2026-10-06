@@ -302,8 +302,9 @@ const think: Operation = {
     const { recordThinkAnswer, feedbackMetaFields } = await import('../feedback/record.ts');
     const feedbackMeta = feedbackMetaFields(await recordThinkAnswer(ctx, 'think', result));
     delete result.feedback_evidence;
+    const { persist: _persist, ...visible } = result;
     return {
-      ...result,
+      ...visible,
       ...feedbackMeta,
       // #1698 (#10): the persist-skip signal returns slug '' — map it (and any
       // falsy) to null so callers never see an empty-string "slug".

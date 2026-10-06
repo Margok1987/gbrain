@@ -44,6 +44,8 @@ export const GRADUATION_INVENTORY: Inventory = {
     carry('conversation_parser_llm_cache', 'operational', 'Paid LLM parse cache; rebuilding spends money.'),
     carry('decide_calibrations', 'user_data', 'System One slot qualifications (paid calibration results).'),
     carry('decide_proposals', 'user_data', 'Supersession proposals and the user\'s decisions on them.'),
+    carry('decide_review_proposals', 'user_data', 'Review-lane proposals (withdraw and duplicate kinds) and the owner\'s decisions on them.'),
+    carry('decide_review_queue', 'operational', 'Durable review-lane work with its retry schedule; dropping it would skip queued withdrawals.'),
     carry('decide_spend', 'operational', 'System One spend log.'),
     carry('decide_state', 'operational', 'System One sweep cursors and slot state.'),
     carry('decide_sweep_deferred', 'operational', 'Deferred System One sweep work with its schedule.'),

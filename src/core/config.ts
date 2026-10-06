@@ -554,6 +554,8 @@ export interface GBrainConfig {
      * over this file slot. Always bounded by the server ceiling (D2).
      */
     default_surface_dcr?: 'verbs' | 'starter' | 'full';
+    /** Tools listed to agents (callable set unchanged; request_tools reaches the rest). Dual-plane, DB > file. */
+    advertised_surface?: 'verbs' | 'starter' | 'full';
     /** Search/query row shape for remote MCP callers: 'lean' (default) | 'full'. Dual-plane, DB > file. */
     result_rows?: 'lean' | 'full';
     /** Stdio `request_tools {surface}` widens the session's tool surface (default true). Dual-plane, DB > file. */
@@ -1495,6 +1497,8 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'dream.synthesize.mode',
   'dream.synthesize.link_manifest',
   'dream.synthesize.quote_verify',
+  'dream.quote_verify',
+  'think.quote_verify',
   'dream.synthesize.inline_concurrency',
   // #4152 triage knobs. The triage model's preferred key is
   // `models.dream.triage` (models.* prefix, registered via the models.dream.*

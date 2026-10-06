@@ -2334,8 +2334,19 @@
       {
         "kind": "interface",
         "members": [
+          "effect?: string | undefined",
+          "job_id?: string | number | undefined",
+          "job_name?: string | undefined",
+          "phase?: string | undefined",
+          "request_id?: string | undefined"
+        ],
+        "name": "AIAttribution"
+      },
+      {
+        "kind": "interface",
+        "members": [
           "cacheWriteTtl?: \"5m\" | \"1h\" | undefined",
-          "kind: \"embedding\" | \"rerank\" | \"chat\" | \"multimodal\" | \"decide\"",
+          "kind: \"embedding\" | \"rerank\" | \"chat\" | \"transcription\" | \"multimodal\" | \"decide\"",
           "maxInputTokens?: number | undefined",
           "maxOutputTokens?: number | undefined",
           "model: string",
@@ -2344,10 +2355,29 @@
         "name": "AIInvocation"
       },
       {
+        "kind": "interface",
+        "members": [
+          "attribution: AIAttribution | null",
+          "call: AIInvocation",
+          "ms: number",
+          "outcome: \"error\" | \"ok\" | \"refused\"",
+          "startedAt: number",
+          "usage: AIInvocationUsage | null"
+        ],
+        "name": "AIInvocationEvent"
+      },
+      {
         "kind": "type",
         "name": "AIInvocationGuard",
         "signature": [
           "(call: AIInvocation) => Promise<AIInvocationPermit>"
+        ]
+      },
+      {
+        "kind": "type",
+        "name": "AIInvocationObserver",
+        "signature": [
+          "(event: AIInvocationEvent) => void"
         ]
       },
       {
@@ -2369,7 +2399,28 @@
       },
       {
         "kind": "function",
+        "name": "aiInvocationObserverFailures",
+        "signature": [
+          "() => number"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "currentAIAttribution",
+        "signature": [
+          "() => AIAttribution | null"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "hasAIInvocationGuard",
+        "signature": [
+          "() => boolean"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "hasAIInvocationObservers",
         "signature": [
           "() => boolean"
         ]
@@ -2390,6 +2441,13 @@
       },
       {
         "kind": "function",
+        "name": "observeAIInvocations",
+        "signature": [
+          "(observer: AIInvocationObserver) => () => void"
+        ]
+      },
+      {
+        "kind": "function",
         "name": "responseInvocationUsage",
         "signature": [
           "(response: Response) => Promise<AIInvocationUsage | null>"
@@ -2400,6 +2458,13 @@
         "name": "sdkInvocationUsage",
         "signature": [
           "(result: unknown) => AIInvocationUsage | null"
+        ]
+      },
+      {
+        "kind": "function",
+        "name": "withAIAttribution",
+        "signature": [
+          "<T>(patch: AIAttribution, fn: () => T) => T"
         ]
       },
       {
@@ -2545,7 +2610,7 @@
           "hooks?: { stop_push_debounce_min?: number | string; } | undefined",
           "integrations?: { memorable?: { enabled?: boolean; }; } | undefined",
           "litellm_api_key?: string | undefined",
-          "mcp?: { instructions?: string; publish_skills?: boolean; publish_advisor?: boolean; skills_dir?: string; strict_params?: \"warn\" | \"reject\"; default_surface_dcr?: \"verbs\" | \"starter\" | \"full\"; result_rows?: \"lean\" | \"full\"; allow_session_widen?: boolean | string; } | undefined",
+          "mcp?: { instructions?: string; publish_skills?: boolean; publish_advisor?: boolean; skills_dir?: string; strict_params?: \"warn\" | \"reject\"; default_surface_dcr?: \"verbs\" | \"starter\" | \"full\"; advertised_surface?: \"verbs\" | \"starter\" | \"full\"; result_rows?: \"lean\" | \"full\"; allow_session_widen?: boolean | string; } | undefined",
           "mcp_surface?: \"verbs\" | \"starter\" | \"full\" | undefined",
           "memory?: { auto_writeback?: string; auto_writeback_transient_ttl?: string; visibility_posture?: string; } | undefined",
           "migrate?: { graduation?: boolean; } | undefined",
@@ -5708,6 +5773,7 @@
           "logger: Logger",
           "remote: boolean",
           "resultRows?: \"full\" | \"lean\" | undefined",
+          "revealTools?: ((names: string[]) => void) | undefined",
           "sessionId?: string | undefined",
           "sourceId: string",
           "stdioSurface?: StdioSurfaceState | undefined",
@@ -7271,6 +7337,7 @@
         "members": [
           "abstained?: ThinkAbstention | undefined",
           "answer: string",
+          "answer_raw?: string | undefined",
           "citations: ParsedCitation[]",
           "cost_usd?: number | undefined",
           "diagnostics: { pagesFromHybrid: number; takesFromKeyword: number; takesFromVector: number; graphHits: number; }",
@@ -7281,12 +7348,15 @@
           "graphHits: number",
           "modelUsed: string",
           "pagesGathered: number",
+          "persist?: { answer: string; unverified_claims: Array<{ text: string; reason: string; detail: string; }>; } | undefined",
           "question: string",
+          "quote_check?: { grounded: number; repaired: number; unverified: number; } | undefined",
           "rounds: number",
           "savedSlug?: string | undefined",
           "synthesisOk?: boolean | undefined",
           "synthesis_status?: ThinkSynthesisStatus | undefined",
           "takesGathered: number",
+          "unverified_quotes?: { text: string; reason: string; }[] | undefined",
           "usage?: { input_tokens: number; output_tokens: number; } | null | undefined",
           "warnings: string[]"
         ],

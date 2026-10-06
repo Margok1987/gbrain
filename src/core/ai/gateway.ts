@@ -71,6 +71,7 @@ import { redactProviderKeys } from './key-redact.ts';
 import { reportEmbeddingAuthFailure } from './key-warnings.ts';
 import { buildGatewayConfig, foldNativeBaseUrlsFromFilePlane } from './build-gateway-config.ts';
 import { invokeAI, sdkInvocationUsage, responseInvocationUsage, hasAIInvocationGuard, isAIInvocationPolicyError } from './invocation-guard.ts';
+import { installAICallLogFromEnv } from './call-log.ts';
 import { createGuardedGeneration, chatInvocation } from './guarded-generation.ts';
 installAiSdkWarningWriter();
 const guardedGeneration = createGuardedGeneration(() => DEFAULT_MAX_OUTPUT_TOKENS);
@@ -471,6 +472,7 @@ export function configureGateway(config: AIGatewayConfig): void {
   // since the last no_key audit row deserves a fresh once-per-process row.
   _noKeyNoticed.clear();
   warnRecipesMissingBatchTokens();
+  installAICallLogFromEnv();
 }
 
 /**

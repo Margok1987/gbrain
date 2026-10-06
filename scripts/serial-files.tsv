@@ -99,6 +99,8 @@ test/decide/judge-agreement-cli.serial.test.ts	R1	R1: mutates process.env (TYPES
 test/decide/quickstart-doc.serial.test.ts	R2	R2: mock.module(../../src/core/interaction.ts) replaces modules for every file in the process
 test/decide/retrieval-search.serial.test.ts	R1	R1: mutates process.env (GBRAIN_HOME)
 test/decide/retrieval-think.serial.test.ts	R1	R1: mutates process.env (GBRAIN_HOME)
+test/decide/review-duplicate-kinds.serial.test.ts	global-state	global-state: replaces the process-wide gateway decide transport (__setDecideTransportForTests) and gateway config
+test/decide/review-withdraw.serial.test.ts	global-state	global-state: replaces the process-wide gateway decide and embed transports (__setDecideTransportForTests, __setEmbedTransportForTests) and gateway config
 test/decide/search-slots.serial.test.ts	R1	R1: mutates process.env (GBRAIN_HOME)
 test/decide/status-no-entity.serial.test.ts	global-state	global-state: patches process stdout/stderr/console
 test/decide/triage-slot.serial.test.ts	global-state	global-state: process-wide test seams __setDecideTransportForTests, __setChatTransportForTests, __resetDecideStoreForTests; configureGateway changes the process-wide AI gateway
@@ -353,5 +355,7 @@ test/v0_37_gap_fill.serial.test.ts	R1	R1: mutates process.env (GBRAIN_HOME, GBRA
 test/worker-lock-renewal-e2e.serial.test.ts	R1	R1: mutates process.env (GBRAIN_AUDIT_DIR)
 test/worker-registry.serial.test.ts	R1	R1: mutates process.env (GBRAIN_HOME)
 test/workspace-push.serial.test.ts	R1	R1: mutates process.env (HOME, GBRAIN_HOME, GBRAIN_GIT_ALLOW_FILE_TRANSPORT, PATH (+1 more))
+test/write-path-no-egress.serial.test.ts	global-state	global-state: binds a local port for the egress-recording server the brain points its providers at
+test/write-path-zero-llm.serial.test.ts	R1	R1: mutates process.env (ANTHROPIC_API_KEY, OPENAI_API_KEY) so gated chat and embedding paths are live
 test/writeback-nudge.serial.test.ts	global-state	global-state: patches process stdout/stderr/console
 test/writeback-review-fixes.serial.test.ts	global-state	global-state: process-wide test seams __resetCheckpointHarvestForTests; patches process stdout/stderr/console

@@ -41,7 +41,7 @@ export const OP_WRITE_INFERENCE: Readonly<Record<string, WriteInference>> = {
   // memory verbs and facts
   remember: 'embedding', forget: 'none', forget_fact: 'none', extract_facts: 'explicit_llm',
   // pages
-  put_page: 'async_derived', capture: 'async_derived', edit_page: 'async_derived',
+  put_page: 'async_derived', put_pages: 'async_derived', capture: 'async_derived', edit_page: 'async_derived',
   revert_version: 'async_derived', delete_page: 'none', restore_page: 'none',
   purge_deleted_pages: 'none', cancel_write_request: 'none',
   put_raw_data: 'none', log_ingest: 'none', file_upload: 'opt_in_media',

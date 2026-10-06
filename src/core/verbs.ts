@@ -96,6 +96,7 @@ const remember: Operation = {
       enum: ['world', 'private'],
       description: 'world (default) or private (local CLI).',
     },
+    replaces: { type: 'string', description: 'fact_id this fact replaces (same entity).', fullSurfaceOnly: true },
   },
   mutating: true,
   scope: 'write',
@@ -149,6 +150,14 @@ const remember: Operation = {
         'Pass when the fact was said or became true, e.g. valid_from: "2026-03-01", or omit it.',
       );
     }
+    const replaces = typeof p.replaces === 'string' ? p.replaces.trim() : typeof p.replaces === 'number' ? String(p.replaces) : undefined;
+    if (replaces !== undefined && (!/^\d+$/.test(replaces) || Number(replaces) <= 0)) {
+      throw verbError(
+        'not_found',
+        `No fact with id "${String(p.replaces)}" to replace.`,
+        'Pass the opaque fact_id from remember or recall (facts[].fact_id), or omit replaces.',
+      );
+    }
     if (ctx.dryRun) {
       parseTtlParam(p.ttl); // Dry runs still validate without admitting intent.
       return {
@@ -161,7 +170,7 @@ const remember: Operation = {
 
     const { submitRememberMutation } = await import('./persistence/memory-mutations.ts');
     const { runMemoryWrite } = await import('./persistence/verb-errors.ts');
-    const result = await runMemoryWrite(() => submitRememberMutation(ctx, { ...p, fact, provenance, kind, visibility }));
+    const result = await runMemoryWrite(() => submitRememberMutation(ctx, { ...p, fact, provenance, kind, visibility, ...(replaces !== undefined ? { replaces } : {}) }));
     // F8: the explanation the CLI formatter prints, as a model-visible notice.
     if ((result as { degraded_dedup?: boolean } | null)?.degraded_dedup) {
       const { degradedDedupNotice } = await import('./interop-notices.ts');
@@ -343,6 +352,7 @@ const synthesize: Operation = {
 
     return {
       answer: result.answer,
+      ...(result.answer_raw !== undefined ? { answer_raw: result.answer_raw, quote_check: result.quote_check, unverified_quotes: result.unverified_quotes } : {}),
       sources: result.citations.map(c => c.page_slug),
       gaps: result.gaps,
       cost,
@@ -368,6 +378,7 @@ const forget: Operation = {
     request_id: WRITE_REQUEST_PARAM,
     id: { type: 'string', required: true, description: 'fact_id from remember or recall.' },
     reason: { type: 'string', description: 'Audit note (default "forgotten").' },
+    semantic_review: { type: 'boolean', description: 'false: skip overnight rewording review.', fullSurfaceOnly: true },
   },
   mutating: true,
   scope: 'write',
@@ -528,6 +539,8 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
       warnings: { type: 'array', items: { type: 'string', enum: ['NO_ENTITY', 'ENTITY_LINK_FAILED'] },
         description: 'NO_ENTITY: saved unattributed. ENTITY_LINK_FAILED: an inferred entity could not be linked; saved unattributed.' },
       hint: { type: 'string', description: 'Present with warnings: how to attribute the fact (pass `entity`).' },
+      superseded_fact_id: { type: 'string', description: 'Present on status=superseded: the fact this one replaced.' },
+      replaced_by_caller: { type: 'boolean', description: 'Present (true) when the caller named the replaced fact with `replaces`.' },
       write_request: WRITE_RECEIPT_SCHEMA,
     },
   },
@@ -637,7 +650,10 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
     required: ['answer', 'sources', 'cost', 'protocol_version'],
     properties: {
       protocol_version: { type: 'integer', const: MEMORY_VERBS_VERSION },
-      answer: { type: 'string' },
+      answer: { type: 'string', description: 'Quoted words not found in the evidence are unquoted and marked [unverified]; never present them as quotes.' },
+      answer_raw: { type: 'string', description: 'With think.quote_verify on and quotes in the answer: the answer as the model wrote it.' },
+      quote_check: { type: 'object', properties: { grounded: { type: 'integer' }, repaired: { type: 'integer' }, unverified: { type: 'integer' } } },
+      unverified_quotes: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, reason: { type: 'string' } } } },
       sources: { type: 'array', items: { type: 'string' } },
       gaps: { type: 'array', items: { type: 'string' } },
       cost: {
@@ -673,6 +689,16 @@ export const RESPONSE_SCHEMAS: Record<VerbName, Record<string, unknown>> = {
       expired: { type: 'boolean', description: 'true = this call expired the fact; false = it was ALREADY expired (idempotent re-forget).' },
       reason: { type: ['string', 'null'] },
       write_request: WRITE_RECEIPT_SCHEMA,
+      similar_active: {
+        type: 'object',
+        description: 'Active facts about the same entity close in meaning to the withdrawn claim (ids and scores only; zero model calls). Similarity is not sameness: ask the user before forgetting any of them.',
+        properties: {
+          state: { type: 'string', enum: ['checked', 'not_checked_no_embedding', 'not_checked_pending'] },
+          candidates: { type: 'array', items: { type: 'object', properties: { fact_id: { type: 'string' }, similarity: { type: 'number' } } } },
+          semantic_review: { type: 'string', enum: ['scheduled', 'off', 'unavailable', 'opted_out'] },
+          next: { type: 'string' },
+        },
+      },
     },
   },
   // v0.45.7 (issue #1) — ambient recall. World-only by default; include_private

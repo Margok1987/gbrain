@@ -476,11 +476,16 @@
         "withBudgetTracker"
       ],
       "./ai/invocation-guard": [
+        "aiInvocationObserverFailures",
+        "currentAIAttribution",
         "hasAIInvocationGuard",
+        "hasAIInvocationObservers",
         "invokeAI",
         "isAIInvocationPolicyError",
+        "observeAIInvocations",
         "responseInvocationUsage",
         "sdkInvocationUsage",
+        "withAIAttribution",
         "withAIInvocationGuard",
         "withAIInvocationPreflight"
       ],

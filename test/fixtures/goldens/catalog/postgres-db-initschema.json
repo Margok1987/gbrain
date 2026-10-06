@@ -29,6 +29,9 @@
       "decide_calibrations.decide_calibrations_pkey": "p PRIMARY KEY (id)",
       "decide_proposals.decide_proposals_pkey": "p PRIMARY KEY (id)",
       "decide_proposals.decide_proposals_sweep_id_pair_index_key": "u UNIQUE (sweep_id, pair_index)",
+      "decide_review_proposals.decide_review_proposals_kind_source_id_a_ref_b_ref_subject_key": "u UNIQUE (kind, source_id, a_ref, b_ref, subject)",
+      "decide_review_proposals.decide_review_proposals_pkey": "p PRIMARY KEY (id)",
+      "decide_review_queue.decide_review_queue_pkey": "p PRIMARY KEY (kind, source_id, a_ref, b_ref)",
       "decide_spend.decide_spend_pkey": "p PRIMARY KEY (request_id)",
       "decide_state.decide_state_pkey": "p PRIMARY KEY (key)",
       "decide_sweep_deferred.decide_sweep_deferred_pkey": "p PRIMARY KEY (slot, source_id, fact_id)",
@@ -341,6 +344,12 @@
       "decide_proposals": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
+      "decide_review_proposals": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "decide_review_queue": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
       "decide_spend": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ],
@@ -613,6 +622,10 @@
       "decide_proposals_pkey": "CREATE UNIQUE INDEX decide_proposals_pkey ON public.decide_proposals USING btree (id)",
       "decide_proposals_status_created_idx": "CREATE INDEX decide_proposals_status_created_idx ON public.decide_proposals USING btree (status, created_at)",
       "decide_proposals_sweep_id_pair_index_key": "CREATE UNIQUE INDEX decide_proposals_sweep_id_pair_index_key ON public.decide_proposals USING btree (sweep_id, pair_index)",
+      "decide_review_proposals_kind_source_id_a_ref_b_ref_subject_key": "CREATE UNIQUE INDEX decide_review_proposals_kind_source_id_a_ref_b_ref_subject_key ON public.decide_review_proposals USING btree (kind, source_id, a_ref, b_ref, subject)",
+      "decide_review_proposals_pkey": "CREATE UNIQUE INDEX decide_review_proposals_pkey ON public.decide_review_proposals USING btree (id)",
+      "decide_review_proposals_status_idx": "CREATE INDEX decide_review_proposals_status_idx ON public.decide_review_proposals USING btree (status, created_at)",
+      "decide_review_queue_pkey": "CREATE UNIQUE INDEX decide_review_queue_pkey ON public.decide_review_queue USING btree (kind, source_id, a_ref, b_ref)",
       "decide_spend_created_idx": "CREATE INDEX decide_spend_created_idx ON public.decide_spend USING btree (created_at)",
       "decide_spend_pkey": "CREATE UNIQUE INDEX decide_spend_pkey ON public.decide_spend USING btree (request_id)",
       "decide_state_pkey": "CREATE UNIQUE INDEX decide_state_pkey ON public.decide_state USING btree (key)",
@@ -861,6 +874,7 @@
       "context_volunteer_events_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=context_volunteer_events.id",
       "decide_calibrations_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=decide_calibrations.id",
       "decide_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=decide_proposals.id",
+      "decide_review_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=decide_review_proposals.id",
       "decision_receipts_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=decision_receipts.id",
       "eval_candidates_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=eval_candidates.id",
       "eval_capture_failures_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=eval_capture_failures.id",
@@ -1109,6 +1123,41 @@
           "14 decided_at timestamp with time zone/timestamptz NULL",
           "15 before_state text/text NULL",
           "16 after_state text/text NULL"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
+      },
+      "decide_review_proposals": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('decide_review_proposals_id_seq'::regclass)",
+          "2 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "3 kind text/text NOT NULL",
+          "4 source_id text/text NOT NULL",
+          "5 sweep_id text/text NOT NULL",
+          "6 a_ref text/text NOT NULL",
+          "7 b_ref text/text NOT NULL",
+          "8 subject text/text NOT NULL DEFAULT '*'::text",
+          "9 visibility text/text NULL",
+          "10 p_action real/float4 NOT NULL",
+          "11 threshold real/float4 NULL",
+          "12 model_resolved text/text NULL",
+          "13 question_version text/text NULL",
+          "14 status text/text NOT NULL DEFAULT 'pending'::text",
+          "15 decided_at timestamp with time zone/timestamptz NULL",
+          "16 receipt text/text NULL"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
+      },
+      "decide_review_queue": {
+        "columns": [
+          "1 kind text/text NOT NULL",
+          "2 source_id text/text NOT NULL",
+          "3 a_ref text/text NOT NULL",
+          "4 b_ref text/text NOT NULL DEFAULT '*'::text",
+          "5 evidence text/text NULL",
+          "6 reason text/text NOT NULL DEFAULT 'queued'::text",
+          "7 attempts integer/int4 NOT NULL DEFAULT 0",
+          "8 next_attempt_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()",
+          "9 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       },

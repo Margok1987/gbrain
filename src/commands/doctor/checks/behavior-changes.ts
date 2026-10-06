@@ -1,6 +1,8 @@
 /**
  * `behavior_changes` doctor check: the one-time `behavior_changes` safety
- * notice, readable again (src/core/behavior-change-notice.ts). Read-only: it
+ * notice, readable again (src/core/behavior-change-notice.ts): every change
+ * newer than the brain's baseline, whatever the notice already showed,
+ * labeled with the release that introduced it. Read-only: it
  * neither records the brain's baseline nor writes a shown marker, so the
  * notice itself is still delivered once per channel. Always `ok`: the changes
  * are on by design and the fix is the optional chain-removal guidance.
@@ -12,7 +14,7 @@ import {
   behaviorBrainKey,
   behaviorChangesNotice,
   behaviorNoticeShown,
-  brainPredatesRelease,
+  brainBaseline,
   chainDisclosure,
   currentBrainId,
 } from '../../../core/behavior-change-notice.ts';
@@ -26,13 +28,14 @@ export async function checkBehaviorChanges(engine: BrainEngine | null, opts: { c
     let cfg = opts.cfg;
     if (cfg === undefined) { try { cfg = loadConfig(); } catch { cfg = null; } }
     const brainKey = opts.brainKey ?? behaviorBrainKey(cfg, await currentBrainId());
-    if (!(await brainPredatesRelease(engine, brainKey, { persist: false }))) {
-      return { name: 'behavior_changes', status: 'ok', message: `Nothing to disclose: this brain is a fresh install at v${BEHAVIOR_NOTICE_SINCE} or later, so the one-time behavior-change notice does not apply.` };
+    const baseline = await brainBaseline(engine, brainKey, { persist: false });
+    const notice = behaviorChangesNotice(await chainDisclosure(engine, cfg), { after: baseline });
+    if (!notice) {
+      return { name: 'behavior_changes', status: 'ok', message: `Nothing to disclose: this brain is a fresh install at v${baseline}, after every disclosed behavior change, so the one-time behavior-change notice does not apply.` };
     }
-    const notice = behaviorChangesNotice(await chainDisclosure(engine, cfg));
     return {
       name: 'behavior_changes', status: 'ok', message: notice.why, ...(notice.fix ? { fix: notice.fix } : {}),
-      details: { since: BEHAVIOR_NOTICE_SINCE, shown: { cli: behaviorNoticeShown(brainKey, 'cli'), stdio: behaviorNoticeShown(brainKey, 'stdio') } },
+      details: { since: BEHAVIOR_NOTICE_SINCE, baseline, shown: { cli: behaviorNoticeShown(brainKey, 'cli'), stdio: behaviorNoticeShown(brainKey, 'stdio') } },
     };
   } catch (e) {
     return checkError('behavior_changes', 'read the behavior-change disclosure', e);

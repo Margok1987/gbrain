@@ -162,6 +162,9 @@ CHECKS=(
   # EO10 (refactor wave 1): engine-sql/ and schema-migrations/ never import
   # back up into the engine façades or migrate.ts (ESM TDZ cycles).
   "check:layering"
+  # P8: provider SDKs are imported only by allowlisted modules, so every model
+  # call stays observable through invokeAI (write-inference guard, call log).
+  "check:ai-sdk-importers"
   # #5595/#5475: no fsync of a read-only descriptor outside src/core/fs-durable.ts
   # (Windows refuses it with EPERM).
   "check:durable-flush"

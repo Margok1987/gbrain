@@ -899,7 +899,7 @@ export async function runForget(engine: BrainEngine | (() => Promise<BrainEngine
     const delegated = await maybeDelegateLocalOperation('forget', params, cfg, {
       brain: cli.brain, source, timeoutMs: cli.timeoutMs ?? undefined,
     });
-    let result: { id: string; expired: boolean };
+    let result: { id: string; expired: boolean; similar_active?: { candidates?: Array<{ fact_id: string; similarity: number }>; next?: string } };
     if (delegated.handled) result = delegated.result as typeof result;
     else {
       const connected = typeof engine === 'function' ? await engine() : engine;
@@ -909,7 +909,17 @@ export async function runForget(engine: BrainEngine | (() => Promise<BrainEngine
         dryRun: false, sourceId, logger: { info: console.log, warn: console.warn, error: console.error } }, params) as typeof result;
     }
     if (json) console.log(JSON.stringify(result, null, 2));
-    else process.stdout.write(result.expired ? `Forgot fact id=${id}\n` : `Fact id=${id} was already withdrawn\n`);
+    else {
+      process.stdout.write(result.expired ? `Forgot fact id=${id}\n` : `Fact id=${id} was already withdrawn\n`);
+      const similar = result.similar_active;
+      if (similar?.candidates?.length) {
+        process.stdout.write(`Close matches still active: ${similar.candidates.map(c => `#${c.fact_id} (${c.similarity})`).join(', ')}\n`);
+      }
+      if (similar?.next) {
+        const { agentBlock } = await import('../core/agent-markers.ts');
+        process.stderr.write(agentBlock({ next: similar.next }));
+      }
+    }
   } catch (error) {
     if (await reportPersistenceCliError(error, json)) return;
     throw error;

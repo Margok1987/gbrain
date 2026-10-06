@@ -485,7 +485,10 @@ in-word dots, so "C++", "C#", ".NET" and "Node.js" stay distinct from
 end of the claim follows it. Rows recorded before v174 keep their exact fingerprint and keep
 matching; v174 adds a folded row wherever a fact row still holds the claim text
 and expires active facts that became matching. A paraphrase with different
-words is a different claim.
+words is a different claim to the ledger: `forget` returns its close
+rewordings as `similar_active` for the agent to confirm with the user, and
+the optional overnight withdrawal review proposes the ones it judges to
+restate the claim for the owner to accept (`gbrain decide proposals list`).
 
 Already queued source-wide effects are converted using the same bounded exact
 discovery and retain their individual progress cursors. An over-capacity or

@@ -2592,6 +2592,49 @@ DO \$rls\$ BEGIN
     ALTER TABLE decide_sweep_deferred ENABLE ROW LEVEL SECURITY;
   END IF;
 END \$rls\$;
+
+CREATE TABLE IF NOT EXISTS decide_review_queue (
+  kind            TEXT NOT NULL,
+  source_id       TEXT NOT NULL,
+  a_ref           TEXT NOT NULL,
+  b_ref           TEXT NOT NULL DEFAULT '*',
+  evidence        TEXT,
+  reason          TEXT NOT NULL DEFAULT 'queued',
+  attempts        INTEGER NOT NULL DEFAULT 0,
+  next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (kind, source_id, a_ref, b_ref)
+);
+CREATE TABLE IF NOT EXISTS decide_review_proposals (
+  id               BIGSERIAL PRIMARY KEY,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  kind             TEXT NOT NULL,
+  source_id        TEXT NOT NULL,
+  sweep_id         TEXT NOT NULL,
+  a_ref            TEXT NOT NULL,
+  b_ref            TEXT NOT NULL,
+  subject          TEXT NOT NULL DEFAULT '*',
+  visibility       TEXT,
+  p_action         REAL NOT NULL,
+  threshold        REAL,
+  model_resolved   TEXT,
+  question_version TEXT,
+  status           TEXT NOT NULL DEFAULT 'pending',
+  decided_at       TIMESTAMPTZ,
+  receipt          TEXT,
+  UNIQUE (kind, source_id, a_ref, b_ref, subject)
+);
+CREATE INDEX IF NOT EXISTS decide_review_proposals_status_idx ON decide_review_proposals (status, created_at);
+DO \$rls\$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    ALTER TABLE decide_review_queue ENABLE ROW LEVEL SECURITY;
+  END IF;
+END \$rls\$;
+DO \$rls\$ BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles r WHERE pg_has_role(current_user, r.oid, 'USAGE') AND (r.rolbypassrls OR r.rolsuper)) THEN
+    ALTER TABLE decide_review_proposals ENABLE ROW LEVEL SECURITY;
+  END IF;
+END \$rls\$;
 -- END GENERATED from src/core/ai/decide/schema.ts (DECIDE_SCHEMA_SQL)
 
 -- gbrain facts relink attempts and journal (#5836).

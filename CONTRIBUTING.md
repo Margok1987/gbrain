@@ -368,8 +368,18 @@ and it automatically appears in the CLI, MCP server, and tools-json:
    domain needs no façade change; a brand-new domain module gets one spread line
    in `operations.ts`. Shared contract types live in `src/core/ops/contract.ts`,
    the security/scope fences in `src/core/ops/context.ts`.
-2. Add tests
-3. That's it. The CLI, MCP server, and tools-json are generated from operations.
+2. If the operation writes (`mutating: true`), set `writeInference` on it: `'none'`
+   (no model call before commit), `'embedding'` (may embed before commit, never a
+   generative model), `'async_derived'` (generative work only after commit, e.g. a
+   queued extraction job), `'opt_in_media'` (generative preprocessing before commit
+   only behind a user opt-in), `'explicit_llm'` (the op is itself a model call) or
+   `'non_content'` (administrative state). Unset resolves to `'none'`, the strictest
+   promise. For a `'none'`, `'embedding'` or `'async_derived'` op, add a runtime case to
+   `test/write-path-zero-llm.serial.test.ts` (and its `COVERED` set): the test fails if
+   that write calls a generative model before commit, and only lists ops without a case.
+   Types and the existing classification: `src/core/ops/write-inference.ts`.
+3. Add tests
+4. That's it. The CLI, MCP server, and tools-json are generated from operations.
 
 For CLI-only commands (init, upgrade, import, export, files, embed, doctor, sync):
 1. Put the implementation in `src/commands/mycommand.ts`.

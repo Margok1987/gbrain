@@ -277,6 +277,25 @@ near-duplicates may insert; dedup and supersession ride embedding similarity).
   supersedes the old ("X at acme-example" → "X left acme-example").
 - Omitted optional inputs echo as `null`, never absent.
 
+#### remember replaces (additive)
+
+`replaces` (string): the `fact_id` of the fact this new fact replaces. It is a
+caller-directed replacement: it says the old fact is no longer the current one,
+not that the two texts mean the same. Zero model calls; the cosine rule does
+not apply. The target must be an active fact in the same source, with the same
+visibility (world only for remote callers, else `not_found`) and the same
+entity, on the same entity page. Refusals come back as `invalid_params` with a
+code prefix and a `suggestion`: `target_withdrawn` (forgotten facts are not
+replaceable; remember without `replaces`), `target_superseded` (names the fact
+that replaced it), `target_expired`, `replaces_entity_mismatch`,
+`replaces_cross_page` (forget the old fact, then remember), and
+`replaces_duplicate` (another active fact already states the new claim). New
+text equal to the target is `status: duplicate` and changes nothing. On success
+`status` is `superseded`, `superseded_fact_id` names the replaced fact and
+`replaced_by_caller` is `true`; the replaced fact is expired with
+`superseded_by` and its `## Facts` row is struck with `superseded by #N` in
+the same publication. Every `superseded` response carries `superseded_fact_id`.
+
 #### remember entity attribution fields (additive)
 
 Optional response fields; clients must ignore any they do not know.
@@ -380,6 +399,22 @@ output_tokens, usd_estimate}, protocol_version }`.
 - No LLM configured ⇒ the protocol error `unavailable` with a fix — never a
   fake answer.
 
+#### synthesize quote check (additive)
+
+Unless the brain owner turns it off (`think.quote_verify false`; on by default),
+every quoted span in a synthesized `answer` is grounded against the evidence
+the answer was composed from (the same page excerpts, takes and graph lines,
+no refetch). An exact match stays; a normalized or near match is replaced with
+the evidence's own words; a quote found in no evidence loses its quotation
+marks and gains `[unverified]`, and the response warns `QUOTE_NOT_IN_EVIDENCE`.
+When the answer contained quotes, the response adds `answer_raw` (as written),
+`quote_check: { grounded, repaired, unverified }` and `unverified_quotes:
+[{ text, reason }]`. Present `answer`, not `answer_raw`, to the user.
+The check is measured not to over-flag: in its held-out run 1.6% of supported
+quotes were wrongly marked (95% upper bound 3.6%). How often it catches a
+made-up quote has not been measured yet, so a quote it leaves in place is
+grounded text it found, not a guarantee against fabrication.
+
 #### synthesize compose status (additive)
 
 Every response additionally carries four ADDITIVE-FOREVER fields (optional;
@@ -429,6 +464,23 @@ already-expired fact returns `expired: false` (success); unknown id ⇒
 `not_found`. Facts are expired with an audit trail, never deleted.
 
 Response: `{ id, expired, reason, protocol_version }`.
+
+#### forget similar_active and semantic_review (additive)
+
+`semantic_review` (boolean, default `true`): `false` keeps this claim out of
+the overnight rewording review, so its text is never sent to a decision
+provider for comparison.
+
+The response carries `similar_active`: `{ state, candidates, semantic_review,
+next }`. `state` is `checked`, `not_checked_no_embedding` or
+`not_checked_pending`. `candidates` lists up to five other active facts about
+the same entity, with the same visibility (world only for remote callers),
+whose embedding is at cosine 0.80 or higher to the withdrawn claim, as
+`{ fact_id, similarity }` (no stored text; zero model calls). `semantic_review`
+is `scheduled`, `off`, `unavailable` or `opted_out`; `next` tells the agent
+what to do. Similarity is not sameness: show the candidates to the user and
+forget one only when the user confirms it restates the withdrawn claim. An
+empty list means no close match was found, not that every rewording is gone.
 
 #### Durable write receipts (additive)
 

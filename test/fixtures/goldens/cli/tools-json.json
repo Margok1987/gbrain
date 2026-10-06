@@ -2,8 +2,8 @@
   "golden": {
     "exitCode": 0,
     "stderr": "",
-    "stdoutBytes": 209923,
-    "stdoutSha256": "2408faacf21919b46b1ffaccbe328fb42483d4b6c72d75f495c893e6af2a5a6b",
+    "stdoutBytes": 210255,
+    "stdoutSha256": "7f7b92a191673f77ea013ad2fc77d8bb291ebd5029ec21391ca02f869de1d5da",
     "toolNames": [
       "remember",
       "entity",
@@ -185,6 +185,7 @@
           "infer_entity": "boolean?",
           "kind": "string?",
           "provenance": "string",
+          "replaces": "string?",
           "request_id": "string?",
           "source_id": "string?",
           "ttl": "string?",
@@ -227,6 +228,10 @@
             },
             "provenance": {
               "description": "Where the fact came from (max 500 chars).",
+              "type": "string"
+            },
+            "replaces": {
+              "description": "fact_id this fact replaces (same entity).",
               "type": "string"
             },
             "request_id": {
@@ -329,7 +334,8 @@
         "parameters": {
           "id": "string",
           "reason": "string?",
-          "request_id": "string?"
+          "request_id": "string?",
+          "semantic_review": "boolean?"
         },
         "required_scopes": [],
         "schema": {
@@ -345,6 +351,10 @@
             "request_id": {
               "description": "UUID; retry with it on timeout.",
               "type": "string"
+            },
+            "semantic_review": {
+              "description": "false: skip overnight rewording review.",
+              "type": "boolean"
             }
           },
           "required": [
