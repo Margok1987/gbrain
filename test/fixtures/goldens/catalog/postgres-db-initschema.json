@@ -282,7 +282,13 @@
       "think_ab_results.think_ab_results_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE",
       "timeline_entries.timeline_entries_event_page_id_fkey": "f FOREIGN KEY (event_page_id) REFERENCES pages(id) ON DELETE CASCADE",
       "timeline_entries.timeline_entries_page_id_fkey": "f FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE",
-      "timeline_entries.timeline_entries_pkey": "p PRIMARY KEY (id)"
+      "timeline_entries.timeline_entries_pkey": "p PRIMARY KEY (id)",
+      "wanted_links.wanted_links_origin_page_id_fkey": "f FOREIGN KEY (origin_page_id) REFERENCES pages(id) ON DELETE CASCADE",
+      "wanted_links.wanted_links_pkey": "p PRIMARY KEY (id)",
+      "wanted_links.wanted_links_producer_check": "c CHECK ((producer = ANY (ARRAY['body'::text, 'frontmatter'::text])))",
+      "wanted_links.wanted_links_ref_kind_check": "c CHECK ((ref_kind = ANY (ARRAY['slug'::text, 'name'::text])))",
+      "wanted_links.wanted_links_reference_unique": "u UNIQUE (origin_page_id, producer, ref_kind, target_source_id, target_ref)",
+      "wanted_links.wanted_links_source_id_fkey": "f FOREIGN KEY (source_id) REFERENCES sources(id) ON DELETE CASCADE"
     },
     "extensions": [
       "pg_trgm",
@@ -596,6 +602,9 @@
       ],
       "timeline_entries": [
         "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
+      ],
+      "wanted_links": [
+        "<current_role> -> <current_role> WITH GRANT OPTION: DELETE,INSERT,REFERENCES,SELECT,TRIGGER,TRUNCATE,UPDATE"
       ]
     },
     "indexes": {
@@ -717,6 +726,7 @@
       "idx_oauth_tokens_expiry": "CREATE INDEX idx_oauth_tokens_expiry ON public.oauth_tokens USING btree (expires_at)",
       "idx_pages_frontmatter": "CREATE INDEX idx_pages_frontmatter ON public.pages USING gin (frontmatter)",
       "idx_pages_search": "CREATE INDEX idx_pages_search ON public.pages USING gin (search_vector)",
+      "idx_pages_slug_basename": "CREATE INDEX idx_pages_slug_basename ON public.pages USING btree (source_id, regexp_replace(slug, '^.*/'::text, ''::text))",
       "idx_pages_source_id": "CREATE INDEX idx_pages_source_id ON public.pages USING btree (source_id)",
       "idx_pages_trgm": "CREATE INDEX idx_pages_trgm ON public.pages USING gin (title gin_trgm_ops)",
       "idx_pages_type": "CREATE INDEX idx_pages_type ON public.pages USING btree (type)",
@@ -867,7 +877,11 @@
       "timeline_entries_pkey": "CREATE UNIQUE INDEX timeline_entries_pkey ON public.timeline_entries USING btree (id)",
       "uniq_minion_attachments_job_filename": "CREATE UNIQUE INDEX uniq_minion_attachments_job_filename ON public.minion_attachments USING btree (job_id, filename)",
       "uniq_minion_jobs_idempotency": "CREATE UNIQUE INDEX uniq_minion_jobs_idempotency ON public.minion_jobs USING btree (idempotency_key) WHERE (idempotency_key IS NOT NULL)",
-      "uniq_subagent_messages_idx": "CREATE UNIQUE INDEX uniq_subagent_messages_idx ON public.subagent_messages USING btree (job_id, message_idx)"
+      "uniq_subagent_messages_idx": "CREATE UNIQUE INDEX uniq_subagent_messages_idx ON public.subagent_messages USING btree (job_id, message_idx)",
+      "wanted_links_pkey": "CREATE UNIQUE INDEX wanted_links_pkey ON public.wanted_links USING btree (id)",
+      "wanted_links_reference_unique": "CREATE UNIQUE INDEX wanted_links_reference_unique ON public.wanted_links USING btree (origin_page_id, producer, ref_kind, target_source_id, target_ref)",
+      "wanted_links_source_idx": "CREATE INDEX wanted_links_source_idx ON public.wanted_links USING btree (source_id)",
+      "wanted_links_target_idx": "CREATE INDEX wanted_links_target_idx ON public.wanted_links USING btree (target_source_id, target_ref)"
     },
     "policies": {},
     "sequences": {
@@ -915,7 +929,8 @@
       "take_nudge_log_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=take_nudge_log.id",
       "take_proposals_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=take_proposals.id",
       "think_ab_results_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=think_ab_results.id",
-      "timeline_entries_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=timeline_entries.id"
+      "timeline_entries_id_seq": "integer start=1 min=1 max=2147483647 increment=1 cycle=false cache=1 owned_by=timeline_entries.id",
+      "wanted_links_id_seq": "bigint start=1 min=1 max=9223372036854775807 increment=1 cycle=false cache=1 owned_by=wanted_links.id"
     },
     "tables": {
       "access_tokens": {
@@ -2463,6 +2478,22 @@
           "6 detail text/text NOT NULL DEFAULT ''::text",
           "7 event_page_id integer/int4 NULL",
           "8 created_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
+        ],
+        "flags": "relkind=r rls=true force_rls=false"
+      },
+      "wanted_links": {
+        "columns": [
+          "1 id bigint/int8 NOT NULL DEFAULT nextval('wanted_links_id_seq'::regclass)",
+          "2 origin_page_id integer/int4 NOT NULL",
+          "3 source_id text/text NOT NULL",
+          "4 producer text/text NOT NULL",
+          "5 ref_kind text/text NOT NULL",
+          "6 target_source_id text/text NOT NULL",
+          "7 target_ref text/text NOT NULL",
+          "8 link_type text/text NOT NULL DEFAULT ''::text",
+          "9 context text/text NOT NULL DEFAULT ''::text",
+          "10 checked_at timestamp with time zone/timestamptz NOT NULL",
+          "11 first_seen_at timestamp with time zone/timestamptz NOT NULL DEFAULT now()"
         ],
         "flags": "relkind=r rls=true force_rls=false"
       }

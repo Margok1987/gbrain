@@ -34,6 +34,7 @@ import type { BrainEngine } from '../core/engine.ts';
 import { loadActivePack } from '../core/schema-pack/load-active.ts';
 import { loadActivePackForLocalEngine } from '../core/schema-pack/best-effort.ts';
 import { safeCliToken, sanitizeTypeForDisplay, storedTypeMissesPack, type TypeUsagePack } from '../core/schema-pack/type-usage.ts';
+import { parseLineGrammar } from '../core/line-grammar.ts';
 import { pathToSlug } from '../core/sync.ts';
 import { isManagedBrain } from '../core/cycle/phase-table.ts';
 import { maintenancePreflight, publishMaintenancePage, type MaintenanceAuthority } from '../core/persistence/prepared-maintenance.ts';
@@ -143,6 +144,12 @@ export function lintContent(content: string, filePath: string, opts: LintContent
       message: err.message,
       fixable: FRONTMATTER_FIXABLE.has(err.code),
     });
+  }
+
+  // Rule: line-grammar near-misses (a relation or fact line that will not be
+  // read as written). Read-only; the fix is in each message.
+  for (const d of parseLineGrammar(content).diagnostics) {
+    issues.push({ file: filePath, line: d.line, rule: 'line-grammar', message: `${d.message} (${d.reason})`, fixable: false });
   }
 
   // Rule: LLM preamble artifacts

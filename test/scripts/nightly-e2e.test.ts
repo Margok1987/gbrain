@@ -233,6 +233,12 @@ describe('full E2E shard classification (#6040)', () => {
 
   test('the CLI reads this attempt\'s shard jobs and annotations, writes state and the summary', async () => {
     const root = mkdtempSync(join(tmpdir(), 'gbrain-classify-shards-'));
+    // main() prints a workflow command (::error/::warning/::notice). Printed to
+    // this job's log, GitHub would turn it into a real annotation on the test
+    // run, so it is captured and asserted here instead.
+    const printed: string[] = [];
+    const origLog = console.log;
+    console.log = (...args: unknown[]) => { printed.push(args.map(String).join(' ')); };
     try {
       const calls: string[] = [];
       const client = {
@@ -254,6 +260,7 @@ describe('full E2E shard classification (#6040)', () => {
       expect(readFileSync(env2.GITHUB_OUTPUT, 'utf8')).toBe('');
       expect(await classifyMain({ ...env, FULL_E2E_RESULT: 'success', GITHUB_OUTPUT: join(root, 'out3') }, failing)).toBe(0);
       expect(readFileSync(join(root, 'out3'), 'utf8')).toBe('state=complete\n');
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      expect(printed.map(line => line.slice(0, line.indexOf(' title=')))).toEqual(['::warning', '::error', '::notice']);
+    } finally { console.log = origLog; rmSync(root, { recursive: true, force: true }); }
   });
 });

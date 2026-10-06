@@ -426,7 +426,7 @@ export const PGLITE_RULES: readonly Rule[] = [
 
 /** DO blocks outside fragment regions are opaque, so each is classified by content hash. */
 export const PGLITE_DO_BLOCKS: Readonly<Record<string, { keep: boolean; reason: string }>> = {
-  d4724194ea02: { keep: false, reason: 'schema.sql RLS enablement block: PGLite has no role system (the shared-skills fragment keeps its own block)' },
+  '28b8b384fc62': { keep: false, reason: 'schema.sql RLS enablement block: PGLite has no role system (the shared-skills fragment keeps its own block)' },
 };
 
 interface Addition {

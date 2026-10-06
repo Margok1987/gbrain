@@ -145,6 +145,8 @@ const SWEEP: Record<string, Row> = {
   advisor: { skip: 'aggregate advisory over the installed skill stack; advisor suites own it' },
   get_ingest_log: { args: { limit: 50 } },
   find_orphans: { args: {} },
+  // Targets and origin slugs only; the fixture has no unresolved links (behavior: test/wanted-links.test.ts).
+  wanted_pages: { args: {}, content: false },
   get_calibration_profile: { args: {}, content: false },
   takes_list: { args: { limit: 50 } },
   takes_search: { args: { query: 'PLANTMARK', limit: 20 } },

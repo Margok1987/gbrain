@@ -265,6 +265,7 @@ CREATE TRIGGER bump_page_generation_clock_trg
 CREATE INDEX IF NOT EXISTS idx_pages_type ON pages(type);
 CREATE INDEX IF NOT EXISTS idx_pages_frontmatter ON pages USING GIN(frontmatter);
 CREATE INDEX IF NOT EXISTS idx_pages_trgm ON pages USING GIN(title gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_pages_slug_basename ON pages (source_id, (regexp_replace(slug, '^.*/', '')));
 -- v0.13.1 #170: avoids 14.6s seqscan on large brains when listing pages newest-first.
 CREATE INDEX IF NOT EXISTS idx_pages_updated_at_desc ON pages (updated_at DESC);
 -- v0.18.0: source-scoped scans (per /plan-eng-review Section 4).
@@ -516,6 +517,27 @@ CREATE INDEX IF NOT EXISTS idx_links_from ON links(from_page_id);
 CREATE INDEX IF NOT EXISTS idx_links_to ON links(to_page_id);
 CREATE INDEX IF NOT EXISTS idx_links_source ON links(link_source);
 CREATE INDEX IF NOT EXISTS idx_links_origin ON links(origin_page_id);
+
+-- Wanted pages (migration wanted_links): authored links whose target page does
+-- not exist. A live target updated after checked_at makes the origin stale for
+-- link extraction (src/core/wanted-links.ts).
+CREATE TABLE IF NOT EXISTS wanted_links (
+  id               BIGSERIAL PRIMARY KEY,
+  origin_page_id   INTEGER NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
+  source_id        TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE,
+  producer         TEXT NOT NULL CHECK (producer IN ('body','frontmatter')),
+  ref_kind         TEXT NOT NULL CHECK (ref_kind IN ('slug','name')),
+  target_source_id TEXT NOT NULL,
+  target_ref       TEXT NOT NULL,
+  link_type        TEXT NOT NULL DEFAULT '',
+  context          TEXT NOT NULL DEFAULT '',
+  checked_at       TIMESTAMPTZ NOT NULL,
+  first_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT wanted_links_reference_unique
+    UNIQUE (origin_page_id, producer, ref_kind, target_source_id, target_ref)
+);
+CREATE INDEX IF NOT EXISTS wanted_links_target_idx ON wanted_links (target_source_id, target_ref);
+CREATE INDEX IF NOT EXISTS wanted_links_source_idx ON wanted_links (source_id);
 
 -- ============================================================
 -- tags
@@ -1723,6 +1745,7 @@ BEGIN
     ALTER TABLE pages ENABLE ROW LEVEL SECURITY;
     ALTER TABLE content_chunks ENABLE ROW LEVEL SECURITY;
     ALTER TABLE links ENABLE ROW LEVEL SECURITY;
+    ALTER TABLE wanted_links ENABLE ROW LEVEL SECURITY;
     ALTER TABLE tags ENABLE ROW LEVEL SECURITY;
     ALTER TABLE raw_data ENABLE ROW LEVEL SECURITY;
     ALTER TABLE timeline_entries ENABLE ROW LEVEL SECURITY;

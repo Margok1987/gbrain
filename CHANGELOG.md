@@ -10,6 +10,98 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.93.0] - 2026-10-06
+
+**Links to pages you haven't written yet are no longer lost. gbrain keeps them, lists them, and connects them the moment the page exists.**
+
+Before this release, writing `[[people/dana-example]]` on a meeting note before Dana had a page did nothing: the link was dropped, the write reported nothing unresolved, and creating Dana's page later never connected the meeting to her. Now every link to a missing page is remembered. `gbrain wanted` lists the missing pages with how many notes link to each, most-linked first, which doubles as a list of people and companies worth a page. When the page is created, the notes that link to it are revisited and the edges appear on their own. Remote agents' writes record their missing links too.
+
+In the held-out test, writing pages one at a time in shuffled order used to lose 1,849 of 3,810 links. It now loses none, and every withheld person or company page showed up in the wanted list, over local writes and over HTTP.
+
+### How to use it
+
+```bash
+gbrain wanted                 # missing pages, most-linked first (MCP: wanted_pages)
+gbrain wanted --json
+gbrain config set wanted_pages.enabled false   # off switch
+```
+
+Say to your agent: *"Which people and companies do my notes link to that don't have pages yet?"*
+
+### Measured and shipped off
+
+Two more write-time helpers were built and measured on held-out data. Both failed their bars, so both ship off and stay available as opt-ins.
+
+| Feature | Held-out result | Default | Turn on |
+|---|---|---|---|
+| Typed relation lines (`- works_at [[companies/acme-example]]` stores a `works_at` edge) | Read 18 of 696,295 list lines in public notes and transcripts as grammar lines, and all 18 were wrong (unfilled template slots like `- [Time] - [Event]`, and dictionary labels). Precision 0/18 against a 0.95 bar. | off | `gbrain config set line_grammar.enabled true` |
+| "Did you mean an existing page?" hint when a write creates a page | Duplicate pages 3.06% → 2.22%, within noise; wrong merges 2.50% → 3.75%, past the one-point limit, all from `gpt-6.1-sol` | off | `gbrain config set put_page.similar_pages true` |
+
+With typed relation lines on, a validity range on the line (`- works_at @effective[2021-03,2024-06) [[companies/acme-example]]`) is stored on the edge, so default graph reads hide a relationship that ended and `as_of` reads find it. In its held-out test, as-of accuracy on pages with ranges went from 0.228 to 1.000 (`line_grammar.effective_ranges`, on, applies only while typed relation lines are on).
+
+### Things to watch
+
+- The upgrade adds one table (`wanted_links`, migration v214) and re-extracts the links of every existing page once, through the background link sweep or `gbrain extract --stale`. That pass fills the wanted list for notes already in the brain and applies the link-typing change below.
+- Link typing reads the verb next to each link, so when one sentence names two companies with different verbs, each company is typed by its own verb. On held-out pages, typing accuracy is unchanged.
+- The background link sweep (`gbrain sweep --once`, the serve sweep) works on a managed brain again. It stopped on its first page because it wrote timeline rows past the managed writer; it now publishes them through it.
+
+### Itemized changes
+
+- **Wanted pages.** `src/core/wanted-links.ts` and `src/core/wanted-links-store.ts`; table `wanted_links` (migration `v214-wanted-links.ts`, graduation inventory `carry`, user data). `replaceDerivedLinks` replaces wanted rows with the origin's links on every extraction path; a live target updated after a row's `checked_at` makes the origin stale for extraction. `wanted_pages` op (`gbrain wanted`), source-scoped; remote callers never see targets only private pages reference. `wanted_pages.enabled` (on, held-out H4) and `wanted_pages.remote` (on, H8): the persistence `links` effect (`runLinksEffect`) records missing mention targets for remote writes.
+- **Typed relation and fact lines.** `src/core/line-grammar.ts`, `src/core/machine-sections.ts`, `src/core/link-effective.ts`; `line_grammar.enabled` (off, H3), `line_grammar.allow_undeclared_types` (off), `line_grammar.effective_ranges` (on, H7). `put_page` reports a `line_grammar` block while it is on; `gbrain lint` rule `line-grammar`; agent convention `skills/conventions/line-grammar.md`.
+- **Similar-page hint.** `src/core/similar-pages.ts`, `put_page.similar_pages` (off, H5b). The config read stays inside the candidate query, so the write's prepare phase still runs 25 statements.
+- **Link typing.** `src/core/link-extraction.ts`: per-edge verb attachment, coordinated links share a verb, a verb before a preposition belongs to the next link (held-out H9, noninferior).
+- **Sweep.** `runLinksTimelinePass` publishes each page's timeline as a `managed_maintenance_timeline_extract` request on a managed brain (`publishManagedPageTimeline`) instead of a raw batch the writer guard refused (`writer_coordinator_required`); a page whose request is pending or whose text changed mid-run stays unstamped for the next sweep (`test/managed-sweep-timeline.test.ts`).
+- **Schema report.** `gbrain schema detect --fields`: per page type, the frontmatter keys, fact categories and relation types the pages use; 100% coverage proposed as required, 25% or more as optional. Read-only.
+- **Behavior notice.** One `behavior_changes` row for wanted pages and the one-time link re-extraction (`LINK_EXTRACTOR_VERSION_TS` 2026-10-05T03:00:00Z).
+- **Eval records.** `docs/eval/decisions/p5-dev-2026-10-04/` (first-run preregistration and verdicts: H1, H2, H4, H5a pass; H3 and H5b fail; H6 not run) and `docs/eval/decisions/p5-delta-2026-10-05/` (H7, H8, H9, N4 pass; the post-freeze advisory-role typing and temporal-lexicon changes failed their re-checks on sets G and H and were removed under amendment 3). Mirror: gbrain-evals#83.
+
+## To take advantage of v0.60.93.0
+
+Nothing to do. Wanted pages are on after the upgrade; run `gbrain wanted` to see the list.
+
+## [0.60.92.0] - 2026-10-06
+
+**The Windows colon-slug managed-sync test no longer fails with `partial` when its first page publishes slowly.**
+
+`test/colon-slug-windows-5032.test.ts` ran one managed sync pass and expected `first_sync`. A single pass is a single attempt by design: when a page's write is still publishing after the pass's 5-second wait, the pass returns `partial` with reason `writer_pending`, the write stays queued, and the next pass resumes from the same cursor. `gbrain sync` never stops there, because it always drains: it re-enters the pass until the cursor is done. On the `windows-latest` security-regressions runner, the first page's publication took longer than 5 seconds, so the test failed even though the sync would have finished. The two managed first syncs in the file now run through the same drain `gbrain sync` uses and keep every assertion. When the status check fails, it now prints the result's reason, its drain report and the state of each write request. gbrain itself does not change.
+
+### For contributors
+
+- A probe preload holds the consumer's first prepared request for 6 seconds. Before the fix, it reproduces the CI failure on PGLite (`partial`, `writer_pending`, `notes/plain` still `running`) and also fails the POSIX rename test. After the fix, all 9 tests pass with the probe on PGLite and Postgres, and with a 35-second hold, longer than the drain's 30-second per-page wait.
+
+## [0.60.91.0] - 2026-10-06
+
+**The `doctor-harness-smoke` live-serve test no longer fails on a busy CI runner. It used to start a second serve that could take the brain lock from the serve under test.**
+
+The test starts a stdio `gbrain serve` and checks that `gbrain doctor --only harness_wiring` reports it as the brain's lock owner without spawning a smoke serve. It ran doctor immediately, before the serve had taken the lock. So the first doctor run always found no owner and spawned its own smoke serve, and the two raced for the lock. Locally the test's serve won. On the coverage shard that failed (run 37453549563), doctor's smoke serve won. The test's serve then found a live serve holding the brain, switched to status-only mode, and never retried: a stdio serve re-checks the lock only inside a tool call, and nothing called it. Every poll for 30 seconds saw doctor's own smoke pass, and none saw the test's serve as the owner. Now the test completes an MCP handshake with its serve before running doctor. Serve takes the lock before it answers the handshake, so one doctor run gives the verdict and no second serve starts. A forced probe delays the serve's boot until doctor's smoke serve holds the lock. The old test fails with the CI error after 30 seconds; the new test passes. A failure now prints the serve's stderr, its PID and the lock owner record that doctor saw.
+
+## [0.60.90.0] - 2026-10-06
+
+**The keyed tool-routing E2E stops failing at random: it now reads the model's most likely tool choice instead of one random sample.**
+
+No user-facing behavior changes; tool descriptions are unchanged. For contributors and agents working on gbrain:
+
+- **`test/e2e/salience-llm-routing.test.ts`** calls the pinned Haiku snapshot (`claude-haiku-4-5-20251001`) at `temperature: 0`. At the API default of 1.0, each concept phrasing routed to `search` instead of `query` in 1 to 6 of 100 calls ("which portfolio companies have shipped AI features": 14 of 300), so about one run in eight failed with no description change. At 0, every phrasing routed correctly in 100 of 100 calls (that phrasing: 300 of 300), and the personal phrasings still route to the salience, anomaly or transcript tools. Every assertion is unchanged.
+
+## To take advantage of v0.60.90.0
+
+Nothing to do: this release changes a test only.
+
+## [0.60.89.0] - 2026-10-06
+
+**Nightly CI repairs: the dream E2E no longer kills its own test process, a test stops planting a fake error annotation on every Test run, and CI shard weights are current.**
+
+No user-facing behavior changes. For contributors and agents working on gbrain:
+
+- **`test/e2e/dream.test.ts`** drops the ambient Anthropic key its test gateway lacks, so LLM phases skip as on a keyless brain instead of starting and failing at chat time. `runDream`'s exit on a failed phase now surfaces as a named test error with the captured output, not a silent process death with no JUnit report.
+- **`test/scripts/nightly-e2e.test.ts`** captures the `::error`/`::warning`/`::notice` workflow commands the shard classifier prints, so they no longer become real annotations on the Test run (and no longer block `bun run weights:mine`).
+- **Shard weights** are re-mined, so the scheduled `check:weight-coverage` passes and CI shards stay balanced.
+
+## To take advantage of v0.60.89.0
+
+Nothing to do: this release changes tests and CI data only.
+
 ## [0.60.88.0] - 2026-10-06
 
 **`think` now reads with the current date and each page's date, so "last month" and "yesterday" resolve correctly. On held-out conversations it answered 88.2% of questions right instead of 74.2%.**

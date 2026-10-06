@@ -110,6 +110,7 @@ const LEDGER: Record<string, string> = {
   get_agent_job: 'test/get-agent-job.test.ts',
   get_job_stats: 'test/get-job-stats-op.test.ts',
   find_orphans: 'test/orphans-source-scope.test.ts',
+  wanted_pages: 'test/wanted-links.test.ts',
   get_calibration_profile: 'test/calibration-cli.test.ts',
   takes_list: 'test/takes-mcp-allowlist.test.ts',
   takes_search: 'test/takes-mcp-allowlist.test.ts',

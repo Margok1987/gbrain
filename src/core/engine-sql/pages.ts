@@ -241,7 +241,7 @@ export async function restorePage(exec: SqlExecutor, slug: string, opts?: { sour
     const sourceId = opts?.sourceId;
     const sourceCondition = sourceId ? sqlFragment`AND source_id = ${sourceId}` : sqlFragment``;
     const { rows } = await exec.run(sqlFragment`
-      UPDATE pages SET deleted_at = NULL
+      UPDATE pages SET deleted_at = NULL, updated_at = now()
       WHERE slug = ${slug} AND deleted_at IS NOT NULL ${sourceCondition}
       RETURNING slug
     `);
@@ -650,6 +650,19 @@ export async function resolveSlugs(
 // ── v0.42.7 (#1696): link/timeline extraction freshness watermark ──
 
 /**
+ * Origins of wanted links whose target now exists: a live page with the wanted
+ * slug (or, for a bare-name reference, the wanted basename) updated after the
+ * origin last resolved it. Their next extraction creates the edge
+ * (src/core/wanted-links.ts).
+ */
+const WANTED_ORIGIN_IS_STALE = sqlFragment`id IN (SELECT w.origin_page_id FROM wanted_links w
+      JOIN pages t ON t.source_id = w.target_source_id AND t.slug = w.target_ref AND t.deleted_at IS NULL
+      WHERE t.updated_at > w.checked_at
+    UNION SELECT w.origin_page_id FROM wanted_links w
+      JOIN pages t ON t.source_id = w.target_source_id AND regexp_replace(t.slug, '^.*/', '') = w.target_ref AND t.deleted_at IS NULL
+      WHERE w.ref_kind = 'name' AND t.updated_at > w.checked_at)`;
+
+/**
  * Shared stale-for-extraction predicate. `attendance` narrows it by the #5761
  * marker: a page is attendance-blocked while its marker equals its current
  * knowledge revision. Extraction itself never passes it, so it keeps
@@ -657,8 +670,8 @@ export async function resolveSlugs(
  */
 function stalePagesWhere(opts?: { sourceId?: string; versionTs?: string; attendance?: 'exclude' | 'blocked' }) {
   const version = opts?.versionTs
-    ? sqlFragment`(links_extracted_at IS NULL OR links_extracted_at < ${opts.versionTs}::timestamptz OR updated_at > links_extracted_at)`
-    : sqlFragment`(links_extracted_at IS NULL OR updated_at > links_extracted_at)`;
+    ? sqlFragment`(links_extracted_at IS NULL OR links_extracted_at < ${opts.versionTs}::timestamptz OR updated_at > links_extracted_at OR ${WANTED_ORIGIN_IS_STALE})`
+    : sqlFragment`(links_extracted_at IS NULL OR updated_at > links_extracted_at OR ${WANTED_ORIGIN_IS_STALE})`;
   const source = opts?.sourceId ? sqlFragment` AND source_id = ${opts.sourceId}` : sqlFragment``;
   const attendance = opts?.attendance === 'exclude'
     ? sqlFragment` AND links_attendance_blocked_revision IS DISTINCT FROM knowledge_revision`

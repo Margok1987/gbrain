@@ -2136,6 +2136,14 @@
             "via": "unsafe"
           },
           {
+            "paramCount": 1,
+            "via": "tagged"
+          },
+          {
+            "paramCount": 1,
+            "via": "tagged"
+          },
+          {
             "paramCount": 2,
             "unsafeOptions": {
               "cancelFence": false,

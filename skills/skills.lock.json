@@ -1,5 +1,5 @@
 {
-  "RESOLVER.md": "5939d2a22bd2a6658bff105e8902170b46907fd6e930e24e2a8ecc24776930cf",
+  "RESOLVER.md": "e110522e362dfad7e5d025c148c99850ecffbb684a830da9df9c7b5a3f86b9c6",
   "_AGENT_README.md": "ab51e36e9a0b53f4d0609294b0556444399147834932d9c1acfdc7aa367c70b8",
   "_brain-filing-rules.json": "4e6ecee2d94867d146583d60bf98dccdd9205bb70793af56fe1397a2b258ae0d",
   "_brain-filing-rules.md": "b8f6844fd7ab6fbe4a4e7a95e7089466b37d63127730040c766927f55b1ad138",
@@ -50,6 +50,7 @@
   "conventions/cron-via-minions.md": "badb1cd6cd825d6f1ac0b6b28cc47e5d80facc783a3e59a14146ae901ee0f933",
   "conventions/cross-modal.yaml": "c012c3d72614a87b1ee698173dce2a0fb0d057a54df7aab87993c4b07fff6280",
   "conventions/exec-output.md": "2bf371ac3ec4987eff7cc13cd3ea8cc97c46bd43f588eec024ff27f3171bc58f",
+  "conventions/line-grammar.md": "9d00254359153064e9fc0959d8c15743b5ff860890ed556178185bee32c7aeb1",
   "conventions/model-routing.md": "c0d5031e4372c108d7e94346dc2958c21389f3b67544524578bbc9ea32d53c34",
   "conventions/path-discipline.md": "8af5415721bd115e6979c96688bcf542a32675809ada9aaedbb6706a40926954",
   "conventions/quality.md": "8aa681001114689d34268ccadaf0e2ff07b8f68aa5987c093a8c4a7a744f12a6",

@@ -4,7 +4,7 @@
 <!-- Regenerate: bun run scripts/generate-tool-catalog.ts -->
 <!-- Freshness-guarded by scripts/check-tool-catalog-fresh.sh (bun run verify). -->
 
-Every non-localOnly operation on the MCP surface: 144 tools across 24 areas. **Starter** marks membership in the ~40-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
+Every non-localOnly operation on the MCP surface: 145 tools across 24 areas. **Starter** marks membership in the ~40-op `starter` surface (`src/mcp/surface.ts`); **Gate** names the config key that must be true before remote callers see/call the op (`gbrain config set <key> true`). What a given token actually sees is further filtered per request by scope, bound-client fence, publish gates, and the per-client surface — see `docs/operations/mcp-surface-runbook.md`. Area names are non-contractual groupings.
 
 ## admin
 
@@ -117,6 +117,7 @@ Every non-localOnly operation on the MCP surface: 144 tools across 24 areas. **S
 | `list_link_sources` | Link provenances in the brain (e.g. | read | yes |  |
 | `remove_link` | Remove a link between two pages (optionally only one link_type or link_source). | write |  |  |
 | `traverse_graph` | Walk the link graph from a page. | read | yes |  |
+| `wanted_pages` | Link targets that have no page yet, most-referenced first: each was written as a link but its page does not exist, so no edge exists. | read |  |  |
 
 ## loops
 
