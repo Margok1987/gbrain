@@ -134,9 +134,16 @@ async function judgePages(engine: Exec, source: CensusSource, rows: readonly Pag
   await clearCandidateParts(engine, { sourceId: source.id, incarnation: source.incarnation }, 'page', clean);
 }
 
+/**
+ * One source's scan record while a census advances it. Nothing is stored for
+ * a source with no stored record whose scan has read no page or file yet (an
+ * empty brain stays empty, which engine graduation's target check relies on).
+ */
+interface ScanProgress { record: ScanRecord; kept: boolean; scanned: number; save(): Promise<void> }
+
 /** Advances the backfill, then the incremental pass, until both are done or the deadline passes. Saves after every batch. */
-async function scanPages(engine: Exec, source: CensusSource, record: ScanRecord, opts: Required<Pick<CensusOptions, 'batchSize' | 'lateCommitGraceMs'>> & { deadline: number; now: () => Date }): Promise<boolean> {
-  const pages = record.pages;
+async function scanPages(engine: Exec, source: CensusSource, progress: ScanProgress, opts: Required<Pick<CensusOptions, 'batchSize' | 'lateCommitGraceMs'>> & { deadline: number; now: () => Date }): Promise<boolean> {
+  const pages = progress.record.pages;
   while (!pages.backfill.done) {
     if (opts.now().getTime() >= opts.deadline) return false;
     const rows = await engine.executeRaw<PageRow>(`SELECT ${PAGE_COLUMNS} FROM pages WHERE source_id=$1 AND id>$2 ORDER BY id LIMIT $3`,
@@ -144,7 +151,8 @@ async function scanPages(engine: Exec, source: CensusSource, record: ScanRecord,
     await judgePages(engine, source, rows, opts.now().toISOString());
     if (rows.length) pages.backfill.after_id = Number(rows[rows.length - 1]!.id);
     if (rows.length < opts.batchSize) Object.assign(pages.backfill, { done: true, completed_at: opts.now().toISOString() });
-    await writeScanRecord(engine, record);
+    progress.scanned += rows.length;
+    await progress.save();
   }
   for (;;) {
     if (opts.now().getTime() >= opts.deadline) return false;
@@ -157,7 +165,8 @@ async function scanPages(engine: Exec, source: CensusSource, record: ScanRecord,
     if (rows.length) pass.after = { at: rows[rows.length - 1]!.updated_at, id: Number(rows[rows.length - 1]!.id) };
     const caughtUp = rows.length < opts.batchSize;
     if (caughtUp) { pages.watermark = pass.next; pages.pass = null; }
-    await writeScanRecord(engine, record);
+    progress.scanned += rows.length;
+    await progress.save();
     if (caughtUp) return true;
   }
 }
@@ -223,9 +232,9 @@ function judgeFile(root: string, rel: string, at: string): { key: string | null;
 }
 
 /** Advances the working-tree walk until it finishes or the deadline passes. */
-async function scanFiles(engine: Exec, source: CensusSource, record: ScanRecord, stored: Map<string, string>, opts: { deadline: number; now: () => Date }): Promise<boolean> {
+async function scanFiles(engine: Exec, source: CensusSource, progress: ScanProgress, stored: Map<string, string>, opts: { deadline: number; now: () => Date }): Promise<boolean> {
   const root = resolve(source.local_path!);
-  const files = record.files ??= { pass: null, walked: null };
+  const files = progress.record.files ??= { pass: null, walked: null };
   const changed = files.walked && files.pass?.mode !== 'full' ? changedFiles(root, files.walked, [...stored.keys()]) : null;
   files.pass ??= { mode: changed ? 'changed' : 'full', after: null, started_at: opts.now().toISOString(), commit: gitHead(root) };
   const pass = files.pass;
@@ -235,18 +244,19 @@ async function scanFiles(engine: Exec, source: CensusSource, record: ScanRecord,
   let since = 0;
   for (const rel of list) {
     if (pass.after !== null && rel <= pass.after) continue;
-    if (opts.now().getTime() >= opts.deadline) { await writeScanRecord(engine, record); return false; }
+    if (opts.now().getTime() >= opts.deadline) { await progress.save(); return false; }
     const { key, finding } = judgeFile(root, rel, opts.now().toISOString());
     const previous = stored.get(rel);
     if (previous !== undefined && previous !== key) await clearCandidateParts(engine, ids, 'file', [previous]);
     if (key !== null && finding) { await upsertCandidatePart(engine, { ...ids, key }, 'file', finding); stored.set(rel, key); }
     else { if (key !== null) await clearCandidateParts(engine, ids, 'file', [key]); stored.delete(rel); }
     pass.after = rel;
-    if (++since >= FILE_SAVE_EVERY) { since = 0; await writeScanRecord(engine, record); }
+    progress.scanned++;
+    if (++since >= FILE_SAVE_EVERY) { since = 0; await progress.save(); }
   }
   files.walked = { commit: pass.commit, at: pass.started_at };
   files.pass = null;
-  await writeScanRecord(engine, record);
+  await progress.save();
   return true;
 }
 
@@ -260,7 +270,7 @@ export interface CensusOptions {
   lateCommitGraceMs?: number;
 }
 
-export interface CensusRun { source_id: string; complete: boolean; backfill_done: boolean; pages_caught_up: boolean; files: 'none' | 'done' | 'partial' }
+export interface CensusRun { source_id: string; complete: boolean; fresh_at: string | null; backfill_done: boolean; pages_caught_up: boolean; files: 'none' | 'done' | 'partial' }
 
 function freshRecord(source: CensusSource, at: string): ScanRecord {
   return { version: 1, source_id: source.id, incarnation: source.incarnation, rules: CENSUS_RULES,
@@ -285,18 +295,22 @@ export async function runFenceCensus(engine: Exec, opts: CensusOptions): Promise
     const deadline = Math.min(opts.deadline, started + Math.max(0, opts.deadline - started) / (sources.length - index));
     const checkout = hasCheckout(source);
     const stored = await readScanRecord(engine, source.id, source.incarnation);
-    const record = stored && stored.rules === CENSUS_RULES ? stored : freshRecord(source, now().toISOString());
+    const kept = !!stored && stored.rules === CENSUS_RULES;
+    const progress: ScanProgress = { record: kept ? stored! : freshRecord(source, now().toISOString()), kept, scanned: 0,
+      async save() { if (this.kept || this.scanned > 0) await writeScanRecord(engine, this.record); } };
+    const record = progress.record;
     // The first pass starts where the backfill starts, so a page updated during the backfill is read again.
     record.pages.watermark ??= await passHorizon(engine, tuning.lateCommitGraceMs);
     // With a checkout, the stored pages get half of the share first; the walk gets the rest.
-    const caughtUp = await scanPages(engine, source, record, { ...tuning, deadline: checkout ? started + (deadline - started) / 2 : deadline });
+    const caughtUp = await scanPages(engine, source, progress, { ...tuning, deadline: checkout ? started + (deadline - started) / 2 : deadline });
     const storedFiles = new Map(records.filter(r => r.source_id === source.id && r.incarnation === source.incarnation && r.file).map(r => [r.file!.path, r.key]));
-    const walked = checkout ? await scanFiles(engine, source, record, storedFiles, { deadline, now }) : false;
-    const pagesDone = caughtUp || await scanPages(engine, source, record, { ...tuning, deadline });
+    const walked = checkout ? await scanFiles(engine, source, progress, storedFiles, { deadline, now }) : false;
+    const pagesDone = caughtUp || await scanPages(engine, source, progress, { ...tuning, deadline });
     const complete = record.pages.backfill.done && pagesDone && (!checkout || walked);
     record.census = { complete, fresh_at: complete ? now().toISOString() : record.census.fresh_at, checked_at: now().toISOString() };
-    await writeScanRecord(engine, record);
-    runs.push({ source_id: source.id, complete, backfill_done: record.pages.backfill.done, pages_caught_up: pagesDone, files: !checkout ? 'none' : walked ? 'done' : 'partial' });
+    await progress.save();
+    runs.push({ source_id: source.id, complete, fresh_at: record.census.fresh_at, backfill_done: record.pages.backfill.done, pages_caught_up: pagesDone,
+      files: !checkout ? 'none' : walked ? 'done' : 'partial' });
   }
   return runs;
 }
@@ -391,19 +405,26 @@ export interface SourceCensus {
   scan: { complete: boolean; fresh_at: string | null; checked_at: string | null; backfill_done: boolean; walking: boolean };
 }
 
-/** Per-source counts by bucket and planned tier, with the stored scan state; sources with nothing found and a complete scan are included too. */
-export async function summarizeFenceCensus(engine: Exec, sourceIds?: readonly string[]): Promise<SourceCensus[]> {
+/**
+ * Per-source counts by bucket and planned tier, with the scan state (sources
+ * with nothing found are included). `runs`, from the census that just ran,
+ * overrides the stored state, so a source whose scan stored nothing still
+ * reads complete.
+ */
+export async function summarizeFenceCensus(engine: Exec, sourceIds?: readonly string[], runs: readonly CensusRun[] = []): Promise<SourceCensus[]> {
   const sources = await censusSources(engine, sourceIds);
   const candidates = await listFenceCandidates(engine, sources.map(source => source.id));
   const out: SourceCensus[] = [];
   for (const source of sources) {
     const record = await readScanRecord(engine, source.id, source.incarnation);
     const current = record?.rules === CENSUS_RULES ? record : null;
+    const run = runs.find(r => r.source_id === source.id);
     const mine = candidates.filter(c => c.source_id === source.id);
     const census: SourceCensus = { source_id: source.id, total: mine.length, holds: zero(), pages: zero(), files: zero(), by_tier: zero(), oldest_hold_at: null,
       sample: mine.slice(0, 5).map(c => ({ key: c.key, path: c.path, bucket: c.bucket, tier: c.tier, reasons: c.reasons })),
-      scan: { complete: current?.census.complete ?? false, fresh_at: current?.census.fresh_at ?? null, checked_at: current?.census.checked_at ?? null,
-        backfill_done: current?.pages.backfill.done ?? false, walking: !!current?.files?.pass } };
+      scan: { complete: run?.complete ?? current?.census.complete ?? false, fresh_at: run?.fresh_at ?? current?.census.fresh_at ?? null,
+        checked_at: current?.census.checked_at ?? run?.fresh_at ?? null, backfill_done: run?.backfill_done ?? current?.pages.backfill.done ?? false,
+        walking: !!current?.files?.pass } };
     for (const candidate of mine) {
       const bucket = candidate.bucket === 'hold' ? census.holds : candidate.bucket === 'page' ? census.pages : census.files;
       bucket[candidate.tier]++; bucket.total++;

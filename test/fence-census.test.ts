@@ -124,7 +124,7 @@ for (const backend of backends) {
         meta: { reason: 'takes_kind_unsupported', recovery_version: 1, fence_version: 1,
           fence: { reason: 'takes_kind_unsupported', fence: 'takes', section: 'body', rows: [1], columns: ['kind'], line: 4 } } }));
 
-      expect(await s.census()).toEqual([{ source_id: s.id, complete: true, backfill_done: true, pages_caught_up: true, files: 'done' }]);
+      expect(await s.census()).toEqual([{ source_id: s.id, complete: true, fresh_at: expect.any(String), backfill_done: true, pages_caught_up: true, files: 'done' }]);
       const list = await listFenceCandidates(engine, [s.id]);
       expect(list.map(c => [c.key, c.bucket, c.origins, c.tier])).toEqual([
         ['notes/both', 'page', ['page', 'file'], 'resolver'],
@@ -271,6 +271,19 @@ for (const backend of backends) {
       plain.write('notes/new.md', md('New', LLM));
       await plain.census();
       expect(await plain.keys()).toEqual(['notes/new']);
+    }, 60_000);
+
+    test('a source with nothing to scan stores nothing, so an empty brain stays empty (graduation target check)', async () => {
+      const s = await source(null);
+      const runs = await s.census();
+      expect(runs).toMatchObject([{ source_id: s.id, complete: true, files: 'none' }]);
+      expect(await engine.executeRaw('SELECT 1 FROM op_checkpoints WHERE fingerprint LIKE $1', [`${s.id}:%`])).toEqual([]);
+      expect((await summarizeFenceCensus(engine, [s.id], runs))[0]!.scan).toMatchObject({ complete: true });
+      expect((await summarizeFenceCensus(engine, [s.id]))[0]!.scan).toMatchObject({ complete: false });
+      // Once it holds a page, its cursors are kept so later runs scan incrementally.
+      await s.stored('notes/one', CLEAN);
+      await s.census();
+      expect((await readScanRecord(engine, s.id, s.incarnation))!.census).toMatchObject({ complete: true });
     }, 60_000);
 
     test('census, candidate and attempt rows survive the 7-day purge while their source incarnation lives; trend rows age out', async () => {

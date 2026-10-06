@@ -76,8 +76,8 @@ function sourceFix(census: SourceCensus) {
 export async function fenceIntegrityResult(engine: BrainEngine, opts: { timeoutMs?: number; now?: () => Date } = {}): Promise<Omit<Check, 'name'>> {
   const now = opts.now ?? (() => new Date());
   const timeoutMs = opts.timeoutMs ?? fenceScanTimeoutMs();
-  await runFenceCensus(engine, { deadline: now().getTime() + timeoutMs, now });
-  const census = await summarizeFenceCensus(engine);
+  const runs = await runFenceCensus(engine, { deadline: now().getTime() + timeoutMs, now });
+  const census = await summarizeFenceCensus(engine, undefined, runs);
   const from = new Date(now().getTime() - (TREND_DAYS - 1) * 86_400_000).toISOString().slice(0, 10);
   const trendRows = await readTrend(engine, census.map(c => c.source_id), from);
   const trend = census.map(c => sourceTrend(c.source_id, trendRows.get(c.source_id) ?? []));
