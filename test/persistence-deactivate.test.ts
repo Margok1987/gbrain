@@ -27,6 +27,7 @@ import type { OperationContext } from '../src/core/ops/contract.ts';
 import { managedBrain } from './helpers/managed-brain.ts';
 import { declarePersistenceProtocol } from '../src/core/persistence/protocol.ts';
 import { put } from './helpers/wave-fixture.ts';
+import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 
 const admin = (engine: BrainEngine, operation: string, params: Record<string, unknown> = {}) =>
   runPersistenceAdministration(engine, operation as never, params) as Promise<Record<string, any>>;
@@ -41,6 +42,10 @@ const brainRow = async (engine: BrainEngine) => (await engine.executeRaw<{ brain
 for (const databaseUrl of process.env.DATABASE_URL ? [undefined, process.env.DATABASE_URL] : [undefined]) describe(`#5455 sources writer deactivate (${databaseUrl ? 'postgres' : 'pglite'})`, () => {
   test('dry run lists every blocker and changes nothing; each blocker refuses with its exit', () => managedBrain(async ({ engine, ctx }) => {
     await put(ctx, 'notes/one', 'Body.');
+    // `put` returns at the request's commit; its effects then run on the in-process consumer. A run that claimed an
+    // effect before the rewrites below keeps its execution token and its completion would overwrite the seeded
+    // queued embedding blocker. Stopping the consumer waits for those runs, and nothing in this process claims again.
+    await disposePersistenceConsumer(engine);
     const [request] = await engine.executeRaw<{ request_id: string; id: string }>("SELECT request_id::text, id::text FROM persistence_requests WHERE slug='notes/one'");
     await protocol(engine, "UPDATE persistence_effects SET state='committed'");
     await protocol(engine, "UPDATE persistence_effects SET state='queued', next_attempt_at=now()+interval '1 day' WHERE request_id=$1::uuid AND kind='embedding'", [request.id]);
@@ -78,6 +83,7 @@ for (const databaseUrl of process.env.DATABASE_URL ? [undefined, process.env.DAT
 
   test('success: classic mode, retired worktrees keep receipts, markers from the real activation are removed, content unchanged; rerun is a no-op', () => managedBrain(async ({ engine, ctx, root }) => {
     await put(ctx, 'notes/one', 'Body one.');
+    await disposePersistenceConsumer(engine);
     await protocol(engine, "UPDATE persistence_effects SET state='committed'");
     const file = readFileSync(join(root, 'notes', 'one.md'), 'utf8');
     const page = await engine.getPage('notes/one', { sourceId: 'default' });
