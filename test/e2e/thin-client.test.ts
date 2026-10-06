@@ -30,6 +30,7 @@ import { tmpdir } from 'os';
 import { keylessBrainEnv } from '../helpers/provider-env.ts';
 import { cliDiagnostic, fixtureDiagnostic } from '../helpers/fixture-diagnostics.ts';
 import { isolatedPersistencePostgres } from '../helpers/persistence-postgres.ts';
+import { ExitedEarly, startOnFreePort, waitForHealthy } from '../helpers/free-port.ts';
 
 function test(name: string, fn: () => void | Promise<unknown>): void {
   testRaw(name, fn, 120000);
@@ -91,32 +92,24 @@ describeWhen('thin-client end-to-end (requires DATABASE_URL)', () => {
     const init = await spawn(['init', '--non-interactive', '--no-embedding', '--url', hostDatabaseUrl], hostHome);
     if (init.exitCode !== 0) throw new Error(cliDiagnostic(`host init failed`, init));
 
-    // 2. Pick a random free port for serve --http.
-    serverPort = 30000 + Math.floor(Math.random() * 30000);
-
-    // 3. Spawn serve --http (background, async).
+    // 2-3. Spawn serve --http on a free port (background, async) and wait
+    //      for the discovery endpoint.
     const env = keylessBrainEnv(process.env, hostHome, {
       GBRAIN_REMOTE_CLIENT_SECRET: undefined, GBRAIN_DATABASE_URL: undefined, DATABASE_URL: hostDatabaseUrl,
     });
-    serverProc = Bun.spawn({
-      cmd: ['bun', '--no-env-file', 'run', CLI, 'serve', '--http', '--port', String(serverPort)],
-      env,
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
+    serverPort = await startOnFreePort(async port => {
+      const proc = Bun.spawn({
+        cmd: ['bun', '--no-env-file', 'run', CLI, 'serve', '--http', '--port', String(port)],
+        env,
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      serverProc = proc;
+      const state = await waitForHealthy(`http://127.0.0.1:${port}/.well-known/oauth-authorization-server`, () => proc.exitCode !== null, 20_000);
+      if (state === 'exited') return new ExitedEarly((await new Response(proc.stderr).text()).slice(-800));
+      return port;
     });
-
-    // Wait for the server to be ready (poll the discovery endpoint).
-    const deadline = Date.now() + 20_000;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(`http://127.0.0.1:${serverPort}/.well-known/oauth-authorization-server`, {
-          signal: AbortSignal.timeout(500),
-        });
-        if (res.ok) break;
-      } catch { /* retry */ }
-      await new Promise(r => setTimeout(r, 250));
-    }
 
     // 4. Register a client with read,write,admin scope.
     const reg = await spawn([

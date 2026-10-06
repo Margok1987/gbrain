@@ -48,8 +48,9 @@ import { shellQuote } from '../src/core/agent-output.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
 import { withCoordinatedWrite } from '../src/core/persistence/context.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
+import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
 import {
-  REPO, body, call, expectOneBlockError, gb, journeyEnv, mcp, oneDocument, waitFor, type GbResult,
+  REPO, body, call, expectOneBlockError, gb, journeyEnv, mcp, oneDocument, type GbResult,
 } from './helpers/agent-journey.ts';
 
 const MARKER = 'wombat-tier2-marker';
@@ -151,7 +152,6 @@ describe('H1b: --surface starter', () => {
 describe('H1b: read-only grant over HTTP', () => {
   let home = '';
   let http: ChildProcess | null = null;
-  const PORT = 43000 + Math.floor(Math.random() * 2000);
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), 'gbrain-tier2-ro-'));
     expect((await gb(home, ['init', '--pglite', '--no-embedding', '--json'])).exitCode).toBe(0);
@@ -167,11 +167,17 @@ describe('H1b: read-only grant over HTTP', () => {
     expect(minted.exitCode, minted.stderr).toBe(0);
     const token = (minted.stdout.match(/gbrain_[a-f0-9]{64}/) ?? [''])[0];
     expect(token).toBeTruthy();
-    http = spawn('bun', ['--no-env-file', 'run', join(REPO, 'src', 'cli.ts'), 'serve', '--http', '--bind', '127.0.0.1', '--port', String(PORT)],
-      { cwd: home, env: journeyEnv(home), stdio: ['ignore', 'ignore', 'ignore'] });
-    expect(await waitFor(async () => (await fetch(`http://127.0.0.1:${PORT}/health`).catch(() => null))?.ok === true, 60_000)).toBe(true);
+    const port = await startOnFreePort(async candidate => {
+      const child = spawn('bun', ['--no-env-file', 'run', join(REPO, 'src', 'cli.ts'), 'serve', '--http', '--bind', '127.0.0.1', '--port', String(candidate)],
+        { cwd: home, env: journeyEnv(home), stdio: ['ignore', 'ignore', 'ignore'] });
+      http = child;
+      const state = await waitForHealthy(`http://127.0.0.1:${candidate}/health`, () => child.exitCode !== null || child.signalCode !== null, 60_000);
+      if (state === 'exited') return new ExitedEarly(`serve --http exited with ${child.exitCode ?? child.signalCode}`);
+      expect(state).toBe('healthy');
+      return candidate;
+    });
     const client = new Client({ name: 'ro-harness', version: '1' }, { capabilities: {} });
-    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), { requestInit: { headers: { Authorization: `Bearer ${token}` } } }));
     try {
       const listed = (await client.listTools()).tools;
       const byName = new Map(operations.map(op => [op.name, op]));

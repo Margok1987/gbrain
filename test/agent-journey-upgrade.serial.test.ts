@@ -50,6 +50,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { makeDoctorHome, runGbrain, type DoctorHome, type GbrainRun } from './helpers/doctor-json-golden.ts';
 import { PROVIDER_ENV_KEYS } from './helpers/provider-env.ts';
+import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
 import { oldReadError, oldUnpack } from './fixtures/agent-contract/frozen-thin-client-v0.60.37.ts';
 import { extractToolErrorDetail } from '../src/core/mcp-client.ts';
 import { PGLiteEngine } from '../src/core/pglite-engine.ts';
@@ -317,8 +318,7 @@ describe('(4) an old thin client against a real new serve --http', () => {
   let server: ChildProcess | null = null;
   let rw = '';
   let ro = '';
-  const PORT = 44000 + Math.floor(Math.random() * 2000);
-  const URL_ = `http://127.0.0.1:${PORT}/mcp`;
+  let URL_ = '';
 
   beforeAll(async () => {
     h = await upgradedBrain('upgrade-thin-client');
@@ -330,14 +330,16 @@ describe('(4) an old thin client against a real new serve --http', () => {
     rw = await token('old-thin-client', 'read,write');
     ro = await token('old-thin-reader', 'read');
     expect(rw && ro).toBeTruthy();
-    server = spawn(process.execPath, ['--no-env-file', CLI, 'serve', '--http', '--bind', '127.0.0.1', '--port', String(PORT)],
-      { cwd: h.work, env: childEnv(h), stdio: ['ignore', 'ignore', 'ignore'] });
-    const end = Date.now() + 60_000;
-    while (Date.now() < end) {
-      if ((await fetch(`http://127.0.0.1:${PORT}/health`).catch(() => null))?.ok) return;
-      await Bun.sleep(500);
-    }
-    throw new Error('serve --http never became healthy');
+    const port = await startOnFreePort(async candidate => {
+      const child = spawn(process.execPath, ['--no-env-file', CLI, 'serve', '--http', '--bind', '127.0.0.1', '--port', String(candidate)],
+        { cwd: h.work, env: childEnv(h), stdio: ['ignore', 'ignore', 'ignore'] });
+      server = child;
+      const state = await waitForHealthy(`http://127.0.0.1:${candidate}/health`, () => child.exitCode !== null || child.signalCode !== null, 60_000);
+      if (state === 'exited') return new ExitedEarly(`serve --http exited with ${child.exitCode ?? child.signalCode}`);
+      if (state === 'timeout') throw new Error('serve --http never became healthy');
+      return candidate;
+    });
+    URL_ = `http://127.0.0.1:${port}/mcp`;
   }, 180_000);
 
   afterAll(async () => {

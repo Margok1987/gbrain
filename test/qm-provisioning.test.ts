@@ -27,6 +27,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { keylessBrainEnv } from './helpers/provider-env.ts';
 import { cliDiagnostic, fixtureDiagnostic } from './helpers/fixture-diagnostics.ts';
+import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
 
 function test(name: string, fn: () => void | Promise<unknown>): void {
   testRaw(name, fn, 120000);
@@ -135,26 +136,20 @@ describe('qm-harness provisioning + write fence (e2e, PGLite)', () => {
     };
 
     // 5. Serve over HTTP MCP (holds the PGLite lock from here on).
-    serverPort = 30000 + Math.floor(Math.random() * 30000);
     const env = keylessBrainEnv(process.env, hostHome, {
       DATABASE_URL: undefined, GBRAIN_DATABASE_URL: undefined, GBRAIN_REMOTE_CLIENT_SECRET: undefined,
     });
-    serverProc = Bun.spawn({
-      cmd: ['bun', '--no-env-file', 'run', CLI, 'serve', '--http', '--port', String(serverPort)],
-      env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+    serverPort = await startOnFreePort(async port => {
+      const proc = Bun.spawn({
+        cmd: ['bun', '--no-env-file', 'run', CLI, 'serve', '--http', '--port', String(port)],
+        env, stdin: 'ignore', stdout: 'pipe', stderr: 'pipe',
+      });
+      serverProc = proc;
+      const state = await waitForHealthy(`http://127.0.0.1:${port}/.well-known/oauth-authorization-server`, () => proc.exitCode !== null, 30_000);
+      if (state === 'exited') return new ExitedEarly((await new Response(proc.stderr).text()).slice(-800));
+      if (state === 'timeout') throw new Error('serve --http did not come up');
+      return port;
     });
-    const deadline = Date.now() + 30_000;
-    let up = false;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(`http://127.0.0.1:${serverPort}/.well-known/oauth-authorization-server`, {
-          signal: AbortSignal.timeout(500),
-        });
-        if (res.ok) { up = true; break; }
-      } catch { /* retry */ }
-      await new Promise(r => setTimeout(r, 250));
-    }
-    if (!up) throw new Error('serve --http did not come up');
 
     // 6. Thin-client bootstrap for both scopes (the once-per-sandbox step).
     //    --oauth-client-secret (NOT the env var) on purpose: an env-sourced

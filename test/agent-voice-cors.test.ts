@@ -23,19 +23,10 @@
 import { describe, test, expect } from 'bun:test';
 import type { Subprocess } from 'bun';
 import { join } from 'path';
-import { createServer, type AddressInfo } from 'node:net';
+import { ExitedEarly, startOnFreePort, waitForHealthy } from './helpers/free-port.ts';
 
 const SERVER_SCRIPT = join(import.meta.dir, '..', 'recipes', 'agent-voice', 'code', 'server.mjs');
 const EVIL = 'https://evil.example';
-
-/** A port the OS reports free on every interface (the server may bind 0.0.0.0). */
-async function freePort(): Promise<number> {
-  const probe = createServer();
-  await new Promise<void>(resolve => probe.listen(0, '0.0.0.0', resolve));
-  const { port } = probe.address() as AddressInfo;
-  await new Promise<void>(resolve => probe.close(() => resolve()));
-  return port;
-}
 
 interface VoiceServer {
   port: number;
@@ -46,9 +37,7 @@ interface VoiceServer {
 }
 
 async function spawnVoice(extraEnv: Record<string, string> = {}): Promise<VoiceServer> {
-  let stderr = '';
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const port = await freePort();
+  return startOnFreePort(async port => {
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       PORT: String(port),
@@ -79,23 +68,14 @@ async function spawnVoice(extraEnv: Record<string, string> = {}): Promise<VoiceS
       } catch { /* stream closed on shutdown */ }
     })();
 
-    // A server that exits before it is healthy (another process took the port
-    // between the probe and the bind) is retried on a fresh port.
     const base = `http://127.0.0.1:${port}`;
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline && proc.exitCode === null) {
-      try {
-        const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(2000) });
-        if (res.ok) return { port, base, proc, stdout: () => out };
-      } catch { /* not up yet */ }
-      await new Promise(r => setTimeout(r, 250));
-    }
-    const exitedEarly = proc.exitCode !== null;
+    const state = await waitForHealthy(`${base}/health`, () => proc.exitCode !== null, 30_000);
+    if (state === 'healthy') return { port, base, proc, stdout: () => out };
     proc.kill();
-    stderr = await new Response(proc.stderr).text();
-    if (!exitedEarly) break;
-  }
-  throw new Error(`agent-voice server did not become healthy\nstderr: ${stderr.slice(-800)}`);
+    const stderr = (await new Response(proc.stderr).text()).slice(-800);
+    if (state === 'exited') return new ExitedEarly(stderr);
+    throw new Error(`agent-voice server did not become healthy in 30s\nstderr: ${stderr}`);
+  }, { host: '0.0.0.0' });
 }
 
 async function stopVoice(server: VoiceServer): Promise<void> {
