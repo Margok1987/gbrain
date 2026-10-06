@@ -44,7 +44,7 @@ import { pricingSetCommand } from '../budget/no-pricing.ts';
 import type { CapSource } from '../consent.ts';
 import { sha256 } from '../persistence/digest.ts';
 import { clearApprovedSet, loadApprovedSet, previewChangedError, previewHash, saveApprovedSet } from '../persistence/preview-approval.ts';
-import { recordFenceHoldRepair } from '../persistence/sync-holds.ts';
+import { readGitSourceHolds, recordFenceHoldRepair } from '../persistence/sync-holds.ts';
 import { attemptStore } from '../fence-repair/attempts.ts';
 import { listFenceCandidates, runFenceCensus, type FenceCandidate } from '../fence-repair/census.ts';
 import { fenceRepairLlmEnabled, readFenceRepairCaps } from '../fence-repair/config.ts';
@@ -482,7 +482,22 @@ async function tier3(ctx: OperationContext, src: FenceSource, target: FenceTarge
 }
 
 /** Verification and the summary counts: what this run repaired by tier, what is left by reason, and the oldest hold. */
-async function reportFences(ctx: OperationContext, scope: RepairScope, result: RepairResult, _opts: RepairPlanOptions) {
+/** Candidates of the selection this run did not touch, by the reason they are held (the last repair's, else the census's). */
+async function heldInScope(engine: BrainEngine, scope: RepairScope, opts: RepairPlanOptions, result: RepairResult): Promise<Record<string, number>> {
+  const selection: Selection = { source_ids: scope.source_ids, only: opts.only ?? [], skip: opts.skip ?? [], slugs: opts.slugs ?? [], no_llm: opts.noLlm === true };
+  const touched = new Set((result.outcome_items ?? []).map(outcome => outcome.item));
+  const holds = new Map((await readGitSourceHolds(engine, { sourceIds: scope.source_ids })).flatMap(source => source.holds.map(hold => [`${hold.source_id}:${hold.path}`, hold] as const)));
+  const out: Record<string, number> = {};
+  for (const cand of await listFenceCandidates(engine, scope.source_ids)) {
+    if (!selected(cand, selection) || touched.has(`${cand.source_id}:${cand.key}`)) continue;
+    const hold = cand.path ? holds.get(`${cand.source_id}:${cand.path}`) : undefined;
+    const reason = hold?.meta.fence_repair?.reason ?? cand.reasons[0] ?? 'unparseable';
+    out[reason] = (out[reason] ?? 0) + 1;
+  }
+  return out;
+}
+
+async function reportFences(ctx: OperationContext, scope: RepairScope, result: RepairResult, opts: RepairPlanOptions) {
   const repairedByTier: Record<RepairTier, number> = { deterministic: 0, resolver: 0, llm: 0 };
   const remaining: Record<string, number> = {};
   for (const [reason, count] of Object.entries(result.residuals)) if (reason !== 'already_clean') remaining[reason] = (remaining[reason] ?? 0) + count;
@@ -494,6 +509,8 @@ async function reportFences(ctx: OperationContext, scope: RepairScope, result: R
     }
     const unattempted = result.affected - result.applied - result.skipped;
     if (unattempted > 0 && result.stopped) remaining[result.stopped.reason] = (remaining[result.stopped.reason] ?? 0) + unattempted;
+    // An --expect apply replays the approved set only; re-check the selection for what the preview listed as held.
+    if (opts.expect) for (const [reason, count] of Object.entries(await heldInScope(ctx.engine, scope, opts, result))) remaining[reason] = (remaining[reason] ?? 0) + count;
   } else if (result.affected) remaining.pending_repair = result.affected;
   const [oldest] = await ctx.engine.executeRaw<{ held_at: string | null }>(`SELECT min(completed_keys->0->>'held_at') AS held_at FROM op_checkpoints
     WHERE op='sync-hold' AND completed_keys->0->>'code'='invalid_fence' AND completed_keys->0->>'source_id'=ANY($1::text[])`, [scope.source_ids]).catch(() => [{ held_at: null }]);

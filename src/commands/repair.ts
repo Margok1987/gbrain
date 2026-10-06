@@ -18,6 +18,7 @@ import { setCliExitVerdict } from '../core/cli-force-exit.ts';
 import { clearHealthMemo } from '../core/health-memo.ts';
 import { OperationError, opError } from '../core/ops/contract.ts';
 import { readFix } from '../core/ops/op-fix.ts';
+import { shellQuote } from '../core/agent-output.ts';
 import { REPAIR_KINDS, resolveRepairScope, type RepairKind, type RepairResult } from '../core/repair/core.ts';
 import { consentGate, engineConsentEnv } from '../core/consent-cli.ts';
 import { AUTO_REPAIR_REGISTRY, EXPLICIT_REPAIR_REGISTRY, LLM_REPAIR_REGISTRY, PREVIEW_BOUND_REPAIR_REGISTRY, REPAIR_REGISTRY, explicitRepairNotices, repairMayEmbed, repairMaySpend,
@@ -197,7 +198,13 @@ function human(result: RepairResult, opts: { diff: boolean } = { diff: false }):
   for (const c of result.capacity) lines.push(`  capacity ${c.scope} ${c.resource}: ${c.used} of ${c.limit} (stops at ${c.stop_at})`);
   if (result.resumed_from) lines.push(`  resuming after item ${result.resumed_from.phase}:${result.resumed_from.id}`);
   if (result.mode === 'apply') lines.push(`  applied ${result.applied}, skipped ${result.skipped}${result.complete ? ', complete' : ''}`);
+  if (result.mode === 'apply' && result.repaired !== undefined) {
+    const left = Object.entries(result.remaining ?? {}).map(([k, v]) => `${k}=${v}`).join(', ');
+    lines.push(`  repaired ${result.repaired}; ${left ? `still waiting: ${left}` : 'nothing left in this selection'}`);
+  }
+  if (result.scan?.partial) lines.push('  scan: partial (the census did not finish within its bound; more candidates may exist, rerun to resume it)');
   if (result.stopped) lines.push(`  STOPPED: ${result.stopped.message}`);
+  if (result.stopped?.fix?.argv) lines.push(`  fix: ${shellQuote(result.stopped.fix.argv)}${result.stopped.fix.consent.length ? ` (asks the user first: ${result.stopped.fix.consent.join(', ')})` : ''}`);
   for (const entry of result.listing ?? []) lines.push(`  ${entry.class}: ${entry.item}${entry.detail ? ` (${entry.detail})` : ''}`);
   const render = repairSpec(result.kind).handler.render;
   if (result.details && render) lines.push(...render(result.details, opts));

@@ -1248,6 +1248,13 @@ async function runStatus(engine: BrainEngine, args: string[]): Promise<void> {
   const backlog = new Map((await drainMod.readManagedSyncBacklog(engine).catch(() => [])).map(b => [b.source_id, b]));
   const sharedSkillsView = await import('../core/shared-skills/source-opt-out.ts');
   const sharedSkills = new Map(await Promise.all(sources.map(async source => [source.id, await sharedSkillsView.readSharedSkillsSourceView(engine, source.id).catch(() => null)] as const)));
+  // #6188 (T2): legacy fence repairs written to disk but not committed yet, with the exact commit step.
+  const { readUncommittedFenceRepairs } = await import('../core/fence-repair/uncommitted.ts');
+  const uncommitted = new Map<string, Array<{ path: string; repaired_at: string; backup: string | null; commit_step: string; classes: string[] }>>();
+  for (const notice of await readUncommittedFenceRepairs(engine, sources.map(source => source.id)).catch(() => [])) {
+    uncommitted.set(notice.source_id, [...(uncommitted.get(notice.source_id) ?? []),
+      { path: notice.path, repaired_at: notice.repaired_at, backup: notice.backup, commit_step: notice.commit_step, classes: notice.receipt.classes }]);
+  }
   if (json) {
     const enriched = metrics.map((m) => ({
       ...m,
@@ -1258,6 +1265,7 @@ async function runStatus(engine: BrainEngine, args: string[]): Promise<void> {
       ...(backlog.get(m.source_id) ? { managed_backlog: backlog.get(m.source_id) } : {}),
       ...(gitHolds.get(m.source_id) ? { git_holds: gitHolds.get(m.source_id) } : {}),
       ...(sharedSkills.get(m.source_id) ? { shared_skills: sharedSkills.get(m.source_id) } : {}),
+      ...(uncommitted.get(m.source_id) ? { fence_repairs_uncommitted: uncommitted.get(m.source_id) } : {}),
     }));
     console.log(JSON.stringify({ schema_version: 1, sources: enriched }, null, 2));
     return;
@@ -1298,6 +1306,10 @@ async function runStatus(engine: BrainEngine, args: string[]): Promise<void> {
   for (const [sourceId, status] of connectors) for (const line of statusView.connectorStatusLines(sourceId, status)) console.log(line);
   for (const [sourceId, status] of gitHolds) for (const line of statusView.gitHoldStatusLines(sourceId, status)) console.log(line);
   for (const b of backlog.values()) console.log(`  ${drainMod.formatManagedSyncBacklog(b)}`);
+  for (const [sourceId, notices] of uncommitted) {
+    console.log(`  ${sourceId}: ${notices.length} uncommitted fence repair(s); gbrain rewrote and imported them (backups kept), commit each when you are ready:`);
+    for (const notice of notices) console.log(`    ${notice.path} (${notice.classes.join(', ')}): ${notice.commit_step}`);
+  }
   for (const view of sharedSkills.values()) if (view && (only || view.configured === false || view.parked)) for (const line of sharedSkillsView.sharedSkillsStatusLines(view)) console.log(`  ${line}`);
   for (const m of metrics) {
     const warns: string[] = [];
