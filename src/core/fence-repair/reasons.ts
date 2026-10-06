@@ -30,7 +30,8 @@ export interface FenceReasonSpec {
   fix: string;
 }
 
-const DOCS = 'docs/guides/write-refusals.md#fence-';
+// The anchor is built per reason, so no partial `write-refusals.md#...` literal reads as a broken link (write-refusals-coverage).
+const DOCS = 'docs/guides/write-refusals.md';
 // PR4 switches this next step to `gbrain repair fences`, routed through the hold-repair router.
 const REPAIR = 'Edit the fence by hand, then sync or write the page again.';
 
@@ -102,7 +103,7 @@ const SPECS: Record<FenceReason, Omit<FenceReasonSpec, 'docs'>> = {
 };
 
 export const FENCE_REASONS: Readonly<Record<FenceReason, FenceReasonSpec>> = Object.fromEntries(
-  Object.entries(SPECS).map(([reason, spec]) => [reason, { ...spec, docs: `${DOCS}${reason}` }]),
+  Object.entries(SPECS).map(([reason, spec]) => [reason, { ...spec, docs: `${DOCS}#fence-${reason}` }]),
 ) as Record<FenceReason, FenceReasonSpec>;
 
 /** Every reason code, in table order (the registry's `invalid_fence.reasons`). */
