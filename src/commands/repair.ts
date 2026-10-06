@@ -17,7 +17,7 @@ import { OperationError, opError } from '../core/ops/contract.ts';
 import { readFix } from '../core/ops/op-fix.ts';
 import { REPAIR_KINDS, resolveRepairScope, type RepairKind, type RepairResult } from '../core/repair/core.ts';
 import { consentGate, engineConsentEnv } from '../core/consent-cli.ts';
-import { AUTO_REPAIR_REGISTRY, EXPLICIT_REPAIR_REGISTRY, REPAIR_REGISTRY, explicitRepairNotices, repairMaySpend, repairPreviewCommand, repairRunner, repairSpec } from '../core/repair/registry.ts';
+import { AUTO_REPAIR_REGISTRY, EXPLICIT_REPAIR_REGISTRY, REPAIR_REGISTRY, explicitRepairNotices, repairMayEmbed, repairMaySpend, repairPreviewCommand, repairRunner, repairSpec } from '../core/repair/registry.ts';
 
 function wrap(text: string, indent: number, width = 80): string {
   const lines: string[] = [];
@@ -139,8 +139,11 @@ function human(result: RepairResult, opts: { diff: boolean } = { diff: false }):
   if (result.sample.length) lines.push(`  e.g. ${result.sample.join(', ')}`);
   const residuals = Object.entries(result.residuals).map(([k, v]) => `${k}=${v}`).join(', ');
   if (residuals) lines.push(`  ${residuals}`);
+  const { llm_usd: llmUsd, llm_cap_remaining_usd: llmLeft } = result.cost;
   lines.push(`  cost: ${result.cost.lifetime_ids} request ID(s), ${result.cost.receipt_bytes} receipt bytes, `
-    + `${result.cost.embedding_pages} page(s) to re-embed${result.cost.embedding_usd === null ? '' : ` (~$${result.cost.embedding_usd.toFixed(4)})`}`);
+    + `${result.cost.embedding_pages} page(s) to re-embed${result.cost.embedding_usd === null ? '' : ` (~$${result.cost.embedding_usd.toFixed(4)})`}`
+    + `${llmUsd === undefined ? '' : `, paid model ${llmUsd === null ? 'unpriced' : result.mode === 'apply' ? `$${llmUsd.toFixed(4)} spent` : `~$${llmUsd.toFixed(4)}`}`
+      + `${typeof llmLeft === 'number' ? ` ($${llmLeft.toFixed(4)} left under today's cap)` : ''}`}`);
   for (const c of result.capacity) lines.push(`  capacity ${c.scope} ${c.resource}: ${c.used} of ${c.limit} (stops at ${c.stop_at})`);
   if (result.resumed_from) lines.push(`  resuming after item ${result.resumed_from.phase}:${result.resumed_from.id}`);
   if (result.mode === 'apply') lines.push(`  applied ${result.applied}, skipped ${result.skipped}${result.complete ? ', complete' : ''}`);
@@ -200,8 +203,16 @@ export async function runRepairCommand(engine: BrainEngine, args: string[]): Pro
   } else {
     console.log(`Scope: brain ${scope.brain_id}; sources ${scope.source_ids.join(', ') || '(none)'}`);
     for (const result of results) console.log(human(result, { diff }));
-    if (!apply && paidKinds.length) console.log(`Kinds that may queue paid embeddings: ${paidKinds.join(', ')} (pass --no-embed to skip; `
+    const embedKinds = results.filter(r => repairMayEmbed(repairSpec(r.kind), noEmbed)).map(r => r.kind);
+    if (!apply && embedKinds.length) console.log(`Kinds that may queue paid embeddings: ${embedKinds.join(', ')} (pass --no-embed to skip; `
       + 'page-write kinds are re-embedded by their publication either way; cap spend with gbrain doctor --remediate --yes --include-repairs --max-usd <n> --expect <plan_hash> from gbrain doctor --remediation-plan --json).');
+    const llmResults = results.filter(r => r.cost.llm_usd !== undefined);
+    if (!apply && llmResults.length) {
+      const usd = llmResults.some(r => r.cost.llm_usd === null) ? null : llmResults.reduce((sum, r) => sum + (r.cost.llm_usd ?? 0), 0);
+      const left = llmResults.map(r => r.cost.llm_cap_remaining_usd).filter((cap): cap is number => typeof cap === 'number');
+      console.log(`Kinds that may call a paid model: ${llmResults.map(r => r.kind).join(', ')} (${usd === null ? 'estimate unavailable: the model is unpriced' : `estimated $${usd.toFixed(4)}`}`
+        + `${left.length ? `; $${Math.min(...left).toFixed(4)} left under today's cap` : ''}).`);
+    }
     if (explicitKindsNotRun.length) console.log(`Explicit-only kinds (not run without their name; preview each): ${explicitKindsNotRun.map(n => n.preview_command).join('; ')}`);
   }
   if (results.some(r => r.stopped)) setCliExitVerdict(1);

@@ -23,6 +23,7 @@ import { getWriteRequest } from '../persistence/journal.ts';
 import { initializeLocalPersistence, requestPrincipalForContext } from '../persistence/page-mutations.ts';
 import { lookupEmbeddingPrice, estimateCostFromChars } from '../embedding-pricing.ts';
 import { shellQuote } from '../agent-output.ts';
+import type { RepairKindSpec } from './registry.ts';
 
 export const REPAIR_KINDS = ['timeline', 'visibility', 'safe-chunks', 'contextual-mode', 'connector-checkpoints', 'request-indexes', 'connector-fences', 'take-supersession', 'orphan-bindings', 'embedding-effects', 'attribution-backfill', 'planner-stats', 'google-file-modes', 'stale-atoms', 'extractor-facts', 'captured-facts', 'loop-facts', 'orphan-children', 'failed-writes', 'frontmatter'] as const;
 export type RepairKind = typeof REPAIR_KINDS[number];
@@ -50,6 +51,11 @@ export interface RepairPlan {
   listing?: RepairListing[];
   /** Kind-specific preview detail (per-file diffs, manual fixes, next actions), rendered by the handler's `render`. */
   details?: Record<string, unknown>;
+  /**
+   * `spends: 'llm'` kinds: the estimated paid-model spend of the pending items (null for an unpriced model under a
+   * user-set cap) and what is left under the kind's own daily cap (null when it has none).
+   */
+  llm?: { usd: number | null; cap_remaining_usd: number | null };
 }
 
 export interface RepairListing { item: string; class: string; detail?: string }
@@ -69,16 +75,18 @@ export interface RepairHandler {
    * Apply one item; `false` when it no longer needs repair. `embed` is false
    * under --no-embed. `runId` identifies this repair run and survives a resume.
    * A kind with named per-item outcomes returns them instead of a boolean.
+   * `llmAllowanceUsd` (`spends: 'llm'` kinds): what is left of the run's paid-model allowance (undefined = no run
+   * cap), so the kind caps its own reservation at it.
    */
-  apply(ctx: OperationContext, item: RepairItem, opts?: { embed: boolean; runId?: string }): Promise<boolean | RepairItemOutcome>;
+  apply(ctx: OperationContext, item: RepairItem, opts?: { embed: boolean; runId?: string; llmAllowanceUsd?: number }): Promise<boolean | RepairItemOutcome>;
   /** How many per-item outcomes the result lists (default 20). */
   outcomeItemsLimit?: number;
   /** Human lines for the plan's `details`; `diff` asks for every per-item diff, not one sample per class. */
   render?(details: Record<string, unknown>, opts: { diff: boolean }): string[];
 }
 
-/** A named per-item outcome; `applied` counts it as applied, otherwise skipped. */
-export interface RepairItemOutcome { applied: boolean; outcome: string; reason?: string; detail?: Record<string, unknown> }
+/** A named per-item outcome; `applied` counts it as applied, otherwise skipped. `llm_usd`: what the item actually spent on a paid chat model. */
+export interface RepairItemOutcome { applied: boolean; outcome: string; reason?: string; detail?: Record<string, unknown>; llm_usd?: number }
 
 export interface RepairResult {
   kind: RepairKind;
@@ -88,7 +96,11 @@ export interface RepairResult {
   affected: number;
   sample: string[];
   residuals: Record<string, number>;
-  cost: { lifetime_ids: number; receipt_bytes: number; embedding_pages: number; embedding_usd: number | null };
+  /**
+   * `llm_usd` and `llm_cap_remaining_usd` are present only for `spends: 'llm'` kinds: the plan's estimate on a dry
+   * run, the actual spend on an apply, and what is left under the kind's daily cap and the run's allowance.
+   */
+  cost: { lifetime_ids: number; receipt_bytes: number; embedding_pages: number; embedding_usd: number | null; llm_usd?: number | null; llm_cap_remaining_usd?: number | null };
   capacity: Array<{ scope: string; resource: string; used: number; limit: number; stop_at: number }>;
   resumed_from: RepairCursor | null;
   applied: number;
@@ -186,30 +198,45 @@ function writerHeld(error: unknown): error is OperationError {
 /**
  * `explicit`: the operator named this kind on the command line. An
  * explicit-only kind (registry `explicit_only`) refuses without it, so no
- * `--all` loop or supplied remediation step can run one.
+ * `--all` loop or supplied remediation step can run one. `spec` is the kind's
+ * registry entry (default: the registered one).
+ *
+ * `maxLlmUsd` caps what a `spends: 'llm'` apply may spend on a paid chat
+ * model: each item gets the remaining allowance, and once it is used up the
+ * run stops (`budget_exhausted`) before the next item, resumable by rerunning
+ * the apply command. The cap is metered from each item's reported `llm_usd`;
+ * the core never opens a budget tracker of its own.
  */
 export async function runRepair(ctx: OperationContext, handler: RepairHandler, scope: RepairScope,
   opts: { apply: boolean; limit?: number; embeddingModel?: string; sourceFlag?: string; embed?: boolean; applyArgs?: string[];
-    explicit?: boolean; expect?: string; includeAmbiguous?: boolean; only?: string[]; skip?: string[] }): Promise<RepairResult> {
+    explicit?: boolean; expect?: string; includeAmbiguous?: boolean; only?: string[]; skip?: string[];
+    spec?: Pick<RepairKindSpec, 'explicit_only' | 'consent' | 'spends'>; maxLlmUsd?: number }): Promise<RepairResult> {
   const { repairSpec, explicitKindRequired } = await import('./registry.ts');
-  if (repairSpec(handler.kind)?.explicit_only && opts.explicit !== true) throw explicitKindRequired(handler.kind);
+  const spec = opts.spec ?? repairSpec(handler.kind);
+  if (spec?.explicit_only && opts.explicit !== true) throw explicitKindRequired(handler.kind);
   if (opts.apply) await initializeLocalPersistence(ctx);
   const { cursor: resumed, runId: storedRunId } = await readCursor(ctx.engine, handler.kind, scope, opts.apply ? opts.expect : undefined);
   const plan = await handler.plan(ctx.engine, scope, resumed, { apply: opts.apply, expect: opts.expect, includeAmbiguous: opts.includeAmbiguous, only: opts.only, skip: opts.skip });
   const pending = opts.limit !== undefined ? plan.items.slice(0, opts.limit) : plan.items;
   const counters = await capacity(ctx);
   const admits = (handler.publication ?? 'coordinated') === 'coordinated' ? pending.length : 0;
+  const llm = spec?.spends === 'llm';
+  const llmLeft = (spent: number): number | null => {
+    const caps = [plan.llm?.cap_remaining_usd, opts.maxLlmUsd].filter((cap): cap is number => typeof cap === 'number');
+    return caps.length ? Math.max(0, Math.min(...caps) - spent) : null;
+  };
   const result: RepairResult = {
     kind: handler.kind, mode: opts.apply ? 'apply' : 'dry_run', scope, affected: plan.items.length,
     sample: plan.items.slice(0, SAMPLE).map(item => `${item.source_id}:${item.slug}`), residuals: plan.residuals,
     cost: { lifetime_ids: admits, receipt_bytes: admits * RECEIPT_BYTES, embedding_pages: handler.embeds === false ? 0 : pending.length,
-      embedding_usd: embeddingUsd(pending.reduce((sum, item) => sum + item.chars, 0), opts.embeddingModel) },
+      embedding_usd: embeddingUsd(pending.reduce((sum, item) => sum + item.chars, 0), opts.embeddingModel),
+      ...(llm ? { llm_usd: opts.apply || !plan.llm ? 0 : plan.llm.usd, llm_cap_remaining_usd: llmLeft(0) } : {}) },
     capacity: counters.map(({ scope: key, resource, used, limit, stop_at }) => ({ scope: key, resource, used, limit, stop_at })),
     resumed_from: resumed, applied: 0, skipped: 0, complete: false, ...(plan.warnings?.length ? { warnings: plan.warnings } : {}),
     apply_command: `gbrain repair ${handler.kind}${opts.sourceFlag ? ` --source ${opts.sourceFlag}` : ''}${(opts.applyArgs ?? []).map(arg => ` ${arg}`).join('')}`
       + `${[...(opts.only ?? []).flatMap(path => ['--only', path]), ...(opts.skip ?? []).flatMap(path => ['--skip', path])].map(arg => ` ${shellQuote([arg])}`).join('')}`
       + `${opts.includeAmbiguous ? ' --include-ambiguous' : ''} --apply${plan.preview_hash ? ` --expect ${plan.preview_hash}` : ''}`
-      + `${repairSpec(handler.kind)?.consent === 'destructive' ? ' --yes' : ''}`,
+      + `${spec?.consent === 'destructive' ? ' --yes' : ''}`,
   };
   if (!opts.apply) {
     if (plan.listing) result.listing = plan.listing;
@@ -220,8 +247,14 @@ export async function runRepair(ctx: OperationContext, handler: RepairHandler, s
   // A resumed run keeps its id, so work it authorized is replayed, not authorized twice.
   const runId = storedRunId ?? randomUUID();
   if (!storedRunId) await writeCursor(ctx.engine, handler.kind, scope, resumed, runId, opts.expect);
+  let llmSpent = 0;
   for (const [index, item] of pending.entries()) {
     const remaining = pending.length - index;
+    if (llm && opts.maxLlmUsd !== undefined && llmSpent >= opts.maxLlmUsd) {
+      result.stopped = { reason: 'budget_exhausted', message: `Stopped before ${item.source_id}:${item.slug}: this run's paid-model allowance is used up `
+        + `($${llmSpent.toFixed(4)} spent of $${opts.maxLlmUsd.toFixed(4)}; ${remaining} item(s) still pending). Rerun \`${result.apply_command}\` to resume.` };
+      return result;
+    }
     const full = admits ? (await capacity(ctx)).find(c => c.used + (c.resource === 'lifetime_ids' ? 1 : RECEIPT_BYTES) > c.stop_at) : undefined;
     if (full) {
       const perItem = full.resource === 'lifetime_ids' ? 1 : RECEIPT_BYTES;
@@ -231,7 +264,12 @@ export async function runRepair(ctx: OperationContext, handler: RepairHandler, s
       return result;
     }
     try {
-      const applied = await handler.apply({ ...ctx, sourceId: item.source_id }, item, { embed: opts.embed === true, runId });
+      const applied = await handler.apply({ ...ctx, sourceId: item.source_id }, item, { embed: opts.embed === true, runId,
+        ...(llm && opts.maxLlmUsd !== undefined ? { llmAllowanceUsd: opts.maxLlmUsd - llmSpent } : {}) });
+      if (llm && typeof applied === 'object' && applied.llm_usd) {
+        llmSpent += applied.llm_usd;
+        result.cost = { ...result.cost, llm_usd: llmSpent, llm_cap_remaining_usd: llmLeft(llmSpent) };
+      }
       if (typeof applied === 'object') {
         result.outcomes = { ...result.outcomes, [applied.outcome]: (result.outcomes?.[applied.outcome] ?? 0) + 1 };
         if ((result.outcome_items ??= []).length < (handler.outcomeItemsLimit ?? SAMPLE * 2)) {
