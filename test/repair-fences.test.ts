@@ -497,3 +497,22 @@ test('a run past its deadline stops with time_budget before any item and calls n
   expect(result).toMatchObject({ applied: 0, remaining: { time_budget: 1 } });
   expect(calls).toHaveLength(0);
 }), 240_000);
+
+test('two concurrent appliers at the daily cap: one model call, the other stops budget_exhausted, and the ledger never passes the cap', () => each(async engine => {
+  const a = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
+  const b = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
+  await a.sync(); await b.sync();
+  transport(() => answer(CLAIM));
+  const day = new Date().toISOString().slice(0, 10);
+  const [before] = await engine.executeRaw<{ spent: string | null }>("SELECT (reserved_usd + committed_usd)::text AS spent FROM budget_ledger WHERE scope='llm_repair' AND resolver_id='fences' AND local_date=$1::date", [day]);
+  const spent = Number(before?.spent ?? 0);
+  // Room for exactly one call today (each estimate is about $0.017 and settles at about $0.005).
+  await engine.setConfig('fences.repair.max_usd_per_day', (spent + 0.02).toFixed(4));
+  const results = await Promise.all([a.run({ apply: true }), b.run({ apply: true })]);
+  expect(calls).toHaveLength(1);
+  expect(results.map(r => r.repaired).sort()).toEqual([0, 1]);
+  expect(results.find(r => r.repaired === 0)!.stopped).toMatchObject({ reason: 'budget_exhausted' });
+  const [after] = await engine.executeRaw<{ spent: string; cap: string }>("SELECT (reserved_usd + committed_usd)::text AS spent, cap_usd::text AS cap FROM budget_ledger WHERE scope='llm_repair' AND resolver_id='fences' AND local_date=$1::date", [day]);
+  expect(Number(after!.spent)).toBeLessThanOrEqual(Number(after!.cap));
+  await engine.executeRaw("DELETE FROM config WHERE key='fences.repair.max_usd_per_day'");
+}), 240_000);
