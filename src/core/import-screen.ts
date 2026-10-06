@@ -16,9 +16,11 @@ import { classifyImportHold, contentSizeHold, parseMarkdown, type ContentHold, t
 import { isCodeFilePath } from './sync.ts';
 import { opError, type OperationError } from './ops/contract.ts';
 import type { Action } from './agent-output.ts';
-import { fenceFixText, fenceLocationFromMessage, fenceRefusal, scanCanonicalFences } from './fence-repair/refusal.ts';
+import { fenceFixText, fenceLocationFromMessage, fenceRefusal } from './fence-repair/refusal.ts';
 import type { FenceMessageLocation } from './fence-repair/reasons.ts';
-import type { FenceReason } from './fence-repair/types.ts';
+import { fenceIssuesWire, fenceStep, type FenceIssueWire } from './fence-repair/tier1.ts';
+import type { FenceCtx, FenceFix, FencePage, FenceReason } from './fence-repair/types.ts';
+import { effectiveVisibility } from './search/private-visibility.ts';
 
 export const MAX_FILE_SIZE = 5_000_000; // 5MB
 
@@ -79,6 +81,27 @@ export interface ContentRefusal extends Omit<ContentHold, 'code' | 'reason'> {
   code: ContentHold['code'] | 'content_rejected' | 'invalid_fence';
   reason?: ContentHold['reason'] | FenceReason;
   fence?: FenceMessageLocation;
+  /** #6188 (D18): every issue that blocks the write, location and class only. */
+  fence_issues?: FenceIssueWire[];
+}
+
+/**
+ * #6188: what the fence step decided for importable content. Absent when the
+ * fences compile (or the page has none). `fixes` non-empty: Tier 1 rewrote
+ * `before` into `after`. `issues` non-empty (lenient paths only): a residual
+ * fence imported as written, reported as a warning.
+ */
+export interface FenceScreen {
+  before: FencePage;
+  after: FencePage;
+  fixes: FenceFix[];
+  issues: FenceIssueWire[];
+}
+
+/** The Tier 1 context a screen knows without the database: page visibility and the pack's takes kinds. */
+export function screenFenceCtx(page: Pick<ParsedMarkdown, 'type' | 'frontmatter'>, activePack?: ParseOpts['activePack']): FenceCtx {
+  const kinds = (activePack as { takes_kinds?: readonly string[] } | undefined)?.takes_kinds;
+  return { pageVisibility: effectiveVisibility({ kind: 'page', page }), ...(kinds?.length ? { takesPackKinds: kinds } : {}) };
 }
 
 export interface ImportScreenInput {
@@ -101,19 +124,28 @@ export interface ImportScreenInput {
   /** Pre-loaded config: a junk hit under `junk_disposition: reject` refuses as `content_rejected`. */
   sanity?: ImportSanityConfig;
   /**
-   * #6188 (E8): `coordinated` writers (managed sync, managed import, managed
-   * file repair) refuse a fence the canonical projection would refuse as
-   * `invalid_fence`; `lenient` (the default: legacy sync, `importFromFile`,
-   * put_page) screens no fence. Coordinated put_page refuses the same fence
-   * typed at its projection, after the remote hidden-row merge.
+   * #6188 (E8): the fence step. Both modes run Tier 1 on a fence the canonical
+   * projection would refuse and admit what it fixes (`fences` on the result).
+   * A residual fence refuses `invalid_fence` with `fence_issues` on
+   * `coordinated` paths (managed sync, managed import, managed file repair,
+   * put_page) and is importable with the issues as a warning on `lenient`
+   * paths (legacy sync, `importFromFile`, direct content imports). Unset:
+   * no fence step.
    */
   fences?: 'coordinated' | 'lenient';
+  /** #6188: `fences.normalize`; false treats a fixable fence as residual. Default true. */
+  normalize?: boolean;
 }
 
 export type ImportScreenResult =
   | { status: 'published' }
-  | { status: 'importable'; parsed: ParsedMarkdown | null }
+  | { status: 'importable'; parsed: ParsedMarkdown | null; fences?: FenceScreen }
   | { status: 'refused'; refusal: ContentRefusal };
+
+/** The screen admitted content because Tier 1 rewrote a fence (callers then read `fences.normalize`). */
+export function screenNormalized(result: ImportScreenResult): boolean {
+  return result.status === 'importable' && !!result.fences?.fixes.length;
+}
 
 export function screenImportContent(input: ImportScreenInput): ImportScreenResult {
   if (input.published?.()) return { status: 'published' };
@@ -124,15 +156,23 @@ export function screenImportContent(input: ImportScreenInput): ImportScreenResul
   const parsed = parseMarkdown(input.content, input.path, { validate: true, ...(input.activePack ? { activePack: input.activePack } : {}) });
   const hold = classifyImportHold(parsed, { expectedSlug: input.expectedSlug, slugExempt: input.slugExempt, slugConflictMessage: input.slugConflictMessage });
   if (hold) return { status: 'refused', refusal: hold };
-  if (input.fences === 'coordinated') {
-    const [defect] = scanCanonicalFences(parsed).defects;
-    if (defect) return { status: 'refused', refusal: fenceRefusal(defect) };
+  let fences: FenceScreen | undefined;
+  if (input.fences) {
+    const before = { compiled_truth: parsed.compiled_truth, timeline: parsed.timeline ?? '' };
+    const step = fenceStep(before, screenFenceCtx(parsed, input.activePack), { normalize: input.normalize !== false });
+    if (step.status === 'residual') {
+      const issues = fenceIssuesWire([...step.issues, ...step.fixable]);
+      if (input.fences === 'coordinated') return { status: 'refused', refusal: { ...fenceRefusal(step.location), fence_issues: issues } };
+      fences = { before, after: before, fixes: [], issues };
+    } else if (step.status === 'normalized') {
+      fences = { before, after: step.page, fixes: step.fixes, issues: [] };
+    }
   }
   if (input.sanity && !input.sanity.disabled && input.sanity.junkDisposition === 'reject') {
     const result = assessImportSanity(parsed, input.sanity);
     if (result.shouldQuarantine) return { status: 'refused', refusal: { code: 'content_rejected', message: `Content rejected by sanity gate: ${result.reason_messages.join('; ')}` } };
   }
-  return { status: 'importable', parsed };
+  return { status: 'importable', parsed, ...(fences ? { fences } : {}) };
 }
 
 /**
@@ -142,9 +182,12 @@ export function screenImportContent(input: ImportScreenInput): ImportScreenResul
  */
 export function contentRefusalError(refusal: ContentRefusal, suggestion: string, opts: { legacy_error?: string; fix?: Action } = {}): OperationError {
   const where = [refusal.key ? `key ${refusal.key}` : '', refusal.line !== undefined ? `line ${refusal.line}` : ''].filter(Boolean).join(', ');
-  return opError(refusal.code, refusal.message, suggestion, {
+  const error = opError(refusal.code, refusal.message, suggestion, {
     ...(refusal.reason ? { reason: refusal.reason } : {}), ...(where ? { detail: where } : {}), ...opts,
   });
+  if (refusal.fence) error.fence = { ...refusal.fence };
+  if (refusal.fence_issues?.length) error.fenceIssues = refusal.fence_issues.map(issue => ({ ...issue }));
+  return error;
 }
 
 /**

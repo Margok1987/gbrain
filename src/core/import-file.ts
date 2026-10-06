@@ -10,7 +10,10 @@ import { basename, extname, resolve } from 'path';
 import { createHash } from 'crypto';
 import type { BrainEngine, FileSpec } from './engine.ts';
 import { classifyImportHold, parseMarkdown, resolveParsedSubtype, type ParseOpts, type ParsedMarkdown } from './markdown.ts';
-import { assessImportSanity, loadImportSanityConfig, MAX_FILE_SIZE, screenImportContent, type ContentRefusal } from './import-screen.ts';
+import { assessImportSanity, loadImportSanityConfig, MAX_FILE_SIZE, screenImportContent, type ContentRefusal, type FenceScreen } from './import-screen.ts';
+import { applyImportFences } from './fence-repair/import-step.ts';
+import type { FenceIssueWire } from './fence-repair/tier1.ts';
+import type { FenceFix } from './fence-repair/types.ts';
 import { classifyStoredType } from './schema-pack/type-usage.ts';
 import { prepareMarkdownChunks } from './markdown-chunks.ts';
 import { prepareCodeChunks, installCodeChunkEdges } from './code-chunks.ts';
@@ -167,6 +170,9 @@ export interface ImportResult {
   refusal?: ContentRefusal;
   /** #5988: the file imported only after quoting unreadable frontmatter values, or carries a `#`-comment value. */
   frontmatter_recovery?: { quoted: boolean; comment_value: boolean };
+  /** #6188: Tier 1 rewrote a fence (the stored body and hash are normalized); `fence_issues`: a lenient import stored a residual fence as written. */
+  fences_normalized?: FenceFix[];
+  fence_issues?: FenceIssueWire[];
 }
 
 export { MAX_FILE_SIZE };
@@ -203,6 +209,14 @@ async function refreshSourcePath(engine: BrainEngine, slug: string, sourceId: st
       [sourcePath, sourceId ?? 'default', slug, originUri],
     ));
   } catch { /* bookkeeping only — never fail the import over it */ }
+}
+
+/** #6188 (E8): `importFromContent`'s fence options. */
+interface ImportFenceOptions {
+  /** A residual fence refuses typed (`coordinated`) or is stored with a warning (`lenient`, default); a fixable one is normalized. */
+  fences?: 'coordinated' | 'lenient';
+  /** The caller's fence verdict for these exact bytes, `fences.normalize` settled (null: the fences compile); skips a second scan. */
+  fenceScreen?: FenceScreen | null;
 }
 
 /**
@@ -309,7 +323,7 @@ export async function importFromContent(
     allowEmptyOverwrite?: boolean;
     beforeCommit?: (tx: BrainEngine, slug: string) => Promise<void>;
     onPostCommitEmbedding?: (complete: () => Promise<ImportEmbeddingResult>) => void;
-  } = {},
+  } & ImportFenceOptions = {},
 ): Promise<ImportResult> {
   // Normalize BEFORE any tx write: putPage lowercases via validateSlug but
   // upsertChunks used to query by the caller's raw slug, so a mixed-case slug
@@ -326,7 +340,7 @@ export async function importFromContent(
   // Reject oversized payloads before any parsing, chunking, or embedding happens.
   // Uses Buffer.byteLength to count UTF-8 bytes the same way disk size would,
   // so the network path behaves identically to the file path.
-  const screen = screenImportContent({ content, path: slug + '.md', ...(opts.activePack ? { activePack: opts.activePack } : {}) });
+  const screen = screenImportContent({ content, path: slug + '.md', ...(opts.activePack ? { activePack: opts.activePack } : {}), ...(opts.fenceScreen === undefined ? { fences: opts.fences ?? 'lenient' } : {}) });
   if (screen.status === 'refused') {
     return { slug, status: screen.refusal.code === 'file_too_large' ? 'skipped' : 'error', chunks: 0, error: screen.refusal.message, refusal: screen.refusal, skip_reason: screen.refusal.code };
   }
@@ -573,6 +587,9 @@ export async function importFromContent(
   // write-back arrives missing those rows as well. Each column merges
   // against its own existing counterpart (fences don't migrate between
   // columns here; splitBody keeps them where the caller wrote them).
+  // #6188 (E7): Tier 1 in place before the hidden-row merge and withdrawal preservation; the hash covers the normalized body.
+  const fences = await applyImportFences({ engine, sourceId: sourceId ?? 'default', slug, mode: opts.fences ?? 'lenient', screened: opts.fenceScreen, screen, parsed, activePack: opts.activePack, remote: opts.remote === true, existing });
+  if (fences.refused) return fences.refused;
   if (opts.remote === true && existing) {
     parsed.compiled_truth = mergeHiddenFactRowsIntoBody(slug, parsed.compiled_truth, existing.compiled_truth);
     parsed.timeline = mergeHiddenFactRowsIntoBody(slug, parsed.timeline, existing.timeline);
@@ -670,20 +687,20 @@ export async function importFromContent(
     // projection-only; the canonical write stays a no-op.
     const reseal = await projectionBelowSafeFence(engine, existing.id);
     if (opts.prepare) {
-      const result: ImportResult = { slug, status: 'skipped', chunks: 0, parsedPage, ...(typeWarning ? { type_warning: typeWarning } : {}) };
+      const result: ImportResult = { slug, status: 'skipped', chunks: 0, parsedPage, ...(typeWarning ? { type_warning: typeWarning } : {}), ...fences.fields };
       return opts.prepare({ slug, parsedPage, observedRevision: (existing as typeof existing & { knowledge_revision?: string }).knowledge_revision ?? null,
         noop: true, result, validate: async () => {},
         apply: async tx => { if (reseal) await queuePageProjection(tx, sourceId ?? 'default', slug, 'safe_chunk_reseal'); } });
     }
     await persistUnchanged();
     const resealed = reseal ? await resealSafeChunks(engine, slug, sourceId ?? 'default') : null;
-    return { slug, status: 'skipped', chunks: 0, parsedPage, ...(typeWarning ? { type_warning: typeWarning } : {}), ...(resealed ? { resealed } : {}) };
+    return { slug, status: 'skipped', chunks: 0, parsedPage, ...(typeWarning ? { type_warning: typeWarning } : {}), ...(resealed ? { resealed } : {}), ...fences.fields };
   }
 
   if (existing && legacyHashMatch) {
     await persistUnchanged(true);
     const resealed = await projectionBelowSafeFence(engine, existing.id) ? await resealSafeChunks(engine, slug, sourceId ?? 'default') : null;
-    return { slug, status: 'skipped', chunks: 0, parsedPage, ...(typeWarning ? { type_warning: typeWarning } : {}), ...(resealed ? { resealed } : {}) };
+    return { slug, status: 'skipped', chunks: 0, parsedPage, ...(typeWarning ? { type_warning: typeWarning } : {}), ...(resealed ? { resealed } : {}), ...fences.fields };
   }
 
   // Identity dedup (#1309): move, skip a true duplicate, or index both.
@@ -704,7 +721,7 @@ export async function importFromContent(
   }
   if (identity.kind === 'duplicate') {
     if (opts.prepare) {
-      const result: ImportResult = { slug: identity.dupSlug, status: 'skipped', chunks: 0, parsedPage };
+      const result: ImportResult = { slug: identity.dupSlug, status: 'skipped', chunks: 0, parsedPage, ...fences.fields };
       return opts.prepare({ slug: identity.dupSlug, parsedPage, observedRevision: (existing as (typeof existing & { knowledge_revision?: string }) | null)?.knowledge_revision ?? null,
         noop: true, result, validate: async () => {}, apply: async () => {} });
     }
@@ -713,7 +730,7 @@ export async function importFromContent(
       `(frontmatter.id=${fmIdStr}) in source ${sourceId ?? 'default'}. ` +
       `Pass --force-rechunk to override.\n`
     );
-    return { slug: identity.dupSlug, status: 'skipped', chunks: 0, parsedPage };
+    return { slug: identity.dupSlug, status: 'skipped', chunks: 0, parsedPage, ...fences.fields };
   }
   if (identity.kind === 'shared_id') {
     process.stderr.write(
@@ -981,7 +998,7 @@ export async function importFromContent(
   if (opts.prepare) return opts.prepare({
     slug, parsedPage, observedRevision: (existing as (typeof existing & { knowledge_revision?: string }) | null)?.knowledge_revision ?? null,
     noop: false, contentHash: hash, result: { slug, status: 'imported', chunks: chunks.length, parsedPage,
-      ...(pageQuarantined ? { quarantined: true } : {}), ...(pageFlagged ? { flagged: true, flag_reason: pageFlagReason } : {}) },
+      ...(pageQuarantined ? { quarantined: true } : {}), ...(pageFlagged ? { flagged: true, flag_reason: pageFlagReason } : {}), ...fences.fields },
     validate: tx => assertPreparedFactWithdrawals(tx, txOpts.sourceId, parsed.compiled_truth, parsed.timeline || '', slug),
     apply: applyPrepared,
   });
@@ -1025,7 +1042,7 @@ export async function importFromContent(
     ...(pageQuarantined ? { quarantined: true } : {}),
     ...(pageFlagged ? { flagged: true, flag_reason: pageFlagReason } : {}),
     ...(typeWarning ? { type_warning: typeWarning } : {}),
-    ...(embeddingDeferred ? { embedding_deferred: true } : {}),
+    ...(embeddingDeferred ? { embedding_deferred: true } : {}), ...fences.fields,
   };
 }
 
