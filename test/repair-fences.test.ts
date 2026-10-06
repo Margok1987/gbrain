@@ -46,7 +46,8 @@ import { importFromContent } from '../src/core/import-file.ts';
 import { parseFactsFence } from '../src/core/facts-fence.ts';
 import { parseTakesFence } from '../src/core/takes-fence.ts';
 import { resolveRepairScope, type RepairResult } from '../src/core/repair/core.ts';
-import { repairRunner } from '../src/core/repair/registry.ts';
+import { repairRunner, repairSpec } from '../src/core/repair/registry.ts';
+import { planRepairSteps, runRepairSteps } from '../src/core/remediation/repairs.ts';
 import { fencesRepair, type FencesPreviewDetails } from '../src/core/repair/fences.ts';
 import { readUncommittedFenceRepairs } from '../src/core/fence-repair/uncommitted.ts';
 import { parseRepairArgs, runRepairCommand } from '../src/commands/repair.ts';
@@ -448,4 +449,19 @@ test('--slug reaches a page the census has not judged and binds it into the hash
   expect((refused as OperationError).code).toBe('preview_changed');
   expect(await h.run({ apply: true, expect: hashOf(one), slugs: ['notes/one'] })).toMatchObject({ repaired: 1 });
   expect(parseFactsFence((await engine.getPage('notes/two', { sourceId: 'slugged' }))!.compiled_truth).warnings.length).toBeGreaterThan(0);
+}), 240_000);
+
+test('doctor --remediate: the plan counts the fences model estimate as paid, and a smaller --max-usd refuses the step before any call', () => each(async engine => {
+  const s = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
+  await s.sync();
+  transport(() => answer(CLAIM));
+  const registry = [repairSpec('fences')];
+  const steps = await planRepairSteps(engine, { registry });
+  expect(steps).toHaveLength(1);
+  expect(steps[0]).toMatchObject({ kind: 'fences', paid: true });
+  expect(steps[0]!.llm_usd).toBeGreaterThan(0.01);
+  const results = await runRepairSteps(engine, steps, { remote: false, remainingUsd: () => 0.01, registry });
+  expect(results.map(r => r.status)).toEqual(['budget_refused']);
+  expect(calls).toHaveLength(0);
+  expect(s.read('people/model.md')).toBe(md('Model', noHeader()));
 }), 240_000);
