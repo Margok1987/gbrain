@@ -48,6 +48,7 @@ import { parseTakesFence } from '../src/core/takes-fence.ts';
 import { resolveRepairScope, type RepairResult } from '../src/core/repair/core.ts';
 import { repairRunner, repairSpec } from '../src/core/repair/registry.ts';
 import { planRepairSteps, runRepairSteps } from '../src/core/remediation/repairs.ts';
+import { runFenceRepairPhase } from '../src/core/cycle/fence-repair.ts';
 import { fencesRepair, type FencesPreviewDetails } from '../src/core/repair/fences.ts';
 import { readUncommittedFenceRepairs } from '../src/core/fence-repair/uncommitted.ts';
 import { parseRepairArgs, runRepairCommand } from '../src/commands/repair.ts';
@@ -515,4 +516,35 @@ test('two concurrent appliers at the daily cap: one model call, the other stops 
   const [after] = await engine.executeRaw<{ spent: string; cap: string }>("SELECT (reserved_usd + committed_usd)::text AS spent, cap_usd::text AS cap FROM budget_ledger WHERE scope='llm_repair' AND resolver_id='fences' AND local_date=$1::date", [day]);
   expect(Number(after!.spent)).toBeLessThanOrEqual(Number(after!.cap));
   await engine.executeRaw("DELETE FROM config WHERE key='fences.repair.max_usd_per_day'");
+}), 240_000);
+
+test('the maintenance phase repairs held fences with the real kind, and the daily cap holds across ticks until it is raised', () => each(async engine => {
+  const a = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
+  const b = await managed(engine, { 'people/model.md': md('Model', noHeader()) });
+  await a.sync(); await b.sync();
+  transport(() => answer(CLAIM));
+  const day = new Date().toISOString().slice(0, 10);
+  const [before] = await engine.executeRaw<{ spent: string | null }>("SELECT (reserved_usd + committed_usd)::text AS spent FROM budget_ledger WHERE scope='llm_repair' AND resolver_id='fences' AND local_date=$1::date", [day]);
+  await engine.setConfig('fences.repair.max_usd_per_day', (Number(before?.spent ?? 0) + 0.02).toFixed(4));
+  const tick = () => runFenceRepairPhase(engine, { dryRun: false, deadlineAtMs: Date.now() + 600_000 });
+  const first = await tick();
+  expect(first.details).toMatchObject({ mode: 'apply', stopped_reason: 'budget_exhausted' });
+  expect(calls).toHaveLength(1);
+  const fixed = [a, b].filter(s => parseFactsFence(s.read('people/model.md')).warnings.length === 0);
+  expect(fixed).toHaveLength(1);
+  expect(await fixed[0]!.holds()).toEqual([]);
+  // A second tick the same UTC day spends nothing more.
+  const second = await tick();
+  expect(second.details).toMatchObject({ stopped_reason: 'budget_exhausted' });
+  expect(calls).toHaveLength(1);
+  await engine.executeRaw("DELETE FROM config WHERE key='fences.repair.max_usd_per_day'");
+  const third = await tick();
+  expect(third).toMatchObject({ status: 'ok' });
+  expect(calls).toHaveLength(2);
+  for (const s of [a, b]) { expect(parseFactsFence(s.read('people/model.md')).warnings).toEqual([]); expect(await s.holds()).toEqual([]); }
+  expectNoSecrets([first, second, third]);
+  // Paused: the phase never calls the kind.
+  await engine.setConfig('fences.repair.enabled', 'false');
+  expect(await tick()).toMatchObject({ status: 'skipped', details: { reason: 'disabled' } });
+  await engine.executeRaw("DELETE FROM config WHERE key='fences.repair.enabled'");
 }), 240_000);
