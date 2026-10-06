@@ -165,11 +165,40 @@ holder or cell. Holds carry the same location as
 `fence: { reason, fence, section, rows, columns, line }`; a failed receipt
 keeps it in `write_error_detail.fence` (row numbers stay on the brain host).
 
-Legacy (unmanaged) sync, `importFromFile` and legacy `put_page` still import
-such a page as before (bad rows skipped) and never hold it. Two documented
-exceptions keep blocking with the typed refusal instead of holding:
-`sync.holds=fail`, and company-brain sources, which never hold and never
-rewrite repository files (fix the fence in the repository and commit).
+**What gbrain fixes by itself.** Before refusing or holding, every write path
+runs the fence through a lossless normalizer: a missing end marker with only
+blank lines after the table, two-dash takes markers above a table, zero,
+negative or duplicate row numbers (new numbers come after every number the
+page and its stored rows ever used), header aliases and column order,
+header-level defaults (`confidence 1.0`, `notability medium`,
+`visibility private`), enum synonyms (`critical` → `high`; `public` → `world`
+only on a world-visible page, else `private`), invented facts kinds (mapped to
+the closest kind, the original word kept in `context`), a short list of takes
+kind synonyms, assistant holders (`System`, `assistant` → `brain`) and percent
+confidences. It never changes a claim, an existing row number or a valid cell,
+and never makes a row more visible. A fence it fixes completely is written in
+its normalized form: managed sync commits the rewritten file (a read-only
+mirror keeps it database-only; a company-brain source refuses
+`source_writeback_required` naming the fence), and the result reports
+`fences_normalized` (`count`, `by_class`, `writers`, sample paths for local
+callers). A write also carries one `fence_normalized` coaching notice: the
+stored page differs from what was sent, so re-read it with `get_page` before
+editing; `remember` and `takes_add` write rows that never need it.
+`gbrain sync --dry-run` lists `would_normalize` beside `would_hold`.
+`gbrain config set fences.normalize false` turns normalization off: a fixable
+fence is then held or refused like any other.
+
+What the normalizer cannot fix exactly is refused or held as below; a refusal
+lists every blocking problem in `fence_issues`
+(`[{ fence, section, row, column, line, class, allowed }]`, where `allowed`
+is the column's vocabulary), so the caller can correct all of them at once.
+
+Legacy (unmanaged) sync, `gbrain import` on an unmanaged brain and other
+direct imports store a fence the normalizer cannot fix as written (bad rows
+skipped) and never hold it; the result reports it in `fence_issues`. Two
+documented exceptions keep blocking with the typed refusal instead of
+holding: `sync.holds=fail`, and company-brain sources, which never hold and
+never rewrite repository files (fix the fence in the repository and commit).
 
 **Say to your agent:** *"Sync held a page because of its facts table. Show me
 which rows are wrong and fix them."*
@@ -200,6 +229,8 @@ table, use `remember` (facts) or `takes_add` (takes).
 | <a id="fence-quoted_fence_rows"></a>`quoted_fence_rows` | A fence sits inside a code block or inline code span, so readers treat it as an example and importing would remove the stored rows it holds. | Move the fence out of the code, or delete the fence to remove its rows. |
 | <a id="fence-stored_row_collision"></a>`stored_row_collision` | A new takes row's number already names a different stored take that is not in the page's fence (wire `take_row_collision`). | Renumber the new row, or add the stored take back to the fence. |
 | <a id="fence-withdrawn_claim_in_malformed_fence"></a>`withdrawn_claim_in_malformed_fence` | A facts fence that does not parse holds a claim the user withdrew, so gbrain cannot tell whether the row should stay withdrawn. | Repair the fence so it parses; the withdrawn row then stays withdrawn. |
+| <a id="fence-target_fence_malformed"></a>`target_fence_malformed` | A verb that appends to or edits a page (`remember`, `extract_facts`, `takes_*`, `facts relink`, `edit_page`) found that page's stored fence does not parse and cannot be normalized in the same write (`edit_page` and the other takes writes never normalize). Memory verbs keep their v1 code (`invalid_params`, `detail: invalid_fence`). | Read the page, fix the named fence (or write the whole page with `put_page`, which normalizes what it can and names every row it cannot), then retry with a new request_id. |
+| <a id="fence-normalizer_failed"></a>`normalizer_failed` | The normalizer or its validator failed on this fence (a gbrain bug); the fence was not rewritten. A coordinated write refuses; a legacy import stores the page as written. | Run `gbrain doctor --json` and report it with the gbrain version; an upgrade re-screens the file. |
 | <a id="fence-prepare_time"></a>`prepare_time` | Hold only: the file passed the content screen, but its fence was refused while it was prepared against the stored page (a stored-row collision, a withdrawn claim, rows quoted in code). `fence.reason` names which. Managed sync holds it in the same run instead of blocking. | Fix it as its `fence.reason` says. After a database-side fix (for example removing the conflicting take), `gbrain sources retry-held <source>` re-checks the file. |
 
 Fence format. Markers are `<!--- gbrain:facts:begin -->` / `<!--- gbrain:facts:end -->`

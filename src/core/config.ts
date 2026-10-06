@@ -1651,6 +1651,9 @@ export const KNOWN_CONFIG_KEYS: readonly string[] = [
   'sync.hold_escalate_count',
   'sync.hold_escalate_pct',
   'sync.parser_regression',
+  // #6188: Tier 1 inline fence normalization on write paths (read by fence-repair/config.ts).
+  // Default on; `false` refuses (coordinated writers) or stores as written (legacy importers).
+  'fences.normalize',
   // #2179: clamp window for DCR-requested per-client token TTLs. Read by
   // `gbrain serve --http` at startup; unset min defaults to 300s, unset max
   // defaults fail-closed to max(--token-ttl, min).

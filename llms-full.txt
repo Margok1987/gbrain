@@ -6497,6 +6497,11 @@ vars — incident-time escape hatches, not everyday knobs.
    gbrain repair frontmatter --source <source-id>    # preview; writes nothing
    ```
 
+   A fence whose meaning is unambiguous (a missing end marker after the
+   table, duplicate row numbers, an invented kind, an assistant holder, ...)
+   is not held: managed sync rewrites it losslessly, commits the file and
+   reports `fences_normalized` (`gbrain sync --dry-run` lists
+   `would_normalize`; `gbrain config set fences.normalize false` turns it off).
    A fence hold (`invalid_fence`) names the fence, section, reason and row
    numbers, never a cell. Fix it by reading the page
    (`gbrain get --source <source-id> -- <slug>`), editing that fence in the
@@ -6509,8 +6514,10 @@ vars — incident-time escape hatches, not everyday knobs.
    Walkthrough with real output: [held files](repair.md#held-files); codes:
    [content refusals](write-refusals.md#held-files-and-content-refusals).
    Managed and legacy sync behave the same for frontmatter, size and content
-   holds; for fences, legacy sync keeps importing the page with its bad rows
-   skipped and never holds it. Holds never count toward the
+   holds; for fences, legacy sync stores the normalized fence in the database
+   (it never rewrites the file), keeps importing a page whose fence cannot be
+   normalized with its bad rows skipped (reported in `fence_issues`), and
+   never holds it. Holds never count toward the
    legacy auto-skip streak below. A source blocked by such a file before this
    release recovers on its next sync, or now with
    `gbrain sync --source <source-id> --no-pull`. Teams that want fail-closed
@@ -10101,7 +10108,7 @@ Source: https://raw.githubusercontent.com/garrytan/gbrain/master/docs/guides/tro
 
 <a id="held-files"></a>**Sync held a file (`Held <path>: invalid_frontmatter …`, doctor `git_held_files`, `get_page` shows `file_held`)?** The sync succeeded; only that file waits, and its page (if any) keeps its last good revision and refuses `put_page` until the file is repaired. Run `gbrain sources status <id>`, preview `gbrain repair frontmatter --source <id>`, and after the user agrees run the printed apply. A source a broken file blocked before upgrading recovers on its next sync (`gbrain sync --source <id> --no-pull` does it now). See [held files](repair.md#held-files).
 
-<a id="held-fence-files"></a>**Sync held a file because of its facts or takes fence (`Held <path>: invalid_fence …`)?** Managed sync succeeded; only that file waits. The hold names the fence, section, row numbers, columns and reason, never a cell. Read the page (`gbrain get --source <id> -- <slug>`), edit only that fence in the file (not the frontmatter; `gbrain repair frontmatter` does not touch fences), commit, and run `gbrain sync --source <id> --no-pull`. A `prepare_time` hold was refused against stored rows (for example a takes row number a stored take already uses): fix it as its `fence.reason` says, and after a database-side fix run `gbrain sources retry-held <id>`. A source a fence blocked before upgrading recovers on its next sync. See [fence holds](write-refusals.md#invalid_fence).
+<a id="held-fence-files"></a>**Sync held a file because of its facts or takes fence (`Held <path>: invalid_fence …`)?** Managed sync succeeded; only that file waits. The hold names the fence, section, row numbers, columns and reason, never a cell. Read the page (`gbrain get --source <id> -- <slug>`), edit only that fence in the file (not the frontmatter; `gbrain repair frontmatter` does not touch fences), commit, and run `gbrain sync --source <id> --no-pull`. A `prepare_time` hold was refused against stored rows (for example a takes row number a stored take already uses): fix it as its `fence.reason` says, and after a database-side fix run `gbrain sources retry-held <id>`. A source a fence blocked before upgrading recovers on its next sync. A fence with one obvious meaning is never held: sync rewrites it losslessly, commits the file and reports `fences_normalized`; a `fence_normalized` notice on a write means re-read the page before editing it. See [fence holds](write-refusals.md#invalid_fence).
 
 <a id="held-connector-items"></a>**A Google or GitHub item is held after repeated failures (doctor `connector_held_items`, `gbrain waiting` says coverage is partial)?** Run `gbrain sources status <id>`, fix the cause, then after the user agrees run `gbrain sources retry-held <id>` and `gbrain sync --source <id>`. See [held items](google-connect.md#held-items).
 
