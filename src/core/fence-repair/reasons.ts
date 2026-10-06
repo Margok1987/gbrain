@@ -31,7 +31,8 @@ export interface FenceReasonSpec {
 }
 
 const DOCS = 'docs/guides/write-refusals.md#fence-';
-const REPAIR = 'Preview the repair with `gbrain repair fences`.';
+// PR4 switches this next step to `gbrain repair fences`, routed through the hold-repair router.
+const REPAIR = 'Edit the fence by hand, then sync or write the page again.';
 
 type Base = Pick<FenceReasonSpec, 'stage' | 'tier' | 'manualOnly' | 'autoRetry'>;
 const tier3: Base = { stage: 'screen', tier: 'llm', manualOnly: false, autoRetry: true };
@@ -54,7 +55,7 @@ const SPECS: Record<FenceReason, Omit<FenceReasonSpec, 'docs'>> = {
   short_row: entry(tier3, 'Row(s) {rows} of the {fence} fence in the {section} (line {line}) are missing a cell in the middle of the row, so its columns are ambiguous. Add the missing cell so every column lines up. ' + REPAIR),
   extra_cells: entry(tier3, 'Row(s) {rows} of the {fence} fence in the {section} (line {line}) have more cells than the header, often an unescaped `|` in a cell. Escape it as `\\|` or remove the extra cell. ' + REPAIR),
   holder_unresolved: entry({ stage: 'screen', tier: 'resolver', manualOnly: false, autoRetry: true },
-    'Column `who` of row(s) {rows} in the {fence} fence ({section}, line {line}) is not a holder gbrain recognizes. Write `world`, `brain`, `people/<slug>` or `companies/<slug>`; the repair pass resolves it only when exactly one existing page matches.'),
+    'Column `who` of row(s) {rows} in the {fence} fence ({section}, line {line}) is not a holder gbrain recognizes. Write `world`, `brain`, `people/<slug>` or `companies/<slug>`.'),
   missing_begin: entry(manual, 'The {fence} fence in the {section} has an end marker at line {line} with no begin marker before it. Add the begin marker above the table, or delete the stray end marker.'),
   split_rows: entry(manual, 'The {fence} fence that begins at line {line} in the {section} has no end marker and its rows are split by blank lines or text. Join the rows into one table and add the end marker after the last row.'),
   unclosed_trailing_content: entry(manual, 'The {fence} fence that begins at line {line} in the {section} has no end marker and other text follows its table. Add the end marker directly after the last table row, or wrap the marker in backticks if the text only mentions it; gbrain does not guess where the fence ends.'),
