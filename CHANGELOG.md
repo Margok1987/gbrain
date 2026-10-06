@@ -10,6 +10,12 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.80.0] - 2026-10-06
+
+**The `sources writer deactivate` blocker test no longer flakes on Postgres: it stops the in-process persistence consumer before seeding effect state, so a background run can't settle the embedding blocker the test is checking for. Product code is unchanged.**
+
+The test writes a page, then rewrites its effect rows to seed a queued embedding effect that deactivate must refuse over (`writer_not_quiesced`). `put` returns at the request's commit, and the page's git and embedding effects then run on the in-process consumer. If the consumer had claimed the embedding effect before the rewrite, the row kept that run's execution token. The run then completed it (embedding is off, so it settles as skipped), the seeded blocker became `committed` between the dry run and the call, and deactivate succeeded (persistence-deactivate.test.ts:61, Unit-lane PostgreSQL arms). The test now stops the consumer after the write. The stop waits for in-flight runs, and admin calls don't restart the consumer. Production can't hit this race, because every path that moves an effect out of `running` either holds and clears its token or requires that no token is set. A forced probe holds the embedding run at its completion seam after its claim and releases it after `writer_unlock`. The old test failed 6 of 6 runs on PGLite and Postgres under the probe, and the fixed test passed 6 of 6.
+
 ## [0.60.78.0] - 2026-10-06
 
 **Green master wave: a brain with embedding turned off no longer sends your text to an embedding provider, lint survives a file vanishing mid-scan, embed and reindex-code stop failing when a background rebuild wins a race, and a release only publishes after its tests pass.**
