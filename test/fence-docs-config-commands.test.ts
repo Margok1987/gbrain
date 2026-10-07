@@ -28,7 +28,8 @@ const DOCS = [
   'docs/guides/troubleshooting.md', 'docs/guides/repair.md', 'docs/operations/spend-controls.md',
 ];
 const OPT_OUTS = ['gbrain config set fences.normalize false', 'gbrain config set fences.repair.enabled false', 'gbrain config set fences.repair.llm false'];
-const COMMAND = /gbrain config set (fences\.[A-Za-z_.]*[A-Za-z_])\s+([^\s`'")]+)/g;
+/** The value ends before closing quotes, brackets or the sentence punctuation of the prose (or CLI output line) that prints it. */
+const COMMAND = /gbrain config set (fences\.[A-Za-z_.]*[A-Za-z_])\s+([^\s`'")]+?)(?=[.,;:]?(?:\s|$|[`'")]))/g;
 /** A placeholder value (`<usd>`, `<n>`) stands for a number the user picks. */
 const sample = (value: string) => (/^<[a-z_]+>$/.test(value) ? '2' : value);
 
