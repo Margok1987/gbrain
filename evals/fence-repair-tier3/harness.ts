@@ -116,7 +116,8 @@ if (!modelArg || !outPath || !Number.isInteger(run) || !(maxUsd > 0)) {
 const { configureEvalGateway } = await import('../../src/eval/shared/gateway-bootstrap.ts');
 const { isAvailable } = await import('../../src/core/ai/gateway.ts');
 const { registerChatUsageSink } = await import('../../src/core/ai/chat-usage.ts');
-const { resolveFenceRepairModel } = await import('../../src/core/repair/fences.ts');
+// The resolver lives in fence-repair/model.ts from the round 2 code on (repair/fences.ts before).
+const { resolveFenceRepairModel } = await import('../../src/core/fence-repair/model.ts').catch(() => import('../../src/core/repair/fences.ts')) as { resolveFenceRepairModel: (engine: unknown) => Promise<string | null> };
 const { readFenceRepairCaps, FENCE_REPAIR_MAX_USD_PER_DAY_KEY } = await import('../../src/core/fence-repair/config.ts');
 const { loadPricingOverrides } = await import('../../src/core/budget/budget-tracker.ts');
 const { analyzeFences, tier3Estimate } = await import('../../src/core/fence-repair/repair-tiers.ts');
@@ -129,7 +130,9 @@ if (modelArg !== 'default') await engine.setConfig('models.fence_repair', modelA
 const registered = Object.fromEntries(Object.entries(REGISTERED_PRICES).filter(([m]) => !canonicalLookup(m)));
 await engine.setConfig('pricing.overrides', JSON.stringify(Object.fromEntries(Object.entries(registered).map(([m, p]) => [m, { input: p.input, output: p.output }]))));
 await engine.setConfig(FENCE_REPAIR_MAX_USD_PER_DAY_KEY, String(maxUsd));
-const model = await resolveFenceRepairModel(engine);
+const resolved = await resolveFenceRepairModel(engine);
+if (!resolved) { console.error('fence-repair-tier3: no fence-repair model resolves on this brain (no measured model has a provider key); pass --model.'); process.exit(2); }
+const model: string = resolved;
 const overrides = await loadPricingOverrides(engine);
 const caps = await readFenceRepairCaps(engine);
 configureEvalGateway({ chatModel: model });
