@@ -18,6 +18,8 @@
  *   so only the model can hold (`probe` is a plausible wrong guess the gates
  *   accept). `unrecoverable` cases lack a required value, so any repair must
  *   invent one and the gates reject it (`probe` is such a repair).
+ *   `split_claim` cases have a claim cut in two by an unescaped pipe; the
+ *   claim cannot be rejoined (gate b), so a repair can only keep it cut.
  * - `gate_limited`: a person would repair it, but the gates forbid the
  *   correct table (`expected` is that table; the oracle test proves the
  *   gates reject it). Diagnostic only.
@@ -31,7 +33,7 @@ export type CaseClass = 'short_row_trailing' | 'short_row_gap' | 'no_header' | '
 export interface Case {
   id: string;
   set: CaseSet;
-  adversarial?: 'ambiguous' | 'unrecoverable';
+  adversarial?: 'ambiguous' | 'unrecoverable' | 'split_claim';
   cls: CaseClass;
   kind: 'facts' | 'takes' | 'both';
   section?: 'body' | 'timeline';

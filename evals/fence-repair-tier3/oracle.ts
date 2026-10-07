@@ -12,7 +12,13 @@
  *   shows only the model can keep the page held.
  * - adversarial/unrecoverable: the probe (an invented value) must be rejected.
  *
- * Every fixture must also reach Tier 3 with the residual reason its class names.
+ * A fixture that reaches Tier 3 must carry the residual reason its class
+ * names. A fixture the free tiers settle instead is checked by tier, so the
+ * oracle stays valid when a rule moves fences out of Tier 3: a Tier 1 repair
+ * of a repairable fixture must equal `expected` byte for byte (else a
+ * violation); a Tier 1 repair of an adversarial or gate-limited fixture, and a
+ * fixture held before Tier 3, are routing notes, which the harness prints and
+ * the round's report counts. A fixture that already compiles is a violation.
  */
 import { __setChatTransportForTests, type ChatResult } from '../../src/core/ai/gateway.ts';
 import { dailyLedger, FENCE_REPAIR_LEDGER } from '../../src/core/budget/daily-ledger.ts';
@@ -50,7 +56,9 @@ export const oracleAnswers: AnswerFn = (f, req, variant) => {
 const result = (text: string): ChatResult => ({ text, blocks: [], stopReason: 'end',
   usage: { input_tokens: 600, output_tokens: 120, cache_read_tokens: 0, cache_creation_tokens: 0 }, model: 'anthropic:claude-opus-4-7', providerId: 'anthropic' });
 
-export async function runOracle(fixtures: readonly Fixture[], answer: AnswerFn): Promise<string[]> {
+export interface OracleResult { violations: string[]; notes: string[] }
+
+export async function runOracle(fixtures: readonly Fixture[], answer: AnswerFn): Promise<OracleResult> {
   const engine = new PGLiteEngine();
   await engine.connect({});
   await engine.initSchema();
@@ -58,14 +66,19 @@ export async function runOracle(fixtures: readonly Fixture[], answer: AnswerFn):
   const deps = { ledger: dailyLedger(engine, FENCE_REPAIR_LEDGER), store: attemptStore(engine), model: 'anthropic:claude-opus-4-7', capSource: 'default' as const,
     perPageUsd: 0.05, perDayUsd: 1000, timeoutMs: 30_000, now: () => new Date() };
   const violations: string[] = [];
+  const notes: string[] = [];
   try {
     for (const f of fixtures) {
       const variants: Array<'as_written' | 'blank_numbers'> = f.set === 'repairable' && f.tags.includes('no_row_numbers') ? ['as_written', 'blank_numbers'] : ['as_written'];
       for (const variant of variants) {
         const run = variant === 'as_written' ? f : { ...f, id: `${f.id}~blank` };
         const analysis = await analyzeFences(engine, fixtureTarget(run), { pageId: null });
-        if (analysis.status !== 'llm') {
-          violations.push(`${f.id}: the free tiers returned ${analysis.status}${analysis.status === 'manual' ? ` (${analysis.reason})` : ''}; it must reach Tier 3`);
+        if (analysis.status === 'clean') { violations.push(`${f.id}: the page already compiles`); continue; }
+        if (analysis.status === 'manual') { notes.push(`${f.id}: held before Tier 3 (${analysis.reason})`); continue; }
+        if (analysis.status === 'proposal') {
+          if (f.set !== 'repairable') notes.push(`${f.id}: written by Tier 1 (${analysis.tier}) although its correct outcome is ${f.set === 'adversarial' ? 'to stay held' : 'a table the gates forbid'}`);
+          else if (analysis.after.compiled_truth !== f.expected!.compiled_truth || analysis.after.timeline !== f.expected!.timeline) violations.push(`${f.id}: Tier 1 (${analysis.tier}) repair differs from expected`);
+          else notes.push(`${f.id}: repaired by Tier 1 (${analysis.tier}) exactly as expected`);
           continue;
         }
         const want = REASON_OF[f.cls];
@@ -86,14 +99,14 @@ export async function runOracle(fixtures: readonly Fixture[], answer: AnswerFn):
           }
         } else if (f.set === 'gate_limited') {
           if (out.outcome === 'repaired' || !out.gate) violations.push(`${tag}: expected a gate rejection, got ${out.outcome} ${out.reason ?? ''}`);
-        } else if (f.adversarial === 'ambiguous') {
-          if (out.outcome !== 'repaired') violations.push(`${tag}: the ambiguous probe was rejected (${out.reason}${out.gate ? `, gate ${out.gate}` : ''}); the gates can already hold it`);
-        } else if (out.outcome === 'repaired') violations.push(`${tag}: the unrecoverable probe was accepted`);
+        } else if (f.adversarial === 'unrecoverable') {
+          if (out.outcome === 'repaired') violations.push(`${tag}: the unrecoverable probe was accepted`);
+        } else if (f.probe && out.outcome !== 'repaired') violations.push(`${tag}: the ${f.adversarial} probe was rejected (${out.reason}${out.gate ? `, gate ${out.gate}` : ''}); the gates can already hold it`);
       }
     }
   } finally {
     __setChatTransportForTests(null);
     await engine.disconnect();
   }
-  return violations;
+  return { violations, notes };
 }

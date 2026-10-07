@@ -2,9 +2,10 @@
  * Keyless check of the Tier 3 fence-repair eval instrument (#6188 T4,
  * evals/fence-repair-tier3/).
  *
- * Protects: the committed fixtures match their generator; the set keeps at
- * least 60 repairable fences across every Tier 3 residual class plus both
- * kinds of adversarial fence; every label holds under the production gates
+ * Protects: the committed fixtures (round 1) and the held-out set (round 2)
+ * match their generator; round 1 keeps at least 60 repairable fences across
+ * every Tier 3 residual class plus both kinds of adversarial fence, and the
+ * held-out set at least 40 with ambiguous and split-claim adversarials; every label holds under the production gates
  * (the $0 oracle: each repairable ground truth passes every gate and comes
  * out byte-identical, each gate-limited one is rejected, each ambiguous
  * probe is accepted, each unrecoverable probe is rejected); and the scorer's
@@ -21,12 +22,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { resetGateway } from '../src/core/ai/gateway.ts';
 import { fixturesJsonl, type Fixture } from '../evals/fence-repair-tier3/generate-fixtures.ts';
+import { HELDOUT_CASES } from '../evals/fence-repair-tier3/heldout-cases.ts';
 import { oracleAnswers, runOracle } from '../evals/fence-repair-tier3/oracle.ts';
 import { compareRepair, meetsRule, summarize, wilson, type ResultRow } from '../evals/fence-repair-tier3/score.ts';
 
 const dir = join(import.meta.dir, '..', 'evals/fence-repair-tier3');
 const text = readFileSync(join(dir, 'fixtures.jsonl'), 'utf8');
 const fixtures: Fixture[] = text.trim().split('\n').map(line => JSON.parse(line));
+const heldoutText = readFileSync(join(dir, 'heldout.jsonl'), 'utf8');
+const heldout: Fixture[] = heldoutText.trim().split('\n').map(line => JSON.parse(line));
 
 afterAll(() => resetGateway());
 
@@ -47,11 +51,30 @@ describe('fixtures', () => {
     expect(fixtures.filter(f => f.adversarial === 'unrecoverable').length).toBeGreaterThanOrEqual(3);
     for (const f of fixtures) expect(f.expected === null).toBe(f.set === 'adversarial');
   });
+
+  test('the held-out set matches its generator: at least 40 fences, the same classes, ambiguous and split-claim adversarials, no id shared with round 1', () => {
+    expect(heldoutText).toBe(fixturesJsonl(HELDOUT_CASES));
+    expect(heldout.length).toBeGreaterThanOrEqual(40);
+    const repairable = heldout.filter(f => f.set === 'repairable');
+    expect(repairable.length).toBeGreaterThanOrEqual(40);
+    for (const cls of ['short_row_trailing', 'short_row_gap', 'no_header', 'row_before_header', 'extra_cells', 'header_unmapped', 'mixed']) {
+      expect(repairable.filter(f => f.cls === cls).length).toBeGreaterThanOrEqual(3);
+    }
+    expect(heldout.filter(f => f.adversarial === 'ambiguous').length).toBeGreaterThanOrEqual(5);
+    expect(heldout.filter(f => f.adversarial === 'split_claim').length).toBeGreaterThanOrEqual(3);
+    const roundOne = new Set(fixtures.map(f => f.id));
+    expect(heldout.filter(f => roundOne.has(f.id))).toEqual([]);
+    for (const f of heldout) expect(f.expected === null).toBe(f.set === 'adversarial');
+  });
 });
 
 describe('oracle', () => {
-  test('every label holds under the production gates', async () => {
-    expect(await runOracle(fixtures, oracleAnswers)).toEqual([]);
+  test('every round 1 label holds under the production gates', async () => {
+    expect((await runOracle(fixtures, oracleAnswers)).violations).toEqual([]);
+  }, 60_000);
+
+  test('every held-out label holds under the production gates', async () => {
+    expect((await runOracle(heldout, oracleAnswers)).violations).toEqual([]);
   }, 60_000);
 });
 

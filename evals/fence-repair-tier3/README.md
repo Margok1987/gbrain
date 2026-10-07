@@ -21,9 +21,10 @@ Every false accept is a free-text cell in the wrong column (a source in context,
 | File | Role |
 |---|---|
 | `cases.ts` | 78 hand-written cases. Each is one page whose fence Tier 1 leaves with a residual reason a model may clear (`short_row`, `no_header`, `row_before_header`, `extra_cells`, `header_unmapped`), with the whole repaired section written by hand. Sets: 66 `repairable` (a correct repair exists and passes every gate), 9 `adversarial` (the only correct outcome is to stay held: 6 `ambiguous` with two readings the gates cannot tell apart, 3 `unrecoverable` missing a required value) and 3 `gate_limited` (a person would repair them, but the gates forbid the correct table; diagnostic). Placeholder names only. |
-| `generate-fixtures.ts` | Deterministic builder: `cases.ts` → `fixtures.jsonl` (committed). Regenerate after editing a case; the keyless test fails on drift. |
-| `run-case.ts` | One fixture through the production path: the page becomes a stored-page target, `analyzeFences` runs the free tiers, and `runTier3` makes the model call with the brain's real daily ledger and attempt store (prompt v1, one call per fence, at most one corrective re-ask, gates (a)-(g), Tier 1 fixed point). Nothing re-implements a tier or a gate. |
-| `oracle.ts` | The $0 label check: a scripted model answers with each ground truth (or adversarial probe) and the real gates must agree with the label. |
+| `heldout-cases.ts` | Round 2's held-out set: 52 hand-written cases written after round 1 and before any round 2 code result, with the same class mix on new pages (40 repairable) plus 6 ambiguous, 4 split-claim (a claim cut in two by an unescaped pipe; the correct outcome is to stay held) and 2 unrecoverable adversarials. |
+| `generate-fixtures.ts` | Deterministic builder: `cases.ts` → `fixtures.jsonl` and `heldout-cases.ts` → `heldout.jsonl` (both committed). Regenerate after editing a case; the keyless test fails on drift. |
+| `run-case.ts` | One fixture through the production path: the page becomes a stored-page target, `analyzeFences` runs the free tiers, and `runTier3` makes the model call with the brain's real daily ledger and attempt store (one call per fence, the corrective re-ask the code allows, gates (a)-(g), Tier 1 fixed point). Nothing re-implements a tier or a gate. A fence the free tiers repair or hold is reported with that tier. |
+| `oracle.ts` | The $0 label check: a scripted model answers with each ground truth (or adversarial probe) and the real gates must agree with the label. Fences the free tiers settle are routing notes; a Tier 1 repair of a repairable fence must equal its ground truth. |
 | `score.ts` | Pure scoring: the cell-level match rule, per-model rates, Wilson intervals and the preregistered decision rule. |
 | `harness.ts` | Runner: `--oracle`, live (`--model`, `--run`, `--out`) and `--score`. |
 
@@ -32,8 +33,9 @@ The keyless test is `test/eval-fence-repair-tier3.test.ts` (fixture freshness an
 ## Running
 
 ```bash
-# Prove every label against the production gates ($0, no key):
+# Prove every label against the production gates ($0, no key); --fixtures heldout.jsonl for the held-out set:
 bun evals/fence-repair-tier3/harness.ts --oracle
+bun evals/fence-repair-tier3/harness.ts --oracle --fixtures heldout.jsonl
 
 # One live run of one model on a fresh throwaway brain (needs the provider key):
 bun evals/fence-repair-tier3/harness.ts --model anthropic:claude-sonnet-5-5 --run 1 --out results/sonnet-5-5-run1.jsonl --max-usd 10
@@ -49,7 +51,8 @@ Exit codes: 0 done, 1 oracle violation, 2 infrastructure (no key, cap reached, a
 
 ## Metrics
 
-- **Gate-pass rate**: repairable fences whose Tier 3 repair passed every gate, over repairable fences run.
-- **False-accept rate**: repairable fences repaired but not matching the ground truth, over repairable fences run. A match means the same non-empty cell text in the same columns (spacing ignored) and identical text outside the fences.
+- **Gate-pass rate**: repairable fences that reached Tier 3 and whose repair passed every gate, over repairable fences that reached Tier 3.
+- **False-accept rate**: of those, repairs not matching the ground truth. A match means the same non-empty cell text in the same columns (spacing ignored) and identical text outside the fences.
+- **End to end**: every repairable fence whatever tier settled it (a Tier 1 repair, a hold before Tier 3), with wrong writes per tier.
 - **Held correctly**: adversarial fences that stayed held.
 - **USD per repair**: ledger-priced spend on repairable fences over repairs. **Latency**: wall time of the Tier 3 step per fence that made a call (p50, p95).
