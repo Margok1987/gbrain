@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { fenceNormalizedNotice, type FencesNormalized } from '../fence-repair/report.ts';
 import { realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { OperationContext } from '../ops/contract.ts';
@@ -134,6 +135,12 @@ function pendingAwareResponse(ctx: OperationContext, row: WriteRequest): Record<
   return writeResponse(row, { retryAfterMs: estimatedRetryAfterMs(ctx.engine, 1) });
 }
 
+/** #6188 (D21): a write whose fence Tier 1 rewrote carries one `fence_normalized` coaching notice. */
+export function emitFenceNotice(ctx: Pick<OperationContext, 'emitNotice'>, response: Record<string, unknown>, slug?: string): void {
+  const report = response.fences_normalized as FencesNormalized | undefined;
+  if (report) ctx.emitNotice?.(fenceNormalizedNotice(report, slug));
+}
+
 /** Owner-internal `put_page` kinds the trusted local file writers (import, frontmatter repair) submit; every other caller is refused them. */
 const OWNER_FILE_INTENTS: ReadonlySet<string> = new Set(['managed_file_import', 'managed_file_repair']);
 
@@ -152,6 +159,7 @@ export async function submitPageMutation(ctx: OperationContext,
   if (prepared.prior) return pendingAwareResponse(ctx, await waitForWrite(ctx.engine, prepared.prior, ctx.config, waitMs()));
   const row = await admitWrite(ctx.engine, prepared.admission);
   const response = pendingAwareResponse(ctx, await waitForWrite(ctx.engine, row, ctx.config, waitMs()));
+  emitFenceNotice(ctx, response, row.slug);
   return { ...response, ...(prepared.typeWarning ? { type_warning: prepared.typeWarning } : {}), ...(prepared.slugAdvisory ? { slug_advisory: prepared.slugAdvisory } : {}) };
 }
 

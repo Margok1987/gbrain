@@ -381,6 +381,11 @@ async function setConfigWithDecideHooks(engine: BrainEngine, key: string, value:
   }
   (await import('./config/enumerated-keys.ts')).refuseUnregisteredEnumeratedKey(key, force);
   if (key === 'auto_chronicle' || key.startsWith('chronicle.')) await refuseInvalidChronicleValue(key, value, force);
+  if (key.startsWith('fences.')) {
+    const { validateFenceConfigValue } = await import('../core/fence-repair/config.ts');
+    const err = validateFenceConfigValue(key, value);
+    if (err) { console.error(`[config] ${err}`); process.exit(1); }
+  }
   if (key.startsWith('facts.drain_')) {
     const { validateFactsDrainConfigValue } = await import('../core/facts/drain-config.ts');
     const err = validateFactsDrainConfigValue(key, value);

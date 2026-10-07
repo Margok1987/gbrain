@@ -48,6 +48,9 @@ const cases: Array<[name: string, body: string, timeline: string, expected: Reco
   ['duplicate row across sections', facts(fact(6)), facts(fact(6)), { reason: 'row_collision', fence: 'facts', section: 'timeline', rows: [6] }],
 ];
 
+/** The cases Tier 1 fixes losslessly (#6188): a missing end marker with nothing after the table, two-dash takes markers, an invented facts kind, duplicate row numbers. */
+const TIER1_FIXABLE = new Set(['missing end marker', 'two-dash takes markers', 'unknown facts kind', 'duplicate row in one fence', 'duplicate row across sections']);
+
 describe('the shared fence check', () => {
   test('a clean page, a page without fences, a fence quoted in code and a lone end marker (the projection reads none) pass the check', () => {
     for (const body of ['No fences here.', facts(fact(1)), takes(take(1)), `Example:\n\n\`\`\`\n${facts(fact(9, KIND))}\n\`\`\`\n`, `Intro\n\n${FE}\n`]) {
@@ -70,11 +73,22 @@ describe('the shared fence check', () => {
       expect(error.fix?.argv).toEqual(['gbrain', 'get', '--source', 'default', '--', 'notes/example']);
       for (const secret of [CLAIM, HOLDER, KIND, 'Sentinel']) expect(error.message).not.toContain(secret);
 
-      const coordinated = screenImportContent({ content: file(timeline ? `${body}\n\n<!-- timeline -->\n\n${timeline}` : body), path: 'notes/example.md', fences: 'coordinated' });
+      // #6188: with fences.normalize=false the coordinated screen refuses exactly what the projection refuses, at the same location.
+      const content = file(timeline ? `${body}\n\n<!-- timeline -->\n\n${timeline}` : body);
+      const coordinated = screenImportContent({ content, path: 'notes/example.md', fences: 'coordinated', normalize: false });
       expect(coordinated.status).toBe('refused');
       if (coordinated.status === 'refused') {
         expect(coordinated.refusal).toMatchObject({ code: 'invalid_fence', reason: expected.reason, fence: { reason: expected.reason, fence: expected.fence } });
         expect(JSON.stringify(coordinated.refusal)).not.toMatch(/Sentinel|sentinel/);
+      }
+      // With normalization on (the default), Tier 1 admits a fence it fixes losslessly and refuses the rest typed.
+      const normalized = screenImportContent({ content, path: 'notes/example.md', fences: 'coordinated' });
+      if (TIER1_FIXABLE.has(name)) {
+        expect(normalized.status).toBe('importable');
+        if (normalized.status === 'importable') expect(normalized.fences?.fixes.length).toBeGreaterThan(0);
+      } else {
+        expect(normalized).toMatchObject({ status: 'refused', refusal: { code: 'invalid_fence', fence: { fence: expected.fence } } });
+        expect(JSON.stringify(normalized)).not.toMatch(/Sentinel|sentinel/);
       }
       // T5: legacy (lenient, the default) paths import it as before.
       expect(screenImportContent({ content: file(body), path: 'notes/example.md' }).status).toBe('importable');

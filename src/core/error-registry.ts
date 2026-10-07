@@ -405,4 +405,5 @@ export const NOTICE_CODES = {
   pinned_answer_stale: { kind: 'degraded', summary: 'A pinned answer has stale sentences (their evidence changed or was removed) or its refresh is blocked; stale sentences are flagged and withheld from context_pack, and the fix is the next step.' },
   held_files: { kind: 'degraded', summary: 'Sync holds files in the read scope it cannot import: held new files are missing and pages whose newer file is held are stale; the fix is the repair preview on the brain host.' },
   recovered_frontmatter: { kind: 'coaching', summary: 'Files imported only after quoting unquoted frontmatter values; the generator writing them should quote values (the fix is the repair preview).' },
+  fence_normalized: { kind: 'coaching', summary: 'A write\'s facts or takes fence was rewritten losslessly (rows and classes named, never values): the stored page differs from what was sent, so re-read it with get_page before editing; remember and takes_add write rows that never need it.' },
 } as const satisfies Record<string, NoticeEntry>;

@@ -9,6 +9,7 @@
  * company-brain sources never hold (their approved manifest keeps blocking).
  */
 import { createHash, randomUUID } from 'crypto';
+import { importFenceTally } from '../../core/fence-repair/report.ts';
 import { existsSync, lstatSync } from 'fs';
 import { join } from 'path';
 import type { SyncResult } from '../sync.ts';
@@ -59,6 +60,8 @@ export interface LegacyHolds {
   readonly heldPaths: string[];
   readonly recoveredPaths: string[];
   readonly counts: { screened: number; commentValues: number };
+  /** #6188: fences Tier 1 normalized, and fences stored as written with issues (T5). */
+  readonly fences: ReturnType<typeof importFenceTally>;
 }
 
 export type HoldScreen = { refusal: ContentRefusal | null; upstreamVersion: string | null };
@@ -75,7 +78,7 @@ export async function openLegacyHolds(engine: BrainEngine, sourceId: string | un
   return {
     sourceId: id, incarnation: row.incarnation, runId: `legacy-${randomUUID()}`, observedAt: new Date().toISOString(), policy,
     active: policy.mode === 'hold', existing: new Map((listed[0]?.holds ?? []).map(record => [record.path, record])), retryPaths: new Set(retry),
-    rescreen: [], gone: [], retryTaken: [], heldPaths: [], recoveredPaths: [], counts: { screened: 0, commentValues: 0 },
+    rescreen: [], gone: [], retryTaken: [], heldPaths: [], recoveredPaths: [], counts: { screened: 0, commentValues: 0 }, fences: importFenceTally(id),
   };
 }
 
@@ -195,9 +198,10 @@ export async function holdRefusedImport(engine: BrainEngine, holds: LegacyHolds 
 }
 
 /** Bookkeeping for a screened import: the escalation denominator and the recovered-frontmatter tally. */
-export function noteScreenedImport(holds: LegacyHolds | null, path: string, result: Pick<ImportResult, 'status' | 'frontmatter_recovery'>): void {
+export function noteScreenedImport(holds: LegacyHolds | null, path: string, result: Pick<ImportResult, 'status' | 'frontmatter_recovery' | 'fences_normalized' | 'fence_issues'>): void {
   if (!holds) return;
   holds.counts.screened++;
+  holds.fences.note(path, result);
   if (result.status !== 'imported' || !result.frontmatter_recovery) return;
   if (result.frontmatter_recovery.quoted) holds.recoveredPaths.push(path);
   if (result.frontmatter_recovery.comment_value) holds.counts.commentValues++;
@@ -223,7 +227,7 @@ export async function legacyHoldFields(engine: BrainEngine, holds: LegacyHolds |
     policy: holds.policy, screened: holds.counts.screened });
   const recovered = holds.recoveredPaths.length || holds.counts.commentValues
     ? recoveredReport(holds.sourceId, addRecovered(undefined, { paths: holds.recoveredPaths, commentValues: holds.counts.commentValues })) : undefined;
-  return { ...report, ...(recovered ? { recovered_frontmatter: recovered } : {}) };
+  return { ...report, ...(recovered ? { recovered_frontmatter: recovered } : {}), ...holds.fences.fields() };
 }
 
 /** Dry run: the files this run would hold, read-only (no hold row is written or changed). */

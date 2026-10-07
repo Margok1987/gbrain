@@ -20,11 +20,17 @@ import { opError, type OperationError } from '../ops/contract.ts';
 import { readFix } from '../ops/op-fix.ts';
 import { FENCE_REASONS, fenceMessage, issueLocation, renderFenceFix, type FenceMessageLocation } from './reasons.ts';
 import { extractRawRows, primaryFence, rowNumOf, type RawSection } from './raw-rows.ts';
+import { FENCE_RULES_VERSION } from './normalize.ts';
 import { ALLOWED, cellValid } from './schema.ts';
 import type { FenceIssue, FenceKind, FenceReason, FenceSection } from './types.ts';
 
-/** Bumped when the fence screen changes what it refuses; an older `invalid_fence` hold is re-screened. */
-export const FENCE_VERSION = 1;
+/**
+ * The screen's version, stored on `invalid_fence` holds as `fence_version`; an
+ * older hold is re-screened. It moves when the screen changes what it refuses:
+ * 1 was the strict screen alone; Tier 1 (`FENCE_RULES_VERSION`) admits the
+ * fences it fixes, so every rule-set bump moves it too.
+ */
+export const FENCE_VERSION = 1 + FENCE_RULES_VERSION;
 /** Row numbers a location carries at most. */
 export const FENCE_ROWS_MAX = 20;
 
@@ -233,14 +239,36 @@ export function fenceLocationFromMessage(code: string | null | undefined, messag
 }
 
 export const FENCE_DETAIL_VERSION = 1;
-/** The bounded, versioned `error_detail` a fence refusal stores; it outlives receipt compaction (which drops the message). */
-export interface FenceFailureDetail { origin: 'fence'; fence: FenceMessageLocation & { version: typeof FENCE_DETAIL_VERSION } }
+/**
+ * The bounded, versioned `error_detail` a fence refusal stores; it outlives
+ * receipt compaction (which drops the message). `issues` (#6188 D18, at most
+ * `FENCE_ISSUES_MAX`) lists every blocking issue, location and class only.
+ */
+export interface FenceFailureDetail { origin: 'fence'; fence: FenceMessageLocation & { version: typeof FENCE_DETAIL_VERSION; issues?: Array<Record<string, unknown>> } }
 
 /** The durable detail of a typed fence refusal, or undefined for any other error. */
-export function fenceFailureDetail(error: Pick<OperationError, 'canonicalCode' | 'message'>): FenceFailureDetail | undefined {
+export function fenceFailureDetail(error: Pick<OperationError, 'canonicalCode' | 'message' | 'fenceIssues'>): FenceFailureDetail | undefined {
   if (error.canonicalCode !== 'invalid_fence') return undefined;
   const location = parseFenceMessage(error.message);
-  return location ? { origin: 'fence', fence: { version: FENCE_DETAIL_VERSION, ...location } } : undefined;
+  const issues = error.fenceIssues?.slice(0, 20);
+  return location ? { origin: 'fence', fence: { version: FENCE_DETAIL_VERSION, ...location, ...(issues?.length ? { issues } : {}) } } : undefined;
+}
+
+/** The blocking issues a stored fence detail carries (validated field by field), or []. */
+export function fenceIssuesFromDetail(detail: unknown): Array<Record<string, unknown>> {
+  if (!fenceLocationFromDetail(detail)) return [];
+  const issues = (detail as { fence: { issues?: unknown } }).fence.issues;
+  if (!Array.isArray(issues)) return [];
+  return issues.slice(0, 20).flatMap(issue => {
+    if (!issue || typeof issue !== 'object') return [];
+    const i = issue as Record<string, unknown>;
+    if (!KINDS.includes(i.fence as FenceKind) || !SECTIONS.includes(i.section as FenceSection) || typeof i.class !== 'string' || !/^[a-z_]{1,40}$/.test(i.class)) return [];
+    const row = Number.isInteger(i.row) && (i.row as number) > 0 ? i.row as number : null;
+    const column = typeof i.column === 'string' && /^[#a-z_]{1,40}$/.test(i.column) ? i.column : null;
+    const line = Number.isInteger(i.line) && (i.line as number) > 0 ? i.line as number : null;
+    const allowed = Array.isArray(i.allowed) ? i.allowed.filter((a): a is string => typeof a === 'string' && /^[a-z_ ]{1,40}$/.test(a)).slice(0, 20) : [];
+    return [{ fence: i.fence, section: i.section, row, column, line, class: i.class, ...(allowed.length ? { allowed } : {}) }];
+  });
 }
 
 /** The location a stored `error_detail` carries, validated field by field, or null. */
@@ -280,8 +308,24 @@ export function completeFenceLocation(location: ReceiptFenceLocation, page: { co
  * so connector item holds and older receipt readers keep classifying it.
  */
 export function fenceOperationError(location: FenceMessageLocation, slug: string | undefined, sourceId: string, opts: { legacy_error?: string } = {}): OperationError {
-  return opError('invalid_fence', fenceMessage(location),
+  const error = opError('invalid_fence', fenceMessage(location),
     `${slug ? `Page ${slug}` : 'The page'} in source ${sourceId} was not written. Fix the fence the message names in the page body, then write the page again with a new request_id.`,
     { legacy_error: opts.legacy_error ?? 'invalid_params', reason: location.reason,
       ...(slug ? { fix: readFix(`Shows page ${slug} with its fences, read-only.`, { argv: ['gbrain', 'get', '--source', sourceId, '--', slug] }) } : {}) });
+  error.fence = { ...location };
+  return error;
+}
+
+/**
+ * #6188 (D19): the refusal of a verb whose target page has a stored facts or
+ * takes fence that does not compile and that the verb does not normalize
+ * (edit_page and forget never do; an append verb does only what Tier 1 fixes).
+ * Typed `invalid_fence` / `target_fence_malformed` at the fence's location.
+ */
+export function targetFenceRefusal(location: FenceMessageLocation, slug: string, sourceId: string, issues: Array<Record<string, unknown>> = []): OperationError {
+  const error = fenceOperationError({ ...location, reason: 'target_fence_malformed' }, slug, sourceId);
+  error.suggestion = `Page ${slug} in source ${sourceId} was not changed: its stored ${location.fence} fence does not parse. Read the page, fix that fence (or write the whole page with put_page, `
+    + 'which normalizes what it can and names every row it cannot), then retry with a new request_id.';
+  if (issues.length) error.fenceIssues = issues.slice(0, 20);
+  return error;
 }

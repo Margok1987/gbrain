@@ -283,6 +283,11 @@ vars — incident-time escape hatches, not everyday knobs.
    gbrain repair frontmatter --source <source-id>    # preview; writes nothing
    ```
 
+   A fence whose meaning is unambiguous (a missing end marker after the
+   table, duplicate row numbers, an invented kind, an assistant holder, ...)
+   is not held: managed sync rewrites it losslessly, commits the file and
+   reports `fences_normalized` (`gbrain sync --dry-run` lists
+   `would_normalize`; `gbrain config set fences.normalize false` turns it off).
    A fence hold (`invalid_fence`) names the fence, section, reason and row
    numbers, never a cell. Fix it by reading the page
    (`gbrain get --source <source-id> -- <slug>`), editing that fence in the
@@ -295,8 +300,10 @@ vars — incident-time escape hatches, not everyday knobs.
    Walkthrough with real output: [held files](repair.md#held-files); codes:
    [content refusals](write-refusals.md#held-files-and-content-refusals).
    Managed and legacy sync behave the same for frontmatter, size and content
-   holds; for fences, legacy sync keeps importing the page with its bad rows
-   skipped and never holds it. Holds never count toward the
+   holds; for fences, legacy sync stores the normalized fence in the database
+   (it never rewrites the file), keeps importing a page whose fence cannot be
+   normalized with its bad rows skipped (reported in `fence_issues`), and
+   never holds it. Holds never count toward the
    legacy auto-skip streak below. A source blocked by such a file before this
    release recovers on its next sync, or now with
    `gbrain sync --source <source-id> --no-pull`. Teams that want fail-closed

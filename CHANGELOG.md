@@ -10,6 +10,43 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.99.0] - 2026-10-06
+
+**A facts or takes table with one obvious meaning is now fixed in place instead of held: managed sync rewrites it, commits the file and keeps going.**
+
+Most broken tables written by agents and extractors are broken in a way with only one sensible reading: the writer forgot the end marker after the last row, numbered two rows the same, wrote `partnership` where gbrain expects a kind like `fact`, or put `System` where the holder should be `brain`. Until now each of those files was held (or a write was refused) until someone edited it by hand. Now gbrain repairs such a table the moment it is written or synced, without changing any claim, any existing row number or any valid cell, and without making any row more visible. Managed sync commits the repaired file, so the repository and the brain agree. A table gbrain cannot repair exactly is held or refused as before, and a refused write now lists every row and column to fix in one answer.
+
+On a synthetic set shaped like the failures seen in real brains (76 broken tables), 52 are repaired in place (68%). The rest stay held with a precise reason: 11 unclosed tables followed by more prose, 8 rows with missing cells, 5 holders written as display names.
+
+### What you see
+
+| Where | What changed |
+|---|---|
+| Managed sync | Repairs the table, commits the file (`gbrain: persist canonical memory update`) and reports `fences_normalized`: how many files, the fixes by class, the top directories writing them and sample paths. `gbrain sync --dry-run` lists `would_normalize` (path and classes) beside `would_hold` and writes nothing. |
+| Held files from v0.60.98.0 | Re-checked on the next sync with no command: a fixable table is repaired and imported, the rest stay held. |
+| `put_page`, `put_pages`, `capture` | A repaired table is stored in its repaired form, the result carries `fences_normalized` and one `fence_normalized` notice says the stored page differs from what was sent, so read it before editing. A table that cannot be repaired refuses `invalid_fence` with `fence_issues`: every blocking row and column with the allowed values. |
+| `remember`, `extract_facts`, `takes_add`, `takes_update`, `gbrain facts relink` | Repair the target page's existing table in the same write instead of refusing. A table they cannot repair refuses `target_fence_malformed` with its location (it was a bare `storage_error` or a parser message). `edit_page` and the other takes writes refuse it too and never rewrite a table. |
+| Read-only mirrors and company brains | A mirror keeps the repair in the database and never rewrites its checkout. A company-brain source never rewrites repository files: it refuses `source_writeback_required` and names the table to fix in the repository. |
+| Legacy sync and direct imports | Store the repaired table in the database (the file is not rewritten) and report tables they could not repair in `fence_issues`; they still never hold a file for a table. |
+| Opt out | `gbrain config set fences.normalize false` stops all repairs; such tables are then held or refused as in v0.60.98.0. |
+
+### Itemized changes
+
+- One repair step on every write path, `fenceStep` (`src/core/fence-repair/tier1.ts`). A page with no table marker costs a substring check; a page whose tables already parse costs the one shared scan. A broken table is written repaired only when the validator passes all seven gates (it parses; no claim, existing row number or valid cell changed; no row added, dropped or left outside; visibility only tightened; nothing hidden from remote readers became visible) and repairing the result again changes nothing. A normalizer fault becomes `invalid_fence` reason `normalizer_failed`, never a crash.
+- Repairs: close a table whose end marker is missing when only blank lines follow its last row; three-dash takes markers; renumber zero, negative and duplicate row numbers above every number the page and its stored rows have used (a stored row keeps its number); canonical header order and header aliases, with `confidence 1.0`, `notability medium` and `visibility private` defaults for a missing column; enum synonyms (`critical` becomes `high`, `public` becomes `world` only on a world-visible page, `internal`/`shared` become `private`); invented facts kinds mapped to the closest kind with the original word kept in `context`; a short list of takes kind synonyms; assistant holders to `brain`; percent confidences to decimals.
+- `importFromContent` repairs before it restores rows a remote reader could not see and before it re-applies withdrawals, so a remote write with a fixable table keeps every hidden private row; rows a remote caller never saw are never renumbered. Stored rows are read only when a renumber is planned.
+- Managed sync's freeze and prepare screens admit a repairable table; the prepare reuses its screen's verdict for the import, and the existing canonical write-back commits the repaired file under its before-hash. Every hold written by the previous screen is re-screened (hold `fence_version` 2).
+- `fences_normalized` has one shape on sync, import, `put_page`, `put_pages` and the append verbs (`count`, `by_class`, `writers`, `sample_paths` and `common_prefix` for local callers only, `fix`). Refusals carry `fence` and `fence_issues`, also on a stored receipt (`write_error_detail.fence.issues`, without row numbers for remote readers). Memory verbs keep their v1 error code and add `reason`, `fence` and `fence_issues`.
+- When the stored page's takes table did not parse, its stored take rows count as the previous canonical rows, so a repaired row updates its take instead of being refused as a collision.
+- Synthesize verify repairs a table before it re-projects a verified page; the export roundtrip keeps refusing a broken table.
+- `fences.normalize` is a registered config key, validated at `gbrain config set` (true or false). `docs/guides/write-refusals.md#invalid_fence` documents every repair and the new `target_fence_malformed` and `normalizer_failed` reasons.
+
+### For contributors
+
+- `test/fence-write-verbs.test.ts` (PGLite) covers `put_page` repair, notice and `fence_issues`, the switch, the remote hidden-row case, `put_pages`, each append verb, the refusing writers, synthesize verify and the export roundtrip. `test/persistence-sync-fence-holds.test.ts` (PGLite and Postgres) adds a run with one repairable, one unrepairable and two clean files (repaired file committed and imported, the next sync a no-op), the dry run, the switch with an older hold re-screened by itself, a read-only mirror and the stored-take case. `test/sync-legacy-holds.test.ts` and `test/persistence-sync-company.serial.test.ts` cover legacy sync and company sources. Each test checks that no claim, holder or kind value reaches results, refusals, receipts, notices or commit messages.
+- `test/fence-normalize-overhead.slow.test.ts` runs a managed catch-up of mostly clean files with the repair step live and as a no-op and asserts the step sends no statement and reads neither the switch nor stored rows. At 10,000 files (`FENCE_BENCH_FILES=10000`) it sent no repair statement and showed no measurable slowdown (14.1 files/s live, 12.8 no-op on a 4-core machine).
+- The pure normalizer and validator (`src/core/fence-repair/{normalize,structure,content,rules,validate,validate-cells,page-checks}.ts`) have their own unit suites (`test/fence-repair-*.test.ts`).
+
 ## [0.60.98.0] - 2026-10-06
 
 **A broken facts or takes table in one page no longer stops a managed sync: that one file is held, everything else imports, and the hold says which table, section and rows to fix.**

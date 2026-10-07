@@ -89,8 +89,9 @@ export function publicFailureDetail(detail: unknown): Record<string, unknown> | 
   if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return undefined;
   const { sources: _sources, attempt: _attempt, ...rest } = detail as PublicationFailureDetail;
   if ((rest as { origin?: unknown }).origin === 'fence') {
-    const { rows: _rows, ...fence } = ((rest as unknown as FenceFailureDetail).fence ?? {}) as FenceFailureDetail['fence'];
-    return { ...rest, fence } as unknown as Record<string, unknown>;
+    const { rows: _rows, issues, ...fence } = ((rest as unknown as FenceFailureDetail).fence ?? {}) as FenceFailureDetail['fence'];
+    const publicIssues = Array.isArray(issues) ? issues.map(({ row: _row, ...issue }) => issue) : undefined;
+    return { ...rest, fence: { ...fence, ...(publicIssues?.length ? { issues: publicIssues } : {}) } } as unknown as Record<string, unknown>;
   }
   return rest as unknown as Record<string, unknown>;
 }
