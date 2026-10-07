@@ -11820,6 +11820,15 @@ proposal a gate rejects gets one corrective re-ask naming the gate and rows;
 if that fails too the file stays held with the gate, and the same bytes are
 never sent again until the file, the model or the rules change.
 
+The gates check that no text is lost or rewritten; they cannot tell which of two
+free-text columns a moved cell belongs in. On 66 synthetic malformed fences
+over three runs (`evals/fence-repair-tier3`), the default model's rewrites
+passed the gates 195 of 198 times, and 8 of those put a source note in the
+context column. Every such misplacement was on a row with a cell missing in the
+middle or an extra cell, so review model-repaired rows of that shape (the
+receipt names tier `llm` and the rows), or keep fence rows away from the model
+with `gbrain config set fences.repair.llm false`.
+
 The session below is real output (volatile ids, hashes and times shown as
 `<id>`, `<hash>`, `<time>`; `test/fence-walkthrough.test.ts` runs these
 commands against a local stand-in for the model provider and checks every line

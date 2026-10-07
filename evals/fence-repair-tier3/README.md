@@ -2,6 +2,20 @@
 
 Measures how well a chat model repairs the facts and takes fences that the free repair rules (Tier 1) leave malformed, through the production Tier 3 path, and whether that is accurate enough to stay on by default. The preregistration, raw per-item results and verdict live in gbrain-evals (`docs/benchmarks/2026-10-06-fence-repair-tier3*`).
 
+## Current result
+
+Measured 2026-10-06 at `171a7e24`, prompt version 1, three runs per model (198 repairable, 18 ambiguous and 9 unrecoverable fixture runs each). The preregistered bar: gate-pass at least 80% and false-accept at most 1%.
+
+| Model | Gate-pass | False-accept | Ambiguous held | Unrecoverable held | USD per repair | Latency p50 / p95 | Bar |
+|---|---|---|---|---|---|---|---|
+| `anthropic:claude-opus-4-7` (current default) | 195/198 (98.5%) | 8/198 (4.0%) | 14/18 | 9/9 | $0.0075 | 1.9 s / 5.0 s | fails |
+| `anthropic:claude-opus-5-5` | 195/198 (98.5%) | 3/198 (1.5%) | 18/18 | 9/9 | $0.0071 | 3.8 s / 10.9 s | fails |
+| `anthropic:claude-sonnet-5-5` | 195/198 (98.5%) | 10/198 (5.1%) | 15/18 | 9/9 | $0.0029 | 1.7 s / 3.7 s | fails |
+| `openai:gpt-6.1-sol` | 198/198 (100%) | 1/198 (0.5%) | 7/18 | 9/9 | $0.0023 | 3.3 s / 12.0 s | meets |
+| `anthropic:claude-fable-5-1` | 191/198 (96.5%) | 0/198 (0%) | 18/18 | 9/9 | $0.0174 | 5.7 s / 11.6 s | meets |
+
+Every false accept is a free-text cell in the wrong column (a source in context, an end date in `valid_from`) on a row with a cell missing in the middle or an extra cell; the gates preserve text but cannot judge which free-text column it belongs in. Opus 5.5 and Fable 5.1 held the ambiguous fixtures by exhausting their output budget, not by declining; `gpt-6.1-sol` wrote a guess on 11 of 18. The report lists the proposed changes: a deterministic Tier 1 rule for stray empty cells, the wide layout for headerless typed rows, a reasoning allowance in the output budget, a way for the prompt to decline, and a price entry for `gpt-6.1-sol`.
+
 ## What's here
 
 | File | Role |

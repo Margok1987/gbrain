@@ -218,8 +218,8 @@ const DOCTOR_ARGV = ['gbrain', 'doctor', '--only', BEHAVIOR_NOTICE_CODE, '--json
 
 type ChangeText = string | ((chain: ChainDisclosure | null, remote: boolean) => string | null);
 
-/** #6188 T4: replace with the measured Tier 3 gate-pass and false-accept rates when the fence-repair eval lands. */
-const FENCE_REPAIR_MEASURED = 'How often the model\'s rewrites are accepted is not yet measured.';
+/** #6188 T4: the default model's measured Tier 3 gate-pass and false-accept rates (evals/fence-repair-tier3; gbrain-evals docs/benchmarks/2026-10-06-fence-repair-tier3.md). Remeasure when the default model or the prompt changes. */
+const FENCE_REPAIR_MEASURED = 'Measured on 66 synthetic malformed fences over three runs, the default model\'s rewrites passed the gates 195 of 198 times, and 8 of those accepted rewrites put a source note in the context column, a misplacement the gates cannot detect.';
 
 /** Every disclosed behavior change, with the release that introduced it. Append new rows; never edit a shipped `since`. */
 export const BEHAVIOR_CHANGES: ReadonlyArray<{ since: string; text: ChangeText }> = [
