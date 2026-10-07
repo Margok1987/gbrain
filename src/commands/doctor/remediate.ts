@@ -332,7 +332,7 @@ export function classifyWaveFindings(before: WaveFinding[], after: WaveFinding[]
     if (now.state === 'unknown') { findings.push({ ...base, class: 'pending', instruction: 'The check could not run; rerun gbrain doctor on the brain host.' }); continue; }
     if (now.check.details?.partial === true) {
       findings.push({ ...base, class: 'pending', ...(kind ? { repair_kind: kind } : {}),
-        instruction: `The scan stopped at its deadline, so the finding is incomplete; raise GBRAIN_DOCTOR_FM_TIMEOUT_MS and rerun gbrain doctor --only ${now.spec.id} on the brain host.` });
+        instruction: `The scan stopped at its deadline, so the finding is incomplete; raise ${now.spec.id === 'fence_integrity' ? 'GBRAIN_DOCTOR_FENCE_TIMEOUT_MS' : 'GBRAIN_DOCTOR_FM_TIMEOUT_MS'} and rerun gbrain doctor --only ${now.spec.id} on the brain host.` });
       continue;
     }
     if (now.spec.resolution === 'operator') { findings.push({ ...base, class: 'operator_required', instruction: now.spec.instruction }); continue; }

@@ -16,7 +16,8 @@ import { stripStrikethrough } from '../fence-shared.ts';
 import { parseTakesFence } from '../takes-fence.ts';
 import { planRowRules, type CellText, type RowPlan } from './rules.ts';
 import { extractRawRows, rowNumOf, type RawFence, type RawRow, type RawSection } from './raw-rows.ts';
-import { BASE_WIDTH, canonicalColumn, CANONICAL_HEADER, collapse, COLUMN_DEFAULTS, COLUMNS, supersededRef } from './schema.ts';
+import { ALLOWED, BASE_WIDTH, canonicalColumn, CANONICAL_HEADER, collapse, COLUMN_DEFAULTS, COLUMNS, supersededRef } from './schema.ts';
+import { headerlessMisfit } from './stray-cells.ts';
 import { applyEdits, fenceBlocked, type Edit } from './structure.ts';
 import type { FenceCtx, FenceFix, FenceIssue, FenceKind, FenceReason, FenceSection } from './types.ts';
 
@@ -91,13 +92,22 @@ function planSection(pass: Pass, raw: RawSection): void {
     pass.residual.push(...fence.issues.filter(i => i.reason === 'repeated_marker'));
     const balanced = fence.end !== null && !fence.begin.nearMiss && !fence.end.nearMiss;
     const workable = balanced && !fenceBlocked(raw, fence) && fenceWorkable(pass, fence);
-    if (balanced) pass.residual.push(...fence.issues.filter(i => REPORTED.has(i.reason)));
+    if (balanced) pass.residual.push(...fence.issues.filter(i => REPORTED.has(i.reason)), ...headerlessIssues(fence));
     const rewrite = workable && fence.needsRewrite ? planRewrite(fence) : null;
     const clean = (fence.kind === 'facts' ? parseFactsFence(raw.text) : parseTakesFence(raw.text)).warnings.length === 0;
     const rows = fence.rows.map(row => rowWork(pass, fence, row, workable, clean));
     pass.rows[fence.kind].push(...rows);
     if (workable) pass.works.push({ fence, rewrite, rows });
   }
+}
+
+/** Rows of a fence with no header that cannot be read by position (stray-cells.ts), held as manual. */
+function headerlessIssues(fence: RawFence): FenceIssue[] {
+  return fence.rows.flatMap(row => {
+    const misfit = headerlessMisfit(fence, row);
+    if (!misfit) return [];
+    return [misfit === 'claim_split' ? issueAt(fence, misfit, row.line, rowNumOf(fence, row), 'kind', ALLOWED[fence.kind].kind) : issueAt(fence, misfit, row.line, rowNumOf(fence, row))];
+  });
 }
 
 /** A balanced fence the content rules may edit; reports why not otherwise. */

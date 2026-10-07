@@ -25,9 +25,9 @@ export function heldFileMessage(kind: 'drift' | 'occupied', code: string): strin
 export function heldFileDiagnostic(message: string | null | undefined, sourceId = '<source>'): { reason: string; message: string; suggestion: string } | null {
   const held = message ? HELD_FILE.exec(message) : null;
   if (!held) return null;
-  // #6188 (D6): a fence hold is fixed by editing the named fence and syncing, never by frontmatter repair.
+  // #6188 (D6): a fence hold routes to the fence repair, never to frontmatter repair.
   const repair = held[1] === 'invalid_fence'
-    ? `edit the facts or takes fence gbrain sources status ${sourceId} names in that file, commit, and run gbrain sync --source ${sourceId} --no-pull`
+    ? `the maintenance run repairs most fence holds by itself; to repair it now, preview with gbrain repair fences --source ${sourceId} (read-only: it names the planned repair or the exact edit) and run the apply command it prints`
     : `frontmatter holds: preview the fix with gbrain repair frontmatter --source ${sourceId} and apply it; file_too_large: split the file`;
   return { reason: held[2] === 'and differs from the page' ? 'file_database_drift' : 'canonical_path_occupied', message: message!,
     suggestion: `Sync holds this page's file because gbrain cannot import it; gbrain sources status ${sourceId} names the file${held[1] === 'invalid_fence' ? ', fence and reason' : ', line and key'}. `
@@ -100,8 +100,8 @@ export function writeFailureDiagnostic(code: string, message?: string | null): {
     suggestion: `The target page's stored ${fenceWhere(fence)} does not parse, so nothing was changed. Read the page with get_page, fix that fence `
       + '(or write the whole page with put_page, which normalizes what it can and names every row it cannot), then retry.' };
   if (fence) return { reason: 'invalid_fence', message: message!,
-    suggestion: `Edit ${fenceWhere(fence)} in the file as the message says and commit the change; never edit the frontmatter for it. `
-      + 'A managed sync with sync.holds=hold holds such a file instead of blocking; under sync.holds=fail and on company-brain sources it blocks until the file is fixed.' };
+    suggestion: `Edit ${fenceWhere(fence)} in the file as the message says and commit the change, or preview its repair with gbrain repair fences --source <source>; never edit the frontmatter for it. `
+      + 'A managed sync with sync.holds=hold holds such a file instead of blocking, and the maintenance run repairs the held fences it can; under sync.holds=fail and on company-brain sources it blocks until the file is fixed in the repository.' };
   // #6188 (UC3): a company-brain source names the fence correction it will not write; the repository commit is the fix.
   if (code === 'source_writeback_required' && message?.startsWith('Canonical preparation would normalize a facts or takes fence (')) return { reason: code, message,
     suggestion: 'A company-brain source never rewrites repository files: fix the named fence in the repository, commit it, and resume the sync.' };

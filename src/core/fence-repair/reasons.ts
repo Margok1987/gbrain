@@ -11,6 +11,7 @@
  * never quote a cell.
  */
 import type { Actor } from '../agent-output.ts';
+import { FENCE_REPAIR_MEASURED_MODELS } from './measured.ts';
 import type { FenceIssue, FenceKind, FenceReason, FenceSection, FenceTier, GateLetter } from './types.ts';
 
 export interface FenceReasonSpec {
@@ -32,8 +33,8 @@ export interface FenceReasonSpec {
 
 // The anchor is built per reason, so no partial `write-refusals.md#...` literal reads as a broken link (write-refusals-coverage).
 const DOCS = 'docs/guides/write-refusals.md';
-// PR4 switches this next step to `gbrain repair fences`, routed through the hold-repair router.
-const REPAIR = 'Edit the fence by hand, then sync or write the page again.';
+const REPAIR = 'Preview its repair with `gbrain repair fences` (read-only; it names the exact edit when gbrain will not repair it), or fix the fence and write the page again.';
+const BY_HAND = '`gbrain repair fences` (read-only) lists the exact edit.';
 
 type Base = Pick<FenceReasonSpec, 'stage' | 'tier' | 'manualOnly' | 'autoRetry'>;
 const tier3: Base = { stage: 'screen', tier: 'llm', manualOnly: false, autoRetry: true };
@@ -54,7 +55,8 @@ const SPECS: Record<FenceReason, Omit<FenceReasonSpec, 'docs'>> = {
   no_header: entry(tier3, 'The {fence} fence in the {section} at line {line} has rows but no header row. Add the canonical header as the first table line. ' + REPAIR),
   row_before_header: entry(tier3, 'Row(s) {rows} of the {fence} fence in the {section} sit above the header (line {line}). Move them below the header. ' + REPAIR),
   short_row: entry(tier3, 'Row(s) {rows} of the {fence} fence in the {section} (line {line}) are missing a cell in the middle of the row, so its columns are ambiguous. Add the missing cell so every column lines up. ' + REPAIR),
-  extra_cells: entry(tier3, 'Row(s) {rows} of the {fence} fence in the {section} (line {line}) have more cells than the header, often an unescaped `|` in a cell. Escape it as `\\|` or remove the extra cell. ' + REPAIR),
+  extra_cells: entry(manual, 'Row(s) {rows} of the {fence} fence in the {section} (line {line}) have more cells than the header, and removing empty cells does not line them up. Often an unescaped `|` cut a cell, usually the claim, in two: write it as `\\|` to join the cell again, or remove the extra cell. gbrain does not guess which cell moved.'),
+  claim_split: entry(manual, 'Column `kind` of row(s) {rows} in the {fence} fence ({section}, line {line}) holds text, not a kind word: often the end of a claim an unescaped `|` cut in two, with the kind cell missing. Join that text back into the claim with `\\|` and write the kind, one of {allowed}.'),
   holder_unresolved: entry({ stage: 'screen', tier: 'resolver', manualOnly: false, autoRetry: true },
     'Column `who` of row(s) {rows} in the {fence} fence ({section}, line {line}) is not a holder gbrain recognizes. Write `world`, `brain`, `people/<slug>` or `companies/<slug>`.'),
   missing_begin: entry(manual, 'The {fence} fence in the {section} has an end marker at line {line} with no begin marker before it. Add the begin marker above the table, or delete the stray end marker.'),
@@ -79,11 +81,13 @@ const SPECS: Record<FenceReason, Omit<FenceReasonSpec, 'docs'>> = {
   prepare_time: entry(prepared, 'The {fence} fence passed the screen but its rows were refused while the write was prepared. ' + REPAIR),
   normalizer_failed: entry({ ...prepared, autoRetry: false, tier: 'manual' }, 'The fence normalizer failed on the {fence} fence in the {section}; the page is held as it was. Run `gbrain doctor --json` and report it; a gbrain upgrade re-screens it.'),
   llm_unavailable: entry(run(true), 'The repair model was unavailable (timeout, rate limit or server error). The next repair run retries.'),
-  llm_empty: entry(run(false), 'The repair model returned nothing for the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_refused: entry(run(false), 'The repair model declined to repair the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_malformed: entry(run(false), 'The repair model did not return a single table for the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_truncated: entry(run(false), 'The repair model stopped before finishing the {fence} fence. Fix row(s) {rows} by hand. ' + REPAIR),
-  llm_disabled: entry(run(false), 'Model repair is off (`fences.repair.llm`). Fix row(s) {rows} by hand, or ask the user before running `gbrain config set fences.repair.llm true`.', { paid: true }),
+  llm_empty: entry(run(false), 'The repair model returned nothing for the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_refused: entry(run(false), 'The repair model declined to repair the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_malformed: entry(run(false), 'The repair model did not return a single table for the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_truncated: entry(run(false), 'The repair model stopped before finishing the {fence} fence. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_declined: entry(run(false), 'The repair model found a row of the {fence} fence with more than one reasonable reading and declined to guess. Fix row(s) {rows} by hand; ' + BY_HAND),
+  llm_disabled: entry(run(false), 'Model repair is off (`fences.repair.llm`). Fix row(s) {rows} by hand (' + BY_HAND + '), or ask the user before running `gbrain config set fences.repair.llm true`.', { paid: true }),
+  no_measured_model: entry(run(false), `No model measured accurate enough for fence repair (${FENCE_REPAIR_MEASURED_MODELS.join(', ')}) has a provider key on this brain and \`models.fence_repair\` is unset, so row(s) {rows} stay held. Fix them by hand (${BY_HAND}), or ask the user which model to trust before setting it: \`gbrain config set models.fence_repair <provider:model>\`.`, { paid: true }),
   budget_exhausted: entry(run(true), 'The daily fence-repair budget is spent; repairs resume after 00:00 UTC. Raising it is the user\'s call: `gbrain config set fences.repair.max_usd_per_day <usd>`.', { paid: true }),
   no_pricing: entry(run(false), 'A spend cap is set but gbrain has no price for the repair model. Look up its price and run `gbrain pricing set <model> --input <usd> --output <usd>` on the brain host.', { paid: true }),
   ledger_unavailable: entry(run(true), 'The spend ledger could not be read, so no model call was made. The next repair run retries.'),

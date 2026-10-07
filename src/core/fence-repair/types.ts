@@ -24,6 +24,7 @@ export type GateLetter = 'a' | 'b' | 'c' | 'd' | 'e' | 'f' | 'g';
 export type FixClass =
   | 'close_fence'
   | 'marker_form'
+  | 'stray_empty_cell'
   | 'renumber'
   | 'column_default'
   | 'header_alias'
@@ -36,18 +37,18 @@ export type FixClass =
 /** Every fence reason; `FENCE_REASONS` (reasons.ts) holds one entry per code. */
 export type FenceReason =
   // Screen residual, Tier 3.
-  | 'header_unmapped' | 'no_header' | 'row_before_header' | 'short_row' | 'extra_cells'
+  | 'header_unmapped' | 'no_header' | 'row_before_header' | 'short_row'
   // Screen residual, Tier 2 then manual.
   | 'holder_unresolved'
   // Screen residual, manual only.
-  | 'missing_begin' | 'split_rows' | 'unclosed_trailing_content' | 'marker_near_miss' | 'repeated_marker'
+  | 'extra_cells' | 'claim_split' | 'missing_begin' | 'split_rows' | 'unclosed_trailing_content' | 'marker_near_miss' | 'repeated_marker'
   | 'takes_in_facts' | 'superseded_ambiguous' | 'enum_unmapped' | 'weight_missing' | 'holder_missing'
   | 'confidence_out_of_range' | 'claim_value_invalid' | 'takes_kind_unsupported'
   // Preparation and publication.
   | 'unparseable' | 'row_collision' | 'quoted_fence_rows' | 'stored_row_collision'
   | 'withdrawn_claim_in_malformed_fence' | 'target_fence_malformed' | 'prepare_time' | 'normalizer_failed'
   // Repair runs.
-  | 'llm_unavailable' | 'llm_empty' | 'llm_refused' | 'llm_malformed' | 'llm_truncated' | 'llm_disabled'
+  | 'llm_unavailable' | 'llm_empty' | 'llm_refused' | 'llm_malformed' | 'llm_truncated' | 'llm_declined' | 'llm_disabled' | 'no_measured_model'
   | 'budget_exhausted' | 'no_pricing' | 'ledger_unavailable' | 'owner_unavailable' | 'owner_cli_required'
   | 'sync_in_progress' | 'time_budget' | 'changed_since_read' | 'changed_since_preview'
   // Validator gates.

@@ -63,6 +63,10 @@ function residual(plan: RowPlan, kind: FenceKind, column: string, reason: FenceR
 }
 
 function planFactsKind(plan: RowPlan, kindCell: CellText, contextCell: CellText | undefined): void {
+  if (!kindWord(kindCell.text)) {
+    plan.issues.push({ column: 'kind', reason: 'claim_split', allowed: ALLOWED.facts.kind });
+    return;
+  }
   const before = contextCell?.text ?? '';
   const after = appendOriginalKind(before, kindCell.text);
   if (supersededRef(before) !== supersededRef(after) || forgotten(before) !== forgotten(after)) {
@@ -71,6 +75,17 @@ function planFactsKind(plan: RowPlan, kindCell: CellText, contextCell: CellText 
   }
   plan.changes.push({ column: 'kind', raw: factsKindMap(kindCell.text), class: 'kind_map' });
   if (after !== before) plan.changes.push({ column: 'context', raw: appendOriginalKind(contextCell?.raw ?? '', kindCell.raw), class: 'kind_map' });
+}
+
+/**
+ * A facts kind cell `kind_map` may read: at most three words, no sentence
+ * punctuation, no markdown link or strikethrough. Anything longer is more
+ * likely the end of a claim an unescaped `|` cut in two (with the kind cell
+ * missing, the row keeps its width), so it is never stored as a kind note.
+ */
+export function kindWord(text: string): boolean {
+  const word = text.trim();
+  return word.split(/\s+/).length <= 3 && !/[.,;:!?]/.test(word) && !/\[[^\]]*\]\(|~~/.test(word);
 }
 
 function forgotten(context: string): boolean {
@@ -102,7 +117,7 @@ function residualReason(kind: FenceKind, column: string, text: string): FenceRea
 export function ruleOutputs(kind: FenceKind, column: string, text: string, ctx: FenceCtx): Array<{ text: string; class: FixClass }> {
   switch (column) {
     case 'kind': {
-      const mapped = kind === 'facts' ? factsKindMap(text) : takesKindMap(text, ctx.takesPackKinds);
+      const mapped = kind === 'facts' ? (kindWord(text) ? factsKindMap(text) : null) : takesKindMap(text, ctx.takesPackKinds);
       return mapped ? [{ text: mapped, class: 'kind_map' }] : [];
     }
     case 'visibility':

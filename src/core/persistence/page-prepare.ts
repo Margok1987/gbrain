@@ -48,6 +48,8 @@ import { applyPageEdits, editDiff, parsePageEdits } from './page-edit.ts';
 import { carryCoreMarking, prepareCoreGuard } from './core-guard.ts';
 import { fenceWhere } from '../fence-repair/refusal.ts';
 import { pageFencesNormalized } from '../fence-repair/report.ts';
+import { parseFenceRepairReceipt } from '../fence-repair/receipt.ts';
+import { fenceRepairCommit } from './effect-model.ts';
 
 const PURGE_RESIDUALS = 'Brain-repo git history, synced working-tree copies, exports, compiled context files and slug-keyed derived rows (takes, open loops, file records) may still hold the content — rotate the credential and rewrite or regenerate those copies.';
 
@@ -286,6 +288,9 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
         recoverable_until: 'now + 72h via restore_page (remove immediately instead: gbrain delete <slug> --purge, local CLI only)' };
     } };
   }
+  // #6188: a trusted local fence repair's receipt (admission refuses it from every other caller) rides the outcome and the file's commit.
+  const fenceRepair = row.operation === 'put_page' && !row.authority.remote ? parseFenceRepairReceipt(p.fence_repair) : null;
+  const fenceRepairOutcome = fenceRepair ? { fence_repair: fenceRepair } : {};
   // #5616: edits apply to the caller's view of the locked snapshot (revision checked above).
   const edited = row.operation === 'edit_page' ? editLockedPage(row, snapshot) : undefined;
   let content = edited?.content ?? preparedIntent?.content ?? p.content as string;
@@ -351,7 +356,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       const file=await prepareFileTarget(engine,row,snapshot,targetDeleted ? null : serializePageToMarkdown(snapshot.page,snapshot.tags),undefined,{ activePack, remote: row.authority.remote });
       return {observedRevision,noop:true,file,...await pageDatabaseOnlyPublication(engine,row,file),
         apply:async()=>({...pageNoopAdvisories(row),status:'skipped',slug:row.slug,source_id:row.source_id,noop:true,chunks:0,chunk_skip_reason:'write_skipped',
-          ...(row.operation==='capture'?{channel:'capture',content_hash:p.capture_hash}:{})})};
+          ...(row.operation==='capture'?{channel:'capture',content_hash:p.capture_hash}:{}),...fenceRepairOutcome})};
     }
   }
   let prepared: PreparedContentImport | undefined;
@@ -419,7 +424,8 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
   const shownFixes = (ready.result.fences_normalized ?? []).filter(fix => !row.authority.remote || fix.fence !== 'takes');
   const fencesNormalized = shownFixes.length ? { fences_normalized: pageFencesNormalized({ sourceId: row.source_id, slug: row.slug, fixes: shownFixes,
     writer: row.principal_kind, path: snapshot?.page.source_path ?? null, remote: row.authority.remote }) } : {};
-  const file = await prepareFileTarget(engine, row, snapshot, targetDeleted ? null : rendered, undefined, { capture, allowMissing: options.allowMissingFile, activePack, remote: row.authority.remote });
+  const target = await prepareFileTarget(engine, row, snapshot, targetDeleted ? null : rendered, undefined, { capture, allowMissing: options.allowMissingFile, activePack, remote: row.authority.remote });
+  const file = target && fenceRepair ? { ...target, commit: fenceRepairCommit(relative(target.root, target.path).split(sep).join('/'), fenceRepair.classes) } : target;
   const mintMode = file && !snapshot?.page.source_path ? await scannerSlugRootMode(engine, row.source_id, file.root) : undefined;
   const sourcePath = file && mintMode ? scannerSourcePath(file.root, file.path, mintMode) : undefined;
   // An inferred mode is pinned with the first origin it mints, so later pages cannot flip the inference (#5610).
@@ -465,7 +471,7 @@ export async function preparePageMutation(engine: BrainEngine, row: WriteRequest
       ...(ready.result.chunks === 0 ? {chunk_skip_reason: noop ? 'write_skipped'
         : isEmbedSkipped(ready.parsedPage.frontmatter) || isQuarantined(ready.parsedPage.frontmatter) ? 'embed_skip' : 'empty_body'} : {}),
       ...(row.operation === 'capture' ? { channel: 'capture', content_hash: p.capture_hash } : {}),
-      ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized };
+      ...(edited ? editDiff(row.slug, edited.before, edited.after) : {}), ...fencesNormalized, ...fenceRepairOutcome };
   } };
 }
 

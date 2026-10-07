@@ -432,3 +432,80 @@ describe('containment and the allocator', () => {
     expect(Number.isInteger(FENCE_RULES_VERSION) && FENCE_RULES_VERSION > 0).toBe(true);
   });
 });
+
+describe('stray empty cells and split claims (#6188 T4)', () => {
+  const wide = '| # | claim | kind | confidence | visibility | notability | valid_from | valid_until | source | context | claim_metric | claim_value | claim_unit | claim_period |';
+  const wideSep = '|---|-------|------|------------|------------|------------|------------|-------------|--------|---------|--------------|-------------|------------|--------------|';
+
+  test('one empty cell inserted after the claim is removed; every other byte of the row stays', () => {
+    const r = run(facts(factsRow(1, 'Omicron four'), '| 2 | Rho four opened a lab |  | event | 0.7 | private | low | 2026-05-01 |  | site visit |  |'));
+    expect(classes(r)).toEqual(['stray_empty_cell']);
+    expect(r.page.compiled_truth).toContain('| 2 | Rho four opened a lab | event | 0.7 | private | low | 2026-05-01 |  | site visit |  |');
+    expectRepaired(r);
+    expect(parseFactsFence(r.page.compiled_truth).facts[1]).toMatchObject({ kind: 'event', source: 'site visit' });
+  });
+
+  test('two empty cells, a typed wide row and a takes row with an empty cell after the holder line up the same way', () => {
+    const two = run(facts('| 3 | Sigma four cut prices 15% |  | event |  | 0.8 | private | medium | 2026-06-01 |  | price list |  |'));
+    expect(two.page.compiled_truth).toContain('| 3 | Sigma four cut prices 15% | event | 0.8 | private | medium | 2026-06-01 |  | price list |  |');
+    expectRepaired(two);
+    const typed = run(['## Facts', '', FB, wide, wideSep, '| 4 | Tau four margin |  | fact | 0.9 | private | high | 2026-06-30 |  | report |  | margin | 0.4 | ratio | quarterly |', FE, ''].join('\n'));
+    expect(typed.page.compiled_truth).toContain('| 4 | Tau four margin | fact | 0.9 | private | high | 2026-06-30 |  | report |  | margin | 0.4 | ratio | quarterly |');
+    expectRepaired(typed);
+    const take = run(takes(takesRow(1, 'Upsilon four'), '| 2 | Phi four ships late | bet | people/sample-person |  | 0.3 | 2026-02-02 | standup |'));
+    expect(take.page.compiled_truth).toContain('| 2 | Phi four ships late | bet | people/sample-person | 0.3 | 2026-02-02 | standup |');
+    expectRepaired(take);
+  });
+
+  test('extra cells no empty-cell deletion can line up are manual extra_cells and the row is untouched', () => {
+    const duplicate = '| 5 | Chi four expands | fact | 0.6 | 0.9 | private | medium | 2026-01-01 |  | memo |  |';
+    const text = '| 6 | Psi four moved | (relocated) | event | 0.8 | private | medium | 2026-01-10 |  | email |  |';
+    for (const row of [duplicate, text]) {
+      const r = run(facts(row));
+      expect(reasons(r)).toEqual(['extra_cells']);
+      expect(r.fixes).toEqual([]);
+      expect(r.page.compiled_truth).toContain(row);
+    }
+    expect(FENCE_REASONS.extra_cells).toMatchObject({ tier: 'manual', manualOnly: true });
+  });
+
+  test('kind_map reads only a kind word: a claim tail in the kind column is manual claim_split, never a kind note', () => {
+    const tails = ['after a long search, per the board', 'and then the whole team left the office', 'see [the memo](https://example.com/m)', '~~struck~~ words'];
+    for (const tail of tails) {
+      const row = `| 7 | Omega four hired a CFO | ${tail} | 0.8 | private | high | 2026-03-01 |  | memo |  |`;
+      const r = run(facts(row));
+      expect(reasons(r)).toEqual(['claim_split']);
+      expect(r.fixes).toEqual([]);
+      expect(r.page.compiled_truth).toContain(row);
+    }
+    expect(FENCE_REASONS.claim_split).toMatchObject({ tier: 'manual', manualOnly: true });
+    const phrase = run(facts(factsRow(8, 'Alpha five', { kind: 'strategic partnership update' })));
+    expect(classes(phrase)).toEqual(['kind_map']);
+    expectRepaired(phrase);
+  });
+});
+
+describe('fences with no header: rows read by their row number (#6188 T4)', () => {
+  const headerless = (...rows: string[]) => ['## Facts', '', FB, ...rows, FE, ''].join('\n');
+
+  test('a claim an unescaped pipe cut in two is held manual, never sent to the model; the row is untouched', () => {
+    const sentence = '| 4 | Synthco revenue grew 40% | mostly from enterprise renewals | fact | 0.9 | private | high | 2026-06-30 |  | Q2 memo |  |';
+    const short = '| 5 | Synthco churn fell | in Q3 | fact | 0.8 | private | medium | 2026-07-01 |  | dashboard |  |';
+    for (const [row, reason] of [[sentence, 'claim_split'], [short, 'extra_cells']] as const) {
+      const r = run(headerless(factsRow(1, 'Synthco anchor row'), row));
+      expect(reasons(r)).toEqual([reason, 'no_header'].sort() as FenceReason[]);
+      expect(r.fixes).toEqual([]);
+      expect(r.page.compiled_truth).toContain(row);
+      expect(FENCE_REASONS[reason].manualOnly).toBe(true);
+    }
+  });
+
+  test('a stray empty cell is still removed; aligned rows, and rows with no row number to anchor them, stay plain no_header', () => {
+    const r = run(headerless('| 6 | Synthco opened a lab |  | event | 0.7 | private | low | 2026-05-01 |  | site visit |  |'));
+    expect(classes(r)).toEqual(['stray_empty_cell']);
+    expect(reasons(r)).toEqual(['no_header']);
+    expect(r.page.compiled_truth).toContain('| 6 | Synthco opened a lab | event | 0.7 | private | low | 2026-05-01 |  | site visit |  |');
+    expect(reasons(run(headerless(factsRow(1, 'Synthco aligned row'), '| 2 | Synthco short row | idea | 0.4 | private | low |')))).toEqual(['no_header']);
+    expect(reasons(run(headerless('| Synthco unnumbered row | event | 0.8 | private | low | 2026-02-01 |  | press note |  |')))).toEqual(['no_header']);
+  });
+});

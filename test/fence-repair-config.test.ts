@@ -1,7 +1,7 @@
 /**
  * #6188 PR3 fence repair caps (src/core/fence-repair/config.ts).
  *
- * Protects: `fences.repair.max_usd_per_page` (default 0.05) and
+ * Protects: `fences.repair.max_usd_per_page` (default 0.30) and
  * `fences.repair.max_usd_per_day` (default 1.00) are registered keys that
  * `gbrain config set` accepts as non-negative USD amounts (0 = no model
  * spend) and refuses otherwise with nothing written; the reader keeps the
@@ -44,13 +44,13 @@ describe('fence repair caps', () => {
   });
 
   test('the reader keeps the defaults until the user sets a cap, and reports whose cap it is', async () => {
-    expect(await readFenceRepairCaps(engine)).toEqual({ perPageUsd: 0.05, perDayUsd: 1, perPageSource: 'default', perDaySource: 'default' });
+    expect(await readFenceRepairCaps(engine)).toEqual({ perPageUsd: 0.3, perDayUsd: 1, perPageSource: 'default', perDaySource: 'default' });
     await engine.setConfig(FENCE_REPAIR_MAX_USD_PER_DAY_KEY, '0');
     await engine.setConfig(FENCE_REPAIR_MAX_USD_PER_PAGE_KEY, '0.2');
     expect(await readFenceRepairCaps(engine)).toEqual({ perPageUsd: 0.2, perDayUsd: 0, perPageSource: 'user', perDaySource: 'user' });
     await engine.setConfig(FENCE_REPAIR_MAX_USD_PER_PAGE_KEY, 'garbage');
-    expect((await readFenceRepairCaps(engine)).perPageUsd).toBe(0.05);
+    expect((await readFenceRepairCaps(engine)).perPageUsd).toBe(0.3);
     const failing = { getConfig: async () => { throw new Error('config table unavailable'); } };
-    expect(await readFenceRepairCaps(failing)).toEqual({ perPageUsd: 0.05, perDayUsd: 1, perPageSource: 'default', perDaySource: 'default' });
+    expect(await readFenceRepairCaps(failing)).toEqual({ perPageUsd: 0.3, perDayUsd: 1, perPageSource: 'default', perDaySource: 'default' });
   });
 });

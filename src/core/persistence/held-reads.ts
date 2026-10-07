@@ -11,22 +11,27 @@
  *
  * Cost: one indexed lookup (`op_checkpoints_sync_hold_page_idx`) for the pages
  * a call returns and one read of the per-source summary rows in scope, each
- * cached per request. Remote callers get codes, counts and flags, never paths,
- * and a fix addressed to the brain host operator.
+ * cached per request (plus, only for a page whose held file is an
+ * `invalid_fence` hold, the two reads that say whether the maintenance run
+ * repairs it). Remote callers get codes, counts and flags, never paths, and a
+ * fix addressed to the brain host operator; the repair commands come from the
+ * hold router (D6): `gbrain repair fences` for fence holds, `gbrain repair
+ * frontmatter` for the rest.
  */
 import type { BrainEngine } from '../engine.ts';
 import type { Action, Notice } from '../agent-output.ts';
 import { ALL_SOURCES } from '../source-id.ts';
-import { GIT_HOLD_OP, GIT_HOLD_SUMMARY_OP, gitHoldDocs, gitHoldFix, holdRepairSteps, type GitHoldCode, type GitHoldReason, type GitHoldRecord, type HoldRepairRoute } from './sync-holds.ts';
-import type { FenceMessageLocation } from '../fence-repair/reasons.ts';
+import { GIT_HOLD_OP, GIT_HOLD_SUMMARY_OP, fenceAutoRepairFor, gitHoldDocs, gitHoldFix, holdRepairSteps, type GitHoldCode, type GitHoldReason, type GitHoldRecord, type HoldRepairRoute } from './sync-holds.ts';
+import { fenceHoldLocation, fenceHoldRelay, fencePreviewArgv, type FenceAutoRepair, type FenceHoldLocation } from '../fence-repair/hold-fix.ts';
 
 type Exec = Pick<BrainEngine, 'executeRaw'>;
 
-export interface HeldPage { record: GitHoldRecord; revision: string | null }
+/** `fenceAuto`: whether the maintenance run repairs fence holds, read only when some returned hold is one. */
+export interface HeldPage { record: GitHoldRecord; revision: string | null; fenceAuto?: FenceAutoRepair }
 
 /**
  * Held files of the sources in a read scope: new files with no page (`missing`) and pages whose newer file is held (`stale`);
- * `fences` (present only when some are) counts the #6188 `invalid_fence` holds among them, which route to a fence edit instead of frontmatter repair.
+ * `fences` (present only when some are) counts the #6188 `invalid_fence` holds among them, which route to `gbrain repair fences` instead of frontmatter repair.
  */
 export interface HeldCoverage { source_id: string; missing: number; stale: number; fences?: number }
 
@@ -36,8 +41,8 @@ export interface FileHeld {
   reason?: GitHoldReason;
   key?: string;
   line?: number;
-  /** #6188 `invalid_fence`: fence, section, reason and problem classes (row numbers for trusted local callers only). */
-  fence?: FenceMessageLocation;
+  /** #6188 `invalid_fence` (D16): fence, section, reason, classes, planned tier, auto_retry and next_attempt_after (row numbers for trusted local callers only). */
+  fence?: FenceHoldLocation;
   since: string;
   /** Source-relative file path; trusted local callers only. */
   path?: string;
@@ -71,9 +76,10 @@ export function readHeldPages(engine: Exec, pageIds: number[], request?: object)
       WHERE h.op=$1 AND (h.completed_keys->0->>'page_id')=ANY($2::text[])
       ORDER BY h.fingerprint`, [GIT_HOLD_OP, ids.map(String)]);
     const out = new Map<number, HeldPage>();
+    const fenceAuto = await fenceAutoRepairFor(engine, rows.map(row => row.record));
     for (const row of rows) {
       const id = Number(row.record.page_id);
-      if (!out.has(id)) out.set(id, { record: row.record, revision: row.revision });
+      if (!out.has(id)) out.set(id, { record: row.record, revision: row.revision, ...(fenceAuto ? { fenceAuto } : {}) });
     }
     return out;
   });
@@ -104,25 +110,24 @@ export function coverageRoute(source: HeldCoverage): HoldRepairRoute {
   return { fences, others: Math.max(0, source.missing + source.stale - fences) };
 }
 
-function repairArgv(sourceId: string): string[] {
-  return ['gbrain', 'repair', 'frontmatter', '--source', sourceId];
-}
-
 /**
  * The fix a remote caller relays (`tell_user_to_run`): only the brain host
- * operator can inspect and repair held files. A source without a route, or
- * with frontmatter-style holds, names the frontmatter repair preview; a source
- * with fence holds names the status read, the fence edit and the sync (D6).
+ * operator can inspect and repair held files. Commands come from the hold
+ * router (D6): a source without a route, or with frontmatter-style holds,
+ * names the frontmatter repair preview; a source with fence holds names the
+ * fence repair preview and says the maintenance run repairs most of them by
+ * itself when it runs. No path.
  */
 export function hostOperatorFix(sources: ReadonlyArray<{ source_id: string; route?: HoldRepairRoute }>, why: string): Action {
-  const frontmatter = sources.filter(source => !source.route || source.route.others > 0).map(source => `'${repairArgv(source.source_id).join(' ')}'`);
-  const fences = sources.filter(source => source.route && source.route.fences > 0).map(source => source.source_id);
+  const frontmatter = sources.filter(source => !source.route || source.route.others > 0).map(source => `'gbrain repair frontmatter --source ${source.source_id}'`);
+  const fences = sources.filter(source => source.route && source.route.fences > 0).map(source => `'${fencePreviewArgv(source.source_id).join(' ')}'`);
   const first = sources[0]!;
   const parts = [
     ...(frontmatter.length ? [`Please run ${frontmatter.join(', ')} on the brain host to preview the fixes, then apply them.`] : []),
-    ...(fences.length ? [`Some held files have a facts or takes table gbrain cannot import: on the brain host run ${fences.map(id => `'gbrain sources status ${id}'`).join(', ')} to see which file and table, edit that table and commit, then run ${fences.map(id => `'gbrain sync --source ${id} --no-pull'`).join(', ')}.`] : []),
+    ...(fences.length ? [`Some held files have a facts or takes table gbrain could not import. The brain host's maintenance run repairs most of these by itself when it is running; `
+      + `to see each one's state and repair the rest now, run ${fences.join(', ')} on the brain host (a read-only preview that prints the apply command).`] : []),
   ];
-  return { argv: first.route ? holdRepairSteps(first.source_id, first.route).argv : repairArgv(first.source_id), consent: [], actor: 'host_admin', requires_exclusive: false, why,
+  return { argv: holdRepairSteps(first.source_id, first.route ?? { fences: 0, others: 1 }).argv, consent: [], actor: 'host_admin', requires_exclusive: false, why,
     user_message: `Some files in your brain could not be imported, so answers from it can miss or show outdated notes. ${parts.join(' ')}` };
 }
 
@@ -131,15 +136,22 @@ export function recordRoute(record: Pick<GitHoldRecord, 'code'>): HoldRepairRout
   return record.code === 'invalid_fence' ? { fences: 1, others: 0 } : { fences: 0, others: 1 };
 }
 
-/** `get_page.file_held` for a page whose newer file is held; the path only for trusted local callers. */
+/**
+ * `get_page.file_held` for a page whose newer file is held; the path only for
+ * trusted local callers. A fence hold's fix follows its state (D17): locally
+ * the step `gitHoldFix` names, remotely the owner-host relay saying whether it
+ * clears by itself (Codex CEO #7).
+ */
 export function fileHeldField(held: HeldPage, remote: boolean): FileHeld {
   const { record } = held;
-  const fix = remote
-    ? hostOperatorFix([{ source_id: record.source_id, route: recordRoute(record) }], `The canonical file of this page is held (${record.code}${record.meta.reason ? `, ${record.meta.reason}` : ''}): sync cannot import its newer version, so this page shows its last good revision and is read-only for put_page until the brain host operator repairs the file.`)
-    : gitHoldFix(record);
-  const fence = record.meta.fence ? (remote ? { ...record.meta.fence, rows: [] } : record.meta.fence) : undefined;
+  const fence = record.code === 'invalid_fence';
+  const why = `The canonical file of this page is held (${record.code}${record.meta.reason ? `, ${record.meta.reason}` : ''}): sync cannot import its newer version, so this page shows its last good revision `
+    + `and is read-only for put_page until ${fence ? 'the file is repaired' : 'the brain host operator repairs the file'}.`;
+  const fix = !remote ? gitHoldFix(record, held.fenceAuto)
+    : fence ? fenceHoldRelay(record, held.fenceAuto, why) : hostOperatorFix([{ source_id: record.source_id, route: recordRoute(record) }], why);
+  const location = fence ? fenceHoldLocation(record.meta, held.fenceAuto, remote) : undefined;
   return { code: record.code, ...(record.meta.reason ? { reason: record.meta.reason } : {}), ...(record.meta.key ? { key: record.meta.key } : {}),
-    ...(record.meta.line !== undefined ? { line: record.meta.line } : {}), ...(fence ? { fence } : {}), since: record.held_at, ...(remote ? {} : { path: record.path }),
+    ...(record.meta.line !== undefined ? { line: record.meta.line } : {}), ...(location ? { fence: location } : {}), since: record.held_at, ...(remote ? {} : { path: record.path }),
     fix, docs: gitHoldDocs(record.code, record.meta.reason) };
 }
 
@@ -178,6 +190,6 @@ export function heldFilesNotice(coverage: HeldCoverage[], remote: boolean): Noti
         ? `gbrain sources status ${ids[0]} lists each held file; ${single.text}.`
         : `Previews the fix for each held file in source ${ids[0]} (gbrain sources status ${ids[0]} lists them); nothing is written until a hash-bound apply.` }
     : { argv: ['gbrain', 'doctor', '--json'], consent: [], actor: 'agent', requires_exclusive: false,
-      why: `Doctor lists the held files of each source with its next step (${coverage.map(source => holdRepairSteps(source.source_id, coverageRoute(source)).commands[0]).join('; ')}).` };
+      why: `Doctor lists the held files of each source with its next step (${coverage.map(source => holdRepairSteps(source.source_id, coverageRoute(source)).commands.join(', ')).join('; ')}).` };
   return { code: 'held_files', kind: 'degraded', why, fix };
 }

@@ -15,12 +15,17 @@ const SPEC_MANUAL: FenceReason[] = [
 ];
 /** Manual-only residuals this module adds where the spec says "residual" without naming one. */
 const ADDED_MANUAL: FenceReason[] = ['unclosed_trailing_content', 'marker_near_miss', 'holder_missing'];
-const SPEC_TIER3: FenceReason[] = ['header_unmapped', 'no_header', 'row_before_header', 'short_row', 'extra_cells'];
+/**
+ * Manual since the Tier 3 eval (#6188 T4): a row whose extra cells empty-cell removal cannot line up, and a facts kind
+ * cell that holds text rather than a kind word; no gate can tell a claim cut by an unescaped `|` from a misplaced cell.
+ */
+const EVAL_MANUAL: FenceReason[] = ['extra_cells', 'claim_split'];
+const SPEC_TIER3: FenceReason[] = ['header_unmapped', 'no_header', 'row_before_header', 'short_row'];
 const SPEC_OTHERS: FenceReason[] = [
   'holder_unresolved',
   'unparseable', 'row_collision', 'quoted_fence_rows', 'stored_row_collision', 'withdrawn_claim_in_malformed_fence',
   'target_fence_malformed', 'prepare_time', 'normalizer_failed',
-  'llm_unavailable', 'llm_empty', 'llm_refused', 'llm_malformed', 'llm_truncated', 'llm_disabled', 'budget_exhausted',
+  'llm_unavailable', 'llm_empty', 'llm_refused', 'llm_malformed', 'llm_truncated', 'llm_declined', 'llm_disabled', 'no_measured_model', 'budget_exhausted',
   'no_pricing', 'ledger_unavailable', 'owner_unavailable', 'owner_cli_required', 'sync_in_progress', 'time_budget',
   'changed_since_read', 'changed_since_preview',
   'still_invalid', 'claim_changed', 'row_number_changed', 'visibility_loosened', 'row_count_changed', 'cell_changed', 'protection_loosened',
@@ -28,11 +33,11 @@ const SPEC_OTHERS: FenceReason[] = [
 
 describe('FENCE_REASONS', () => {
   test('holds exactly the reasons the spec names (plus the documented additions)', () => {
-    expect([...FENCE_REASON_CODES].sort()).toEqual([...SPEC_MANUAL, ...ADDED_MANUAL, ...SPEC_TIER3, ...SPEC_OTHERS].sort());
+    expect([...FENCE_REASON_CODES].sort()).toEqual([...SPEC_MANUAL, ...ADDED_MANUAL, ...EVAL_MANUAL, ...SPEC_TIER3, ...SPEC_OTHERS].sort());
   });
 
   test('screen residual classes carry the spec\'s tier and manual-only flag', () => {
-    for (const reason of [...SPEC_MANUAL, ...ADDED_MANUAL]) {
+    for (const reason of [...SPEC_MANUAL, ...ADDED_MANUAL, ...EVAL_MANUAL]) {
       expect([reason, FENCE_REASONS[reason].tier, FENCE_REASONS[reason].manualOnly, FENCE_REASONS[reason].autoRetry]).toEqual([reason, 'manual', true, false]);
     }
     for (const reason of SPEC_TIER3) expect([reason, FENCE_REASONS[reason].tier, FENCE_REASONS[reason].manualOnly]).toEqual([reason, 'llm', false]);
@@ -62,7 +67,7 @@ describe('FENCE_REASONS', () => {
   });
 
   test('paid reasons are exactly the ones whose fix raises spend or enables the model', () => {
-    expect(FENCE_REASON_CODES.filter(r => FENCE_REASONS[r].paid).sort()).toEqual(['budget_exhausted', 'llm_disabled', 'no_pricing']);
+    expect(FENCE_REASON_CODES.filter(r => FENCE_REASONS[r].paid).sort()).toEqual(['budget_exhausted', 'llm_disabled', 'no_measured_model', 'no_pricing']);
   });
 });
 

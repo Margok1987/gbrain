@@ -3,14 +3,19 @@
  *
  * Protects: doctor reports every malformed facts or takes fence that waits
  * (held file, stored page, unsynced file) per source, split by planned tier,
- * with the oldest hold and the PR1/PR2 next step (never `repair fences`,
- * which has not shipped); a census the bounded scan did not finish is
- * partial and never ok; the 7-day normalization trend warns at
- * FENCE_NORMALIZATION_WARN_7D and not below, naming the top writers; the
- * model-repair caps and today's ledger spend are shown; output is location
- * only.
+ * with the oldest hold and the `gbrain repair fences --source <id>` preview as
+ * the fix for every bucket (#6188 PR4); what the next maintenance run repairs
+ * is described as "repaired automatically by the next maintenance run" only
+ * while one is active, otherwise the preview then the apply; model-tier
+ * fences say why they wait (fences.repair.llm off, budget spent); a census
+ * the bounded scan did not finish is partial and never ok; the 7-day
+ * normalization trend warns at FENCE_NORMALIZATION_WARN_7D and not below,
+ * naming the top writers; the model-repair caps and today's ledger spend are
+ * shown; the WAVE_CHECKS entry counts details.total; output is location only.
  * Fails when: a partial or stale census reads ok, counts double a page found
- * twice, the trend threshold is off by one, or a cell value reaches the check.
+ * twice, the trend threshold is off by one, the fix keeps the edit-and-sync
+ * step, "no action needed" appears with no maintenance run, or a cell value
+ * reaches the check.
  * PGLite in-memory ($0); synthetic content only.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
@@ -25,6 +30,11 @@ import { FENCE_NORMALIZATION_WARN_7D, fenceIntegrityResult } from '../src/comman
 import { writeGitHold } from '../src/core/persistence/sync-holds.ts';
 import { recordWriteTrend } from '../src/core/fence-repair/census-store.ts';
 import { dailyLedger, FENCE_REPAIR_LEDGER } from '../src/core/budget/daily-ledger.ts';
+import { WAVE_CHECKS, remoteWaveHandoff } from '../src/commands/doctor/wave-checks.ts';
+import { bannerFindingLine } from '../src/commands/doctor/upgrade-banner.ts';
+import { repairForCheck } from '../src/core/repair/registry.ts';
+import { LAST_GLOBAL_MAINTENANCE_KEY } from '../src/core/fence-repair/hold-fix.ts';
+import { LAST_GLOBAL_AT_KEY } from '../src/core/cycle.ts';
 
 const T = '<!--- gbrain:takes:begin -->', TE = '<!--- gbrain:takes:end -->';
 const TH = '| # | claim | kind | who | weight | since | source |\n|---|---|---|---|---|---|---|';
@@ -54,7 +64,7 @@ afterAll(async () => { await engine.disconnect(); for (const root of roots) rmSy
 // Every test reads the whole brain, so each one starts with only its own sources live.
 afterEach(async () => {
   await engine.executeRaw("UPDATE sources SET archived=true WHERE id<>'default'");
-  for (const key of ['fences.repair.max_usd_per_day', 'fences.repair.max_usd_per_page']) await engine.unsetConfig(key);
+  for (const key of ['fences.repair.max_usd_per_day', 'fences.repair.max_usd_per_page', 'fences.repair.llm', 'fences.repair.enabled', LAST_GLOBAL_AT_KEY]) await engine.unsetConfig(key);
 });
 
 async function source(files: Record<string, string> = {}) {
@@ -85,7 +95,7 @@ describe('fence_integrity doctor check', () => {
     expect(check.details).toMatchObject({ total: 0, partial: false, warn_at_normalized_7d: FENCE_NORMALIZATION_WARN_7D });
   });
 
-  test('counts each waiting fence once per source by bucket and tier, names the oldest hold and the edit-and-sync step', async () => {
+  test('counts each waiting fence once per source by bucket and tier, names the oldest hold and the fence repair preview', async () => {
     const s = await source({ 'notes/held.md': md('Held', MANUAL), 'notes/both.md': md('Both', RESOLVER), 'notes/unsynced.md': md('Unsynced', LLM) });
     await stored(s.id, 'notes/both', RESOLVER);
     await stored(s.id, 'notes/db-only', DETERMINISTIC);
@@ -100,20 +110,82 @@ describe('fence_integrity doctor check', () => {
     expect(details.sources.find((c: any) => c.source_id === s.id)).toMatchObject({ total: 4, holds: { manual: 1, total: 1 }, pages: { resolver: 1, deterministic: 1, total: 2 },
       files: { llm: 1, total: 1 }, by_tier: { deterministic: 1, resolver: 1, llm: 1, manual: 1, total: 4 } });
     expect(check.message).toContain(`${s.id}: 1 held file(s), 2 stored page(s), 1 unsynced file(s) (by tier: deterministic 1, resolver 1, llm 1, manual 1); oldest hold`);
-    expect(check.message).toContain('Model repair caps: $0.05 per page, $1.00 per day ($0.00 spent today).');
-    expect(check.fix).toMatchObject({ argv: ['gbrain', 'sources', 'status', s.id, '--json'], actor: 'agent' });
-    expect(check.fix!.why).toContain(`gbrain sync --source ${s.id} --no-pull`);
+    expect(check.message).toContain('Model repair caps: $0.30 per page, $1.00 per day ($0.00 spent today).');
+    // No maintenance run has completed on this brain: never "repaired automatically", the preview then the apply.
+    expect(check.message).toContain('not repaired automatically (no maintenance run has completed in the last 24 h)');
+    expect(check.message).toContain(`Preview: gbrain repair fences --source ${s.id}`);
+    expect(check.fix).toMatchObject({ argv: ['gbrain', 'repair', 'fences', '--source', s.id], actor: 'agent',
+      then: { argv: ['gbrain', 'repair', 'fences', '--source', s.id, '--apply'] } });
+    expect(check.fix!.why).toContain('--expect <hash>');
+    expect(check.fix!.why).toContain('1 need a manual edit');
+    expect(details.auto_repair).toMatchObject({ enabled: true, llm: true, active: false, last_maintenance_at: null });
     const text = JSON.stringify(check);
-    expect(text).not.toMatch(/repair fences/);
+    expect(text).not.toContain('repair frontmatter');
+    expect(text).not.toContain('after the user agrees');
     for (const secret of SECRETS) expect(text).not.toContain(secret);
   });
 
-  test('a stored-page-only source points at reading the page and writing it again', async () => {
+  test('a stored-page-only source gets the same preview; with a maintenance run active it is repaired automatically by the next run', async () => {
     const s = await source();
     await stored(s.id, 'notes/db-only', DETERMINISTIC);
     const check = await result();
     expect(check.status).toBe('warn');
-    expect(check.fix!.argv).toEqual(['gbrain', 'get', '--source', s.id, '--', 'notes/db-only']);
+    expect(check.fix!.argv).toEqual(['gbrain', 'repair', 'fences', '--source', s.id]);
+    await engine.setConfig(LAST_GLOBAL_AT_KEY, new Date(NOW.getTime() - 3_600_000).toISOString());
+    const active = await result();
+    expect(active.message).toContain('The deterministic, resolver and model-tier ones are repaired automatically by the next maintenance run');
+    expect(active.fix).toMatchObject({ argv: ['gbrain', 'repair', 'fences', '--source', s.id] });
+    expect(active.fix!.then).toBeUndefined();
+    expect(active.fix!.why).toContain('no action is needed');
+    // The maintenance stamp is cycle.ts's key; a stamp older than a day is not an active job, and the pause switch wins.
+    expect(LAST_GLOBAL_MAINTENANCE_KEY).toBe(LAST_GLOBAL_AT_KEY);
+    await engine.setConfig(LAST_GLOBAL_AT_KEY, new Date(NOW.getTime() - 25 * 3_600_000).toISOString());
+    expect((await result()).fix!.then?.argv).toEqual(['gbrain', 'repair', 'fences', '--source', s.id, '--apply']);
+    await engine.setConfig(LAST_GLOBAL_AT_KEY, NOW.toISOString());
+    await engine.setConfig('fences.repair.enabled', 'false');
+    expect((await result()).message).toContain('not repaired automatically (fences.repair.enabled is false)');
+  });
+
+  test('model-tier fences say why they wait: model repair off, or today\'s budget spent', async () => {
+    const s = await source();
+    await stored(s.id, 'notes/model', LLM);
+    await engine.setConfig('fences.repair.llm', 'false');
+    const off = await result();
+    expect(off.message).toContain('Model repair (Tier 3) is off (fences.repair.llm false), so 1 model-tier fence(s) wait');
+    expect(off.message).toContain('gbrain config set fences.repair.llm true');
+    expect(off.message).toContain('The deterministic and resolver ones are');
+    await engine.unsetConfig('fences.repair.llm');
+    await engine.setConfig('fences.repair.max_usd_per_day', '0.1');
+    const day = new Date('2026-10-03T12:00:00Z');
+    const ledger = dailyLedger(engine, FENCE_REPAIR_LEDGER, { now: () => day });
+    const held = await ledger.reserve(0.1, { capUsd: 0.1 });
+    if (!held.ok) throw new Error('expected a reservation');
+    await ledger.dispatch(held.reservation.id);
+    await ledger.settle(held.reservation.id, 0.1);
+    const spent = await fenceIntegrityResult(engine, { timeoutMs: 60_000, now: () => day });
+    expect(spent.message).toContain('Today\'s model repair budget is spent ($0.10 of $0.10), so 1 model-tier fence(s) wait until after 00:00 UTC');
+    expect(spent.message).toContain('gbrain config set fences.repair.max_usd_per_day <usd>');
+  });
+
+  test('the WAVE_CHECKS entry counts details.total, routes to the fences kind and its banner and remote lines say who repairs it, with no path or claim', async () => {
+    const spec = WAVE_CHECKS.find(entry => entry.id === 'fence_integrity')!;
+    expect(spec).toMatchObject({ resolution: 'repair', registration: 'doctor.ts' });
+    expect(spec.hostOnly).toBeUndefined();
+    expect(repairForCheck('fence_integrity')?.kind).toBe('fences');
+    const s = await source({ 'notes/held.md': md('Held', MANUAL) });
+    await stored(s.id, 'notes/db-only', DETERMINISTIC);
+    const check = await spec.run(engine, { sourceIds: [s.id] });
+    expect(spec.count(check.details ?? {})).toBe(2);
+    const line = bannerFindingLine({ spec, check, state: 'finding' });
+    expect(line).toBe('[AGENT]   fence_integrity: 2 (not repaired automatically (no maintenance run is active); preview with: gbrain repair fences)');
+    await engine.setConfig(LAST_GLOBAL_AT_KEY, new Date().toISOString());
+    const active = await spec.run(engine, { sourceIds: [s.id] });
+    expect(bannerFindingLine({ spec, check: active, state: 'finding' })).toBe('[AGENT]   fence_integrity: 2 (repaired automatically by the next maintenance run, except 1 that need a manual edit; preview with: gbrain repair fences)');
+    const remote = (await remoteWaveHandoff(engine, [s.id])).find(entry => entry.name === 'fence_integrity')!;
+    expect(remote).toMatchObject({ status: 'warn', details: { host_action: { check_id: 'fence_integrity', state: 'action_required' } } });
+    const text = JSON.stringify(remote);
+    for (const leak of ['notes/held', 'notes/db-only', s.root, ...SECRETS]) expect(text).not.toContain(leak);
+    for (const blob of [line, JSON.stringify(check)]) for (const secret of SECRETS) expect(blob).not.toContain(secret);
   });
 
   test('a census the scan did not finish is partial and never ok, even with nothing found so far', async () => {

@@ -23,6 +23,7 @@ import { withFilesystemPublication } from './filesystem-guard.ts';
 import { mayReprepare } from './semantic.ts';
 import { tryAcquirePublicationCapacity } from './pool-capacity.ts';
 import { queuePublicationEffects } from './effect-journal.ts';
+import type { GitCommitNote } from './effect-model.ts';
 import { authorizePageVisibility } from './page-visibility.ts';
 import { withNoRepoWriteThroughWarning } from '../write-through.ts';
 import { assertUnboundPublication, classifyUnboundPage, unboundWriteWarning } from './unbound-source.ts';
@@ -62,8 +63,11 @@ interface PreparedMutationBase {
   postimage?: PageSnapshot | null;
   validate?(tx: BrainEngine): Promise<void>;
 }
-/** A page file target; `publishMode` (Google pages) is the exact mode it publishes with, and its created directories get 0700. */
-export type PageMutationFile = MutationFile & { publishMode?: number };
+/**
+ * A page file target; `publishMode` (Google pages) is the exact mode it publishes with, and its created directories get 0700.
+ * `commit` (trusted local preparers only) rides the Git effect into the commit message.
+ */
+export type PageMutationFile = MutationFile & { publishMode?: number; commit?: GitCommitNote };
 export type PreparedMutation = PreparedMutationBase & (
   | { target?: 'page'; file?: PageMutationFile; files?: never }
   | { target: 'skill_bundle'; file?: never; files: MutationFile[]; validate(tx: BrainEngine): Promise<void> }

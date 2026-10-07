@@ -95,6 +95,10 @@ function cellOk(check: RowCheck, column: string, text: string): boolean {
   const own = check.byColumn.get(column);
   if (check.aligned && own && !own.movable && own.text !== text) return ruleChange(check, column, own, text);
   if (own && !own.used && own.text === text) return use(own);
+  // A misaligned row realigns by moving text unchanged; prefer that over a rule rewriting this column's own cell,
+  // or an empty kind cell (kind_map reads it as `fact`) would claim the column and strand the real `fact` cell.
+  const exact = check.aligned ? undefined : check.sources.find(s => !s.used && s.movable && s !== own && s.text === text);
+  if (exact) return use(exact);
   if (own && !own.used && ruleChange(check, column, own, text)) return true;
   const moved = check.sources.find(s => !s.used && s.movable && s !== own
     && (s.text === text || (!check.aligned && check.named(column) && ruleFits(check, column, s, text))));

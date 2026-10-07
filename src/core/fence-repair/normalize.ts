@@ -2,9 +2,10 @@
  * Tier 1 fence normalizer (#6188): pure, deterministic, free.
  *
  * `normalizeFences(page, ctx)` fixes what has one obvious meaning (a missing
- * end marker with nothing after the table, two-dash takes markers, row-number
- * repairs, header aliases and order, header-level write defaults, enum,
- * kind and holder synonyms, percent confidences) and reports the rest as
+ * end marker with nothing after the table, two-dash takes markers, stray
+ * empty cells with exactly one valid deletion, row-number repairs, header
+ * aliases and order, header-level write defaults, enum, kind and holder
+ * synonyms, percent confidences) and reports the rest as
  * location-only residual issues. A page whose fences already compile is
  * returned unchanged (the same object), and every other byte outside the
  * edited cells, markers and headers is kept verbatim. The result is a fixed
@@ -16,11 +17,12 @@
 import { contentPass } from './content.ts';
 import { sectionsOf, strictFailures, strictPageClean } from './page-checks.ts';
 import { extractRawRows, rowNumOf } from './raw-rows.ts';
+import { strayCellPass } from './stray-cells.ts';
 import { structuralPass } from './structure.ts';
 import type { FenceCtx, FenceFix, FenceIssue, FencePage, FenceSection, StoredRowMap } from './types.ts';
 
 /** Rule-set version; bump when a rule widens. It is part of the hold `fence_version` (`FENCE_VERSION`), so older holds are re-screened. */
-export const FENCE_RULES_VERSION = 1;
+export const FENCE_RULES_VERSION = 2;
 
 export interface NormalizeResult<T extends FencePage> {
   page: T;
@@ -40,8 +42,9 @@ export function normalizeFences<T extends FencePage>(page: T, ctx: FenceCtx): No
   const texts: Record<FenceSection, string> = { body: '', timeline: '' };
   for (const [section, text] of sectionsOf(page)) {
     const pass = structuralPass(text, section);
-    texts[section] = pass.text;
-    fixes.push(...pass.fixes);
+    const stray = strayCellPass(pass.text, section);
+    texts[section] = stray.text;
+    fixes.push(...pass.fixes, ...stray.fixes);
     residual.push(...pass.residual);
   }
   const content = contentPass(texts, ctx, () => Math.max(nextFreeRowNum(page, ctx.storedRows), maxHidden(ctx) + 1));

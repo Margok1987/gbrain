@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { fenceNormalizedNotice, type FencesNormalized } from '../fence-repair/report.ts';
+import { parseFenceRepairReceipt } from '../fence-repair/receipt.ts';
 import { realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { OperationContext } from '../ops/contract.ts';
@@ -177,6 +178,11 @@ export async function preparePageAdmission(ctx: OperationContext,
       throw new OperationError('invalid_params', 'Reserved persistence fields cannot be submitted through put_page. Use trusted local reconciliation administration.',
         'Drop kind, preview and backup_reference from put_page; reconciling a canonical file runs through gbrain sources reconcile on the brain host.');
     }
+  }
+  // #6188: a fence repair's receipt is recorded only by the trusted local fence repair, never by a caller.
+  if (Object.hasOwn(input.params, 'fence_repair') && (input.operation !== 'put_page' || ctx.remote !== false || !parseFenceRepairReceipt(input.params.fence_repair))) {
+    throw new OperationError('invalid_params', 'fence_repair is reserved for the trusted fence repair.',
+      'Drop fence_repair and submit the page without it; gbrain repair fences records its own receipt on the brain host. To fix a malformed facts or takes fence, correct it in content (or write facts with remember and takes with takes_add); a held file is repaired by the brain host operator with gbrain repair fences, so ask the user to run it.');
   }
   const { page_batch: _forged, ...params } = input.params;
   const p: Record<string, unknown> = { ...params, ...parseMutationPrecondition(params) };

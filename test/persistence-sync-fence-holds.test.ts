@@ -1,6 +1,7 @@
 /**
- * #6188 PR1: a malformed facts or takes fence never blocks a managed sync; the
- * file is held. A fence the screen refuses is held at freeze; a fence refused
+ * #6188: a malformed facts or takes fence never blocks a managed sync; the
+ * file is held, and every surface routes it to `gbrain repair fences` (that
+ * file's preview for one hold, the source's for a source). A fence the screen refuses is held at freeze; a fence refused
  * only while being prepared against the stored page (a stored-row collision)
  * is held in the same invocation from its failed receipt; a cursor an older
  * release blocked converts on the next sync with no `--retry-failed`.
@@ -24,6 +25,8 @@ import { readGitSourceHolds } from '../src/core/persistence/sync-holds.ts';
 import { gitHoldStatusLines, readGitHoldStatuses } from '../src/core/persistence/connector-status.ts';
 import { gitHeldFilesCheck, fenceHoldsBannerNote, frontmatterHoldsBannerNote } from '../src/commands/doctor/checks/git-holds.ts';
 import { retryHeld } from '../src/commands/sources-retry-held.ts';
+import { postUpgradeRecoveryBanner } from '../src/commands/doctor/upgrade-banner.ts';
+import { remoteWaveHandoff } from '../src/commands/doctor/wave-checks.ts';
 import { printSyncResult, type SyncOpts, type SyncResult } from '../src/commands/sync.ts';
 import { isolatedPersistencePostgres } from './helpers/persistence-postgres.ts';
 import { testBackends } from './helpers/test-backends.ts';
@@ -109,29 +112,33 @@ test('a malformed fence among clean files: the sync finishes, holds that file wi
   expect(await engine.getPage('people/malformed', { sourceId: s.id })).toBeNull();
   expect(result.held![0]).toMatchObject({ path: 'people/malformed.md', code: 'invalid_fence', reason: 'holder_unresolved', stale: false,
     fence: { reason: 'holder_unresolved', fence: 'takes', section: 'body', rows: [1], columns: ['who'] }, docs: 'docs/guides/write-refusals.md#fence-holder_unresolved' });
-  // A new file has no page to read: the fix lists the hold, then the sync that imports the corrected file. Never frontmatter advice.
-  expect(result.held![0]!.fix.argv).toEqual(['gbrain', 'sources', 'status', s.id, '--json']);
-  expect(result.held![0]!.fix.then?.argv).toEqual(['gbrain', 'sync', '--source', s.id, '--no-pull']);
-  expect(result.holds_fix!.argv).toEqual(['gbrain', 'sources', 'status', s.id, '--json']);
+  // #6188 PR4 (D6, Codex DX #6): the hold's fix is that file's fence repair preview, the source's is the source preview. Never frontmatter advice.
+  // No maintenance run is active in this brain, so the fix is the preview, then the apply (E35), and the hold records the file line (D16).
+  const preview = ['gbrain', 'repair', 'fences', '--source', s.id, '--only', 'people/malformed.md'];
+  expect(result.held![0]!.fix.argv).toEqual(preview);
+  expect(result.held![0]!.fix.then?.argv).toEqual([...preview, '--apply']);
+  expect(result.held![0]).toMatchObject({ line: 9, fence: { tier: 'resolver', auto_retry: false, next_attempt_after: null, classes: ['holder_unresolved'] } });
+  expect(result.holds_fix!.argv).toEqual(['gbrain', 'repair', 'fences', '--source', s.id]);
   for (const text of [JSON.stringify(result.held), result.holds_fix!.why]) expect(text).not.toContain('repair frontmatter');
   const text = printed(result);
-  expect(text).toContain('Held people/malformed.md: invalid_fence (holder_unresolved) in the takes fence (body), row 1, column who, at line');
-  expect(text).toContain(`gbrain sync --source ${s.id} --no-pull`);
+  expect(text).toContain('Held people/malformed.md: invalid_fence (holder_unresolved) in the takes fence (body), row 1, column who, at line 9');
+  expect(text).toContain(`gbrain repair fences --source ${s.id} --only people/malformed.md`);
   const status = (await readGitHoldStatuses(engine, [s.id])).get(s.id)!;
   const lines = gitHoldStatusLines(s.id, status).join('\n');
   expect(lines).toContain('people/malformed.md: invalid_fence (holder_unresolved) in the takes fence (body)');
   // Privacy sentinel: no claim, holder or kind text in holds, results, printed output or status.
   const rows = await engine.executeRaw<{ completed_keys: unknown }>("SELECT completed_keys FROM op_checkpoints WHERE op LIKE 'sync-hold%' AND fingerprint LIKE $1", [`${s.id}:%`]);
   for (const blob of [JSON.stringify(rows), JSON.stringify(result), text, lines, JSON.stringify(status)]) expectNoSecrets(blob);
-  // `gbrain repair fences` has not shipped: nothing PR1 prints may send an agent to it.
-  for (const blob of [JSON.stringify(result), text, lines]) expect(blob).not.toMatch(/repair fences|repair pass/);
-  // Doctor routes a fence-only source to the status read and the sync, never to frontmatter repair.
+  expect(lines).toContain(`gbrain repair fences --source ${s.id} --only people/malformed.md`);
+  // Doctor routes a fence-only source to the fence repair preview, never to frontmatter repair.
   const doctor = await gitHeldFilesCheck(engine, [s.id]);
-  expect(doctor).toMatchObject({ status: 'warn', fix: { argv: ['gbrain', 'sources', 'status', s.id, '--json'] } });
-  expect(doctor.message).toContain(`gbrain sync --source ${s.id} --no-pull`);
+  expect(doctor).toMatchObject({ status: 'warn', fix: { argv: ['gbrain', 'repair', 'fences', '--source', s.id] }, details: { fences: 1, auto_repair: { active: false } } });
+  expect(doctor.message).toContain(`gbrain repair fences --source ${s.id}`);
   expect(doctor.message).not.toContain('repair frontmatter');
-  // retry-held names the fence edit for what still refuses.
-  expect((await retryHeld(engine, s.id, { dryRun: false })).next_action).toContain('edit the fence');
+  // retry-held names the fence repair preview for what still refuses.
+  const retry = (await retryHeld(engine, s.id, { dryRun: false })).next_action;
+  expect(retry).toContain(`gbrain repair fences --source ${s.id}`);
+  expect(retry).not.toContain('repair frontmatter');
 
   s.write('people/malformed.md', takesPage('Malformed', take(1, 'Synthetic take', 'world'))); commit(s.root, 'fix the holder');
   const fixed = await s.sync();
@@ -160,12 +167,13 @@ test('forced probe: a fence that passes the screen but collides with a stored ta
   expect(await s.ledger()).toEqual([]);
   expect(result.held![0]).toMatchObject({ path: 'people/probe.md', code: 'invalid_fence', reason: 'prepare_time', stale: true,
     fence: { reason: 'stored_row_collision', fence: 'takes', section: 'body', rows: [2] }, docs: 'docs/guides/write-refusals.md#fence-prepare_time' });
-  // A page exists, so the fix reads it first.
-  expect(result.held![0]!.fix.argv).toEqual(['gbrain', 'get', '--source', s.id, '--', 'people/probe']);
+  // A stored-row collision is a manual edit: that file's preview names it, then the sync imports the corrected file.
+  expect(result.held![0]!.fix.argv).toEqual(['gbrain', 'repair', 'fences', '--source', s.id, '--only', 'people/probe.md']);
+  expect(result.held![0]!.fix.then?.argv).toEqual(['gbrain', 'sync', '--source', s.id, '--no-pull']);
   expect((await engine.readPageSnapshot('people/probe', { sourceId: s.id }))!.revision).toBe(before);
   expect(await engine.executeRaw('SELECT row_num,claim FROM takes k JOIN pages p ON p.id=k.page_id WHERE p.source_id=$1 AND p.slug=$2 ORDER BY row_num', [s.id, 'people/probe']))
     .toEqual([{ row_num: 1, claim: 'Synthetic take' }, { row_num: 2, claim: 'Database-only take' }]);
-  for (const blob of [JSON.stringify(result), printed(result), JSON.stringify(failed)]) { expectNoSecrets(blob); expect(blob).not.toMatch(/repair fences|repair pass/); }
+  for (const blob of [JSON.stringify(result), printed(result), JSON.stringify(failed)]) { expectNoSecrets(blob); expect(blob).not.toContain('repair frontmatter'); }
   // The next run neither re-admits the held bytes nor mints another receipt.
   expect(await s.sync()).toMatchObject({ status: 'up_to_date', holds_outstanding: 1 });
   expect(await s.failedRequests()).toHaveLength(1);
@@ -181,7 +189,23 @@ test('sync.holds=fail blocks with the typed refusal; the next sync after the upg
   // The exact text a pre-#6188 release stored for this refusal, with no durable detail.
   await engine.executeRaw('UPDATE persistence_requests SET error_message=$2,error_detail=NULL WHERE request_id=$1::uuid',
     [failed!.request_id, 'A canonical facts or takes fence cannot be parsed losslessly.']);
-  expect((await fenceHoldsBannerNote(engine)) ?? '').toContain(`gbrain sync --source ${s.id} --no-pull`);
+  const fenceNote = (await fenceHoldsBannerNote(engine)) ?? '';
+  for (const part of [`gbrain sync --source ${s.id} --no-pull`, 'recovers each with no command', 'malformed fence(s) are known so far',
+    'nothing repairs them by itself until a maintenance run is active', 'Preview (read-only, no model call): gbrain repair fences',
+    'gbrain config set fences.repair.enabled false']) expect(fenceNote).toContain(part);
+  expect(fenceNote).not.toMatch(/--apply|repairable after the user agrees/);
+  expectNoSecrets(fenceNote);
+  // The whole banner: the fence_holds note, the fence_integrity finding (no maintenance run is active here) and no applying command.
+  const banner = (await postUpgradeRecoveryBanner(engine, 'host')).join('\n');
+  expect(banner).toContain('[AGENT]   fence_holds: ');
+  expect(banner).toMatch(/\[AGENT\] {3}fence_integrity: \d+ \(not repaired automatically \(no maintenance run is active\); preview with: gbrain repair fences\)/);
+  expect(banner).not.toMatch(/--apply|--yes/);
+  expectNoSecrets(banner);
+  // The remote doctor's host-action line names no path and no claim.
+  const remote = (await remoteWaveHandoff(engine, [s.id])).find(line => line.name === 'fence_integrity')!;
+  expect(remote).toMatchObject({ status: 'warn', details: { host_action: { check_id: 'fence_integrity', state: 'action_required' } } });
+  for (const leak of ['people/malformed', s.root]) expect(JSON.stringify(remote)).not.toContain(leak);
+  expectNoSecrets(JSON.stringify(remote));
   expect((await frontmatterHoldsBannerNote(engine)) ?? '').not.toContain(s.id);
   await engine.unsetConfig('sync.holds');
   const converted = await s.sync();
