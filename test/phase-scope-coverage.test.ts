@@ -54,7 +54,7 @@ describe('PHASE_SCOPE coverage', () => {
     // questions adds 'standing_questions' for 27.
     // #6188 adds 'fence_repair' for 28.
     expect(ALL_PHASES.length).toBe(28);
-    expect(Object.keys(PHASE_SCOPE).length).toBe(27);
+    expect(Object.keys(PHASE_SCOPE).length).toBe(28);
   });
 
   test('embed remains global (the headline brain-wide phase)', () => {
