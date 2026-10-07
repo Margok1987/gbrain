@@ -10,6 +10,32 @@ credits are retained; no result has been reassigned to another provider. Origina
 identifiers and attribution are available in the pre-removal Git revision
 `6040075c6cb95be5881cc2e1b76ef7d71f4e5d29` (retained on 2026-09-23).
 
+## [0.60.100.0] - 2026-10-07
+
+**`gbrain doctor` now counts every broken facts or takes table still waiting in your brain, and says what would fix each one.**
+
+After v0.60.98.0 and v0.60.99.0 a broken table never blocks a sync: gbrain repairs it in place when it can, and holds it otherwise. That still left one question without an answer: how many are left, and where? A held file was visible in `gbrain sources status`, but a page an older release imported with a broken table, or a file edited in the checkout and not yet synced, showed up nowhere. The new `fence_integrity` check finds all three, counts each table once, and splits them by what would fix them. Tables gbrain repairs by itself are fixed the next time the file syncs or the page is written. The rest need the named table edited. The same check shows the oldest hold and how many tables were repaired in the last 7 days and by which writer. A source at 20 or more warns, because something keeps writing broken tables.
+
+### What you see
+
+| Where | What changed |
+|---|---|
+| `gbrain doctor` | New `fence_integrity` check. Per source: held files, stored pages and unsynced checkout files with a broken table, each counted once, split by tier (`deterministic`, `resolver`, `llm`, `manual`). It also shows the oldest hold's age, the last 7 days of repaired tables with the top writers, and the model-repair caps with today's spend. The fix names the next step: `gbrain sources status <id>` for held files, `gbrain get --source <id> -- <slug>` (then write the page again) for stored pages, `gbrain sync --source <id> --no-pull` for unsynced files. |
+| Scan budget | Each doctor run scans stored pages and source checkouts for up to 10 seconds (`GBRAIN_DOCTOR_FENCE_TIMEOUT_MS`) and resumes where the last run stopped. Until a scan finishes, the check reports partial, never ok. A brain with nothing to scan stores nothing. |
+| New settings | `fences.repair.max_usd_per_page` (default $0.05) and `fences.repair.max_usd_per_day` (default $1.00) cap model repair of tables, per page and per UTC day across every gbrain process; `0` turns model spend off. They are validated at `gbrain config set` and shown by doctor. Nothing spends under them yet. |
+| `gbrain repair`, `doctor --remediate` | A repair kind that calls a paid chat model reports `cost.llm_usd` and what is left under its cap. `--remediation-plan` includes that spend in the step's estimate, and `--remediate --max-usd` gives the step what is left of the budget and counts its spend once. No shipped kind calls a model yet. |
+
+### Itemized changes
+
+- The fence census (`src/core/fence-repair/census.ts`) finds candidates per source: `invalid_fence` holds, stored pages whose tables fail the repair step, and checkout files. Stored pages: a one-time resumable backfill, then incremental passes over pages updated since a watermark. Each new watermark starts before the oldest writer transaction still open, so a page written by a transaction that committed late is still read. Checkout files: a resumable full walk, then only changed, untracked and already-flagged files. Every finding is bound to the bytes it judged and records locations and reason codes only, never a cell value.
+- Census state, the per-source repaired-table trend and paid-repair attempt claims live in `op_checkpoints` and survive the 7-day checkpoint purge while their source lives. A sync run writes one trend row; each repaired page write adds one row in its own publication.
+- The durable per-UTC-day USD ledger (`src/core/budget/daily-ledger.ts`, over the existing `budget_ledger` and `budget_reservations` tables) and the attempt memo for paid table repairs (`src/core/fence-repair/attempts.ts`) ship for the model repair that follows. Doctor reads today's ledger spend.
+- Repair kinds can declare `spends: 'llm'`. The repair runner then passes a per-run allowance to the kind and stops when it is used up. The doctor remediation run reserves only the embedding part of such a step up front and settles the model spend once.
+
+### For contributors
+
+- `test/fence-census.test.ts` (PGLite, Postgres through `test/e2e/fence-census-postgres.test.ts`) covers dedup across holds, pages and files with tiers, the watermark (a late commit simulated on PGLite; a real open transaction in a second session on Postgres), backfill and file-walk resume across several deadlines, the changed-file walk, the purge exemption, trend replay safety and the privacy sentinel. `test/doctor-fence-integrity.test.ts` covers ok, warn, partial, the trend threshold at 20 and not below, and caps display. `test/repair-llm-cost.test.ts` covers the cost surfaces and doctor budget composition with a stub kind. `test/daily-ledger.test.ts` and `test/fence-repair-attempts.test.ts` cover the ledger and attempt memo on both engines.
+
 ## [0.60.99.0] - 2026-10-06
 
 **A facts or takes table with one obvious meaning is now fixed in place instead of held: managed sync rewrites it, commits the file and keeps going.**

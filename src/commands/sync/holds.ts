@@ -10,6 +10,7 @@
  */
 import { createHash, randomUUID } from 'crypto';
 import { importFenceTally } from '../../core/fence-repair/report.ts';
+import { recordSyncRunTrend } from '../../core/fence-repair/census-store.ts';
 import { existsSync, lstatSync } from 'fs';
 import { join } from 'path';
 import type { SyncResult } from '../sync.ts';
@@ -227,7 +228,11 @@ export async function legacyHoldFields(engine: BrainEngine, holds: LegacyHolds |
     policy: holds.policy, screened: holds.counts.screened });
   const recovered = holds.recoveredPaths.length || holds.counts.commentValues
     ? recoveredReport(holds.sourceId, addRecovered(undefined, { paths: holds.recoveredPaths, commentValues: holds.counts.commentValues })) : undefined;
-  return { ...report, ...(recovered ? { recovered_frontmatter: recovered } : {}), ...holds.fences.fields() };
+  const fences = holds.fences.fields();
+  const normalized = fences.fences_normalized;
+  if (normalized) await recordSyncRunTrend(engine, { sourceId: holds.sourceId, runId: holds.runId, day: new Date().toISOString().slice(0, 10), count: normalized.count,
+    byClass: normalized.by_class as Record<string, number>, writers: Object.fromEntries(normalized.writers.map(w => [w.writer, w.count])) });
+  return { ...report, ...(recovered ? { recovered_frontmatter: recovered } : {}), ...fences };
 }
 
 /** Dry run: the files this run would hold, read-only (no hold row is written or changed). */

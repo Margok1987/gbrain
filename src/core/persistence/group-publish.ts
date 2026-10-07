@@ -53,6 +53,7 @@ import { decoratePublicationOutcome, finishUnpublishedFailure, pageRecoveryRecor
 import { pipelined } from '../page-state/transactions.ts';
 import { jsonBytes } from './digest.ts';
 import { writerStamp } from './writer-versions.ts';
+import { recordPublicationFenceTrend } from '../fence-repair/census-store.ts';
 
 /** A `put_pages` group publishes at most this many pages per transaction, so one commit stays a few seconds long. */
 export const PAGE_BATCH_GROUP_MAX = 8;
@@ -188,6 +189,7 @@ export async function publishGroup(engine: BrainEngine, rows: WriteRequest[], pr
           if (member.databaseOnlyReason === 'mirror_read_only') await classifyMirrorPage(tx, row);
           const final = await publicationPostimage(tx, row, member);
           decoratePublicationOutcome(row, member, outcome, final, file ? 1 : 0, false);
+          await recordPublicationFenceTrend(tx, row, outcome);
           await queuePublicationEffects(tx, row, final, outcome, member, { deferBatchReconcile: true });
           outcomes.push(outcome);
         }

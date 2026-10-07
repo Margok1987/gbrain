@@ -33,6 +33,8 @@ import { waitFor } from './helpers/wait-for.ts';
 import { readFileSync } from 'node:fs';
 import { parseFactsFence } from '../src/core/facts-fence.ts';
 import { parseTakesFence } from '../src/core/takes-fence.ts';
+import { listFenceCandidates, runFenceCensus } from '../src/core/fence-repair/census.ts';
+import { FENCE_TREND_OP } from '../src/core/fence-repair/census-store.ts';
 
 const backends = testBackends();
 const home = mkdtempSync(join(tmpdir(), 'gbrain-fence-holds-'));
@@ -366,4 +368,50 @@ test('TE1: a stored take whose prior fence did not parse is updated by its norma
   expect(result.held_count ?? 0).toBe(0);
   expect(await engine.executeRaw('SELECT row_num,kind FROM takes k JOIN pages p ON p.id=k.page_id WHERE p.source_id=$1 AND p.slug=$2 ORDER BY row_num', [s.id, 'people/probe']))
     .toEqual([{ row_num: 1, kind: 'take' }, { row_num: 2, kind: 'take' }]);
+}), 180_000);
+
+test('E33: a sync that normalizes 50 files writes one trend row with the run total; the census lists the held file once', () => each(async engine => {
+  const files: Record<string, string> = { 'people/malformed.md': MALFORMED };
+  for (let i = 0; i < 50; i++) files[`notes/fix-${String(i).padStart(2, '0')}.md`] = fixable(`Fix ${i}`);
+  const s = await source(engine, files);
+  const result = await s.sync();
+  expect(result).toMatchObject({ held_count: 1, fences_normalized: { count: 50 } });
+  const trend = await engine.executeRaw<{ record: Record<string, unknown> }>(`SELECT completed_keys->0 AS record FROM op_checkpoints WHERE op=$1 AND completed_keys->0->>'source_id'=$2`,
+    [FENCE_TREND_OP, s.id]);
+  expect(trend).toHaveLength(1);
+  expect(trend[0]!.record).toMatchObject({ count: 50, by_class: { kind_map: 50, holder_alias: 50 }, writers: { 'notes/': 50 } });
+  // A second sync with nothing new adds no trend row.
+  await s.sync();
+  expect(await engine.executeRaw(`SELECT 1 FROM op_checkpoints WHERE op=$1 AND completed_keys->0->>'source_id'=$2`, [FENCE_TREND_OP, s.id])).toHaveLength(1);
+  await runFenceCensus(engine, { sourceIds: [s.id], deadline: Date.now() + 60_000 });
+  const candidates = await listFenceCandidates(engine, [s.id]);
+  expect(candidates.map(c => [c.key, c.bucket, c.origins, c.tier, c.reasons])).toEqual([['people/malformed', 'hold', ['hold', 'file'], 'resolver', ['holder_unresolved']]]);
+  expectNoSecrets(JSON.stringify(candidates));
+}), 240_000);
+
+test('E33: a completed sync run always has its trend row; a failed trend write fails the cursor step that counts it instead of vanishing', () => each(async engine => {
+  const s = await source(engine, { 'notes/fix-a.md': fixable('A'), 'notes/fix-b.md': fixable('B'), 'notes/plain.md': note('Plain') });
+  const rows = () => engine.executeRaw<{ record: Record<string, unknown> }>(`SELECT completed_keys->0 AS record FROM op_checkpoints WHERE op=$1 AND completed_keys->0->>'source_id'=$2`,
+    [FENCE_TREND_OP, s.id]);
+  // Forced fault: the first trend INSERT fails, wherever it runs (the run's own statement or inside a publication transaction).
+  const original = engine.executeRaw;
+  let injected = 0;
+  (engine as unknown as { executeRaw: typeof original }).executeRaw = function (this: typeof engine, sql: string, params?: unknown[]) {
+    if (!injected && params?.[0] === FENCE_TREND_OP && sql.includes('INSERT INTO op_checkpoints')) { injected++; return Promise.reject(new Error('injected trend write failure')); }
+    return original.call(this, sql, params) as never;
+  } as typeof original;
+  let first: SyncResult | null = null;
+  try { first = await s.sync(); } catch { /* the cursor step that carried the failed trend write failed with it */ } finally {
+    (engine as unknown as { executeRaw: typeof original }).executeRaw = original;
+  }
+  expect(injected).toBe(1);
+  // A run reported complete has its trend row; a run whose trend could not be written did not complete.
+  const complete = (result: SyncResult | null) => result?.status === 'first_sync' || result?.status === 'synced';
+  if (complete(first)) expect(await rows()).toHaveLength(1);
+  // The next sync resumes the same run from its cursor and records the run's whole total once.
+  const settled = complete(first) ? first! : await s.sync();
+  expect(complete(settled)).toBe(true);
+  const recorded = await rows();
+  expect(recorded).toHaveLength(1);
+  expect(recorded[0]!.record).toMatchObject({ count: 2, by_class: { kind_map: 2, holder_alias: 2 } });
 }), 180_000);

@@ -26,6 +26,7 @@ import { disposePersistenceConsumer } from '../src/core/persistence/service.ts';
 import { assertExportProjectionRoundtrip } from '../src/core/shared-skills/migration-projection.ts';
 import { parseMarkdown } from '../src/core/markdown.ts';
 import { verifyAndRepairDreamPages } from '../src/core/cycle/synthesize-verify.ts';
+import { FENCE_TREND_OP } from '../src/core/fence-repair/census-store.ts';
 import { withEnv } from './helpers/with-env.ts';
 import { TEST_WRITE_ATTRIBUTION } from './helpers/write-attribution.ts';
 
@@ -150,6 +151,25 @@ test('put_pages reports one batch-level fences_normalized and one notice for the
   expect(notices.filter(n => n.code === 'fence_normalized')).toHaveLength(1);
   expect(parseFactsFence(await stored('people/batch-fixable')).facts.map(f => f.rowNum)).toEqual([1]);
 }));
+
+describe('normalization trend (E33)', () => {
+  test('each normalized write adds one trend row with its classes and writer; clean writes and refused writes add none', () => withEnv(env, async () => {
+    const rows = () => engine.executeRaw<{ fingerprint: string; record: Record<string, unknown> }>(
+      `SELECT fingerprint, completed_keys->0 AS record FROM op_checkpoints WHERE op=$1 AND completed_keys->0->>'source_id'='default'`, [FENCE_TREND_OP]);
+    const before = new Set((await rows()).map(r => r.fingerprint));
+    await put('people/trend-fixable', page('Trend', factsFence(fact(1, 'Trend claim'), fact(1, 'Second trend claim'))));
+    await put('people/trend-clean', page('Clean', factsFence(fact(1, 'Plain trend claim'))));
+    await refusal(() => put('people/trend-residual', page('Residual', factsFence(fact(1, 'Bad trend claim', { vis: 'blorp' })))));
+    const slug = 'people/trend-remember';
+    await storeMalformed(slug, `${FB}\n${FH}\n${fact(1, 'Existing trend claim')}`);
+    await op('remember').handler(ctx(), { fact: 'A remembered trend fact', provenance: 'chat', entity: slug });
+    const added = (await rows()).filter(r => !before.has(r.fingerprint)).map(r => r.record);
+    expect(added).toHaveLength(2);
+    expect(added.map(r => ({ count: r.count, writers: r.writers }))).toEqual([{ count: 1, writers: { local_cli: 1 } }, { count: 1, writers: { local_cli: 1 } }]);
+    expect(added.map(r => r.by_class).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))).toEqual([{ close_fence: 1 }, { renumber: 1 }]);
+    expectNoSecrets(added);
+  }));
+});
 
 describe('append verbs normalize their target fence in the same write (D20)', () => {
   test('remember on a page whose facts fence lost its end marker saves the fact and reports close_fence', () => withEnv(env, async () => {

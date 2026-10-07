@@ -115,8 +115,13 @@ export async function jobStepFix(step: { job: string; params?: Record<string, un
   };
 }
 
-export function repairStepFix(step: Pick<RepairPlanStep, 'kind' | 'command' | 'paid' | 'est_usd_cost' | 'affected' | 'checks'>): Action {
-  const cost = step.paid ? (step.est_usd_cost === null ? ' and calls the embedding provider (price unknown)' : ` and costs about $${step.est_usd_cost.toFixed(4)} in embeddings`) : '';
+export function repairStepFix(step: Pick<RepairPlanStep, 'kind' | 'command' | 'paid' | 'est_usd_cost' | 'llm_usd' | 'affected' | 'checks'>): Action {
+  const llm = step.llm_usd;
+  const embedUsd = step.est_usd_cost !== null && typeof llm === 'number' ? step.est_usd_cost - llm : 0;
+  const cost = !step.paid ? ''
+    : llm === undefined ? (step.est_usd_cost === null ? ' and calls the embedding provider (price unknown)' : ` and costs about $${step.est_usd_cost.toFixed(4)} in embeddings`)
+    : `${llm === null ? ' and may call a paid chat model (price unknown)' : ` and may spend about $${llm.toFixed(4)} on a paid chat model`}`
+      + `${embedUsd > 0 ? ` plus about $${embedUsd.toFixed(4)} in embeddings` : ''}`;
   return {
     argv: step.command.split(' '),
     preview_argv: repairPreviewCommand(step.kind).split(' '),
@@ -266,7 +271,11 @@ export function renderRemediationPlanLines(plan: RemediationPlanShape, targetSco
   if (repairs.length > 0) {
     lines.push(`\nRepair steps: ${repairs.length} (requires user agreement; PROTECTED, run on this host only; independent of the score target)`);
     for (const step of repairs) {
-      const cost = step.paid ? (step.est_usd_cost === null ? ' (paid embeddings, price unknown)' : ` (~$${step.est_usd_cost.toFixed(4)} embeddings)`) : ' (free)';
+      const llm = step.llm_usd;
+      const embedUsd = step.est_usd_cost !== null && typeof llm === 'number' ? step.est_usd_cost - llm : 0;
+      const cost = !step.paid ? ' (free)'
+        : llm === undefined ? (step.est_usd_cost === null ? ' (paid embeddings, price unknown)' : ` (~$${step.est_usd_cost.toFixed(4)} embeddings)`)
+        : ` (${llm === null ? 'paid model, price unknown' : `~$${llm.toFixed(4)} paid model`}${embedUsd > 0 ? `, ~$${embedUsd.toFixed(4)} embeddings` : ''})`;
       lines.push(`  R${step.step}. ${step.kind} — ${step.affected} item(s)${cost} [requires user agreement]`);
       lines.push(`     apply: ${step.command}`);
     }

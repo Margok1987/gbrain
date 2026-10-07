@@ -165,7 +165,7 @@ export async function runRemediation(
   // Pre-flight ceiling check via the shared plan computation. The score target
   // governs job steps only; repair steps are planned independently of it.
   const initialPlan = await computeRemediationPlan(engine, { targetScore, extraRemediations });
-  const repairReport = repairs ? await planRepairStepsReport(engine, { noEmbed: repairs.noEmbed, kinds: manifest ? manifest.repair_kinds as RepairPlanStep['kind'][] : undefined }) : { steps: [], previewFailures: [] };
+  const repairReport = repairs ? await planRepairStepsReport(engine, { noEmbed: repairs.noEmbed, kinds: manifest ? manifest.repair_kinds as RepairPlanStep['kind'][] : undefined, registry: repairs.registry }) : { steps: [], previewFailures: [] };
   let repairSteps: RepairPlanStep[] = repairReport.steps;
   previewFailures = repairReport.previewFailures;
   // Embeddings a budget stop left behind after re-sealing; the re-sealed pages no longer show up in a repair plan.
@@ -265,7 +265,7 @@ export async function runRemediation(
   // so in-process spend, reserved effect estimates and job spend all draw on one cumulative cap.
   const repairTracker = new BudgetTracker({ label: 'remediation.repairs', maxCostUsd: remainingCap, capSource: opts.capSource });
   let jobTracker: InstanceType<typeof BudgetTracker> | undefined;
-  // Effect kinds embed in the persistence consumer, outside any tracker, so their estimate is reserved up front.
+  // Effect kinds embed outside any tracker, so their estimate is reserved up front; paid-model spend no tracker here metered is charged once its step reports it.
   let reservedUsd = 0;
   let trackerExhausted = false;
   const stepTrackers: Array<InstanceType<typeof BudgetTracker>> = [];
@@ -332,8 +332,8 @@ export async function runRemediation(
     }
     if (repairSteps.length === 0) return;
     for (const step of repairSteps) hooks.onRepairStepStart?.(step);
-    const results = await runRepairSteps(engine, repairSteps, { remote: repairs.remote, noEmbed: repairs.noEmbed, remainingUsd,
-      charge: (usd) => { reservedUsd += usd; }, exhausted: () => trackerExhausted,
+    const results = await runRepairSteps(engine, repairSteps, { remote: repairs.remote, noEmbed: repairs.noEmbed, remainingUsd, registry: repairs.registry,
+      charge: (usd) => { reservedUsd += usd; }, spentUsd: spentThisRun, exhausted: () => trackerExhausted,
       stepBudget: async (run) => {
         const tracker = new BudgetTracker({ label: 'remediation.repair-step', maxCostUsd: remainingUsd(), capSource: opts.capSource });
         stepTrackers.push(tracker);
