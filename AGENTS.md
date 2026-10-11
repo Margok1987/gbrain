@@ -247,3 +247,9 @@ use generic placeholders (`alice-example`, `acme-example`, `fund-a`).
 
 If you are a fork, regenerate `llms.txt` + `llms-full.txt` with your own URL base before
 publishing: `LLMS_REPO_BASE=https://raw.githubusercontent.com/your-org/your-fork/main bun run build:llms`.
+
+## Mandatory Ponytail-full development method (Owner decision 2026-10-11)
+
+For future changes to code, scripts, tests, builds, dependencies, configuration, or refactoring, use [Ponytail full](https://github.com/DietrichGebert/ponytail) as the mandatory simplicity discipline. Inspect the real end-to-end path and affected callers, fixtures, tests and configs first; prefer the **smallest complete and readable** root-cause change using existing project patterns, the standard library/native capabilities, and installed dependencies. Avoid speculative wrappers, services and abstractions. Keep all affected code paths and required checks current.
+
+Ponytail never overrides this repository's specialist instructions or reduces explicit features, security, data integrity, authentication/authorization, validation, error handling, recovery, provider behavior, integration/CI evidence, human approvals, or release gates. No automatic external plugin installation and no unrelated mass refactoring are authorized by this method.
