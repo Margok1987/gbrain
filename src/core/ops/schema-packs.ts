@@ -115,7 +115,7 @@ const schema_lint: Operation = {
   mutating: false,
   idempotent: true,
   outputRedaction: 'no_stored_text',
-  description: 'Lint the active (or named) schema pack. File-plane rules only over MCP — the with_db option is rejected for remote callers (DB-aware rules require local CLI). Returns {ok, errors, warnings} structured report.',
+  description: 'Lint the active schema pack, or a named installed user pack. Runs 11 file-plane rules only; with_db is not an MCP parameter (DB-aware rules require local CLI). Returns {ok, errors, warnings}; invalid or missing named packs return {error: pack_not_found, pack}.',
   params: {
     pack: { type: 'string', description: 'Pack name (default: active pack)' },
   },
