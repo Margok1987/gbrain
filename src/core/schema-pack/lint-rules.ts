@@ -77,6 +77,8 @@ export const aliasShadowsType: LintRule = (manifest) => {
   return issues;
 };
 
+// Free-form aliases identify legacy/synonym type names; they do not require a new canonical page_type.
+// Only shadowing and duplicate ownership are actionable errors.
 export const aliasDeclaredByTwoTypes: LintRule = (manifest) => {
   const issues: LintIssue[] = [];
   const aliasToTypes = new Map<string, string[]>();
@@ -96,29 +98,6 @@ export const aliasDeclaredByTwoTypes: LintRule = (manifest) => {
         pack: manifest.name,
         hint: `keep the alias on the most-canonical type; remove from the others`,
       });
-    }
-  }
-  return issues;
-};
-
-export const aliasReferencesUndeclaredType: LintRule = (manifest) => {
-  // codex C14 — alias should be a known type OR a known alias of another
-  // type. For v0.40.6.0 we lint the simpler case: alias must match a
-  // declared page_type name. Closure validation is a v0.41+ extension.
-  const issues: LintIssue[] = [];
-  const typeNames = new Set(manifest.page_types.map((t) => t.name));
-  for (const t of manifest.page_types) {
-    for (const a of t.aliases) {
-      if (!typeNames.has(a)) {
-        issues.push({
-          rule: 'alias_references_undeclared_type',
-          severity: 'warning',
-          message: `type '${t.name}' aliases '${a}' which is not a declared page_type in this pack`,
-          pack: manifest.name,
-          type: t.name,
-          hint: `add a page_type for '${a}' OR remove the alias`,
-        });
-      }
     }
   }
   return issues;
@@ -469,7 +448,6 @@ export const storedTypeUndeclared: LintRule = async (manifest, opts) => {
 export const ALL_LINT_RULES: ReadonlyArray<{ name: string; rule: LintRule; planeAware: boolean }> = [
   { name: 'alias_shadows_type', rule: aliasShadowsType, planeAware: false },
   { name: 'alias_declared_by_two_types', rule: aliasDeclaredByTwoTypes, planeAware: false },
-  { name: 'alias_references_undeclared_type', rule: aliasReferencesUndeclaredType, planeAware: false },
   { name: 'enrichable_types_undeclared', rule: enrichableTypesUndeclared, planeAware: false },
   { name: 'link_types_undeclared', rule: linkTypesUndeclared, planeAware: false },
   { name: 'link_types_temporal', rule: linkTypesTemporal, planeAware: false },
