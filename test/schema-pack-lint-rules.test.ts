@@ -1,13 +1,10 @@
-// v0.40.6.0 — lint-rules.ts unit tests. 36 cases (11 rules covering each
-// of clean / single-violation / multi-violation paths plus the audit-aware
-// rule's empty-DB and audit-best-effort paths).
+// File-plane schema lint regression coverage, including legacy alias contracts.
 
 import { describe, expect, it } from 'bun:test';
 import type { SchemaPackManifest } from '../src/core/schema-pack/manifest-v1.ts';
 import {
   aliasShadowsType,
   aliasDeclaredByTwoTypes,
-  aliasReferencesUndeclaredType,
   enrichableTypesUndeclared,
   linkTypesUndeclared,
   frontmatterLinksUndeclared,
@@ -96,29 +93,6 @@ describe('aliasDeclaredByTwoTypes', () => {
     ] });
     const issues = await aliasDeclaredByTwoTypes(m);
     expect(issues.length).toBe(2);
-  });
-});
-
-describe('aliasReferencesUndeclaredType', () => {
-  it('clean: aliases all match declared types', async () => {
-    const m = mk({ page_types: [
-      baseType({ name: 'person' }),
-      baseType({ name: 'researcher', aliases: ['person'] }),
-    ] });
-    expect(await aliasReferencesUndeclaredType(m)).toEqual([]);
-  });
-
-  it('flags alias pointing at undeclared type', async () => {
-    const m = mk({ page_types: [baseType({ name: 'r', aliases: ['ghost'] })] });
-    const issues = await aliasReferencesUndeclaredType(m);
-    expect(issues.length).toBe(1);
-    expect(issues[0]!.severity).toBe('warning');
-    expect(issues[0]!.message).toContain('ghost');
-  });
-
-  it('flags multiple undeclared references separately', async () => {
-    const m = mk({ page_types: [baseType({ name: 'r', aliases: ['g1', 'g2'] })] });
-    expect((await aliasReferencesUndeclaredType(m)).length).toBe(2);
   });
 });
 
@@ -290,6 +264,14 @@ describe('prefixStrictSubsetOverlap', () => {
 });
 
 describe('runFilePlaneLintRules — composition', () => {
+  it('accepts gbrain-base-v2 style legacy aliases without spurious warnings', async () => {
+    const m = mk({ name: 'gbrain-base-v2', page_types: [
+      baseType({ name: 'person', aliases: ['people', 'contact'], prefixes: ['people/'] }),
+      baseType({ name: 'company', aliases: ['org', 'startup'], prefixes: ['companies/'] }),
+    ] });
+    expect(await runFilePlaneLintRules(m)).toEqual({ ok: true, errors: [], warnings: [] });
+  });
+
   it('returns ok:true for a clean manifest', async () => {
     const m = mk({ page_types: [baseType({ name: 'person', prefixes: ['people/'] })] });
     const report = await runFilePlaneLintRules(m);
@@ -332,17 +314,17 @@ describe('runAllLintRules — composition', () => {
 });
 
 describe('rule registry shape', () => {
-  it('ALL_LINT_RULES contains 16 rules', () => {
+  it('ALL_LINT_RULES contains 15 rules', () => {
     // v0.41.37.0 #1569 added link_regex_catastrophic_backtrack (file-plane).
     // Five-issue fix wave added stored_type_is_alias + stored_type_undeclared
     // (both data-plane — they audit the pages corpus against the pack).
     // Temporal typed edges added link_types_temporal (file-plane).
     // Declared single-value relations added link_types_cardinality (file-plane).
-    expect(ALL_LINT_RULES.length).toBe(16);
+    expect(ALL_LINT_RULES.length).toBe(15);
   });
 
   it('FILE_PLANE_LINT_RULES excludes the 4 DB-aware rules', () => {
-    expect(FILE_PLANE_LINT_RULES.length).toBe(12);
+    expect(FILE_PLANE_LINT_RULES.length).toBe(11);
     expect(FILE_PLANE_LINT_RULES.every((r) => !r.planeAware)).toBe(true);
   });
 
