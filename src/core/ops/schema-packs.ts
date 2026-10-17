@@ -160,7 +160,7 @@ const schema_lint: Operation = {
       manifest = resolved.manifest;
     }
     // File-plane only over MCP; the engine-aware --with-db opt-in is
-    // CLI-only (Phase 5 wiring). MCP callers get the 9 file-plane rules.
+    // CLI-only (Phase 5 wiring). MCP callers get the 11 file-plane rules.
     return await runAllLintRules(manifest);
   },
 };
