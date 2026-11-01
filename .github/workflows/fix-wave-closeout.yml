@@ -10,9 +10,7 @@ name: Fix-wave closeout
 # checks out, builds or runs PR code.
 
 on:
-  pull_request_target:
-    branches: [master]
-    types: [closed]
+  workflow_dispatch:
 
 permissions: {}
 
