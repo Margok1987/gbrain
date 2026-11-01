@@ -22,13 +22,6 @@ name: Scale tier
 # so every run measures a real import.
 
 on:
-  # The paths filter lives in the plan job so the `scale-tier` label can also
-  # select a pull request that touches none of these paths.
-  pull_request:
-    branches: [master]
-    types: [opened, synchronize, reopened, labeled]
-  schedule:
-    - cron: '41 8 * * *'
   workflow_dispatch:
     inputs:
       pages:
