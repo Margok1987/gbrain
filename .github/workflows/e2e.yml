@@ -1,19 +1,6 @@
 name: E2E Tests
 
 on:
-  push:
-    branches: [master]
-  pull_request:
-    branches: [master]
-  # Merge queue (inert until the queue is enabled on master): the PR profile.
-  # prepare-e2e classifies the queued change from the compare API (base_sha...
-  # head_sha). docs/RELEASING.md#merge-queue.
-  merge_group:
-  # Event parity (docs/TESTING.md#event-parity): the concurrency suffix below only
-  # separates a full_corpus dispatch; the schedule-only full-corpus lanes are a
-  # named exception documented at the coverage pipeline.
-  schedule:
-    - cron: '0 6 * * *'  # Nightly at 6am UTC
   workflow_dispatch:
     inputs:
       full_corpus:
