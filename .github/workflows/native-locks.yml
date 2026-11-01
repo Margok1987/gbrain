@@ -16,6 +16,13 @@ on:
         type: string
         default: full
 
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: Native validation scope (full, primary, or smoke)
+        type: string
+        default: full
+
 permissions:
   contents: read
 
