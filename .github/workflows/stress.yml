@@ -33,6 +33,25 @@ on:
         type: string
         default: ''
 
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Stress mode (gate or race-hunt)
+        type: string
+        required: true
+      stress_files:
+        description: Optional test files for gate mode
+        type: string
+        default: ''
+      stress_base:
+        description: Optional base ref or SHA for gate mode
+        type: string
+        default: ''
+      stress_head:
+        description: Optional head ref or SHA for gate mode
+        type: string
+        default: ''
+
 permissions:
   contents: read
 
