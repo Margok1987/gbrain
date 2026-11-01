@@ -13,8 +13,6 @@ name: CI health
 # or artifacts). nightly-watch watches this workflow like any scheduled one.
 
 on:
-  schedule:
-    - cron: '0 10 * * 1'  # weekly, Monday 10:00 UTC
   workflow_dispatch:
     inputs:
       dry_run:
