@@ -29,9 +29,6 @@ name: Release
 # through the same gate.
 
 on:
-  push:
-    branches: [master]
-    paths: [VERSION]
   workflow_dispatch: {}  # manual first run / backfill of the current VERSION
 
 permissions:
