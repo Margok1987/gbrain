@@ -13,9 +13,7 @@ name: Fix-wave gate
 # turns on (docs/RELEASING.md#fix-wave-gate); until then the check is advisory.
 
 on:
-  pull_request_target:
-    branches: [master]
-    types: [opened, edited, reopened, synchronize, labeled, unlabeled]
+  workflow_dispatch:
 
 permissions: {}
 
